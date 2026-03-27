@@ -34,15 +34,24 @@ export async function startServer(): Promise<void> {
     max: 10,
   });
 
-  // Verify connectivity
-  try {
-    const client = await pool.connect();
-    client.release();
-    logger.info('PostgreSQL connection established');
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logger.error('Failed to connect to PostgreSQL', { error: message });
-    process.exit(1);
+  // Verify connectivity with retries (PG may not be ready yet in Docker)
+  const maxRetries = 15;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const client = await pool.connect();
+      client.release();
+      logger.info('PostgreSQL connection established');
+      break;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (attempt === maxRetries) {
+        logger.error('Failed to connect to PostgreSQL after retries', { error: message, attempts: maxRetries });
+        process.exit(1);
+      }
+      const code = (err as Record<string, unknown>).code;
+      logger.warn(`PostgreSQL not ready, retrying (${attempt}/${maxRetries})...`, { error: message || code || 'unknown' });
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -70,6 +79,7 @@ export async function startServer(): Promise<void> {
   // Express app with auth middleware
   // -------------------------------------------------------------------------
   const app = express();
+  app.use(express.json());
 
   // Auth middleware
   function authMiddleware(req: Request, res: Response, next: NextFunction): void {
