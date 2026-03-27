@@ -1,0 +1,35 @@
+# -- Build stage --
+FROM node:20-slim AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json tsconfig.json ./
+COPY packages/shared/ packages/shared/
+COPY packages/gateway/ packages/gateway/
+
+RUN npm ci --workspace=packages/shared --workspace=packages/gateway
+RUN npm run build --workspace=packages/shared
+RUN npm run build --workspace=packages/gateway
+
+# -- Runtime stage --
+FROM node:20-alpine AS runtime
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+COPY --from=build /app/packages/gateway/dist ./dist
+COPY --from=build /app/packages/gateway/package.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/shared/dist ./node_modules/@ll5/shared/dist
+COPY --from=build /app/packages/shared/package.json ./node_modules/@ll5/shared/
+
+RUN addgroup -S app && adduser -S app -G app
+USER app
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+CMD ["node", "dist/index.js"]

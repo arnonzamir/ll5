@@ -1,0 +1,13 @@
+export type { FactRepository } from './fact.repository.js';
+export type { PersonRepository } from './person.repository.js';
+export type { PlaceRepository } from './place.repository.js';
+export type { ProfileRepository } from './profile.repository.js';
+export type { DataGapRepository } from './data-gap.repository.js';
+export type { HorizonRepository } from './horizon.repository.js';
+export type { InboxRepository } from './inbox.repository.js';
+export type { ReviewSessionRepository } from './review-session.repository.js';
+export type { LocationRepository } from './location.repository.js';
+export type { MessageRepository } from './message.repository.js';
+export type { EntityStatusRepository } from './entity-status.repository.js';
+export type { CalendarEventRepository } from './calendar-event.repository.js';
+export type { NotableEventRepository } from './notable-event.repository.js';

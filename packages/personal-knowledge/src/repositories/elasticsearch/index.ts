@@ -1,0 +1,6 @@
+export { BaseElasticsearchRepository } from './base.repository.js';
+export { ElasticsearchProfileRepository } from './profile.repository.js';
+export { ElasticsearchFactRepository } from './fact.repository.js';
+export { ElasticsearchPersonRepository } from './person.repository.js';
+export { ElasticsearchPlaceRepository } from './place.repository.js';
+export { ElasticsearchDataGapRepository } from './data-gap.repository.js';
