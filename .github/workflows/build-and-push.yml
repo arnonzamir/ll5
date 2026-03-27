@@ -115,3 +115,37 @@ jobs:
             ${{ env.IMAGE_PREFIX }}-${{ matrix.package }}:latest
           cache-from: type=gha,scope=${{ matrix.package }}
           cache-to: type=gha,mode=max,scope=${{ matrix.package }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ vars.SERVER_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy to Coolify
+        env:
+          SERVER_HOST: ${{ vars.SERVER_HOST }}
+          SERVICE_UUID: ${{ secrets.COOLIFY_SERVICE_UUID }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key root@${SERVER_HOST}"
+          DIR="/data/coolify/services/${SERVICE_UUID}"
+
+          # Ensure GHCR auth on server
+          $SSH "echo ${GHCR_TOKEN} | docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+
+          # Update image tags to current SHA
+          $SSH "cd ${DIR} && sed -i -E 's|(ghcr.io/arnonzamir/ll5-[a-z-]+:)[a-zA-Z0-9._-]+|\1${{ github.sha }}|g' docker-compose.yml"
+
+          # Pull and redeploy
+          $SSH "cd ${DIR} && docker compose pull && docker compose up -d"
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
