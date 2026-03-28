@@ -65,15 +65,7 @@ export async function startServer(): Promise<void> {
   const horizonRepo = new PostgresHorizonRepository(pool);
   const inboxRepo = new PostgresInboxRepository(pool);
 
-  // -------------------------------------------------------------------------
-  // MCP Server
-  // -------------------------------------------------------------------------
-  const mcpServer = new McpServer({
-    name: 'll5-gtd',
-    version: '0.1.0',
-  });
-
-  registerAllTools(mcpServer, { horizonRepo, inboxRepo }, getUserId);
+  const deps = { horizonRepo, inboxRepo };
 
   // -------------------------------------------------------------------------
   // Express app with auth middleware
@@ -109,36 +101,26 @@ export async function startServer(): Promise<void> {
     }
   });
 
-  // MCP endpoint with auth
-  app.post('/mcp', authMiddleware, async (req: Request, res: Response) => {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
-    res.on('close', () => {
-      transport.close().catch(() => {});
-    });
-    await mcpServer.connect(transport);
-    await transport.handleRequest(req, res, req.body);
-  });
-
-  // Handle GET and DELETE for SSE session management
-  app.get('/mcp', authMiddleware, async (req: Request, res: Response) => {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
-    res.on('close', () => {
-      transport.close().catch(() => {});
-    });
-    await mcpServer.connect(transport);
-    await transport.handleRequest(req, res);
-  });
-
-  app.delete('/mcp', authMiddleware, async (req: Request, res: Response) => {
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
-    await mcpServer.connect(transport);
-    await transport.handleRequest(req, res);
+  // MCP endpoint (stateless — new server+transport per request)
+  app.all('/mcp', authMiddleware, async (req: Request, res: Response) => {
+    try {
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+      const mcpServer = new McpServer({
+        name: 'll5-gtd',
+        version: '0.1.0',
+      });
+      registerAllTools(mcpServer, deps, getUserId);
+      await mcpServer.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('MCP request failed', { error: message });
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    }
   });
 
   // -------------------------------------------------------------------------

@@ -55,15 +55,7 @@ export async function startServer(): Promise<void> {
     dataGap: new ElasticsearchDataGapRepository(esClient),
   };
 
-  // Create MCP server
-  const mcpServer = new McpServer({
-    name: 'll5-personal-knowledge',
-    version: '0.1.0',
-  });
-
-  // Register all tools
-  registerAllTools(mcpServer, repos, getUserId);
-  logger.info('MCP tools registered');
+  logger.info('Repositories initialized');
 
   // Create Express app
   const app = express();
@@ -96,14 +88,20 @@ export async function startServer(): Promise<void> {
     next();
   }
 
-  // MCP endpoint using StreamableHTTP transport
+  // MCP endpoint using StreamableHTTP transport (stateless — new transport per request)
   app.all('/mcp', authMiddleware, async (req: Request, res: Response) => {
     try {
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
       });
 
-      await mcpServer.connect(transport);
+      // Each request gets its own server+transport pair in stateless mode
+      const reqServer = new McpServer({
+        name: 'll5-personal-knowledge',
+        version: '0.1.0',
+      });
+      registerAllTools(reqServer, repos, getUserId);
+      await reqServer.connect(transport);
 
       await transport.handleRequest(req, res, req.body);
     } catch (err) {
