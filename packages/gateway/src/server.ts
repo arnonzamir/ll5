@@ -1,7 +1,9 @@
 import { Client } from '@elastic/elasticsearch';
 import express from 'express';
 import type { Request, Response } from 'express';
+import pg from 'pg';
 import { ZodError } from 'zod';
+import { createAuthRouter } from './auth.js';
 import { processCalendar } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
@@ -170,7 +172,7 @@ async function processItem(
 /**
  * Create and configure the Express application.
  */
-export function createApp(config: EnvConfig): { app: express.Application; esClient: Client } {
+export function createApp(config: EnvConfig): { app: express.Application; esClient: Client; pgPool: pg.Pool } {
   const app = express();
 
   // Parse JSON bodies
@@ -180,6 +182,15 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   const esClient = new Client({
     node: config.elasticsearchUrl,
   });
+
+  // Create PG pool for auth
+  const pgPool = new pg.Pool({
+    connectionString: config.databaseUrl,
+    max: 5,
+  });
+
+  // Mount auth routes
+  app.use('/auth', createAuthRouter(pgPool, config.authSecret));
 
   // --- Health endpoint ---
   app.get('/health', async (_req: Request, res: Response) => {
@@ -261,14 +272,46 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
-  return { app, esClient };
+  return { app, esClient, pgPool };
 }
 
 /**
  * Start the gateway server.
  */
+/**
+ * Run SQL migration files from the migrations directory.
+ */
+async function runMigrations(pool: pg.Pool): Promise<void> {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const url = await import('node:url');
+
+  const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
+  const migrationsDir = path.join(__dirname, 'migrations');
+
+  if (!fs.existsSync(migrationsDir)) {
+    logger.warn('No migrations directory found', { path: migrationsDir });
+    return;
+  }
+
+  const files = fs.readdirSync(migrationsDir)
+    .filter((f: string) => f.endsWith('.sql'))
+    .sort();
+
+  for (const file of files) {
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    logger.info(`Running migration: ${file}`);
+    await pool.query(sql);
+  }
+}
+
 export async function startServer(config: EnvConfig): Promise<void> {
-  const { app, esClient } = createApp(config);
+  const { app, esClient, pgPool } = createApp(config);
+
+  // Run database migrations
+  logger.info('Running database migrations...');
+  await runMigrations(pgPool);
+  logger.info('Database migrations complete');
 
   // Ensure awareness indices exist
   logger.info('Ensuring Elasticsearch indices...');

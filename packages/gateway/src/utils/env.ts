@@ -5,6 +5,8 @@ export interface EnvConfig {
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   nodeEnv: string;
   geocodingApiKey: string | undefined;
+  authSecret: string;
+  databaseUrl: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -34,6 +36,19 @@ export function loadEnv(): EnvConfig {
     throw new Error('LOG_LEVEL must be one of: debug, info, warn, error');
   }
 
+  const authSecret = process.env.AUTH_SECRET;
+  if (!authSecret) {
+    throw new Error('AUTH_SECRET environment variable is required');
+  }
+  if (authSecret.length < 32) {
+    throw new Error('AUTH_SECRET must be at least 32 characters');
+  }
+
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL environment variable is required');
+  }
+
   return {
     port: parseInt(process.env.PORT ?? '3006', 10),
     elasticsearchUrl,
@@ -41,5 +56,7 @@ export function loadEnv(): EnvConfig {
     logLevel: logLevel as EnvConfig['logLevel'],
     nodeEnv: process.env.NODE_ENV ?? 'development',
     geocodingApiKey: process.env.GEOCODING_API_KEY,
+    authSecret,
+    databaseUrl,
   };
 }
