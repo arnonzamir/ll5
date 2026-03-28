@@ -89,7 +89,7 @@ export function registerChatTools(
           config, userId, '/chat/pending', { params: queryParams },
         ) as { messages: Array<{ id: string }> };
 
-        // Mark as processing so they won't appear in next poll/check
+        // Mark all as processing so they won't appear in next check
         for (const msg of result.messages ?? []) {
           await gatewayFetch(config, userId, `/chat/messages/${msg.id}`, {
             method: 'PATCH',
