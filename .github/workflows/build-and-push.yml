@@ -132,19 +132,25 @@ jobs:
         env:
           SERVER_HOST: ${{ vars.SERVER_HOST }}
           SERVICE_UUID: ${{ secrets.COOLIFY_SERVICE_UUID }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           SSH="ssh -i ~/.ssh/deploy_key root@${SERVER_HOST}"
           DIR="/data/coolify/services/${SERVICE_UUID}"
 
-          # Ensure GHCR auth on server
-          $SSH "echo ${GHCR_TOKEN} | docker login ghcr.io -u ${{ github.actor }} --password-stdin"
-
-          # Update image tags to current SHA
-          $SSH "cd ${DIR} && sed -i -E 's|(ghcr.io/arnonzamir/ll5-[a-z-]+:)[a-zA-Z0-9._-]+|\1${{ github.sha }}|g' docker-compose.yml"
-
-          # Pull and redeploy
+          # Pull latest images and recreate changed containers
           $SSH "cd ${DIR} && docker compose pull && docker compose up -d"
+
+          # Verify health (check first MCP)
+          sleep 15
+          for i in 1 2 3 4; do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' https://mcp-knowledge.noninoni.click/health 2>/dev/null || echo "000")
+            echo "Health check attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "Deploy successful"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Warning: health check did not return 200, but containers may still be starting"
 
       - name: Cleanup
         if: always()
