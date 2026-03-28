@@ -147,11 +147,12 @@ async function processItem(
   item: PushItem,
   itemIndex: number,
   config: EnvConfig,
+  pgPool?: pg.Pool,
 ): Promise<ItemResult> {
   try {
     switch (item.type) {
       case 'location':
-        await processLocation(es, userId, item, config.geocodingApiKey);
+        await processLocation(es, userId, item, config.geocodingApiKey, pgPool);
         break;
       case 'message':
         await processMessage(es, userId, item);
@@ -298,7 +299,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     const results: ItemResult[] = [];
 
     for (let i = 0; i < payload.items.length; i++) {
-      const result = await processItem(esClient, userId, payload.items[i], i, config);
+      const result = await processItem(esClient, userId, payload.items[i], i, config, pgPool);
       results.push(result);
     }
 

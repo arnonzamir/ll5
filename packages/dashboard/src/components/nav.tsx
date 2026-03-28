@@ -11,6 +11,7 @@ import {
   ShoppingCart,
   Users,
   MapPin,
+  Navigation,
   UserCircle,
   Menu,
   X,
@@ -24,6 +25,7 @@ const userLinks = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/shopping", label: "Shopping", icon: ShoppingCart },
   { href: "/people", label: "People", icon: Users },
+  { href: "/locations", label: "Locations", icon: Navigation },
   { href: "/places", label: "Places", icon: MapPin },
   { href: "/profile", label: "Profile", icon: UserCircle },
 ];

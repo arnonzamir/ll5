@@ -70,7 +70,7 @@ export default async function DashboardPage() {
   const recentInbox = Array.isArray(inboxList) ? inboxList.slice(0, 5) : [];
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-4rem)] overflow-hidden">
+    <div className="flex gap-6 h-full overflow-hidden">
       {/* Left panel — GTD summary */}
       <div className="w-full lg:w-[45%] overflow-y-auto space-y-6 pb-6 min-h-0">
         {/* Status cards */}
