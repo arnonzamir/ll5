@@ -87,7 +87,15 @@ export function registerChatTools(
 
         const result = await gatewayFetch(
           config, userId, '/chat/pending', { params: queryParams },
-        );
+        ) as { messages: Array<{ id: string }> };
+
+        // Mark fetched messages as processing so they don't appear in subsequent polls
+        for (const msg of result.messages ?? []) {
+          await gatewayFetch(config, userId, `/chat/messages/${msg.id}`, {
+            method: 'PATCH',
+            body: { status: 'processing' },
+          }).catch(() => {}); // best-effort, don't fail the tool
+        }
 
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
