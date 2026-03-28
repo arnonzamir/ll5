@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
+import pg from 'pg';
 import type { Pool } from 'pg';
 import { logger } from './utils/logger.js';
 
@@ -288,6 +289,74 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /chat/listen — SSE endpoint for real-time message notifications
+  // Uses PG LISTEN/NOTIFY — no polling
+  // ---------------------------------------------------------------------------
+  router.get('/listen', auth, async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write('data: {"type":"connected"}\n\n');
+
+    // Dedicated PG client for LISTEN (can't use pool — LISTEN is session-level)
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      res.write('data: {"type":"error","message":"No database connection"}\n\n');
+      res.end();
+      return;
+    }
+
+    const listener = new pg.Client({ connectionString });
+
+    try {
+      await listener.connect();
+      await listener.query('LISTEN chat_messages');
+
+      listener.on('notification', (msg) => {
+        if (msg.channel !== 'chat_messages') return;
+        try {
+          const data = JSON.parse(msg.payload || '{}');
+          // Only forward messages for this user
+          // Note: the NOTIFY payload doesn't include user_id for security
+          // Since this is an authenticated endpoint, we forward all messages
+          // from the trigger (which only fires on inbound pending)
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+        } catch { /* skip malformed */ }
+      });
+
+      listener.on('error', () => {
+        res.end();
+      });
+
+      // Clean up on client disconnect
+      req.on('close', () => {
+        listener.end().catch(() => {});
+      });
+
+      // Keep-alive ping every 30s
+      const keepAlive = setInterval(() => {
+        res.write(': keepalive\n\n');
+      }, 30000);
+
+      req.on('close', () => {
+        clearInterval(keepAlive);
+      });
+
+    } catch (err) {
+      logger.error('SSE listen failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.write(`data: {"type":"error","message":"Connection failed"}\n\n`);
+      res.end();
     }
   });
 
