@@ -30,15 +30,22 @@ export function ChatWidget() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/chat/conversations?channel=web&limit=1");
+        const res = await fetch("/api/chat/conversations?channel=web&limit=1", {
+          credentials: "same-origin",
+        });
         if (res.ok) {
           const data = await res.json();
+          console.log("[chat] conversations:", data);
           const latest = data.conversations?.[0];
           if (latest?.conversation_id) {
             setConvId(latest.conversation_id);
           }
+        } else {
+          console.log("[chat] conversations failed:", res.status);
         }
-      } catch { /* ignore */ }
+      } catch (e) {
+        console.log("[chat] conversations error:", e);
+      }
       setInitialized(true);
     })();
   }, []);
