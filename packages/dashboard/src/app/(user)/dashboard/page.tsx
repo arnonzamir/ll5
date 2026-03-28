@@ -15,11 +15,17 @@ export const metadata = { title: "Dashboard - LL5" };
 
 interface GtdHealth {
   inbox_count?: number;
+  inboxCount?: number;
   due_today_count?: number;
   overdue_count?: number;
+  overdueActionCount?: number;
   waiting_for_count?: number;
+  staleWaitingCount?: number;
   active_project_count?: number;
+  activeProjectCount?: number;
   active_action_count?: number;
+  activeActionCount?: number;
+  [key: string]: unknown;
 }
 
 interface Project {
@@ -27,31 +33,41 @@ interface Project {
   title: string;
   action_count?: number;
   active_action_count?: number;
+  activeActionCount?: number;
   category?: string | null;
   status?: string;
+  [key: string]: unknown;
 }
 
 interface InboxEntry {
   id: string;
-  title: string;
+  title?: string;
+  content?: string;
   source?: string | null;
   captured_at?: string | null;
+  createdAt?: string | null;
+  [key: string]: unknown;
 }
 
 export default async function DashboardPage() {
-  const [health, projects, inbox] = await Promise.all([
-    mcpCallJsonSafe<GtdHealth>("gtd", "get_gtd_health"),
-    mcpCallJsonSafe<Project[]>("gtd", "list_projects", { status: "active" }),
-    mcpCallJsonSafe<InboxEntry[]>("gtd", "list_inbox", { limit: 5 }),
+  const [healthRaw, projectsRaw, inboxRaw] = await Promise.all([
+    mcpCallJsonSafe<Record<string, unknown>>("gtd", "get_gtd_health"),
+    mcpCallJsonSafe<Record<string, unknown>>("gtd", "list_projects", { status: "active" }),
+    mcpCallJsonSafe<Record<string, unknown>>("gtd", "list_inbox", { limit: 5 }),
   ]);
 
-  const inboxCount = health?.inbox_count ?? 0;
-  const dueToday = health?.due_today_count ?? 0;
-  const overdue = health?.overdue_count ?? 0;
-  const waitingFor = health?.waiting_for_count ?? 0;
+  // MCP tools return wrapped objects — extract the data
+  const health = (healthRaw?.health ?? healthRaw ?? {}) as GtdHealth;
+  const projectsList = (projectsRaw?.projects ?? projectsRaw ?? []) as Project[];
+  const inboxList = (inboxRaw?.items ?? inboxRaw?.inbox ?? inboxRaw ?? []) as InboxEntry[];
 
-  const topProjects = (projects ?? []).slice(0, 5);
-  const recentInbox = (inbox ?? []).slice(0, 5);
+  const inboxCount = health?.inbox_count ?? health?.inboxCount ?? 0;
+  const dueToday = health?.due_today_count ?? health?.overdueActionCount ?? 0;
+  const overdue = health?.overdue_count ?? health?.overdueActionCount ?? 0;
+  const waitingFor = health?.waiting_for_count ?? health?.staleWaitingCount ?? 0;
+
+  const topProjects = Array.isArray(projectsList) ? projectsList.slice(0, 5) : [];
+  const recentInbox = Array.isArray(inboxList) ? inboxList.slice(0, 5) : [];
 
   return (
     <div className="flex gap-6 h-[calc(100vh-4rem)]">
@@ -88,7 +104,7 @@ export default async function DashboardPage() {
                 <ProjectCard
                   key={p.id}
                   title={p.title}
-                  actionCount={p.active_action_count ?? p.action_count ?? 0}
+                  actionCount={p.activeActionCount ?? p.active_action_count ?? p.action_count ?? 0}
                   category={p.category}
                   status={p.status}
                 />
@@ -109,9 +125,9 @@ export default async function DashboardPage() {
               recentInbox.map((item) => (
                 <InboxItem
                   key={item.id}
-                  title={item.title}
+                  title={item.title ?? item.content ?? ""}
                   source={item.source}
-                  capturedAt={item.captured_at}
+                  capturedAt={item.captured_at ?? item.createdAt}
                 />
               ))
             )}
