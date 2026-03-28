@@ -87,7 +87,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
       return;
     }
 
-    const validChannels = ['web', 'telegram', 'whatsapp', 'cli'];
+    const validChannels = ['web', 'telegram', 'whatsapp', 'cli', 'android'];
     if (!validChannels.includes(channel)) {
       res.status(400).json({ error: `Invalid channel. Must be one of: ${validChannels.join(', ')}` });
       return;

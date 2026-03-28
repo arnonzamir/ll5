@@ -76,7 +76,7 @@ export function registerChatTools(
     'check_messages',
     'Check for pending inbound messages from external channels (web, Telegram, WhatsApp). Returns unread messages oldest-first. Each message has an id — pass it as reply_to_id when calling send_message to mark it as delivered.',
     {
-      channel: z.enum(['web', 'telegram', 'whatsapp', 'cli']).optional()
+      channel: z.enum(['web', 'telegram', 'whatsapp', 'cli', 'android']).optional()
         .describe('Filter by channel. If omitted, returns messages from all channels.'),
     },
     async (params) => {
@@ -118,7 +118,7 @@ export function registerChatTools(
     'send_message',
     'Send a message to an external channel (web, Telegram, WhatsApp). Use this to respond to inbound messages or initiate outbound messages.',
     {
-      channel: z.enum(['web', 'telegram', 'whatsapp', 'cli'])
+      channel: z.enum(['web', 'telegram', 'whatsapp', 'cli', 'android'])
         .describe('Target channel for the message'),
       content: z.string().describe('Message content to send'),
       conversation_id: z.string().optional()
@@ -174,7 +174,7 @@ export function registerChatTools(
     'list_conversations',
     'List active chat conversations across external channels. Shows last message and unread count per conversation.',
     {
-      channel: z.enum(['web', 'telegram', 'whatsapp', 'cli']).optional()
+      channel: z.enum(['web', 'telegram', 'whatsapp', 'cli', 'android']).optional()
         .describe('Filter by channel'),
       limit: z.number().optional().describe('Max conversations to return. Default: 20'),
     },
