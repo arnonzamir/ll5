@@ -222,8 +222,55 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   app.post('/webhook/:token', async (req: Request, res: Response) => {
     const token = req.params.token as string;
 
-    // Validate token
-    const userId = config.webhookTokens[token];
+    // Validate token: try webhook token first, then auth token, then Bearer header
+    let userId = config.webhookTokens[token];
+
+    if (!userId && config.authSecret) {
+      // Try as ll5 auth token (from Android app)
+      try {
+        const crypto = await import('node:crypto');
+        const parts = token.split('.');
+        if (parts.length === 3 && parts[0] === 'll5') {
+          const [, payloadB64, signature] = parts;
+          const expected = crypto.createHmac('sha256', config.authSecret)
+            .update(payloadB64).digest('hex').slice(0, 32);
+          if (signature.length === 32 && crypto.timingSafeEqual(
+            Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex')
+          )) {
+            const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+            if (payload.exp > Date.now() / 1000) {
+              userId = payload.uid;
+            }
+          }
+        }
+      } catch { /* not a valid auth token */ }
+    }
+
+    if (!userId) {
+      // Try Bearer header as last resort
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith('Bearer ll5.') && config.authSecret) {
+        try {
+          const crypto = await import('node:crypto');
+          const authToken = authHeader.slice(7);
+          const parts = authToken.split('.');
+          if (parts.length === 3) {
+            const [, payloadB64, signature] = parts;
+            const expected = crypto.createHmac('sha256', config.authSecret)
+              .update(payloadB64).digest('hex').slice(0, 32);
+            if (signature.length === 32 && crypto.timingSafeEqual(
+              Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex')
+            )) {
+              const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+              if (payload.exp > Date.now() / 1000) {
+                userId = payload.uid;
+              }
+            }
+          }
+        } catch { /* not valid */ }
+      }
+    }
+
     if (!userId) {
       res.status(401).json({ error: 'Invalid webhook token' });
       return;
