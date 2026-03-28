@@ -10,23 +10,17 @@ import {
   addShoppingItem,
   checkOffItem,
 } from "./shopping-server-actions";
-
-interface ShoppingItem {
-  id: string;
-  name: string;
-  category?: string | null;
-  checked?: boolean;
-}
+import type { ShoppingGroup } from "./shopping-server-actions";
 
 export function ShoppingView() {
-  const [items, setItems] = useState<ShoppingItem[]>([]);
+  const [groups, setGroups] = useState<ShoppingGroup[]>([]);
   const [isPending, startTransition] = useTransition();
   const [newItem, setNewItem] = useState("");
 
   function load() {
     startTransition(async () => {
       const result = await fetchShoppingList();
-      setItems(result);
+      setGroups(result);
     });
   }
 
@@ -46,22 +40,14 @@ export function ShoppingView() {
     });
   }
 
-  function handleCheck(id: string) {
+  function handleCheck(title: string) {
     startTransition(async () => {
-      await checkOffItem(id);
+      await checkOffItem(title);
       load();
     });
   }
 
-  // Group by category
-  const grouped = items.reduce<Record<string, ShoppingItem[]>>((acc, item) => {
-    const cat = item.category ?? "Other";
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(item);
-    return acc;
-  }, {});
-
-  const categories = Object.keys(grouped).sort();
+  const totalItems = groups.reduce((sum, g) => sum + g.items.length, 0);
 
   return (
     <div>
@@ -89,36 +75,36 @@ export function ShoppingView() {
       </form>
 
       <div className="rounded-lg border border-gray-200 bg-white">
-        {items.length === 0 ? (
+        {totalItems === 0 ? (
           <p className="p-6 text-sm text-gray-500 text-center">
             {isPending ? "Loading..." : "Shopping list empty"}
           </p>
         ) : (
-          categories.map((cat) => (
-            <div key={cat}>
+          groups.map((group) => (
+            <div key={group.category}>
               <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
                 <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                  {cat}
+                  {group.category}
                 </span>
               </div>
-              {grouped[cat].map((item) => (
+              {group.items.map((item) => (
                 <div
                   key={item.id}
                   className="flex items-center gap-3 px-4 py-3 border-b border-gray-100"
                 >
                   <Checkbox
-                    checked={item.checked ?? false}
-                    onCheckedChange={() => handleCheck(item.id)}
-                    aria-label={`Check off ${item.name}`}
+                    checked={item.status === "completed"}
+                    onCheckedChange={() => handleCheck(item.title)}
+                    aria-label={`Check off ${item.title}`}
                   />
                   <span
                     className={
-                      item.checked
+                      item.status === "completed"
                         ? "text-sm text-gray-400 line-through"
                         : "text-sm"
                     }
                   >
-                    {item.name}
+                    {item.title}
                   </span>
                 </div>
               ))}

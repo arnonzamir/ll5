@@ -1,28 +1,42 @@
 "use server";
 
-import { mcpCall, mcpCallList } from "@/lib/api";
+import { mcpCall, mcpCallJson } from "@/lib/api";
 
-interface ShoppingItem {
+export interface ShoppingItem {
   id: string;
-  name: string;
+  title: string;
   category?: string | null;
-  checked?: boolean;
+  status?: string;
 }
 
-export async function fetchShoppingList(): Promise<ShoppingItem[]> {
-  return mcpCallList<ShoppingItem>("gtd", "manage_shopping_list", { action: "list" });
+export interface ShoppingGroup {
+  category: string;
+  items: ShoppingItem[];
 }
 
-export async function addShoppingItem(name: string): Promise<void> {
+export async function fetchShoppingList(): Promise<ShoppingGroup[]> {
+  try {
+    const raw = await mcpCallJson<Record<string, unknown>>("gtd", "manage_shopping_list", { action: "list" });
+    // Response: {shopping_list: {groups: [{category, items}], total_items, checked_off}}
+    const shoppingList = (raw?.shopping_list ?? raw) as Record<string, unknown>;
+    const groups = (shoppingList?.groups ?? []) as ShoppingGroup[];
+    return Array.isArray(groups) ? groups : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addShoppingItem(title: string, category?: string): Promise<void> {
   await mcpCall("gtd", "manage_shopping_list", {
     action: "add",
-    name,
+    title,
+    category,
   });
 }
 
-export async function checkOffItem(id: string): Promise<void> {
+export async function checkOffItem(title: string): Promise<void> {
   await mcpCall("gtd", "manage_shopping_list", {
     action: "check_off",
-    item_id: id,
+    title,
   });
 }
