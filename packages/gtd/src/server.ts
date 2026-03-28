@@ -1,5 +1,7 @@
 import express from 'express';
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response } from 'express';
+import { tokenAuthMiddleware } from './auth-middleware.js';
+import type { AuthenticatedRequest } from './auth-middleware.js';
 import pg from 'pg';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -73,22 +75,12 @@ export async function startServer(): Promise<void> {
   const app = express();
   app.use(express.json());
 
-  // Auth middleware
-  function authMiddleware(req: Request, res: Response, next: NextFunction): void {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Missing authorization' });
-      return;
-    }
-    const key = authHeader.slice(7);
-    if (key !== env.apiKey) {
-      res.status(401).json({ error: 'Invalid API key' });
-      return;
-    }
-    // Set the current user ID for tool handlers
-    currentUserId = env.userId;
-    next();
-  }
+  // Auth middleware — supports token auth + legacy API key fallback
+  const authMw = tokenAuthMiddleware({
+    authSecret: env.authSecret,
+    legacyApiKey: env.apiKey,
+    legacyUserId: env.userId,
+  });
 
   // Health endpoint (no auth required)
   app.get('/health', async (_req: Request, res: Response) => {
@@ -107,7 +99,8 @@ export async function startServer(): Promise<void> {
   });
 
   // MCP endpoint (stateless — new server+transport per request)
-  app.all('/mcp', authMiddleware, async (req: Request, res: Response) => {
+  app.all('/mcp', authMw, async (req: Request, res: Response) => {
+    currentUserId = (req as AuthenticatedRequest).userId;
     try {
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,

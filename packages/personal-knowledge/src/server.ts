@@ -2,7 +2,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { Client as ElasticsearchClient } from '@elastic/elasticsearch';
 import express from 'express';
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response } from 'express';
+import { tokenAuthMiddleware } from './auth-middleware.js';
+import type { AuthenticatedRequest } from './auth-middleware.js';
 import { loadEnv } from './utils/env.js';
 import { logger, setLogLevel } from './utils/logger.js';
 import type { LogLevel } from './utils/logger.js';
@@ -14,14 +16,10 @@ import { ElasticsearchPlaceRepository } from './repositories/elasticsearch/place
 import { ElasticsearchDataGapRepository } from './repositories/elasticsearch/data-gap.repository.js';
 import { registerAllTools } from './tools/index.js';
 
-// Per-request userId storage using a simple closure approach.
-// In production this would use AsyncLocalStorage for proper request isolation.
+// Per-request userId set by auth middleware
 let currentUserId = '';
 
 function getUserId(): string {
-  if (!currentUserId) {
-    throw new Error('No authenticated user in current request context');
-  }
   return currentUserId;
 }
 
@@ -71,25 +69,16 @@ export async function startServer(): Promise<void> {
     }
   });
 
-  // Auth middleware
-  function authMiddleware(req: Request, res: Response, next: NextFunction): void {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Missing authorization' });
-      return;
-    }
-    const key = authHeader.slice(7);
-    if (key !== env.apiKey) {
-      res.status(401).json({ error: 'Invalid API key' });
-      return;
-    }
-    // Set the user context for this request
-    currentUserId = env.userId;
-    next();
-  }
+  // Auth middleware — supports token auth + legacy API key fallback
+  const authMw = tokenAuthMiddleware({
+    authSecret: env.authSecret,
+    legacyApiKey: env.apiKey,
+    legacyUserId: env.userId,
+  });
 
   // MCP endpoint using StreamableHTTP transport (stateless — new transport per request)
-  app.all('/mcp', authMiddleware, async (req: Request, res: Response) => {
+  app.all('/mcp', authMw, async (req: Request, res: Response) => {
+    currentUserId = (req as AuthenticatedRequest).userId;
     try {
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
