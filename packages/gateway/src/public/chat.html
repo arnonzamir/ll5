@@ -126,6 +126,12 @@ async function loadHistory() {
       seenIds.add(m.id);
       appendMsg(m.role, m.content, m.created_at);
       lastTimestamp = m.created_at;
+      if (m.status === 'pending' || m.status === 'processing') {
+        fetch(`${API}/chat/messages/${m.id}`, {
+          method: 'PATCH', headers: authHeaders(),
+          body: JSON.stringify({ status: 'delivered' })
+        }).catch(() => {});
+      }
     }
   } catch (e) { /* ignore */ }
 }
@@ -144,6 +150,13 @@ async function pollMessages() {
         appendMsg(m.role, m.content, m.created_at);
       }
       lastTimestamp = m.created_at;
+      // Mark as delivered so it's not returned as pending
+      if (m.status === 'pending' || m.status === 'processing') {
+        fetch(`${API}/chat/messages/${m.id}`, {
+          method: 'PATCH', headers: authHeaders(),
+          body: JSON.stringify({ status: 'delivered' })
+        }).catch(() => {});
+      }
     }
   } catch (e) { /* ignore */ }
 }
