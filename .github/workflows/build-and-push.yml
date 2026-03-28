@@ -26,7 +26,7 @@ jobs:
 
       - id: set-matrix
         run: |
-          PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "gateway")
+          PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "gateway" "dashboard")
 
           # On manual dispatch with specific packages, use those
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.packages }}" ]]; then
@@ -97,6 +97,9 @@ jobs:
         run: |
           if [[ "${{ matrix.package }}" == "gateway" ]]; then
             echo "file=docker/Dockerfile.gateway" >> "$GITHUB_OUTPUT"
+            echo "build_args=" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ matrix.package }}" == "dashboard" ]]; then
+            echo "file=docker/Dockerfile.dashboard" >> "$GITHUB_OUTPUT"
             echo "build_args=" >> "$GITHUB_OUTPUT"
           else
             echo "file=docker/Dockerfile.mcp" >> "$GITHUB_OUTPUT"

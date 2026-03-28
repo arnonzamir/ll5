@@ -1,0 +1,35 @@
+# -- Build stage --
+FROM node:20-slim AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY packages/dashboard/package.json packages/dashboard/
+RUN npm ci --workspace=packages/dashboard
+
+COPY packages/dashboard/ packages/dashboard/
+
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build --workspace=packages/dashboard
+
+# -- Runtime stage --
+FROM node:20-alpine AS runtime
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=build /app/packages/dashboard/.next/standalone ./
+COPY --from=build /app/packages/dashboard/.next/static ./.next/static
+COPY --from=build /app/packages/dashboard/public ./public
+
+RUN addgroup -S app && adduser -S app -G app
+USER app
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/api/health || exit 1
+
+CMD ["node", "server.js"]
