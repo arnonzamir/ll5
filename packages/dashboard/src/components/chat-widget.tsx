@@ -14,7 +14,12 @@ export function ChatWidget() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [convId, setConvId] = useState<string | null>(null);
+  const [convId, setConvId] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("ll5_conv_id");
+    }
+    return null;
+  });
   const seenIds = useRef(new Set<string>());
   const messagesEnd = useRef<HTMLDivElement>(null);
   const lastTs = useRef("");
@@ -109,7 +114,10 @@ export function ChatWidget() {
       if (res.ok) {
         const data = await res.json();
         if (data.id) seenIds.current.add(data.id);
-        if (!convId && data.conversation_id) setConvId(data.conversation_id);
+        if (!convId && data.conversation_id) {
+          setConvId(data.conversation_id);
+          localStorage.setItem("ll5_conv_id", data.conversation_id);
+        }
       }
     } catch { /* ignore */ }
     setSending(false);
@@ -128,6 +136,7 @@ export function ChatWidget() {
               setMessages([]);
               seenIds.current.clear();
               lastTs.current = "";
+              localStorage.removeItem("ll5_conv_id");
             }}
           >
             New
