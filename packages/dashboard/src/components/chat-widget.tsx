@@ -14,12 +14,8 @@ export function ChatWidget() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [convId, setConvId] = useState<string | null>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("ll5_conv_id");
-    }
-    return null;
-  });
+  const [convId, setConvId] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
   const seenIds = useRef(new Set<string>());
   const messagesEnd = useRef<HTMLDivElement>(null);
   const lastTs = useRef("");
@@ -29,6 +25,23 @@ export function ChatWidget() {
   };
 
   useEffect(scrollToBottom, [messages]);
+
+  // Load most recent conversation on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/chat/conversations?channel=web&limit=1");
+        if (res.ok) {
+          const data = await res.json();
+          const latest = data.conversations?.[0];
+          if (latest?.conversation_id) {
+            setConvId(latest.conversation_id);
+          }
+        }
+      } catch { /* ignore */ }
+      setInitialized(true);
+    })();
+  }, []);
 
   // Poll for new messages
   const poll = useCallback(async () => {
@@ -116,7 +129,6 @@ export function ChatWidget() {
         if (data.id) seenIds.current.add(data.id);
         if (!convId && data.conversation_id) {
           setConvId(data.conversation_id);
-          localStorage.setItem("ll5_conv_id", data.conversation_id);
         }
       }
     } catch { /* ignore */ }
@@ -136,7 +148,6 @@ export function ChatWidget() {
               setMessages([]);
               seenIds.current.clear();
               lastTs.current = "";
-              localStorage.removeItem("ll5_conv_id");
             }}
           >
             New
