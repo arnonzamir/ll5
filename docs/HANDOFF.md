@@ -26,6 +26,9 @@ Dashboard (Next.js 15)
   ├── /login — user_id + PIN auth
   ├── /dashboard — GTD status + chat panel (50/50)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
+  ├── /locations — Leaflet map with clustering, timeline, trail
+  ├── /people, /places, /knowledge, /horizons — personal knowledge pages
+  ├── /profile — user settings
   └── /admin — system health, users, tools
 ```
 
@@ -105,4 +108,4 @@ See docs/implementation/deployment-log.md for full details:
 - PG POSTGRES_PASSWORD only used at first init — ALTER ROLE for changes
 - ES versions not backwards-compatible — can't downgrade with existing data
 - MCP StreamableHTTP needs per-request server+transport pair
-- FileChanged hook doesn't reliably wake Claude — use asyncRewake on Stop hook
+- FileChanged hook doesn't reliably wake Claude — Channel MCP is the working solution

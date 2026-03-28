@@ -107,7 +107,7 @@ ll5/
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
 │   └── src/
 │       ├── app/(auth)/login/          # Login page + server action
-│       ├── app/(user)/                # User pages: dashboard, actions, projects, inbox, shopping, etc.
+│       ├── app/(user)/                # User pages: dashboard, actions, projects, inbox, shopping, locations, people, places, knowledge, horizons, profile
 │       ├── app/(admin)/               # Admin pages: health, users, tools
 │       ├── app/api/chat/              # Proxy routes: messages, conversations
 │       ├── components/                # Nav, cards, chat widget, shadcn/ui primitives

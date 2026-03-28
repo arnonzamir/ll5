@@ -51,6 +51,11 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-03-29: Location map page with Leaflet, clustering, timeline slider, trail visualization
+- 2026-03-29: Shopping list fixed to parse grouped MCP response
+- 2026-03-29: All dashboard pages: search, edit/delete, profile page
+- 2026-03-29: Channel MCP bridge (replaces file-watcher approach) for real-time chat
+- 2026-03-29: Android companion app with chat, location tracking, notification capture
 - 2026-03-28: Chat message queue with PG LISTEN/NOTIFY + SSE
 - 2026-03-28: Dashboard deployed with chat panel (50/50 split)
 - 2026-03-28: Auth token system with role in payload
@@ -61,7 +66,7 @@ Current state of the LL5 personal assistant system.
 ## Known Issues
 
 - Dashboard MCP client sometimes gets stale responses (needs cache-busting)
-- FileChanged hook doesn't reliably wake Claude (using asyncRewake poll-chat.sh as workaround)
+- FileChanged hook replaced by Channel MCP (channel approach works reliably)
 - Gateway SSE listener needs reconnect-on-error improvement
 - No automated deploy step with SSH keys in GitHub secrets (manual deploy works)
 
@@ -70,4 +75,5 @@ Current state of the LL5 personal assistant system.
 - personal-knowledge and gtd MCPs have duplicated auth-middleware.ts (should use @ll5/shared)
 - ES indices use 8.15.0 (not latest) due to server cache
 - No tests for any MCP or gateway
-- Dashboard stub pages (people, places, knowledge, horizons, admin users/tools)
+- Dashboard pages fully implemented (no more stubs)
+- Leaflet packages added to dashboard but lockfile was out of sync (fixed)
