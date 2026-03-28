@@ -7,6 +7,7 @@ import {
 import { StatusCard } from "@/components/status-card";
 import { ProjectCard } from "@/components/project-card";
 import { InboxItem } from "@/components/inbox-item";
+import { ChatWidget } from "@/components/chat-widget";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mcpCallJsonSafe } from "@/lib/api";
 
@@ -17,15 +18,8 @@ interface GtdHealth {
   due_today_count?: number;
   overdue_count?: number;
   waiting_for_count?: number;
-}
-
-interface Action {
-  id: string;
-  title: string;
-  status?: string;
-  due_date?: string | null;
-  project_id?: string | null;
-  project_name?: string | null;
+  active_project_count?: number;
+  active_action_count?: number;
 }
 
 interface Project {
@@ -60,36 +54,35 @@ export default async function DashboardPage() {
   const recentInbox = (inbox ?? []).slice(0, 5);
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+    <div className="flex gap-6 h-[calc(100vh-4rem)]">
+      {/* Left panel — GTD summary */}
+      <div className="w-full lg:w-[45%] overflow-y-auto space-y-6 pb-6">
+        {/* Status cards */}
+        <div className="grid grid-cols-2 gap-3">
+          <StatusCard title="Inbox" value={inboxCount} icon={Inbox} />
+          <StatusCard
+            title="Due Today"
+            value={dueToday}
+            icon={CalendarClock}
+            variant={dueToday > 0 ? "warning" : "default"}
+          />
+          <StatusCard
+            title="Overdue"
+            value={overdue}
+            icon={AlertCircle}
+            variant={overdue > 0 ? "danger" : "default"}
+          />
+          <StatusCard title="Waiting For" value={waitingFor} icon={Clock} />
+        </div>
 
-      {/* Status cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatusCard title="Inbox" value={inboxCount} icon={Inbox} />
-        <StatusCard
-          title="Due Today"
-          value={dueToday}
-          icon={CalendarClock}
-          variant={dueToday > 0 ? "warning" : "default"}
-        />
-        <StatusCard
-          title="Overdue"
-          value={overdue}
-          icon={AlertCircle}
-          variant={overdue > 0 ? "danger" : "default"}
-        />
-        <StatusCard title="Waiting For" value={waitingFor} icon={Clock} />
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-6">
         {/* Active Projects */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Active Projects</CardTitle>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-gray-500">Active Projects</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2">
             {topProjects.length === 0 ? (
-              <p className="text-sm text-gray-500">No active projects</p>
+              <p className="text-sm text-gray-400">No active projects</p>
             ) : (
               topProjects.map((p) => (
                 <ProjectCard
@@ -106,12 +99,12 @@ export default async function DashboardPage() {
 
         {/* Recent Inbox */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Recent Inbox</CardTitle>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-gray-500">Recent Inbox</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             {recentInbox.length === 0 ? (
-              <p className="text-sm text-gray-500 p-6 pt-0">Inbox empty</p>
+              <p className="text-sm text-gray-400 px-6 pb-4">Inbox empty</p>
             ) : (
               recentInbox.map((item) => (
                 <InboxItem
@@ -124,6 +117,11 @@ export default async function DashboardPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      {/* Right panel — Chat (hidden on mobile, shown on lg+) */}
+      <div className="hidden lg:flex lg:w-[55%] lg:flex-col">
+        <ChatWidget />
       </div>
     </div>
   );
