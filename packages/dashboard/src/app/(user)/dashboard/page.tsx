@@ -70,9 +70,9 @@ export default async function DashboardPage() {
   const recentInbox = Array.isArray(inboxList) ? inboxList.slice(0, 5) : [];
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-4rem)]">
+    <div className="flex gap-6 h-[calc(100vh-4rem)] overflow-hidden">
       {/* Left panel — GTD summary */}
-      <div className="w-full lg:w-[45%] overflow-y-auto space-y-6 pb-6">
+      <div className="w-full lg:w-[45%] overflow-y-auto space-y-6 pb-6 min-h-0">
         {/* Status cards */}
         <div className="grid grid-cols-2 gap-3">
           <StatusCard title="Inbox" value={inboxCount} icon={Inbox} />
@@ -136,7 +136,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Right panel — Chat (hidden on mobile, shown on lg+) */}
-      <div className="hidden lg:flex lg:w-[55%] lg:flex-col">
+      <div className="hidden lg:flex lg:w-[55%] lg:flex-col min-h-0">
         <ChatWidget />
       </div>
     </div>

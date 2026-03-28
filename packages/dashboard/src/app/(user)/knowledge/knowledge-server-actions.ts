@@ -1,6 +1,6 @@
 "use server";
 
-import { mcpCallJson, mcpCallList } from "@/lib/api";
+import { mcpCall, mcpCallJson, mcpCallList } from "@/lib/api";
 
 export interface KnowledgeResult {
   entity_type: string;
@@ -42,4 +42,14 @@ export async function searchKnowledge(
 
 export async function fetchRecentFacts(): Promise<Fact[]> {
   return mcpCallList<Fact>("knowledge", "list_facts", { limit: 20 });
+}
+
+export async function upsertFact(
+  data: Omit<Fact, "id"> & { id?: string }
+): Promise<void> {
+  await mcpCall("knowledge", "upsert_fact", data as Record<string, unknown>);
+}
+
+export async function deleteFact(id: string): Promise<void> {
+  await mcpCall("knowledge", "delete_fact", { id });
 }

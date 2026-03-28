@@ -11,6 +11,7 @@ import {
   ShoppingCart,
   Users,
   MapPin,
+  UserCircle,
   Menu,
   X,
 } from "lucide-react";
@@ -24,6 +25,7 @@ const userLinks = [
   { href: "/shopping", label: "Shopping", icon: ShoppingCart },
   { href: "/people", label: "People", icon: Users },
   { href: "/places", label: "Places", icon: MapPin },
+  { href: "/profile", label: "Profile", icon: UserCircle },
 ];
 
 export function Nav() {
