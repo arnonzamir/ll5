@@ -74,7 +74,7 @@ export function registerChatTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'check_messages',
-    'Check for pending inbound messages from external channels (web, Telegram, WhatsApp). Returns unread messages oldest-first.',
+    'Check for pending inbound messages from external channels (web, Telegram, WhatsApp). Returns unread messages oldest-first. Each message has an id — pass it as reply_to_id when calling send_message to mark it as delivered.',
     {
       channel: z.enum(['web', 'telegram', 'whatsapp', 'cli']).optional()
         .describe('Filter by channel. If omitted, returns messages from all channels.'),
@@ -87,15 +87,7 @@ export function registerChatTools(
 
         const result = await gatewayFetch(
           config, userId, '/chat/pending', { params: queryParams },
-        ) as { messages: Array<{ id: string }> };
-
-        // Mark fetched messages as processing so they don't appear in subsequent polls
-        for (const msg of result.messages ?? []) {
-          await gatewayFetch(config, userId, `/chat/messages/${msg.id}`, {
-            method: 'PATCH',
-            body: { status: 'processing' },
-          }).catch(() => {}); // best-effort, don't fail the tool
-        }
+        );
 
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
@@ -123,6 +115,8 @@ export function registerChatTools(
       content: z.string().describe('Message content to send'),
       conversation_id: z.string().optional()
         .describe('Conversation ID to reply in. If omitted, creates a new conversation.'),
+      reply_to_id: z.string().optional()
+        .describe('ID of the inbound message being replied to. Marks it as delivered.'),
       metadata: z.record(z.unknown()).optional()
         .describe('Optional metadata (e.g. telegram_chat_id, whatsapp_phone)'),
     },
@@ -142,6 +136,14 @@ export function registerChatTools(
             },
           },
         );
+
+        // Mark the original inbound message as delivered
+        if (params.reply_to_id) {
+          await gatewayFetch(config, userId, `/chat/messages/${params.reply_to_id}`, {
+            method: 'PATCH',
+            body: { status: 'delivered' },
+          }).catch(() => {});
+        }
 
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
