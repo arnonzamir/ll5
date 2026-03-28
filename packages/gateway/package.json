@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && cp -r src/migrations dist/migrations 2>/dev/null || true",
+    "build": "tsc && rm -rf dist/migrations dist/public && cp -r src/migrations dist/migrations && cp -r src/public dist/public",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js"
   },

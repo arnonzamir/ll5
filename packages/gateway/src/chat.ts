@@ -1,0 +1,295 @@
+import { Router } from 'express';
+import type { Request, Response } from 'express';
+import type { Pool } from 'pg';
+import { logger } from './utils/logger.js';
+
+interface AuthenticatedRequest extends Request {
+  userId: string;
+}
+
+/**
+ * Auth middleware for chat endpoints.
+ * Replicates the same ll5 token validation used by MCP services.
+ */
+function chatAuthMiddleware(authSecret: string) {
+  return async (req: Request, res: Response, next: () => void): Promise<void> => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ll5.')) {
+      res.status(401).json({ error: 'Missing or invalid authorization' });
+      return;
+    }
+
+    try {
+      const crypto = await import('node:crypto');
+      const token = authHeader.slice(7); // Remove "Bearer "
+      const parts = token.split('.');
+      if (parts.length !== 3 || parts[0] !== 'll5') {
+        res.status(401).json({ error: 'Invalid token format' });
+        return;
+      }
+
+      const [, payloadB64, signature] = parts;
+
+      const expected = crypto.createHmac('sha256', authSecret)
+        .update(payloadB64).digest('hex').slice(0, 32);
+
+      if (signature.length !== 32) {
+        res.status(401).json({ error: 'Invalid token' });
+        return;
+      }
+
+      if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
+        res.status(401).json({ error: 'Invalid token' });
+        return;
+      }
+
+      const payload = JSON.parse(
+        Buffer.from(payloadB64, 'base64url').toString(),
+      ) as { uid: string; iat: number; exp: number };
+
+      if (payload.exp < Date.now() / 1000) {
+        res.status(401).json({ error: 'token_expired' });
+        return;
+      }
+
+      (req as AuthenticatedRequest).userId = payload.uid;
+      next();
+    } catch {
+      res.status(401).json({ error: 'Invalid token' });
+    }
+  };
+}
+
+/**
+ * Create the /chat router with message queue endpoints.
+ */
+export function createChatRouter(pool: Pool, authSecret: string): Router {
+  const router = Router();
+  const auth = chatAuthMiddleware(authSecret);
+
+  // ---------------------------------------------------------------------------
+  // POST /chat/messages — channel pushes a message (inbound or outbound)
+  // ---------------------------------------------------------------------------
+  router.post('/messages', auth, async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const { channel, content, conversation_id, metadata, direction, role } = req.body as {
+      channel?: string;
+      content?: string;
+      conversation_id?: string;
+      metadata?: Record<string, unknown>;
+      direction?: string;
+      role?: string;
+    };
+
+    if (!channel || !content) {
+      res.status(400).json({ error: 'Missing required fields: channel, content' });
+      return;
+    }
+
+    const validChannels = ['web', 'telegram', 'whatsapp', 'cli'];
+    if (!validChannels.includes(channel)) {
+      res.status(400).json({ error: `Invalid channel. Must be one of: ${validChannels.join(', ')}` });
+      return;
+    }
+
+    const msgDirection = direction || 'inbound';
+    const msgRole = role || 'user';
+    const msgStatus = msgDirection === 'outbound' ? 'delivered' : 'pending';
+
+    try {
+      const result = await pool.query<{ id: string; conversation_id: string }>(
+        `INSERT INTO chat_messages (user_id, conversation_id, channel, direction, role, content, status, metadata)
+         VALUES ($1, COALESCE($2::uuid, gen_random_uuid()), $3, $4, $5, $6, $7, $8)
+         RETURNING id, conversation_id`,
+        [
+          userId,
+          conversation_id || null,
+          channel,
+          msgDirection,
+          msgRole,
+          content,
+          msgStatus,
+          JSON.stringify(metadata || {}),
+        ],
+      );
+
+      const row = result.rows[0];
+      res.status(201).json({ id: row.id, conversation_id: row.conversation_id });
+    } catch (err) {
+      logger.error('Failed to create chat message', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /chat/messages — pull messages for a conversation or channel
+  // ---------------------------------------------------------------------------
+  router.get('/messages', auth, async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const { conversation_id, channel, status, since, limit: limitStr } = req.query as {
+      conversation_id?: string;
+      channel?: string;
+      status?: string;
+      since?: string;
+      limit?: string;
+    };
+
+    const limit = Math.min(parseInt(limitStr || '50', 10), 200);
+    const conditions: string[] = ['user_id = $1'];
+    const params: unknown[] = [userId];
+    let paramIdx = 2;
+
+    if (conversation_id) {
+      conditions.push(`conversation_id = $${paramIdx++}`);
+      params.push(conversation_id);
+    }
+    if (channel) {
+      conditions.push(`channel = $${paramIdx++}`);
+      params.push(channel);
+    }
+    if (status) {
+      conditions.push(`status = $${paramIdx++}`);
+      params.push(status);
+    }
+    if (since) {
+      conditions.push(`created_at > $${paramIdx++}`);
+      params.push(since);
+    }
+
+    try {
+      const where = conditions.join(' AND ');
+      const countResult = await pool.query<{ count: string }>(
+        `SELECT COUNT(*) as count FROM chat_messages WHERE ${where}`,
+        params,
+      );
+      const total = parseInt(countResult.rows[0].count, 10);
+
+      const messagesResult = await pool.query(
+        `SELECT id, conversation_id, channel, direction, role, content, status, reply_to_id, metadata, created_at, updated_at
+         FROM chat_messages WHERE ${where}
+         ORDER BY created_at ASC
+         LIMIT $${paramIdx}`,
+        [...params, limit],
+      );
+
+      res.json({ messages: messagesResult.rows, total });
+    } catch (err) {
+      logger.error('Failed to fetch chat messages', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /chat/pending — get unread inbound messages (for Claude to check)
+  // ---------------------------------------------------------------------------
+  router.get('/pending', auth, async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const { channel } = req.query as { channel?: string };
+
+    const conditions = ['user_id = $1', "direction = 'inbound'", "status = 'pending'"];
+    const params: unknown[] = [userId];
+
+    if (channel) {
+      conditions.push('channel = $2');
+      params.push(channel);
+    }
+
+    try {
+      const result = await pool.query(
+        `SELECT id, conversation_id, channel, role, content, metadata, created_at
+         FROM chat_messages WHERE ${conditions.join(' AND ')}
+         ORDER BY created_at ASC`,
+        params,
+      );
+
+      res.json({ messages: result.rows, total: result.rows.length });
+    } catch (err) {
+      logger.error('Failed to fetch pending messages', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // PATCH /chat/messages/:id — update message status
+  // ---------------------------------------------------------------------------
+  router.patch('/messages/:id', auth, async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const messageId = req.params.id;
+    const { status } = req.body as { status?: string };
+
+    const validStatuses = ['pending', 'processing', 'delivered', 'failed'];
+    if (!status || !validStatuses.includes(status)) {
+      res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+      return;
+    }
+
+    try {
+      const result = await pool.query(
+        `UPDATE chat_messages SET status = $1, updated_at = now()
+         WHERE id = $2 AND user_id = $3
+         RETURNING id, conversation_id, channel, direction, role, content, status, reply_to_id, metadata, created_at, updated_at`,
+        [status, messageId, userId],
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: 'Message not found' });
+        return;
+      }
+
+      res.json(result.rows[0]);
+    } catch (err) {
+      logger.error('Failed to update chat message', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /chat/conversations — list conversations
+  // ---------------------------------------------------------------------------
+  router.get('/conversations', auth, async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const { channel, limit: limitStr } = req.query as { channel?: string; limit?: string };
+
+    const limit = Math.min(parseInt(limitStr || '20', 10), 100);
+    const channelFilter = channel ? 'AND m.channel = $2' : '';
+    const params: unknown[] = channel ? [userId, channel, limit] : [userId, limit];
+    const limitParam = channel ? '$3' : '$2';
+
+    try {
+      const result = await pool.query(
+        `SELECT
+           m.conversation_id,
+           m.channel,
+           MAX(m.created_at) as last_message_at,
+           COUNT(*) as message_count,
+           COUNT(*) FILTER (WHERE m.direction = 'inbound' AND m.status = 'pending') as unread_count,
+           (SELECT content FROM chat_messages sub
+            WHERE sub.conversation_id = m.conversation_id AND sub.user_id = $1
+            ORDER BY sub.created_at DESC LIMIT 1) as last_message
+         FROM chat_messages m
+         WHERE m.user_id = $1 ${channelFilter}
+         GROUP BY m.conversation_id, m.channel
+         ORDER BY MAX(m.created_at) DESC
+         LIMIT ${limitParam}`,
+        params,
+      );
+
+      res.json({ conversations: result.rows, total: result.rows.length });
+    } catch (err) {
+      logger.error('Failed to fetch conversations', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  return router;
+}

@@ -67,7 +67,7 @@ export async function startServer(): Promise<void> {
   const horizonRepo = new PostgresHorizonRepository(pool);
   const inboxRepo = new PostgresInboxRepository(pool);
 
-  const deps = { horizonRepo, inboxRepo };
+  const deps = { horizonRepo, inboxRepo, gatewayUrl: env.gatewayUrl, authSecret: env.authSecret || '' };
 
   // -------------------------------------------------------------------------
   // Express app with auth middleware

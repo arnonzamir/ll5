@@ -1,9 +1,12 @@
 import { Client } from '@elastic/elasticsearch';
 import express from 'express';
 import type { Request, Response } from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { ZodError } from 'zod';
 import { createAuthRouter } from './auth.js';
+import { createChatRouter } from './chat.js';
 import { processCalendar } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
@@ -189,8 +192,15 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     max: 5,
   });
 
+  // Serve static files (chat UI)
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  app.use(express.static(path.join(__dirname, 'public')));
+
   // Mount auth routes
   app.use('/auth', createAuthRouter(pgPool, config.authSecret));
+
+  // Mount chat routes
+  app.use('/chat', createChatRouter(pgPool, config.authSecret));
 
   // --- Health endpoint ---
   app.get('/health', async (_req: Request, res: Response) => {

@@ -8,10 +8,13 @@ import { registerInboxTools } from './inbox.js';
 import { registerShoppingTools } from './shopping.js';
 import { registerRecommendationTools } from './recommendations.js';
 import { registerHealthTools } from './health.js';
+import { registerChatTools } from './chat.js';
 
 export interface ToolDependencies {
   horizonRepo: HorizonRepository;
   inboxRepo: InboxRepository;
+  gatewayUrl: string;
+  authSecret: string;
 }
 
 export function registerAllTools(
@@ -26,4 +29,5 @@ export function registerAllTools(
   registerShoppingTools(server, deps.horizonRepo, getUserId);
   registerRecommendationTools(server, deps.horizonRepo, getUserId);
   registerHealthTools(server, deps.horizonRepo, getUserId);
+  registerChatTools(server, { gatewayUrl: deps.gatewayUrl, authSecret: deps.authSecret }, getUserId);
 }

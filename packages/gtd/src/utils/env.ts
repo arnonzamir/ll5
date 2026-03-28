@@ -6,6 +6,7 @@ export interface EnvConfig {
   apiKey?: string;
   userId?: string;
   databaseUrl: string;
+  gatewayUrl: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -21,6 +22,8 @@ export function loadEnv(): EnvConfig {
     throw new Error('DATABASE_URL environment variable is required');
   }
 
+  const gatewayUrl = process.env.GATEWAY_URL || 'http://localhost:3006';
+
   return {
     port: parseInt(process.env.PORT || '3001', 10),
     nodeEnv: process.env.NODE_ENV || 'development',
@@ -29,5 +32,6 @@ export function loadEnv(): EnvConfig {
     apiKey,
     userId: process.env.USER_ID,
     databaseUrl,
+    gatewayUrl,
   };
 }
