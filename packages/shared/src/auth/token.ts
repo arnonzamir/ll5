@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 export interface TokenPayload {
   uid: string;
+  role: string;
   iat: number;
   exp: number;
 }
@@ -10,10 +11,11 @@ export interface TokenPayload {
  * Generate a signed LL5 token.
  * Format: ll5.<base64url_payload>.<32char_hex_signature>
  */
-export function generateToken(userId: string, authSecret: string, ttlDays: number): string {
+export function generateToken(userId: string, authSecret: string, ttlDays: number, role: string = 'user'): string {
   const now = Math.floor(Date.now() / 1000);
   const payload: TokenPayload = {
     uid: userId,
+    role,
     iat: now,
     exp: now + ttlDays * 86400,
   };
@@ -73,6 +75,8 @@ export function validateToken(authHeader: string, authSecret: string): TokenPayl
     return null;
   }
 
+  // Default role for tokens generated before role was added
+  if (!payload.role) payload.role = 'user';
   if (!payload.uid || typeof payload.exp !== 'number' || typeof payload.iat !== 'number') {
     return null;
   }

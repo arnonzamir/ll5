@@ -10,6 +10,7 @@ interface AuthUser {
   pin_hash: string;
   name: string | null;
   token_ttl_days: number;
+  role: string;
 }
 
 /**
@@ -28,7 +29,7 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
 
     try {
       const result = await pool.query<AuthUser>(
-        'SELECT user_id, pin_hash, name, token_ttl_days FROM auth_users WHERE user_id = $1',
+        'SELECT user_id, pin_hash, name, token_ttl_days, role FROM auth_users WHERE user_id = $1',
         [user_id],
       );
 
@@ -46,7 +47,7 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
         return;
       }
 
-      const token = generateToken(user_id, authSecret, user.token_ttl_days);
+      const token = generateToken(user_id, authSecret, user.token_ttl_days, user.role);
       const expiresAt = new Date(
         Date.now() + user.token_ttl_days * 86400 * 1000,
       ).toISOString();
