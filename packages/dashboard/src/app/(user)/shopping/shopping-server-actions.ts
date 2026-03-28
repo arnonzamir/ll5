@@ -1,6 +1,6 @@
 "use server";
 
-import { mcpCall, mcpCallJsonSafe } from "@/lib/api";
+import { mcpCall, mcpCallList } from "@/lib/api";
 
 interface ShoppingItem {
   id: string;
@@ -10,12 +10,7 @@ interface ShoppingItem {
 }
 
 export async function fetchShoppingList(): Promise<ShoppingItem[]> {
-  const result = await mcpCallJsonSafe<ShoppingItem[]>(
-    "gtd",
-    "manage_shopping_list",
-    { action: "list" }
-  );
-  return result ?? [];
+  return mcpCallList<ShoppingItem>("gtd", "manage_shopping_list", { action: "list" });
 }
 
 export async function addShoppingItem(name: string): Promise<void> {

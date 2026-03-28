@@ -1,7 +1,6 @@
 "use server";
 
-import { mcpCallJsonSafe, mcpCall } from "@/lib/api";
-import { extractJson } from "@/lib/mcp-client";
+import { mcpCallList, mcpCall } from "@/lib/api";
 
 interface Action {
   id: string;
@@ -16,8 +15,7 @@ interface Action {
 export async function fetchActions(
   filters: Record<string, string>
 ): Promise<Action[]> {
-  const result = await mcpCallJsonSafe<Action[]>("gtd", "list_actions", filters);
-  return result ?? [];
+  return mcpCallList<Action>("gtd", "list_actions", filters);
 }
 
 export async function completeAction(id: string): Promise<void> {

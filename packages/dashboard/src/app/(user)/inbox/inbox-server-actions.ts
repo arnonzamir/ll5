@@ -1,6 +1,6 @@
 "use server";
 
-import { mcpCall, mcpCallJsonSafe } from "@/lib/api";
+import { mcpCall, mcpCallList } from "@/lib/api";
 
 interface InboxEntry {
   id: string;
@@ -10,8 +10,7 @@ interface InboxEntry {
 }
 
 export async function fetchInbox(): Promise<InboxEntry[]> {
-  const result = await mcpCallJsonSafe<InboxEntry[]>("gtd", "list_inbox");
-  return result ?? [];
+  return mcpCallList<InboxEntry>("gtd", "list_inbox");
 }
 
 export async function captureInbox(text: string): Promise<void> {

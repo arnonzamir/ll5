@@ -77,6 +77,29 @@ export async function mcpCallJsonSafe<T = unknown>(
 }
 
 /**
+ * Call an MCP tool and extract an array from the wrapped response.
+ * MCP tools return {items: [...], total: N} or {projects: [...]} etc.
+ * This unwraps to just the array.
+ */
+export async function mcpCallList<T = unknown>(
+  server: McpServer,
+  tool: string,
+  args: Record<string, unknown> = {}
+): Promise<T[]> {
+  try {
+    const raw = await mcpCallJson<Record<string, unknown>>(server, tool, args);
+    if (Array.isArray(raw)) return raw as T[];
+    // Find the first array value in the response
+    for (const val of Object.values(raw ?? {})) {
+      if (Array.isArray(val)) return val as T[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Check health of an MCP server by hitting its /health endpoint.
  */
 export async function checkHealth(

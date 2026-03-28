@@ -1,5 +1,5 @@
 import { ProjectCard } from "@/components/project-card";
-import { mcpCallJsonSafe } from "@/lib/api";
+import { mcpCallList } from "@/lib/api";
 
 export const metadata = { title: "Projects - LL5" };
 
@@ -8,13 +8,13 @@ interface Project {
   title: string;
   action_count?: number;
   active_action_count?: number;
+  activeActionCount?: number;
   category?: string | null;
   status?: string;
 }
 
 export default async function ProjectsPage() {
-  const projects = await mcpCallJsonSafe<Project[]>("gtd", "list_projects");
-  const items = projects ?? [];
+  const items = await mcpCallList<Project>("gtd", "list_projects");
 
   return (
     <div className="space-y-6">
@@ -27,7 +27,7 @@ export default async function ProjectsPage() {
             <ProjectCard
               key={p.id}
               title={p.title}
-              actionCount={p.active_action_count ?? p.action_count ?? 0}
+              actionCount={p.activeActionCount ?? p.active_action_count ?? p.action_count ?? 0}
               category={p.category}
               status={p.status}
             />
