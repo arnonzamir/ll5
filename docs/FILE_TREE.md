@@ -1,0 +1,121 @@
+# LL5 File Tree
+
+Annotated source tree of the ll5 monorepo.
+
+---
+
+```
+ll5/
+├── CLAUDE.md                          # Project instructions for Claude Code
+├── package.json                       # npm workspaces root
+├── tsconfig.json                      # Base TypeScript config
+├── .env.example                       # All environment variables documented
+│
+├── .github/workflows/
+│   └── build-and-push.yml            # CI: build all packages, push to GHCR, deploy via SSH
+│
+├── docker/
+│   ├── Dockerfile.mcp                # Shared Dockerfile for all MCP servers (PACKAGE_NAME build arg)
+│   ├── Dockerfile.gateway            # Gateway-specific Dockerfile
+│   ├── Dockerfile.dashboard          # Next.js standalone Dockerfile
+│   ├── docker-compose.yml            # Local dev: ES + PG
+│   └── docker-compose.prod.yml       # Production reference (Coolify uses its own)
+│
+├── docs/
+│   ├── vision.md                     # What the system does for the user
+│   ├── purpose.md                    # Design principles and constraints
+│   ├── PROGRESS.md                   # Current status, recent changes, known issues
+│   ├── HANDOFF.md                    # Everything to continue: server, auth, DBs, deploy
+│   ├── FILE_TREE.md                  # This file
+│   ├── design/
+│   │   ├── system-architecture.md    # Topology, components, data flows
+│   │   ├── storage-architecture.md   # ES + PG, abstraction layer, index/schema design
+│   │   ├── auth-and-multitenancy.md  # User model, API key (v1), JWT (v2)
+│   │   ├── auth-token-system.md      # Signed tokens with PIN re-auth
+│   │   ├── mcp-personal-knowledge.md # 17 tools, ES indices
+│   │   ├── mcp-gtd.md               # 14 tools, PG tables
+│   │   ├── mcp-awareness.md          # 8 tools, ES indices
+│   │   ├── mcp-google.md             # 9 tools, OAuth
+│   │   ├── mcp-messaging.md          # 8 tools, WhatsApp/Telegram
+│   │   ├── gateway.md                # Webhook receiver design
+│   │   ├── skills.md                 # Claude Code skill designs
+│   │   ├── claude-personality.md     # GTD coaching, autonomy, emotional contract
+│   │   └── ui-design.md             # Dashboard: user + admin pages
+│   └── implementation/
+│       ├── mcp-implementation.md     # Phased build plan for all MCPs
+│       ├── deployment.md             # Docker, CI/CD, Coolify
+│       ├── deployment-log.md         # What was deployed, lessons learned
+│       ├── coolify-setup.md          # Step-by-step Coolify guide
+│       └── mcp-client-config.md      # How to configure Claude Code for MCPs
+│
+├── packages/shared/                   # @ll5/shared — types, interfaces, utilities
+│   └── src/
+│       ├── types/                    # 16 domain types (fact, person, place, horizon, etc.)
+│       ├── repositories/             # 13 repository interfaces
+│       ├── storage/                  # ES + PG client factories
+│       ├── auth/                     # Token generate/validate, Express middleware
+│       ├── mcp/                      # MCP server helpers
+│       └── utils/                    # env, logger, errors
+│
+├── packages/personal-knowledge/       # @ll5/personal-knowledge — ES-backed MCP
+│   └── src/
+│       ├── repositories/elasticsearch/  # 5 ES repositories (fact, person, place, profile, data-gap)
+│       ├── repositories/interfaces/     # Repository interfaces
+│       ├── tools/                       # 17 MCP tools
+│       ├── setup/indices.ts             # ES index creation
+│       ├── auth-middleware.ts           # Token + legacy auth
+│       └── server.ts                    # MCP server with StreamableHTTP
+│
+├── packages/gtd/                      # @ll5/gtd — PG-backed MCP
+│   └── src/
+│       ├── repositories/postgres/       # 3 PG repositories (horizon, inbox, review-session)
+│       ├── repositories/interfaces/     # Repository interfaces
+│       ├── tools/                       # 14 GTD tools + 3 chat tools
+│       ├── migrations/                  # SQL: gtd_horizons, gtd_inbox, gtd_review_sessions
+│       ├── auth-middleware.ts
+│       └── server.ts
+│
+├── packages/awareness/                # @ll5/awareness — ES-backed MCP
+│   └── src/
+│       ├── repositories/elasticsearch/  # 5 ES repositories (location, message, entity-status, calendar, notable)
+│       ├── tools/                       # 8 MCP tools (situation, location, messages, etc.)
+│       ├── setup/indices.ts
+│       └── server.ts
+│
+├── packages/gateway/                  # @ll5/gateway — Express HTTP service
+│   └── src/
+│       ├── auth.ts                    # POST /auth/token (PIN login)
+│       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
+│       ├── processors/                # GPS geocoding, IM processing, calendar, notable events
+│       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger
+│       └── server.ts                  # Express app: webhooks, auth, chat, health
+│
+├── packages/google/                   # @ll5/google — PG-backed MCP [not deployed]
+│   └── src/
+│       ├── repositories/postgres/     # OAuth tokens (encrypted), calendar config
+│       ├── tools/                     # 9 tools (auth, calendar, gmail)
+│       ├── utils/encryption.ts        # AES-256-GCM for token storage
+│       └── server.ts
+│
+├── packages/messaging/                # @ll5/messaging — PG-backed MCP [not deployed]
+│   └── src/
+│       ├── clients/                   # Evolution API (WhatsApp), Telegram Bot API
+│       ├── repositories/postgres/     # Accounts, conversations
+│       ├── tools/                     # 8 tools (send, read, sync, permissions)
+│       └── server.ts
+│
+├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
+│   └── src/
+│       ├── app/(auth)/login/          # Login page + server action
+│       ├── app/(user)/                # User pages: dashboard, actions, projects, inbox, shopping, etc.
+│       ├── app/(admin)/               # Admin pages: health, users, tools
+│       ├── app/api/chat/              # Proxy routes: messages, conversations
+│       ├── components/                # Nav, cards, chat widget, shadcn/ui primitives
+│       ├── lib/                       # MCP client, auth helpers, env
+│       └── providers/                 # React Query
+│
+└── packages/ll5-auth/                 # @ll5/auth-cli — login/status/logout CLI
+    └── src/
+        ├── commands/                  # login, logout, status, setup
+        └── utils/                     # config, token, prompt helpers
+```

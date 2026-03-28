@@ -46,3 +46,21 @@ For architecture and component design, refer to the docs/design/ folder. For imp
 ## When Learning About the User
 
 When the user mentions personal information (facts, people, places, preferences), store it via the personal-knowledge MCP — not in Claude Code's local memory. Claude Code memory is for working preferences about how to collaborate. Life data goes to the MCP.
+
+## Living Documentation
+
+Every commit MUST update these three files (enforced by pre-commit hook):
+
+- **[docs/PROGRESS.md](docs/PROGRESS.md)** — current status, recent changes, known issues, tech debt
+- **[docs/HANDOFF.md](docs/HANDOFF.md)** — everything needed to continue: server details, auth, DBs, deploy procedures
+- **[docs/FILE_TREE.md](docs/FILE_TREE.md)** — annotated source tree
+
+At the start of every session, read PROGRESS.md and HANDOFF.md to understand current state.
+
+### Decisions
+
+When making architectural choices, document them in `docs/decisions/DECISION-NNN.md` with:
+- Context (what problem)
+- Decision (what was chosen)
+- Alternatives considered
+- Consequences
