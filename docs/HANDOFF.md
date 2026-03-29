@@ -73,6 +73,7 @@ Dashboard (Next.js 15)
 | Redirect URI | `https://mcp-google.noninoni.click/oauth/callback` |
 | Encryption Key | Set in Coolify env `ENCRYPTION_KEY` (generate with `openssl rand -hex 32`) |
 | Scopes | calendar.readonly, calendar.events, gmail.readonly, gmail.send |
+| Timezone | Set via TZ env var (default: Asia/Jerusalem) — affects "today" defaults |
 | Tickler Calendar | "LL5 System" (auto-created on first tickler use) |
 | Calendar Access Modes | ignore (hidden), read (read-only), readwrite (full access) |
 

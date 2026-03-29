@@ -238,12 +238,11 @@ export async function startServer(): Promise<void> {
       const auth = await getAuthenticatedClient(googleConfig, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
 
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
-
-      const timeMin = from ?? startOfDay.toISOString();
-      const timeMax = to ?? endOfDay.toISOString();
+      const tz = process.env.TZ || 'Asia/Jerusalem';
+      const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+      const todayStr = fmt.format(new Date());
+      const timeMin = from ?? new Date(`${todayStr}T00:00:00`).toISOString();
+      const timeMax = to ?? new Date(`${todayStr}T23:59:59`).toISOString();
 
       // Determine which calendars to query
       let calendarIds: string[];
@@ -297,7 +296,14 @@ export async function startServer(): Promise<void> {
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          logger.warn(`Failed to fetch events from calendar ${calId}`, { error: message });
+          const responseData = (err as { response?: { status?: number; data?: unknown } }).response;
+          logger.warn(`Failed to fetch events from calendar ${calId}`, {
+            error: message,
+            status: responseData?.status,
+            details: responseData?.data ? JSON.stringify(responseData.data) : undefined,
+            timeMin,
+            timeMax,
+          });
         }
       }
 

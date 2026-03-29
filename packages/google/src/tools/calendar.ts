@@ -6,6 +6,34 @@ import type { CalendarConfigRepository, CalendarAccessMode } from '../repositori
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
 import { logger } from '../utils/logger.js';
 
+const TIMEZONE = process.env.TZ || 'Asia/Jerusalem';
+
+/** Get start-of-day in the configured timezone as an ISO string. */
+function getLocalStartOfDay(): string {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const dateStr = formatter.format(now); // YYYY-MM-DD
+  return new Date(`${dateStr}T00:00:00`).toISOString();
+}
+
+/** Get end-of-day in the configured timezone as an ISO string. */
+function getLocalEndOfDay(): string {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const dateStr = formatter.format(now);
+  return new Date(`${dateStr}T23:59:59`).toISOString();
+}
+
 export function registerCalendarTools(
   server: McpServer,
   tokenRepo: OAuthTokenRepository,
@@ -129,12 +157,8 @@ export function registerCalendarTools(
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
 
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
-
-      const timeMin = from ?? startOfDay.toISOString();
-      const timeMax = to ?? endOfDay.toISOString();
+      const timeMin = from ?? getLocalStartOfDay();
+      const timeMax = to ?? getLocalEndOfDay();
       const maxResults = max_results ?? 50;
       const includeAllDay = include_all_day !== false;
 
@@ -194,7 +218,14 @@ export function registerCalendarTools(
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          logger.warn(`Failed to fetch events from calendar ${calId}`, { error: message });
+          const responseData = (err as { response?: { status?: number; data?: unknown } }).response;
+          logger.warn(`Failed to fetch events from calendar ${calId}`, {
+            error: message,
+            status: responseData?.status,
+            details: responseData?.data ? JSON.stringify(responseData.data) : undefined,
+            timeMin,
+            timeMax,
+          });
         }
       }
 
