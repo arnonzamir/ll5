@@ -3,6 +3,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { Client as ElasticsearchClient } from '@elastic/elasticsearch';
 import express from 'express';
 import type { Request, Response } from 'express';
+import { initAppLog, withToolLogging } from '@ll5/shared';
 import { tokenAuthMiddleware } from './auth-middleware.js';
 import type { AuthenticatedRequest } from './auth-middleware.js';
 import { loadEnv } from './utils/env.js';
@@ -27,6 +28,12 @@ function getUserId(): string {
 export async function startServer(): Promise<void> {
   const env = loadEnv();
   setLogLevel(env.logLevel as LogLevel);
+
+  initAppLog({
+    elasticsearchUrl: env.elasticsearchUrl,
+    service: 'awareness',
+    level: (env.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
+  });
 
   logger.info('Starting awareness MCP server', {
     port: env.port,
@@ -112,6 +119,7 @@ export async function startServer(): Promise<void> {
         name: 'll5-awareness',
         version: '0.1.0',
       });
+      withToolLogging(reqServer, getUserId);
       registerAllTools(reqServer, repos, getUserId, env.timezone);
       await reqServer.connect(transport);
 

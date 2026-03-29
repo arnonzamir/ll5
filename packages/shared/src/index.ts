@@ -18,3 +18,6 @@ export * from './utils/index.js';
 
 // Audit log
 export * from './audit.js';
+
+// App log
+export * from './app-log.js';

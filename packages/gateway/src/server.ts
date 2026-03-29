@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { ZodError } from 'zod';
+import { initAppLog, appLog } from '@ll5/shared';
 import { createAuthRouter } from './auth.js';
 import { createChatRouter } from './chat.js';
 import { processCalendar } from './processors/calendar.js';
@@ -112,6 +113,24 @@ const AWARENESS_INDICES: IndexDefinition[] = [
         attendees_detail: { type: 'object', enabled: false },
         created_at: { type: 'date' },
         updated_at: { type: 'date' },
+      },
+    },
+  },
+  {
+    index: 'll5_app_log',
+    mappings: {
+      properties: {
+        timestamp: { type: 'date' },
+        service: { type: 'keyword' },
+        level: { type: 'keyword' },
+        action: { type: 'keyword' },
+        message: { type: 'text' },
+        user_id: { type: 'keyword' },
+        tool_name: { type: 'keyword' },
+        duration_ms: { type: 'integer' },
+        success: { type: 'boolean' },
+        error_message: { type: 'text' },
+        metadata: { type: 'object', enabled: false },
       },
     },
   },
@@ -349,6 +368,11 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       types: typeCounts,
     });
 
+    appLog.info('webhook', `Processed ${payload.items.length} items`, {
+      user_id: userId,
+      metadata: { accepted, failed, types: typeCounts },
+    });
+
     const response: WebhookResponse = { accepted, failed, results };
 
     if (failed > 0) {
@@ -393,6 +417,12 @@ async function runMigrations(pool: pg.Pool): Promise<void> {
 }
 
 export async function startServer(config: EnvConfig): Promise<void> {
+  initAppLog({
+    elasticsearchUrl: config.elasticsearchUrl,
+    service: 'gateway',
+    level: (config.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
+  });
+
   const { app, esClient, pgPool } = createApp(config);
 
   // Run database migrations

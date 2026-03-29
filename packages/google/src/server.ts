@@ -10,7 +10,7 @@ import { loadEnv } from './utils/env.js';
 import { logger, setLogLevel } from './utils/logger.js';
 import type { LogLevel } from './utils/logger.js';
 import { runMigrations } from './utils/migration-runner.js';
-import { initAudit } from '@ll5/shared';
+import { initAudit, initAppLog, withToolLogging } from '@ll5/shared';
 import { PostgresOAuthTokenRepository } from './repositories/postgres/oauth-token.repository.js';
 import { PostgresCalendarConfigRepository } from './repositories/postgres/calendar-config.repository.js';
 import { PostgresUserSettingsRepository } from './repositories/postgres/user-settings.repository.js';
@@ -31,6 +31,15 @@ function getUserId(): string {
 export async function startServer(): Promise<void> {
   const env = loadEnv();
   setLogLevel(env.logLevel as LogLevel);
+
+  const esUrl = process.env.ELASTICSEARCH_URL;
+  if (esUrl) {
+    initAppLog({
+      elasticsearchUrl: esUrl,
+      service: 'google',
+      level: (env.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
+    });
+  }
 
   logger.info('Starting Google MCP server', { port: env.port });
 
@@ -75,7 +84,6 @@ export async function startServer(): Promise<void> {
   const userSettingsRepo = new PostgresUserSettingsRepository(pool);
 
   // Elasticsearch client for unified calendar reads/writes
-  const esUrl = process.env.ELASTICSEARCH_URL;
   const esClient = esUrl ? new ESClient({ node: esUrl }) : null;
   const esCalendarRepo = esClient ? new ESCalendarEventRepository(esClient) : null;
 
@@ -391,6 +399,7 @@ export async function startServer(): Promise<void> {
         name: 'll5-google',
         version: '0.1.0',
       });
+      withToolLogging(mcpServer, getUserId);
       registerAllTools(mcpServer, deps, getUserId);
       await mcpServer.connect(transport);
       await transport.handleRequest(req, res, req.body);

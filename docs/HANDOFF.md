@@ -96,6 +96,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 **Elasticsearch** (8.15.0, 10 indices):
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps
 - `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
+- `ll5_app_log` — all tool calls, webhooks, errors (service, level, action, tool_name, duration_ms)
 - `ll5_audit_log` — all mutations across MCPs
 - Note: calendar index has text-mapped calendar_id (use .keyword subfield for term queries)
 - Calendar push accepts date-only strings for all-day events (not just ISO datetime)

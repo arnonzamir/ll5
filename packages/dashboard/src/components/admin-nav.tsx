@@ -7,6 +7,7 @@ import {
   Activity,
   Users,
   Wrench,
+  ScrollText,
   ArrowLeft,
   Menu,
   X,
@@ -15,6 +16,7 @@ import { cn } from "@/lib/utils";
 
 const adminLinks = [
   { href: "/admin", label: "System Health", icon: Activity },
+  { href: "/admin/logs", label: "Logs", icon: ScrollText },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/tools", label: "MCP Tools", icon: Wrench },
 ];

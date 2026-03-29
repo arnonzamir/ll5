@@ -9,4 +9,5 @@ export const env = {
   MCP_CALENDAR_URL:
     process.env.MCP_CALENDAR_URL ?? "https://mcp-google.noninoni.click",
   GATEWAY_URL: process.env.GATEWAY_URL ?? "https://gateway.noninoni.click",
+  ELASTICSEARCH_URL: process.env.ELASTICSEARCH_URL ?? "http://elasticsearch:9200",
 } as const;

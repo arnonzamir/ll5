@@ -5,7 +5,7 @@ import type { AuthenticatedRequest } from './auth-middleware.js';
 import pg from 'pg';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { initAudit } from '@ll5/shared';
+import { initAudit, initAppLog, withToolLogging } from '@ll5/shared';
 import { loadEnv } from './utils/env.js';
 import { logger, setLogLevel } from './utils/logger.js';
 import type { LogLevel } from './utils/logger.js';
@@ -26,6 +26,14 @@ function getUserId(): string {
 export async function startServer(): Promise<void> {
   const env = loadEnv();
   setLogLevel(env.logLevel as LogLevel);
+
+  if (env.elasticsearchUrl) {
+    initAppLog({
+      elasticsearchUrl: env.elasticsearchUrl,
+      service: 'gtd',
+      level: (env.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
+    });
+  }
 
   logger.info('Starting GTD MCP server', { port: env.port });
 
@@ -110,6 +118,7 @@ export async function startServer(): Promise<void> {
         name: 'll5-gtd',
         version: '0.1.0',
       });
+      withToolLogging(mcpServer, getUserId);
       registerAllTools(mcpServer, deps, getUserId);
       await mcpServer.connect(transport);
       await transport.handleRequest(req, res, req.body);
