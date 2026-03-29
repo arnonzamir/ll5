@@ -65,14 +65,15 @@ export class ESCalendarEventRepository {
       { range: { end_time: { gt: from } } },
     ];
 
+    // Use calendar_id.keyword for exact matching (calendar_id may be mapped as text on older indices)
     if (params.calendarId) {
-      filters.push({ term: { calendar_id: params.calendarId } });
+      filters.push({ term: { 'calendar_id.keyword': params.calendarId } });
     } else if (params.calendarIds && params.calendarIds.length > 0) {
       // Include docs with matching calendar_id OR docs with no calendar_id (legacy)
       filters.push({
         bool: {
           should: [
-            { terms: { calendar_id: params.calendarIds } },
+            { terms: { 'calendar_id.keyword': params.calendarIds } },
             { bool: { must_not: { exists: { field: 'calendar_id' } } } },
           ],
           minimum_should_match: 1,
