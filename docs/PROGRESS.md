@@ -51,7 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
-- 2026-03-29: Fix timezone in calendar queries (use TZ env, not UTC), better error logging for Google API
+- 2026-03-29: Per-tenant timezone (set_timezone tool), freeBusy support for read-only calendars, calendar settings UI
 - 2026-03-29: Calendar integration: Google MCP with OAuth callback, tickler calendar, periodic review, dashboard calendar page + insights panel
 - 2026-03-29: Location map page with Leaflet, clustering, timeline slider, trail visualization
 - 2026-03-29: Shopping list fixed to parse grouped MCP response

@@ -11,6 +11,7 @@ import type { LogLevel } from './utils/logger.js';
 import { runMigrations } from './utils/migration-runner.js';
 import { PostgresOAuthTokenRepository } from './repositories/postgres/oauth-token.repository.js';
 import { PostgresCalendarConfigRepository } from './repositories/postgres/calendar-config.repository.js';
+import { PostgresUserSettingsRepository } from './repositories/postgres/user-settings.repository.js';
 import { registerAllTools } from './tools/index.js';
 import { pendingStates } from './tools/auth.js';
 import { createOAuth2Client, getAuthenticatedClient } from './utils/google-client.js';
@@ -68,6 +69,7 @@ export async function startServer(): Promise<void> {
   // ---------------------------------------------------------------------------
   const tokenRepo = new PostgresOAuthTokenRepository(pool, env.encryptionKey);
   const calendarConfigRepo = new PostgresCalendarConfigRepository(pool);
+  const userSettingsRepo = new PostgresUserSettingsRepository(pool);
 
   const googleConfig = {
     clientId: env.googleClientId,
@@ -75,7 +77,7 @@ export async function startServer(): Promise<void> {
     redirectUri: env.googleRedirectUri,
   };
 
-  const deps = { tokenRepo, calendarConfigRepo, googleConfig };
+  const deps = { tokenRepo, calendarConfigRepo, userSettingsRepo, googleConfig };
 
   // ---------------------------------------------------------------------------
   // Express app with auth middleware
@@ -237,9 +239,9 @@ export async function startServer(): Promise<void> {
     try {
       const auth = await getAuthenticatedClient(googleConfig, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
+      const settings = await userSettingsRepo.get(userId);
 
-      const tz = process.env.TZ || 'Asia/Jerusalem';
-      const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+      const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: settings.timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
       const todayStr = fmt.format(new Date());
       const timeMin = from ?? new Date(`${todayStr}T00:00:00`).toISOString();
       const timeMax = to ?? new Date(`${todayStr}T23:59:59`).toISOString();

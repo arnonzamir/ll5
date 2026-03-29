@@ -3,34 +3,25 @@ import { google } from 'googleapis';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-token.repository.js';
 import type { CalendarConfigRepository, CalendarAccessMode } from '../repositories/interfaces/calendar-config.repository.js';
+import type { UserSettingsRepository } from '../repositories/interfaces/user-settings.repository.js';
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
 import { logger } from '../utils/logger.js';
 
-const TIMEZONE = process.env.TZ || 'Asia/Jerusalem';
-
-/** Get start-of-day in the configured timezone as an ISO string. */
-function getLocalStartOfDay(): string {
-  const now = new Date();
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
+/** Get start-of-day in a given timezone as an ISO string. */
+function getStartOfDay(tz: string): string {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
   });
-  const dateStr = formatter.format(now); // YYYY-MM-DD
+  const dateStr = fmt.format(new Date());
   return new Date(`${dateStr}T00:00:00`).toISOString();
 }
 
-/** Get end-of-day in the configured timezone as an ISO string. */
-function getLocalEndOfDay(): string {
-  const now = new Date();
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
+/** Get end-of-day in a given timezone as an ISO string. */
+function getEndOfDay(tz: string): string {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
   });
-  const dateStr = formatter.format(now);
+  const dateStr = fmt.format(new Date());
   return new Date(`${dateStr}T23:59:59`).toISOString();
 }
 
@@ -38,6 +29,7 @@ export function registerCalendarTools(
   server: McpServer,
   tokenRepo: OAuthTokenRepository,
   calendarConfigRepo: CalendarConfigRepository,
+  userSettingsRepo: UserSettingsRepository,
   config: GoogleClientConfig,
   getUserId: () => string,
 ): void {
@@ -54,7 +46,6 @@ export function registerCalendarTools(
     async ({ refresh }) => {
       const userId = getUserId();
 
-      // If not refreshing, return cached config
       if (!refresh) {
         const cached = await calendarConfigRepo.list(userId);
         if (cached.length > 0) {
@@ -78,7 +69,6 @@ export function registerCalendarTools(
       const response = await calendar.calendarList.list();
       const items = response.data.items ?? [];
 
-      // Get existing configs to preserve access_mode
       const existingConfigs = await calendarConfigRepo.list(userId);
       const existingMap = new Map(existingConfigs.map((c) => [c.calendar_id, c]));
 
@@ -89,7 +79,6 @@ export function registerCalendarTools(
         const color = item.backgroundColor ?? '#4285f4';
         const existing = existingMap.get(calId);
 
-        // Upsert — preserves existing access_mode via ON CONFLICT (doesn't overwrite)
         await calendarConfigRepo.upsert(userId, {
           calendar_id: calId,
           calendar_name: calName,
@@ -121,10 +110,10 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'configure_calendar',
-    'Set the access mode for a Google Calendar. Use "ignore" to hide it, "read" for read-only, "readwrite" for full access. Call list_calendars first to see available calendars.',
+    'Set the access mode for a Google Calendar. Use "ignore" to hide it, "read" for read-only, "readwrite" for full access.',
     {
       calendar_id: z.string().describe('Google Calendar ID'),
-      access_mode: z.enum(['ignore', 'read', 'readwrite']).describe('Access mode: ignore (hidden), read (read-only), readwrite (full access)'),
+      access_mode: z.enum(['ignore', 'read', 'readwrite']).describe('Access mode'),
     },
     async ({ calendar_id, access_mode }) => {
       const userId = getUserId();
@@ -139,11 +128,43 @@ export function registerCalendarTools(
   );
 
   // ---------------------------------------------------------------------------
+  // set_timezone
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'set_timezone',
+    'Set the user timezone for calendar queries. Affects what "today" means.',
+    {
+      timezone: z.string().describe('IANA timezone (e.g., "Asia/Jerusalem", "America/New_York")'),
+    },
+    async ({ timezone }) => {
+      const userId = getUserId();
+      // Validate timezone
+      try {
+        Intl.DateTimeFormat('en-US', { timeZone: timezone });
+      } catch {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ error: `Invalid timezone: ${timezone}` }),
+          }],
+        };
+      }
+      await userSettingsRepo.setTimezone(userId, timezone);
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ timezone, updated: true }),
+        }],
+      };
+    },
+  );
+
+  // ---------------------------------------------------------------------------
   // list_events
   // ---------------------------------------------------------------------------
   server.tool(
     'list_events',
-    'List Google Calendar events within a date range. Queries all readable calendars (read or readwrite) unless a specific calendar_id is given.',
+    'List Google Calendar events within a date range. Queries all readable calendars. FreeBusyReader calendars return busy blocks labeled "Busy (calendar name)".',
     {
       from: z.string().optional().describe('Start of date range (ISO 8601). Default: start of today.'),
       to: z.string().optional().describe('End of date range (ISO 8601). Default: end of today.'),
@@ -156,9 +177,10 @@ export function registerCalendarTools(
       const userId = getUserId();
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
+      const settings = await userSettingsRepo.get(userId);
 
-      const timeMin = from ?? getLocalStartOfDay();
-      const timeMax = to ?? getLocalEndOfDay();
+      const timeMin = from ?? getStartOfDay(settings.timezone);
+      const timeMax = to ?? getEndOfDay(settings.timezone);
       const maxResults = max_results ?? 50;
       const includeAllDay = include_all_day !== false;
 
@@ -173,11 +195,12 @@ export function registerCalendarTools(
         }
       }
 
-      // Fetch local config for calendar names
+      // Fetch local config to know names and google access roles
       const localConfigs = await calendarConfigRepo.list(userId);
-      const nameMap = new Map(localConfigs.map((c) => [c.calendar_id, c.calendar_name]));
+      const configMap = new Map(localConfigs.map((c) => [c.calendar_id, c]));
 
       const allEvents: Record<string, unknown>[] = [];
+      const freeBusyCalendars: string[] = [];
 
       for (const calId of calendarIds) {
         try {
@@ -191,6 +214,7 @@ export function registerCalendarTools(
             q: query ?? undefined,
           });
 
+          const calConfig = configMap.get(calId);
           const items = response.data.items ?? [];
           for (const event of items) {
             const isAllDay = !event.start?.dateTime;
@@ -199,7 +223,7 @@ export function registerCalendarTools(
             allEvents.push({
               event_id: event.id ?? '',
               calendar_id: calId,
-              calendar_name: nameMap.get(calId) ?? calId,
+              calendar_name: calConfig?.calendar_name ?? calId,
               title: event.summary ?? '(no title)',
               start: event.start?.dateTime ?? event.start?.date ?? '',
               end: event.end?.dateTime ?? event.end?.date ?? '',
@@ -216,27 +240,56 @@ export function registerCalendarTools(
               recurring: !!event.recurringEventId,
             });
           }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          const responseData = (err as { response?: { status?: number; data?: unknown } }).response;
-          logger.warn(`Failed to fetch events from calendar ${calId}`, {
-            error: message,
-            status: responseData?.status,
-            details: responseData?.data ? JSON.stringify(responseData.data) : undefined,
-            timeMin,
-            timeMax,
-          });
+        } catch {
+          // events.list failed — likely a freeBusyReader calendar
+          freeBusyCalendars.push(calId);
         }
       }
 
-      // Sort merged events by start time
-      allEvents.sort((a, b) => {
-        const aStart = String(a.start ?? '');
-        const bStart = String(b.start ?? '');
-        return aStart.localeCompare(bStart);
-      });
+      // Query freeBusy for calendars that failed events.list
+      if (freeBusyCalendars.length > 0) {
+        try {
+          const fbResponse = await calendarApi.freebusy.query({
+            requestBody: {
+              timeMin,
+              timeMax,
+              items: freeBusyCalendars.map((id) => ({ id })),
+            },
+          });
 
-      // Trim to max results
+          const fbCalendars = fbResponse.data.calendars ?? {};
+          for (const [calId, calData] of Object.entries(fbCalendars)) {
+            const calConfig = configMap.get(calId);
+            const calName = calConfig?.calendar_name ?? calId;
+            const busySlots = calData.busy ?? [];
+
+            for (const slot of busySlots) {
+              allEvents.push({
+                event_id: `freebusy-${calId}-${slot.start}`,
+                calendar_id: calId,
+                calendar_name: calName,
+                title: `Busy (${calName})`,
+                start: slot.start ?? '',
+                end: slot.end ?? '',
+                all_day: false,
+                location: null,
+                description: null,
+                attendees: [],
+                html_link: '',
+                status: 'confirmed',
+                recurring: false,
+                is_free_busy: true,
+              });
+            }
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn('FreeBusy query failed', { error: message, calendars: freeBusyCalendars });
+        }
+      }
+
+      // Sort by start time
+      allEvents.sort((a, b) => String(a.start ?? '').localeCompare(String(b.start ?? '')));
       const trimmed = allEvents.slice(0, maxResults);
 
       return {
@@ -278,7 +331,6 @@ export function registerCalendarTools(
 
       const calId = calendar_id ?? 'primary';
 
-      // Check write access (skip check for 'primary' which is always writable)
       if (calId !== 'primary') {
         const writable = await calendarConfigRepo.getWritableCalendarIds(userId);
         if (!writable.includes(calId)) {
@@ -294,6 +346,7 @@ export function registerCalendarTools(
       }
 
       const isAllDay = all_day === true;
+      const settings = await userSettingsRepo.get(userId);
 
       const eventBody: Record<string, unknown> = {
         summary: title,
@@ -305,8 +358,8 @@ export function registerCalendarTools(
         eventBody.start = { date: start };
         eventBody.end = { date: end };
       } else {
-        eventBody.start = { dateTime: start };
-        eventBody.end = { dateTime: end };
+        eventBody.start = { dateTime: start, timeZone: settings.timezone };
+        eventBody.end = { dateTime: end, timeZone: settings.timezone };
       }
 
       if (attendees && attendees.length > 0) {
