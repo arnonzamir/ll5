@@ -71,7 +71,8 @@ export async function processCalendar(
   const now = new Date().toISOString();
 
   try {
-    const overlapping = await findOverlappingEvents(es, userId, item.start, item.end);
+    const end = item.end ?? item.start;
+    const overlapping = await findOverlappingEvents(es, userId, item.start, end);
 
     for (const hit of overlapping) {
       const existing = hit._source;
@@ -121,7 +122,7 @@ export async function processCalendar(
     user_id: userId,
     title: item.title,
     start_time: item.start,
-    end_time: item.end,
+    end_time: item.end ?? item.start,
     source: 'phone',
     all_day: item.all_day ?? false,
     created_at: now,
@@ -134,7 +135,7 @@ export async function processCalendar(
 
   await es.index({
     index: 'll5_awareness_calendar_events',
-    id: phoneEventId(item.title, item.start, item.end),
+    id: phoneEventId(item.title, item.start, item.end ?? item.start),
     document: doc,
     refresh: false,
   });

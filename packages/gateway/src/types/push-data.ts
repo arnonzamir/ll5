@@ -25,8 +25,8 @@ const PushCalendarItemSchema = z.object({
   type: z.literal('calendar_event'),
   timestamp: z.string().datetime(),
   title: z.string().min(1),
-  start: z.string().datetime({ offset: true }),
-  end: z.string().datetime({ offset: true }),
+  start: z.string().min(1), // ISO datetime or date-only (YYYY-MM-DD) for all-day events
+  end: z.string().min(1).optional(), // Optional — some all-day events have no end
   location: z.string().optional(),
   all_day: z.boolean().optional(),
 });
