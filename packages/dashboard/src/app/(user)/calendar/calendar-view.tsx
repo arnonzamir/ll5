@@ -12,12 +12,16 @@ import {
   Users,
   X,
   RefreshCw,
+  Settings,
 } from "lucide-react";
 import {
   fetchEvents,
   fetchTicklers,
+  fetchCalendarConfigs,
+  updateCalendarAccessMode,
   type CalendarEvent,
   type Tickler,
+  type CalendarConfig,
 } from "./calendar-server-actions";
 
 // --- Date helpers ---
@@ -455,6 +459,77 @@ function WeekGrid({
   );
 }
 
+// --- Calendar Settings ---
+
+function CalendarSettings({
+  configs,
+  onUpdate,
+}: {
+  configs: CalendarConfig[];
+  onUpdate: (calendarId: string, mode: "ignore" | "read" | "readwrite") => void;
+}) {
+  const modes = ["ignore", "read", "readwrite"] as const;
+  const modeLabels = { ignore: "Ignore", read: "Read", readwrite: "Read/Write" };
+  const modeColors = {
+    ignore: "text-gray-400",
+    read: "text-blue-600",
+    readwrite: "text-green-600",
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium text-gray-500">
+          Calendar Sources
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {configs.map((cal) => (
+            <div
+              key={cal.calendar_id}
+              className="flex items-center justify-between gap-3 py-1.5 border-b border-gray-50 last:border-0"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <div
+                  className="h-3 w-3 rounded-full shrink-0"
+                  style={{ backgroundColor: cal.color || "#4285f4" }}
+                />
+                <span className="text-sm truncate">{cal.name}</span>
+                {cal.role === "tickler" && (
+                  <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                    tickler
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
+                {modes.map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => onUpdate(cal.calendar_id, mode)}
+                    className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                      cal.access_mode === mode
+                        ? `bg-gray-100 ${modeColors[mode]}`
+                        : "text-gray-400 hover:text-gray-600"
+                    }`}
+                  >
+                    {modeLabels[mode]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        {configs.length === 0 && (
+          <p className="text-sm text-gray-400">
+            No calendars configured. Connect Google first.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // --- Main View ---
 
 type ViewMode = "day" | "week";
@@ -466,7 +541,28 @@ export function CalendarView() {
   const [selectedEvent, setSelectedEvent] = useState<NormalizedEvent | null>(
     null
   );
+  const [showSettings, setShowSettings] = useState(false);
+  const [calConfigs, setCalConfigs] = useState<CalendarConfig[]>([]);
   const [isPending, startTransition] = useTransition();
+
+  // Load calendar configs on mount
+  useEffect(() => {
+    void fetchCalendarConfigs().then(setCalConfigs);
+  }, []);
+
+  const handleAccessModeUpdate = useCallback(
+    (calendarId: string, mode: "ignore" | "read" | "readwrite") => {
+      // Optimistic update
+      setCalConfigs((prev) =>
+        prev.map((c) =>
+          c.calendar_id === calendarId ? { ...c, access_mode: mode } : c
+        )
+      );
+      // Persist
+      void updateCalendarAccessMode(calendarId, mode);
+    },
+    []
+  );
 
   const loadData = useCallback(
     (date: Date, mode: ViewMode) => {
@@ -562,6 +658,15 @@ export function CalendarView() {
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => setShowSettings((s) => !s)}
+            aria-label="Calendar settings"
+          >
+            <Settings className={`h-4 w-4 ${showSettings ? "text-primary" : ""}`} />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => loadData(currentDate, viewMode)}
             disabled={isPending}
             aria-label="Refresh"
@@ -596,6 +701,16 @@ export function CalendarView() {
           </div>
         </div>
       </div>
+
+      {/* Calendar settings panel */}
+      {showSettings && (
+        <div className="mb-4">
+          <CalendarSettings
+            configs={calConfigs}
+            onUpdate={handleAccessModeUpdate}
+          />
+        </div>
+      )}
 
       {/* Calendar content */}
       {isPending && events.length === 0 ? (

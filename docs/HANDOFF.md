@@ -27,7 +27,7 @@ Dashboard (Next.js 15)
   ├── /login — user_id + PIN auth
   ├── /dashboard — GTD status + chat panel (50/50)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
-  ├── /calendar — day/week calendar view with tickler events
+  ├── /calendar — day/week calendar view + settings panel for access modes
   ├── /locations — Leaflet map with clustering, timeline, trail
   ├── /people, /places, /knowledge, /horizons — personal knowledge pages
   ├── /profile — user settings

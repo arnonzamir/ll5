@@ -2,6 +2,16 @@
 
 import { mcpCallJsonSafe } from "@/lib/api";
 
+export interface CalendarConfig {
+  calendar_id: string;
+  name: string;
+  access_mode: "ignore" | "read" | "readwrite";
+  role: string;
+  color: string;
+  google_access_role?: string;
+  primary?: boolean;
+}
+
 export interface CalendarEvent {
   event_id: string;
   calendar_id?: string;
@@ -47,6 +57,42 @@ export async function fetchEvents(
     return [];
   } catch {
     return [];
+  }
+}
+
+export async function fetchCalendarConfigs(): Promise<CalendarConfig[]> {
+  try {
+    const raw = await mcpCallJsonSafe<unknown>(
+      "google",
+      "list_calendars",
+      { refresh: false }
+    );
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw as CalendarConfig[];
+    if (typeof raw === "object" && raw !== null) {
+      for (const val of Object.values(raw)) {
+        if (Array.isArray(val)) return val as CalendarConfig[];
+      }
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+export async function updateCalendarAccessMode(
+  calendarId: string,
+  accessMode: "ignore" | "read" | "readwrite"
+): Promise<boolean> {
+  try {
+    const raw = await mcpCallJsonSafe<Record<string, unknown>>(
+      "google",
+      "configure_calendar",
+      { calendar_id: calendarId, access_mode: accessMode }
+    );
+    return raw?.updated === true;
+  } catch {
+    return false;
   }
 }
 
