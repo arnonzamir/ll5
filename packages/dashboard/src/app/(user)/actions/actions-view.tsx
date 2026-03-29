@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition, useEffect, useCallback } from "react";
 import { ActionRow } from "@/components/action-row";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,6 +50,8 @@ export function ActionsView() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editAction, setEditAction] = useState<Action | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [fadingOut, setFadingOut] = useState<Set<string>>(new Set());
+  const [justCompleted, setJustCompleted] = useState<Set<string>>(new Set());
 
   function loadActions() {
     startTransition(async () => {
@@ -66,14 +68,35 @@ export function ActionsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, energy]);
 
-  function handleToggle(id: string, completed: boolean) {
-    startTransition(async () => {
-      if (completed) {
-        await completeAction(id);
-        loadActions();
-      }
-    });
-  }
+  const isFiltered = status === "active" || status !== "all";
+
+  const handleToggle = useCallback((id: string, completed: boolean) => {
+    if (!completed) return;
+
+    // Optimistic: mark as completed immediately
+    setJustCompleted((prev) => new Set(prev).add(id));
+
+    // Fire server action
+    void completeAction(id);
+
+    if (isFiltered) {
+      // In filtered view: show strikethrough, then fade out after 1.5s
+      setTimeout(() => {
+        setFadingOut((prev) => new Set(prev).add(id));
+      }, 1500);
+      // Remove from list after fade animation (0.5s)
+      setTimeout(() => {
+        setActions((prev) => prev.filter((a) => a.id !== id));
+        setJustCompleted((prev) => { const s = new Set(prev); s.delete(id); return s; });
+        setFadingOut((prev) => { const s = new Set(prev); s.delete(id); return s; });
+      }, 2000);
+    } else {
+      // In "all" view: just update the status in place
+      setActions((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, status: "completed" } : a))
+      );
+    }
+  }, [isFiltered]);
 
   const filteredActions = actions.filter((a) => {
     if (searchQuery && !a.title.toLowerCase().includes(searchQuery.toLowerCase())) {
@@ -245,7 +268,11 @@ export function ActionsView() {
           filteredActions.map((action) => (
             <div
               key={action.id}
-              className="cursor-pointer"
+              className={`cursor-pointer transition-all duration-500 ${
+                fadingOut.has(action.id)
+                  ? "opacity-0 max-h-0 overflow-hidden"
+                  : "opacity-100 max-h-24"
+              }`}
               onClick={() => openEditDialog(action)}
             >
               <ActionRow
@@ -255,7 +282,7 @@ export function ActionsView() {
                 energy={action.energy}
                 dueDate={action.due_date}
                 projectName={action.project_name}
-                completed={action.status === "completed"}
+                completed={action.status === "completed" || justCompleted.has(action.id)}
                 onToggle={handleToggle}
               />
             </div>
