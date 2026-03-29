@@ -21,8 +21,10 @@ RUN npm ci
 # Copy dashboard source
 COPY packages/dashboard/ packages/dashboard/
 
-# Build Next.js
+# Build Next.js with build ID
+ARG BUILD_ID=unknown
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV BUILD_ID=${BUILD_ID}
 RUN npm run build --workspace=packages/dashboard
 
 # -- Runtime stage --

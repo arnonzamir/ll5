@@ -100,7 +100,7 @@ jobs:
             echo "build_args=" >> "$GITHUB_OUTPUT"
           elif [[ "${{ matrix.package }}" == "dashboard" ]]; then
             echo "file=docker/Dockerfile.dashboard" >> "$GITHUB_OUTPUT"
-            echo "build_args=" >> "$GITHUB_OUTPUT"
+            echo "build_args=BUILD_ID=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           else
             echo "file=docker/Dockerfile.mcp" >> "$GITHUB_OUTPUT"
             echo "build_args=PACKAGE_NAME=${{ matrix.package }}" >> "$GITHUB_OUTPUT"

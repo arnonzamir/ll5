@@ -20,7 +20,7 @@ export async function fetchActions(
 
 export async function completeAction(id: string): Promise<void> {
   await mcpCall("gtd", "update_action", {
-    action_id: id,
+    id,
     status: "completed",
   });
 }
@@ -37,7 +37,7 @@ export async function updateAction(
   const listType = formData.get("list_type") as string;
   const waitingFor = formData.get("waiting_for") as string;
 
-  const args: Record<string, unknown> = { action_id: id };
+  const args: Record<string, unknown> = { id };
   if (title) args.title = title;
   if (status) args.status = status;
   if (energy) args.energy = energy;

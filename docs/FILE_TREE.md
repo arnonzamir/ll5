@@ -113,7 +113,7 @@ ll5/
 │       ├── app/(user)/                # User pages: dashboard (insights), calendar (day/week/settings), actions, projects, inbox, shopping, locations, people, places, knowledge, horizons, profile
 │       ├── app/(admin)/               # Admin pages: health, users, tools
 │       ├── app/api/chat/              # Proxy routes: messages, conversations
-│       ├── components/                # Nav, cards, chat widget, action-row (completion + click guard), shadcn/ui
+│       ├── components/                # Nav, cards, chat widget, action-row, shadcn/ui
 │       ├── lib/                       # MCP client, auth helpers, env
 │       └── providers/                 # React Query
 │

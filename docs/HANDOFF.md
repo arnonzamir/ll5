@@ -24,7 +24,8 @@ Gateway (Express)
   └── Schedulers — calendar sync (30min), periodic review (2h, 7am-10pm)
 
 Dashboard (Next.js 15)
-  ├── /login — user_id + PIN auth (all user pages redirect here if not authenticated)
+  ├── /login — user_id + PIN auth (all pages redirect here if not logged in)
+  ├── Build ID shown in footer (git short hash, injected at build time)
   ├── /dashboard — GTD status + chat panel (50/50)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
   ├── /calendar — day/week calendar view + settings panel for access modes

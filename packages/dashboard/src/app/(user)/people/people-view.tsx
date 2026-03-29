@@ -97,6 +97,23 @@ export function PeopleView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Collect unique relationship values from the data (case-insensitive, prefer lowercase canonical form)
+  const relationshipOptions = useMemo(() => {
+    const seen = new Map<string, string>(); // lowercase -> first-seen original
+    for (const p of people) {
+      const rel = p.relationship?.trim();
+      if (rel) {
+        const key = rel.toLowerCase();
+        if (!seen.has(key)) seen.set(key, key);
+      }
+    }
+    // Merge with the canonical list so all standard options always appear
+    for (const r of RELATIONSHIPS) {
+      if (!seen.has(r)) seen.set(r, r);
+    }
+    return Array.from(seen.values()).sort();
+  }, [people]);
+
   const filtered = useMemo(() => {
     let list = people;
     if (search.trim()) {
@@ -108,7 +125,9 @@ export function PeopleView() {
       );
     }
     if (filterRelationship !== "all") {
-      list = list.filter((p) => p.relationship === filterRelationship);
+      list = list.filter(
+        (p) => p.relationship?.toLowerCase() === filterRelationship.toLowerCase()
+      );
     }
     return list;
   }, [people, search, filterRelationship]);
@@ -195,7 +214,7 @@ export function PeopleView() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All relationships</SelectItem>
-            {RELATIONSHIPS.map((r) => (
+            {relationshipOptions.map((r) => (
               <SelectItem key={r} value={r}>
                 {r.charAt(0).toUpperCase() + r.slice(1)}
               </SelectItem>
@@ -238,7 +257,7 @@ export function PeopleView() {
                   <span className="font-medium text-sm truncate">{p.name}</span>
                   {p.relationship && (
                     <Badge
-                      variant={RELATIONSHIP_VARIANT[p.relationship] ?? "outline"}
+                      variant={RELATIONSHIP_VARIANT[p.relationship.toLowerCase()] ?? "outline"}
                       className="shrink-0 text-xs"
                     >
                       {p.relationship}
