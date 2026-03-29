@@ -4,6 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-token.repository.js';
 import type { CalendarConfigRepository, CalendarAccessMode } from '../repositories/interfaces/calendar-config.repository.js';
 import type { UserSettingsRepository } from '../repositories/interfaces/user-settings.repository.js';
+import type { ESCalendarEventRepository } from '../repositories/elasticsearch/calendar-event.repository.js';
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
 import { logAudit } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
@@ -26,11 +27,111 @@ function getEndOfDay(tz: string): string {
   return new Date(`${dateStr}T23:59:59`).toISOString();
 }
 
+/**
+ * Fetch events from Google API for a set of calendars.
+ * Used for sync and as a fallback when ES is unavailable.
+ */
+async function fetchEventsFromGoogle(
+  config: GoogleClientConfig,
+  tokenRepo: OAuthTokenRepository,
+  calendarConfigRepo: CalendarConfigRepository,
+  userId: string,
+  calendarIds: string[],
+  timeMin: string,
+  timeMax: string,
+  query?: string,
+  maxResults: number = 100,
+): Promise<Record<string, unknown>[]> {
+  const auth = await getAuthenticatedClient(config, tokenRepo, userId);
+  const calendarApi = google.calendar({ version: 'v3', auth });
+  const localConfigs = await calendarConfigRepo.list(userId);
+  const configMap = new Map(localConfigs.map((c) => [c.calendar_id, c]));
+
+  const allEvents: Record<string, unknown>[] = [];
+  const freeBusyCalendars: string[] = [];
+
+  for (const calId of calendarIds) {
+    try {
+      const response = await calendarApi.events.list({
+        calendarId: calId,
+        timeMin, timeMax, maxResults,
+        singleEvents: true,
+        orderBy: 'startTime',
+        q: query ?? undefined,
+      });
+
+      const calConfig = configMap.get(calId);
+      for (const event of response.data.items ?? []) {
+        allEvents.push({
+          event_id: event.id ?? '',
+          calendar_id: calId,
+          calendar_name: calConfig?.calendar_name ?? calId,
+          calendar_color: calConfig?.color ?? '#4285f4',
+          title: event.summary ?? '(no title)',
+          start: event.start?.dateTime ?? event.start?.date ?? '',
+          end: event.end?.dateTime ?? event.end?.date ?? '',
+          all_day: !event.start?.dateTime,
+          location: event.location ?? null,
+          description: event.description ?? null,
+          attendees: (event.attendees ?? []).map((a) => ({
+            email: a.email ?? '',
+            name: a.displayName ?? null,
+            response_status: a.responseStatus ?? 'needsAction',
+          })),
+          html_link: event.htmlLink ?? '',
+          status: event.status ?? 'confirmed',
+          recurring: !!event.recurringEventId,
+          is_free_busy: false,
+        });
+      }
+    } catch {
+      freeBusyCalendars.push(calId);
+    }
+  }
+
+  // FreeBusy fallback
+  if (freeBusyCalendars.length > 0) {
+    try {
+      const auth2 = await getAuthenticatedClient(config, tokenRepo, userId);
+      const calendarApi2 = google.calendar({ version: 'v3', auth: auth2 });
+      const fbResponse = await calendarApi2.freebusy.query({
+        requestBody: {
+          timeMin, timeMax,
+          items: freeBusyCalendars.map((id) => ({ id })),
+        },
+      });
+      for (const [calId, calData] of Object.entries(fbResponse.data.calendars ?? {})) {
+        const calConfig = configMap.get(calId);
+        const calName = calConfig?.calendar_name ?? calId;
+        for (const slot of calData.busy ?? []) {
+          allEvents.push({
+            event_id: `freebusy-${calId}-${slot.start}`,
+            calendar_id: calId,
+            calendar_name: calName,
+            calendar_color: calConfig?.color ?? '#4285f4',
+            title: `Busy (${calName})`,
+            start: slot.start ?? '', end: slot.end ?? '',
+            all_day: false, location: null, description: null,
+            attendees: [], html_link: '', status: 'confirmed',
+            recurring: false, is_free_busy: true,
+          });
+        }
+      }
+    } catch (err) {
+      logger.warn('FreeBusy query failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  allEvents.sort((a, b) => String(a.start ?? '').localeCompare(String(b.start ?? '')));
+  return allEvents;
+}
+
 export function registerCalendarTools(
   server: McpServer,
   tokenRepo: OAuthTokenRepository,
   calendarConfigRepo: CalendarConfigRepository,
   userSettingsRepo: UserSettingsRepository,
+  esRepo: ESCalendarEventRepository | null,
   config: GoogleClientConfig,
   getUserId: () => string,
 ): void {
@@ -40,7 +141,7 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'list_calendars',
-    'List Google Calendars accessible to the user, with access mode (ignore/read/readwrite). Use refresh=true to sync from Google.',
+    'List calendars with access mode (ignore/read/readwrite). Use refresh=true to sync from Google.',
     {
       refresh: z.boolean().optional().describe('Force refresh from Google API (default: false)'),
     },
@@ -81,17 +182,13 @@ export function registerCalendarTools(
         const existing = existingMap.get(calId);
 
         await calendarConfigRepo.upsert(userId, {
-          calendar_id: calId,
-          calendar_name: calName,
-          color,
+          calendar_id: calId, calendar_name: calName, color,
         });
 
         calendars.push({
-          calendar_id: calId,
-          name: calName,
+          calendar_id: calId, name: calName,
           access_mode: existing?.access_mode ?? 'read',
-          role: existing?.role ?? 'user',
-          color,
+          role: existing?.role ?? 'user', color,
           google_access_role: item.accessRole ?? 'reader',
           primary: item.primary ?? false,
         });
@@ -111,9 +208,9 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'configure_calendar',
-    'Set the access mode for a Google Calendar. Use "ignore" to hide it, "read" for read-only, "readwrite" for full access.',
+    'Set the access mode for a calendar: ignore (hidden), read (read-only), readwrite (full access).',
     {
-      calendar_id: z.string().describe('Google Calendar ID'),
+      calendar_id: z.string().describe('Calendar ID'),
       access_mode: z.enum(['ignore', 'read', 'readwrite']).describe('Access mode'),
     },
     async ({ calendar_id, access_mode }) => {
@@ -133,222 +230,174 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'set_timezone',
-    'Set the user timezone for calendar queries. Affects what "today" means.',
+    'Set the user timezone for calendar queries.',
     {
-      timezone: z.string().describe('IANA timezone (e.g., "Asia/Jerusalem", "America/New_York")'),
+      timezone: z.string().describe('IANA timezone (e.g., "Asia/Jerusalem")'),
     },
     async ({ timezone }) => {
       const userId = getUserId();
-      // Validate timezone
       try {
         Intl.DateTimeFormat('en-US', { timeZone: timezone });
       } catch {
         return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({ error: `Invalid timezone: ${timezone}` }),
-          }],
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: `Invalid timezone: ${timezone}` }) }],
         };
       }
       await userSettingsRepo.setTimezone(userId, timezone);
       return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({ timezone, updated: true }),
-        }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ timezone, updated: true }) }],
       };
     },
   );
 
   // ---------------------------------------------------------------------------
-  // list_events
+  // list_events — reads from ES (unified view), falls back to Google API
   // ---------------------------------------------------------------------------
   server.tool(
     'list_events',
-    'List Google Calendar events within a date range. Queries all readable calendars. FreeBusyReader calendars return busy blocks labeled "Busy (calendar name)".',
+    'List calendar events from the unified timeline. Reads from the aggregated cache (includes phone-enriched data). Use refresh=true to sync from Google first.',
     {
-      from: z.string().optional().describe('Start of date range (ISO 8601). Default: start of today.'),
-      to: z.string().optional().describe('End of date range (ISO 8601). Default: end of today.'),
+      from: z.string().optional().describe('Start of range (ISO 8601). Default: start of today.'),
+      to: z.string().optional().describe('End of range (ISO 8601). Default: end of today.'),
       calendar_id: z.string().optional().describe('Filter to a specific calendar ID'),
-      query: z.string().optional().describe('Free-text search query for event title/description'),
-      max_results: z.number().optional().describe('Max events to return (default: 50)'),
+      query: z.string().optional().describe('Free-text search'),
+      max_results: z.number().optional().describe('Max events (default: 50)'),
       include_all_day: z.boolean().optional().describe('Include all-day events (default: true)'),
+      refresh: z.boolean().optional().describe('Sync from Google before reading (default: false)'),
     },
-    async ({ from, to, calendar_id, query, max_results, include_all_day }) => {
+    async ({ from, to, calendar_id, query, max_results, include_all_day, refresh }) => {
       const userId = getUserId();
-      const auth = await getAuthenticatedClient(config, tokenRepo, userId);
-      const calendarApi = google.calendar({ version: 'v3', auth });
       const settings = await userSettingsRepo.get(userId);
-
       const timeMin = from ?? getStartOfDay(settings.timezone);
       const timeMax = to ?? getEndOfDay(settings.timezone);
       const maxResults = max_results ?? 50;
-      const includeAllDay = include_all_day !== false;
 
-      // Determine which calendars to query
+      // Determine readable calendars
       let calendarIds: string[];
       if (calendar_id) {
         calendarIds = [calendar_id];
       } else {
         calendarIds = await calendarConfigRepo.getReadableCalendarIds(userId);
-        if (calendarIds.length === 0) {
-          calendarIds = ['primary'];
-        }
+        if (calendarIds.length === 0) calendarIds = ['primary'];
       }
 
-      // Fetch local config to know names and google access roles
-      const localConfigs = await calendarConfigRepo.list(userId);
-      const configMap = new Map(localConfigs.map((c) => [c.calendar_id, c]));
-
-      const allEvents: Record<string, unknown>[] = [];
-      const freeBusyCalendars: string[] = [];
-
-      for (const calId of calendarIds) {
+      // On-demand sync if requested
+      if (refresh) {
         try {
-          const response = await calendarApi.events.list({
-            calendarId: calId,
-            timeMin,
-            timeMax,
-            maxResults,
-            singleEvents: true,
-            orderBy: 'startTime',
-            q: query ?? undefined,
-          });
-
-          const calConfig = configMap.get(calId);
-          const items = response.data.items ?? [];
-          for (const event of items) {
-            const isAllDay = !event.start?.dateTime;
-            if (!includeAllDay && isAllDay) continue;
-
-            allEvents.push({
-              event_id: event.id ?? '',
-              calendar_id: calId,
-              calendar_name: calConfig?.calendar_name ?? calId,
-              title: event.summary ?? '(no title)',
-              start: event.start?.dateTime ?? event.start?.date ?? '',
-              end: event.end?.dateTime ?? event.end?.date ?? '',
-              all_day: isAllDay,
-              location: event.location ?? null,
-              description: event.description ?? null,
-              attendees: (event.attendees ?? []).map((a) => ({
-                email: a.email ?? '',
-                name: a.displayName ?? null,
-                response_status: a.responseStatus ?? 'needsAction',
-              })),
-              html_link: event.htmlLink ?? '',
-              status: event.status ?? 'confirmed',
-              recurring: !!event.recurringEventId,
-            });
-          }
-        } catch {
-          // events.list failed — likely a freeBusyReader calendar
-          freeBusyCalendars.push(calId);
-        }
-      }
-
-      // Query freeBusy for calendars that failed events.list
-      if (freeBusyCalendars.length > 0) {
-        try {
-          const fbResponse = await calendarApi.freebusy.query({
-            requestBody: {
-              timeMin,
-              timeMax,
-              items: freeBusyCalendars.map((id) => ({ id })),
-            },
-          });
-
-          const fbCalendars = fbResponse.data.calendars ?? {};
-          for (const [calId, calData] of Object.entries(fbCalendars)) {
-            const calConfig = configMap.get(calId);
-            const calName = calConfig?.calendar_name ?? calId;
-            const busySlots = calData.busy ?? [];
-
-            for (const slot of busySlots) {
-              allEvents.push({
-                event_id: `freebusy-${calId}-${slot.start}`,
-                calendar_id: calId,
-                calendar_name: calName,
-                title: `Busy (${calName})`,
-                start: slot.start ?? '',
-                end: slot.end ?? '',
-                all_day: false,
-                location: null,
-                description: null,
-                attendees: [],
-                html_link: '',
-                status: 'confirmed',
-                recurring: false,
-                is_free_busy: true,
-              });
+          const events = await fetchEventsFromGoogle(
+            config, tokenRepo, calendarConfigRepo, userId,
+            calendarIds, timeMin, timeMax, undefined, 200,
+          );
+          if (esRepo) {
+            const localConfigs = await calendarConfigRepo.list(userId);
+            const configMap = new Map(localConfigs.map((c) => [c.calendar_id, c]));
+            for (const event of events) {
+              const calConfig = configMap.get(String(event.calendar_id));
+              const isTickler = calConfig?.role === 'tickler';
+              await esRepo.upsertFromGoogle(userId, event as Parameters<typeof esRepo.upsertFromGoogle>[1], isTickler);
             }
           }
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          logger.warn('FreeBusy query failed', { error: message, calendars: freeBusyCalendars });
+          logger.warn('On-demand sync failed, reading from cache', { error: err instanceof Error ? err.message : String(err) });
         }
       }
 
-      // Sort by start time
-      allEvents.sort((a, b) => String(a.start ?? '').localeCompare(String(b.start ?? '')));
-      const trimmed = allEvents.slice(0, maxResults);
+      // Read from ES if available
+      if (esRepo) {
+        try {
+          const docs = await esRepo.query(userId, {
+            from: timeMin, to: timeMax,
+            calendarIds: calendar_id ? [calendar_id] : calendarIds,
+            isTickler: false,
+            query, includeAllDay: include_all_day,
+            limit: maxResults,
+          });
+
+          const events = docs.map((d) => ({
+            event_id: d.google_event_id ?? '',
+            calendar_id: d.calendar_id ?? '',
+            calendar_name: d.calendar_name ?? '',
+            calendar_color: d.calendar_color ?? '#4285f4',
+            title: d.title,
+            start: d.start_time,
+            end: d.end_time,
+            all_day: d.all_day,
+            location: d.location ?? null,
+            description: d.description ?? null,
+            attendees: d.attendees_detail ?? [],
+            html_link: d.html_link ?? '',
+            status: d.status ?? 'confirmed',
+            recurring: d.recurring ?? false,
+            is_free_busy: d.is_free_busy ?? false,
+            source: d.source,
+          }));
+
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify(events, null, 2),
+            }],
+          };
+        } catch (err) {
+          logger.warn('ES read failed, falling back to Google API', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      // Fallback: live Google API
+      const events = await fetchEventsFromGoogle(
+        config, tokenRepo, calendarConfigRepo, userId,
+        calendarIds, timeMin, timeMax, query, maxResults,
+      );
 
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify(trimmed, null, 2),
+          text: JSON.stringify(events.slice(0, maxResults), null, 2),
         }],
       };
     },
   );
 
   // ---------------------------------------------------------------------------
-  // create_event
+  // create_event — writes to Google API + ES
   // ---------------------------------------------------------------------------
   server.tool(
     'create_event',
-    'Create a new event on a Google Calendar. Only works on calendars with readwrite access.',
+    'Create a calendar event. Only works on calendars with readwrite access. Writes to Google Calendar and updates the unified timeline.',
     {
       calendar_id: z.string().optional().describe('Target calendar ID (default: primary)'),
       title: z.string().describe('Event title'),
-      start: z.string().describe('Event start time (ISO 8601)'),
-      end: z.string().describe('Event end time (ISO 8601)'),
-      description: z.string().optional().describe('Event description'),
-      location: z.string().optional().describe('Event location'),
-      attendees: z.array(z.string()).optional().describe('List of attendee email addresses'),
-      all_day: z.boolean().optional().describe('Create as all-day event. When true, start/end should be YYYY-MM-DD.'),
+      start: z.string().describe('Start time (ISO 8601)'),
+      end: z.string().describe('End time (ISO 8601)'),
+      description: z.string().optional(),
+      location: z.string().optional(),
+      attendees: z.array(z.string()).optional().describe('Attendee email addresses'),
+      all_day: z.boolean().optional().describe('All-day event (start/end should be YYYY-MM-DD)'),
       reminders: z.object({
         use_default: z.boolean(),
         overrides: z.array(z.object({
           method: z.enum(['email', 'popup']),
           minutes: z.number(),
         })).optional(),
-      }).optional().describe('Reminder settings'),
+      }).optional(),
     },
     async ({ calendar_id, title, start, end, description, location, attendees, all_day, reminders }) => {
       const userId = getUserId();
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
-
+      const settings = await userSettingsRepo.get(userId);
       const calId = calendar_id ?? 'primary';
 
       if (calId !== 'primary') {
         const writable = await calendarConfigRepo.getWritableCalendarIds(userId);
         if (!writable.includes(calId)) {
           return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                error: `Calendar ${calId} is not configured for readwrite access. Use configure_calendar to change.`,
-              }),
-            }],
+            content: [{ type: 'text' as const, text: JSON.stringify({ error: `Calendar ${calId} not configured for readwrite.` }) }],
           };
         }
       }
 
       const isAllDay = all_day === true;
-      const settings = await userSettingsRepo.get(userId);
-
       const eventBody: Record<string, unknown> = {
         summary: title,
         description: description ?? undefined,
@@ -363,17 +412,11 @@ export function registerCalendarTools(
         eventBody.end = { dateTime: end, timeZone: settings.timezone };
       }
 
-      if (attendees && attendees.length > 0) {
-        eventBody.attendees = attendees.map((email) => ({ email }));
-      }
-
+      if (attendees?.length) eventBody.attendees = attendees.map((email) => ({ email }));
       if (reminders) {
         eventBody.reminders = {
           useDefault: reminders.use_default,
-          overrides: reminders.overrides?.map((o) => ({
-            method: o.method,
-            minutes: o.minutes,
-          })),
+          overrides: reminders.overrides?.map((o) => ({ method: o.method, minutes: o.minutes })),
         };
       }
 
@@ -382,148 +425,214 @@ export function registerCalendarTools(
         requestBody: eventBody as Parameters<typeof calendarApi.events.insert>[0] extends { requestBody?: infer R } ? R : never,
       });
 
-      logAudit({ user_id: userId, source: 'google', action: 'create', entity_type: 'event', entity_id: response.data.id ?? '', summary: `Created event: ${title}` });
+      const eventId = response.data.id ?? '';
+      logAudit({ user_id: userId, source: 'calendar', action: 'create', entity_type: 'event', entity_id: eventId, summary: `Created event: ${title}` });
+
+      // Write-through to ES
+      if (esRepo) {
+        const localConfigs = await calendarConfigRepo.list(userId);
+        const calConfig = localConfigs.find((c) => c.calendar_id === calId);
+        await esRepo.upsertFromGoogle(userId, {
+          event_id: eventId,
+          calendar_id: calId,
+          calendar_name: calConfig?.calendar_name ?? calId,
+          calendar_color: calConfig?.color,
+          title,
+          start: response.data.start?.dateTime ?? response.data.start?.date ?? start,
+          end: response.data.end?.dateTime ?? response.data.end?.date ?? end,
+          all_day: isAllDay,
+          location, description,
+          attendees: attendees?.map((e) => ({ email: e })),
+          html_link: response.data.htmlLink ?? undefined,
+          status: response.data.status ?? 'confirmed',
+          recurring: false,
+        });
+      }
 
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({
-            event_id: response.data.id ?? '',
-            html_link: response.data.htmlLink ?? '',
-            status: response.data.status ?? 'confirmed',
-          }, null, 2),
+          text: JSON.stringify({ event_id: eventId, html_link: response.data.htmlLink ?? '', status: response.data.status ?? 'confirmed' }, null, 2),
         }],
       };
     },
   );
 
   // ---------------------------------------------------------------------------
-  // update_event
+  // update_event — writes to Google API + ES
   // ---------------------------------------------------------------------------
   server.tool(
     'update_event',
-    'Update an existing Google Calendar event. Only works on calendars with readwrite access. Only provided fields are changed.',
+    'Update a calendar event. Only provided fields are changed. Writes to Google Calendar and updates the unified timeline.',
     {
-      event_id: z.string().describe('Google event ID to update'),
-      calendar_id: z.string().optional().describe('Calendar ID the event belongs to (default: primary)'),
-      title: z.string().optional().describe('New event title'),
-      start: z.string().optional().describe('New start time (ISO 8601)'),
-      end: z.string().optional().describe('New end time (ISO 8601)'),
-      description: z.string().optional().describe('New description'),
-      location: z.string().optional().describe('New location'),
-      attendees: z.array(z.string()).optional().describe('Replace attendee list (email addresses)'),
-      all_day: z.boolean().optional().describe('Convert to/from all-day event'),
+      event_id: z.string().describe('Event ID to update'),
+      calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
+      title: z.string().optional(),
+      start: z.string().optional(),
+      end: z.string().optional(),
+      description: z.string().optional(),
+      location: z.string().optional(),
+      attendees: z.array(z.string()).optional(),
+      all_day: z.boolean().optional(),
     },
     async ({ event_id, calendar_id, title, start, end, description, location, attendees, all_day }) => {
       const userId = getUserId();
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
       const settings = await userSettingsRepo.get(userId);
-
       const calId = calendar_id ?? 'primary';
 
       if (calId !== 'primary') {
         const writable = await calendarConfigRepo.getWritableCalendarIds(userId);
         if (!writable.includes(calId)) {
           return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({ error: `Calendar ${calId} is not configured for readwrite access.` }),
-            }],
+            content: [{ type: 'text' as const, text: JSON.stringify({ error: `Calendar ${calId} not configured for readwrite.` }) }],
           };
         }
       }
 
-      // Fetch current event to merge with updates
       const current = await calendarApi.events.get({ calendarId: calId, eventId: event_id });
       const patch: Record<string, unknown> = {};
-
       if (title !== undefined) patch.summary = title;
       if (description !== undefined) patch.description = description;
       if (location !== undefined) patch.location = location;
-
-      if (attendees !== undefined) {
-        patch.attendees = attendees.map((email) => ({ email }));
-      }
+      if (attendees !== undefined) patch.attendees = attendees.map((email) => ({ email }));
 
       const isAllDay = all_day ?? !current.data.start?.dateTime;
-
       if (start !== undefined || all_day !== undefined) {
-        if (isAllDay) {
-          patch.start = { date: start ?? current.data.start?.date };
-        } else {
-          patch.start = { dateTime: start ?? current.data.start?.dateTime, timeZone: settings.timezone };
-        }
+        patch.start = isAllDay ? { date: start ?? current.data.start?.date } : { dateTime: start ?? current.data.start?.dateTime, timeZone: settings.timezone };
       }
-
       if (end !== undefined || all_day !== undefined) {
-        if (isAllDay) {
-          patch.end = { date: end ?? current.data.end?.date };
-        } else {
-          patch.end = { dateTime: end ?? current.data.end?.dateTime, timeZone: settings.timezone };
-        }
+        patch.end = isAllDay ? { date: end ?? current.data.end?.date } : { dateTime: end ?? current.data.end?.dateTime, timeZone: settings.timezone };
       }
 
       const response = await calendarApi.events.patch({
-        calendarId: calId,
-        eventId: event_id,
+        calendarId: calId, eventId: event_id,
         requestBody: patch as Parameters<typeof calendarApi.events.patch>[0] extends { requestBody?: infer R } ? R : never,
       });
 
-      logAudit({ user_id: userId, source: 'google', action: 'update', entity_type: 'event', entity_id: event_id, summary: `Updated event: ${response.data.summary ?? event_id}`, metadata: patch });
+      logAudit({ user_id: userId, source: 'calendar', action: 'update', entity_type: 'event', entity_id: event_id, summary: `Updated event: ${response.data.summary ?? event_id}`, metadata: patch });
+
+      // Write-through to ES
+      if (esRepo) {
+        const localConfigs = await calendarConfigRepo.list(userId);
+        const calConfig = localConfigs.find((c) => c.calendar_id === calId);
+        await esRepo.upsertFromGoogle(userId, {
+          event_id,
+          calendar_id: calId,
+          calendar_name: calConfig?.calendar_name ?? calId,
+          calendar_color: calConfig?.color,
+          title: response.data.summary ?? '(no title)',
+          start: response.data.start?.dateTime ?? response.data.start?.date ?? '',
+          end: response.data.end?.dateTime ?? response.data.end?.date ?? '',
+          all_day: !response.data.start?.dateTime,
+          location: response.data.location,
+          description: response.data.description,
+          attendees: (response.data.attendees ?? []).map((a) => ({ email: a.email ?? '', name: a.displayName ?? null, response_status: a.responseStatus ?? undefined })),
+          html_link: response.data.htmlLink ?? undefined,
+          status: response.data.status ?? 'confirmed',
+          recurring: !!response.data.recurringEventId,
+        });
+      }
 
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({
-            event_id: response.data.id ?? '',
-            html_link: response.data.htmlLink ?? '',
-            status: response.data.status ?? 'confirmed',
-            updated: true,
-          }, null, 2),
+          text: JSON.stringify({ event_id, html_link: response.data.htmlLink ?? '', status: response.data.status ?? 'confirmed', updated: true }, null, 2),
         }],
       };
     },
   );
 
   // ---------------------------------------------------------------------------
-  // delete_event
+  // delete_event — deletes from Google API + ES
   // ---------------------------------------------------------------------------
   server.tool(
     'delete_event',
-    'Delete a Google Calendar event. Only works on calendars with readwrite access.',
+    'Delete a calendar event. Only works on calendars with readwrite access.',
     {
-      event_id: z.string().describe('Google event ID to delete'),
-      calendar_id: z.string().optional().describe('Calendar ID the event belongs to (default: primary)'),
+      event_id: z.string().describe('Event ID to delete'),
+      calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
     },
     async ({ event_id, calendar_id }) => {
       const userId = getUserId();
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
-
       const calId = calendar_id ?? 'primary';
 
       if (calId !== 'primary') {
         const writable = await calendarConfigRepo.getWritableCalendarIds(userId);
         if (!writable.includes(calId)) {
           return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({ error: `Calendar ${calId} is not configured for readwrite access.` }),
-            }],
+            content: [{ type: 'text' as const, text: JSON.stringify({ error: `Calendar ${calId} not configured for readwrite.` }) }],
           };
         }
       }
 
       await calendarApi.events.delete({ calendarId: calId, eventId: event_id });
+      logAudit({ user_id: userId, source: 'calendar', action: 'delete', entity_type: 'event', entity_id: event_id, summary: `Deleted event: ${event_id}` });
 
-      logAudit({ user_id: userId, source: 'google', action: 'delete', entity_type: 'event', entity_id: event_id, summary: `Deleted event: ${event_id}` });
+      // Remove from ES
+      if (esRepo) {
+        await esRepo.deleteByDocId(`google-${event_id}`);
+      }
 
       return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({ event_id, deleted: true }),
-        }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ event_id, deleted: true }) }],
+      };
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // sync_calendar — on-demand Google → ES sync
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'sync_calendar',
+    'Sync calendar events from Google to the unified timeline. Use after initial setup or to refresh stale data.',
+    {
+      from: z.string().optional().describe('Start of sync window (ISO 8601). Default: 7 days ago.'),
+      to: z.string().optional().describe('End of sync window (ISO 8601). Default: 30 days from now.'),
+    },
+    async ({ from, to }) => {
+      const userId = getUserId();
+
+      if (!esRepo) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'ES not configured' }) }],
+        };
+      }
+
+      const now = new Date();
+      const timeMin = from ?? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const timeMax = to ?? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+      const calendarIds = await calendarConfigRepo.getReadableCalendarIds(userId);
+      if (calendarIds.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ synced: 0, message: 'No readable calendars configured' }) }],
+        };
+      }
+
+      const events = await fetchEventsFromGoogle(
+        config, tokenRepo, calendarConfigRepo, userId,
+        calendarIds, timeMin, timeMax, undefined, 500,
+      );
+
+      const localConfigs = await calendarConfigRepo.list(userId);
+      const configMap = new Map(localConfigs.map((c) => [c.calendar_id, c]));
+
+      let synced = 0;
+      for (const event of events) {
+        const calConfig = configMap.get(String(event.calendar_id));
+        const isTickler = calConfig?.role === 'tickler';
+        await esRepo.upsertFromGoogle(userId, event as Parameters<typeof esRepo.upsertFromGoogle>[1], isTickler);
+        synced++;
+      }
+
+      logAudit({ user_id: userId, source: 'calendar', action: 'sync', entity_type: 'calendar', entity_id: 'all', summary: `Synced ${synced} events from Google Calendar` });
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ synced, from: timeMin, to: timeMax }) }],
       };
     },
   );

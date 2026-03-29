@@ -7,7 +7,6 @@ import type { NotableEventRepository } from '../repositories/interfaces/notable-
 import { registerLocationTools } from './location.js';
 import { registerMessageTools } from './messages.js';
 import { registerEntityStatusTools } from './entity-statuses.js';
-import { registerCalendarTools } from './calendar.js';
 import { registerNotableEventTools } from './notable-events.js';
 import { registerSituationTools } from './situation.js';
 
@@ -28,7 +27,7 @@ export function registerAllTools(
   registerLocationTools(server, repos.location, getUserId);
   registerMessageTools(server, repos.message, getUserId);
   registerEntityStatusTools(server, repos.entityStatus, getUserId);
-  registerCalendarTools(server, repos.calendar, getUserId);
+  // Calendar tools retired — unified calendar reads/writes go through the calendar MCP
   registerNotableEventTools(server, repos.notableEvent, getUserId);
   registerSituationTools(
     server,

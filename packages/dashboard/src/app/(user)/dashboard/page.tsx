@@ -65,8 +65,8 @@ export default async function DashboardPage() {
       overdue: true,
       limit: 5,
     }),
-    mcpCallJsonSafe<Record<string, unknown>>("google", "list_events"),
-    mcpCallJsonSafe<Record<string, unknown>>("google", "list_ticklers", {
+    mcpCallJsonSafe<Record<string, unknown>>("calendar", "list_events"),
+    mcpCallJsonSafe<Record<string, unknown>>("calendar", "list_ticklers", {
       to: threeDaysStr,
     }),
   ]);
@@ -110,7 +110,7 @@ export default async function DashboardPage() {
   try {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const weekEventsRaw = await mcpCallJsonSafe<Record<string, unknown>>("google", "list_events", {
+    const weekEventsRaw = await mcpCallJsonSafe<Record<string, unknown>>("calendar", "list_events", {
       from: tomorrow.toISOString(),
       to: threeDaysStr,
     });

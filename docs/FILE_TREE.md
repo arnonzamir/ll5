@@ -92,12 +92,13 @@ ll5/
 │       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, channel constraints
 │       └── server.ts                  # Express app: webhooks, auth, chat, health, schedulers
 │
-├── packages/google/                   # @ll5/google — PG-backed MCP [ready to deploy]
+├── packages/google/                   # calendar MCP — unified calendar layer (PG+ES)
 │   └── src/
-│       ├── repositories/postgres/     # OAuth tokens (encrypted), calendar config (with role), user settings
-│       ├── tools/                     # 16 tools (auth, calendar CRUD+configure+tz, gmail, tickler)
+│       ├── repositories/postgres/     # OAuth tokens (encrypted), calendar config, user settings
+│       ├── repositories/elasticsearch/ # Calendar event read/write (shared ES index)
+│       ├── tools/                     # 17 tools (auth, calendar CRUD+configure+tz+sync, gmail, tickler)
 │       ├── utils/encryption.ts        # AES-256-GCM for token storage
-│       └── server.ts                  # MCP server (dual auth, blocks OAuth discovery) + callback + REST
+│       └── server.ts                  # MCP server (dual auth) + OAuth callback + REST API
 │
 ├── packages/messaging/                # @ll5/messaging — PG-backed MCP [not deployed]
 │   └── src/

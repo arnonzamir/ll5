@@ -6,7 +6,7 @@ export const env = {
     process.env.MCP_KNOWLEDGE_URL ?? "https://mcp-knowledge.noninoni.click",
   MCP_AWARENESS_URL:
     process.env.MCP_AWARENESS_URL ?? "https://mcp-awareness.noninoni.click",
-  MCP_GOOGLE_URL:
-    process.env.MCP_GOOGLE_URL ?? "https://mcp-google.noninoni.click",
+  MCP_CALENDAR_URL:
+    process.env.MCP_CALENDAR_URL ?? "https://mcp-google.noninoni.click",
   GATEWAY_URL: process.env.GATEWAY_URL ?? "https://gateway.noninoni.click",
 } as const;

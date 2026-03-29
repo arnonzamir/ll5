@@ -2,6 +2,7 @@ import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
 import pg from 'pg';
+import { Client as ESClient } from '@elastic/elasticsearch';
 import { google } from 'googleapis';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -13,6 +14,7 @@ import { initAudit } from '@ll5/shared';
 import { PostgresOAuthTokenRepository } from './repositories/postgres/oauth-token.repository.js';
 import { PostgresCalendarConfigRepository } from './repositories/postgres/calendar-config.repository.js';
 import { PostgresUserSettingsRepository } from './repositories/postgres/user-settings.repository.js';
+import { ESCalendarEventRepository } from './repositories/elasticsearch/calendar-event.repository.js';
 import { registerAllTools } from './tools/index.js';
 import { pendingStates } from './tools/auth.js';
 import { createOAuth2Client, getAuthenticatedClient } from './utils/google-client.js';
@@ -72,13 +74,24 @@ export async function startServer(): Promise<void> {
   const calendarConfigRepo = new PostgresCalendarConfigRepository(pool);
   const userSettingsRepo = new PostgresUserSettingsRepository(pool);
 
+  // Elasticsearch client for unified calendar reads/writes
+  const esUrl = process.env.ELASTICSEARCH_URL;
+  const esClient = esUrl ? new ESClient({ node: esUrl }) : null;
+  const esCalendarRepo = esClient ? new ESCalendarEventRepository(esClient) : null;
+
+  if (esClient) {
+    logger.info('Elasticsearch connected for calendar reads/writes');
+  } else {
+    logger.warn('ELASTICSEARCH_URL not set — calendar reads will fall back to live Google API');
+  }
+
   const googleConfig = {
     clientId: env.googleClientId,
     clientSecret: env.googleClientSecret,
     redirectUri: env.googleRedirectUri,
   };
 
-  const deps = { tokenRepo, calendarConfigRepo, userSettingsRepo, googleConfig };
+  const deps = { tokenRepo, calendarConfigRepo, userSettingsRepo, esCalendarRepo, googleConfig };
 
   // ---------------------------------------------------------------------------
   // Express app with auth middleware
@@ -392,8 +405,7 @@ export async function startServer(): Promise<void> {
 
   // ---------------------------------------------------------------------------
   // Start listening
-  // Initialize audit logging
-  const esUrl = process.env.ELASTICSEARCH_URL;
+  // Initialize audit logging (reuse esUrl from above)
   if (esUrl) {
     initAudit(esUrl);
     logger.info('Audit logging enabled');

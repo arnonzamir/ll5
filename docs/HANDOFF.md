@@ -13,7 +13,7 @@ Claude Code (ll5-run workspace)
   ├── personal-knowledge MCP (ES) — facts, people, places, profile, data gaps
   ├── gtd MCP (PG) — actions, projects, horizons, inbox, shopping, chat tools
   ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation
-  ├── google MCP (PG) — Calendar, Gmail, OAuth, Tickler [ready to deploy]
+  ├── calendar MCP (PG+ES) — Unified calendar (reads ES, writes Google API+ES), Gmail, OAuth, Tickler
   └── messaging MCP (PG) — WhatsApp, Telegram [not deployed]
 
 Gateway (Express)

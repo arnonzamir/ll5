@@ -120,11 +120,17 @@ export function ActionsView() {
 
   function handleEdit(formData: FormData) {
     if (!editAction) return;
+    const actionId = editAction.id;
     startTransition(async () => {
-      await updateAction(editAction.id, formData);
+      await updateAction(actionId, formData);
       setEditDialogOpen(false);
       setEditAction(null);
-      loadActions();
+      // Reload inline instead of calling loadActions() to avoid nesting startTransition
+      const filters: Record<string, string> = {};
+      if (status !== "all") filters.status = status;
+      if (energy !== "all") filters.energy = energy;
+      const result = await fetchActions(filters);
+      setActions(result);
     });
   }
 
@@ -310,7 +316,7 @@ export function ActionsView() {
             </DialogDescription>
           </DialogHeader>
           {editAction && (
-            <EditActionForm action={editAction} onSubmit={handleEdit} isPending={isPending} />
+            <EditActionForm key={editAction.id} action={editAction} onSubmit={handleEdit} isPending={isPending} />
           )}
         </DialogContent>
       </Dialog>

@@ -3,6 +3,7 @@ import { google } from 'googleapis';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-token.repository.js';
 import type { CalendarConfigRepository } from '../repositories/interfaces/calendar-config.repository.js';
+import type { ESCalendarEventRepository } from '../repositories/elasticsearch/calendar-event.repository.js';
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
 import { logAudit } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
@@ -59,6 +60,7 @@ export function registerTicklerTools(
   server: McpServer,
   tokenRepo: OAuthTokenRepository,
   calendarConfigRepo: CalendarConfigRepository,
+  esRepo: ESCalendarEventRepository | null,
   config: GoogleClientConfig,
   getUserId: () => string,
 ): void {
@@ -119,7 +121,24 @@ export function registerTicklerTools(
         requestBody: eventBody as Parameters<typeof calendarApi.events.insert>[0] extends { requestBody?: infer R } ? R : never,
       });
 
-      logAudit({ user_id: userId, source: 'google', action: 'create', entity_type: 'tickler', entity_id: response.data.id ?? '', summary: `Created tickler: ${fullTitle}` });
+      logAudit({ user_id: userId, source: 'calendar', action: 'create', entity_type: 'tickler', entity_id: response.data.id ?? '', summary: `Created tickler: ${fullTitle}` });
+
+      // Write-through to ES
+      if (esRepo) {
+        await esRepo.upsertFromGoogle(userId, {
+          event_id: response.data.id ?? '',
+          calendar_id: calendarId,
+          calendar_name: TICKLER_CALENDAR_NAME,
+          calendar_color: TICKLER_COLOR,
+          title: fullTitle,
+          start: response.data.start?.dateTime ?? response.data.start?.date ?? due_date,
+          end: response.data.end?.dateTime ?? response.data.end?.date ?? due_date,
+          all_day: isAllDay,
+          description,
+          html_link: response.data.htmlLink ?? undefined,
+          status: 'confirmed',
+        }, true);
+      }
 
       return {
         content: [{
@@ -149,6 +168,45 @@ export function registerTicklerTools(
     },
     async ({ from, to, include_past }) => {
       const userId = getUserId();
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const defaultFrom = include_past
+        ? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
+        : startOfDay.toISOString();
+      const defaultTo = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      const timeMin = from ? new Date(from).toISOString() : defaultFrom;
+      const timeMax = to ? new Date(to).toISOString() : defaultTo;
+
+      // Read from ES if available
+      if (esRepo) {
+        try {
+          const docs = await esRepo.query(userId, {
+            from: timeMin, to: timeMax, isTickler: true, limit: 100,
+          });
+
+          const ticklers = docs.map((d) => ({
+            event_id: d.google_event_id ?? '',
+            title: d.title,
+            start: d.start_time,
+            end: d.end_time,
+            all_day: d.all_day,
+            description: d.description ?? null,
+            status: d.status ?? 'confirmed',
+          }));
+
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ ticklers, total: ticklers.length }),
+            }],
+          };
+        } catch {
+          logger.warn('ES read failed for ticklers, falling back to Google API');
+        }
+      }
+
+      // Fallback: Google API
       const existing = await calendarConfigRepo.getByRole(userId, 'tickler');
       if (!existing) {
         return {
@@ -162,20 +220,9 @@ export function registerTicklerTools(
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
 
-      const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const defaultFrom = include_past
-        ? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
-        : startOfDay.toISOString();
-      const defaultTo = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
-      const timeMin = from ? new Date(from).toISOString() : defaultFrom;
-      const timeMax = to ? new Date(to).toISOString() : defaultTo;
-
       const response = await calendarApi.events.list({
         calendarId: existing.calendar_id,
-        timeMin,
-        timeMax,
+        timeMin, timeMax,
         maxResults: 100,
         singleEvents: true,
         orderBy: 'startTime',
@@ -229,7 +276,12 @@ export function registerTicklerTools(
         eventId: event_id,
       });
 
-      logAudit({ user_id: userId, source: 'google', action: 'complete', entity_type: 'tickler', entity_id: event_id, summary: `Completed tickler: ${event_id}` });
+      logAudit({ user_id: userId, source: 'calendar', action: 'complete', entity_type: 'tickler', entity_id: event_id, summary: `Completed tickler: ${event_id}` });
+
+      // Remove from ES
+      if (esRepo) {
+        await esRepo.deleteByDocId(`tickler-${event_id}`);
+      }
 
       return {
         content: [{
