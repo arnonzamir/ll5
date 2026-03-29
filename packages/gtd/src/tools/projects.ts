@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { logAudit } from '@ll5/shared';
 import type { HorizonRepository } from '../repositories/interfaces/horizon.repository.js';
 
 export function registerProjectTools(server: McpServer, repo: HorizonRepository, getUserId: () => string): void {
@@ -28,6 +29,7 @@ export function registerProjectTools(server: McpServer, repo: HorizonRepository,
         dueDate: params.due_date,
         status: params.status,
       });
+      logAudit({ user_id: userId, source: 'gtd', action: 'create', entity_type: 'project', entity_id: project.id, summary: `Created project: ${params.title}` });
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ project }, null, 2) }],
       };
@@ -61,6 +63,7 @@ export function registerProjectTools(server: McpServer, repo: HorizonRepository,
         if (params.status !== undefined) updateData.status = params.status;
 
         const project = await repo.updateProject(userId, params.id, updateData);
+        logAudit({ user_id: userId, source: 'gtd', action: 'update', entity_type: 'project', entity_id: params.id, summary: `Updated project: ${project.title}`, metadata: updateData });
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ project }, null, 2) }],
         };

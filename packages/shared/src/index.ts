@@ -15,3 +15,6 @@ export * from './mcp/index.js';
 
 // Common utilities
 export * from './utils/index.js';
+
+// Audit log
+export * from './audit.js';

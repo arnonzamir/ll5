@@ -107,6 +107,21 @@ const AWARENESS_INDICES: IndexDefinition[] = [
     },
   },
   {
+    index: 'll5_audit_log',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        timestamp: { type: 'date' },
+        source: { type: 'keyword' },
+        action: { type: 'keyword' },
+        entity_type: { type: 'keyword' },
+        entity_id: { type: 'keyword' },
+        summary: { type: 'text', analyzer: 'multilingual' },
+        metadata: { type: 'object', enabled: false },
+      },
+    },
+  },
+  {
     index: 'll5_awareness_notable_events',
     mappings: {
       properties: {

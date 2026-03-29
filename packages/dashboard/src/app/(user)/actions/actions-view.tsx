@@ -76,8 +76,10 @@ export function ActionsView() {
     // Optimistic: mark as completed immediately
     setJustCompleted((prev) => new Set(prev).add(id));
 
-    // Fire server action
-    void completeAction(id);
+    // Fire server action inside startTransition for proper Next.js handling
+    startTransition(async () => {
+      await completeAction(id);
+    });
 
     if (isFiltered) {
       // In filtered view: show strikethrough, then fade out after 1.5s
@@ -96,7 +98,7 @@ export function ActionsView() {
         prev.map((a) => (a.id === id ? { ...a, status: "completed" } : a))
       );
     }
-  }, [isFiltered]);
+  }, [isFiltered, startTransition]);
 
   const filteredActions = actions.filter((a) => {
     if (searchQuery && !a.title.toLowerCase().includes(searchQuery.toLowerCase())) {

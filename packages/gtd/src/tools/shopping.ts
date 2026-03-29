@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { logAudit } from '@ll5/shared';
 import type { HorizonRepository } from '../repositories/interfaces/horizon.repository.js';
 
 export function registerShoppingTools(server: McpServer, repo: HorizonRepository, getUserId: () => string): void {
@@ -34,6 +35,7 @@ export function registerShoppingTools(server: McpServer, repo: HorizonRepository
             category: params.category,
             energy: 'low',
           });
+          logAudit({ user_id: userId, source: 'gtd', action: 'create', entity_type: 'shopping_item', entity_id: item.id, summary: `Added to shopping list: ${title}` });
           return {
             content: [{ type: 'text' as const, text: JSON.stringify({ success: true, item }, null, 2) }],
           };
@@ -76,6 +78,7 @@ export function registerShoppingTools(server: McpServer, repo: HorizonRepository
             };
           }
           const updated = await repo.updateAction(userId, shoppingMatches[0].id, { status: 'completed' });
+          logAudit({ user_id: userId, source: 'gtd', action: 'complete', entity_type: 'shopping_item', entity_id: shoppingMatches[0].id, summary: `Checked off: ${params.title}` });
           return {
             content: [{ type: 'text' as const, text: JSON.stringify({ success: true, item: updated }, null, 2) }],
           };

@@ -5,6 +5,7 @@ import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-toke
 import type { CalendarConfigRepository, CalendarAccessMode } from '../repositories/interfaces/calendar-config.repository.js';
 import type { UserSettingsRepository } from '../repositories/interfaces/user-settings.repository.js';
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
+import { logAudit } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
 /** Get start-of-day in a given timezone as an ISO string. */
@@ -381,6 +382,8 @@ export function registerCalendarTools(
         requestBody: eventBody as Parameters<typeof calendarApi.events.insert>[0] extends { requestBody?: infer R } ? R : never,
       });
 
+      logAudit({ user_id: userId, source: 'google', action: 'create', entity_type: 'event', entity_id: response.data.id ?? '', summary: `Created event: ${title}` });
+
       return {
         content: [{
           type: 'text' as const,
@@ -467,6 +470,8 @@ export function registerCalendarTools(
         requestBody: patch as Parameters<typeof calendarApi.events.patch>[0] extends { requestBody?: infer R } ? R : never,
       });
 
+      logAudit({ user_id: userId, source: 'google', action: 'update', entity_type: 'event', entity_id: event_id, summary: `Updated event: ${response.data.summary ?? event_id}`, metadata: patch });
+
       return {
         content: [{
           type: 'text' as const,
@@ -511,6 +516,8 @@ export function registerCalendarTools(
       }
 
       await calendarApi.events.delete({ calendarId: calId, eventId: event_id });
+
+      logAudit({ user_id: userId, source: 'google', action: 'delete', entity_type: 'event', entity_id: event_id, summary: `Deleted event: ${event_id}` });
 
       return {
         content: [{

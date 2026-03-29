@@ -7,6 +7,7 @@ export interface EnvConfig {
   userId?: string;
   databaseUrl: string;
   gatewayUrl: string;
+  elasticsearchUrl?: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -33,5 +34,6 @@ export function loadEnv(): EnvConfig {
     userId: process.env.USER_ID,
     databaseUrl,
     gatewayUrl,
+    elasticsearchUrl: process.env.ELASTICSEARCH_URL,
   };
 }

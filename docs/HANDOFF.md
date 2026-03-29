@@ -94,6 +94,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 **Elasticsearch** (8.15.0, 10 indices):
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps
 - `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
+- `ll5_audit_log` — all mutations across MCPs (source, action, entity_type, entity_id, summary)
 
 ## CI/CD
 

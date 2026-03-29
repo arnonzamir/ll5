@@ -9,6 +9,7 @@ import { loadEnv } from './utils/env.js';
 import { logger, setLogLevel } from './utils/logger.js';
 import type { LogLevel } from './utils/logger.js';
 import { runMigrations } from './utils/migration-runner.js';
+import { initAudit } from '@ll5/shared';
 import { PostgresOAuthTokenRepository } from './repositories/postgres/oauth-token.repository.js';
 import { PostgresCalendarConfigRepository } from './repositories/postgres/calendar-config.repository.js';
 import { PostgresUserSettingsRepository } from './repositories/postgres/user-settings.repository.js';
@@ -391,6 +392,13 @@ export async function startServer(): Promise<void> {
 
   // ---------------------------------------------------------------------------
   // Start listening
+  // Initialize audit logging
+  const esUrl = process.env.ELASTICSEARCH_URL;
+  if (esUrl) {
+    initAudit(esUrl);
+    logger.info('Audit logging enabled');
+  }
+
   // ---------------------------------------------------------------------------
   const server = app.listen(env.port, () => {
     logger.info(`Google MCP server listening on port ${env.port}`);

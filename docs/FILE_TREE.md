@@ -55,6 +55,7 @@ ll5/
 │       ├── storage/                  # ES + PG client factories
 │       ├── auth/                     # Token generate/validate, Express middleware
 │       ├── mcp/                      # MCP server helpers
+│       ├── audit.ts                  # Lightweight ES audit writer (fire-and-forget)
 │       └── utils/                    # env, logger, errors
 │
 ├── packages/personal-knowledge/       # @ll5/personal-knowledge — ES-backed MCP

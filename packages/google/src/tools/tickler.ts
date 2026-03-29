@@ -4,6 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-token.repository.js';
 import type { CalendarConfigRepository } from '../repositories/interfaces/calendar-config.repository.js';
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
+import { logAudit } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
 const TICKLER_CALENDAR_NAME = 'LL5 System';
@@ -118,6 +119,8 @@ export function registerTicklerTools(
         requestBody: eventBody as Parameters<typeof calendarApi.events.insert>[0] extends { requestBody?: infer R } ? R : never,
       });
 
+      logAudit({ user_id: userId, source: 'google', action: 'create', entity_type: 'tickler', entity_id: response.data.id ?? '', summary: `Created tickler: ${fullTitle}` });
+
       return {
         content: [{
           type: 'text' as const,
@@ -225,6 +228,8 @@ export function registerTicklerTools(
         calendarId: existing.calendar_id,
         eventId: event_id,
       });
+
+      logAudit({ user_id: userId, source: 'google', action: 'complete', entity_type: 'tickler', entity_id: event_id, summary: `Completed tickler: ${event_id}` });
 
       return {
         content: [{

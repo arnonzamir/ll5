@@ -5,6 +5,7 @@ import type { AuthenticatedRequest } from './auth-middleware.js';
 import pg from 'pg';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { initAudit } from '@ll5/shared';
 import { loadEnv } from './utils/env.js';
 import { logger, setLogLevel } from './utils/logger.js';
 import type { LogLevel } from './utils/logger.js';
@@ -122,6 +123,12 @@ export async function startServer(): Promise<void> {
   });
 
   // -------------------------------------------------------------------------
+  // Initialize audit logging
+  if (env.elasticsearchUrl) {
+    initAudit(env.elasticsearchUrl);
+    logger.info('Audit logging enabled');
+  }
+
   // Start listening
   // -------------------------------------------------------------------------
   const server = app.listen(env.port, () => {
