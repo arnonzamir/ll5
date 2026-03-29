@@ -99,7 +99,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `ll5_app_log` — all tool calls, webhooks, errors (service, level, action, tool_name, duration_ms)
 - `ll5_audit_log` — all mutations across MCPs
 - Note: calendar index has text-mapped calendar_id (use .keyword subfield for term queries)
-- Calendar push accepts date-only strings for all-day events (not just ISO datetime)
+- Calendar push accepts date-only strings and null values (Android Moshi sends explicit null, not undefined)
 
 ## CI/CD
 

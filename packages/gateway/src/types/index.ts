@@ -1,5 +1,6 @@
 export {
   WebhookPayloadSchema,
+  PushItemSchema,
   type PushLocationItem,
   type PushMessageItem,
   type PushCalendarItem,

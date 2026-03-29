@@ -26,9 +26,9 @@ const PushCalendarItemSchema = z.object({
   timestamp: z.string().datetime(),
   title: z.string().min(1),
   start: z.string().min(1), // ISO datetime or date-only (YYYY-MM-DD) for all-day events
-  end: z.string().min(1).optional(), // Optional — some all-day events have no end
-  location: z.string().optional(),
-  all_day: z.boolean().optional(),
+  end: z.string().min(1).nullish(), // Nullable — some all-day events have no end
+  location: z.string().nullish(),
+  all_day: z.boolean().nullish(),
 });
 
 const PushItemSchema = z.discriminatedUnion('type', [
@@ -38,8 +38,10 @@ const PushItemSchema = z.discriminatedUnion('type', [
 ]);
 
 export const WebhookPayloadSchema = z.object({
-  items: z.array(PushItemSchema).min(1),
+  items: z.array(z.unknown()).min(1),
 });
+
+export { PushItemSchema };
 
 // --- Inferred types ---
 

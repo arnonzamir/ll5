@@ -12,7 +12,7 @@ import { processCalendar } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
 import { startSchedulers } from './scheduler/index.js';
-import { WebhookPayloadSchema, type ItemResult, type PushItem, type WebhookResponse } from './types/index.js';
+import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type WebhookResponse } from './types/index.js';
 import type { EnvConfig } from './utils/env.js';
 import { logger } from './utils/logger.js';
 
@@ -343,22 +343,26 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       throw err;
     }
 
-    // Process items — each item is independent, partial failures allowed
+    // Validate and process items individually — bad items are skipped, not fatal
     const results: ItemResult[] = [];
+    const typeCounts: Record<string, number> = {};
 
     for (let i = 0; i < payload.items.length; i++) {
-      const result = await processItem(esClient, userId, payload.items[i], i, config, pgPool);
+      const parsed = PushItemSchema.safeParse(payload.items[i]);
+      if (!parsed.success) {
+        const errors = parsed.error.errors.map((e: { path: (string | number)[]; message: string }) => `${e.path.join('.')}: ${e.message}`).join('; ');
+        logger.warn('Skipping invalid webhook item', { index: i, errors });
+        results.push({ index: i, type: (payload.items[i] as Record<string, unknown>)?.type as string ?? 'unknown', status: 'error', error: errors });
+        continue;
+      }
+      const item = parsed.data;
+      typeCounts[item.type] = (typeCounts[item.type] ?? 0) + 1;
+      const result = await processItem(esClient, userId, item, i, config, pgPool);
       results.push(result);
     }
 
     const accepted = results.filter((r) => r.status === 'ok').length;
     const failed = results.filter((r) => r.status === 'error').length;
-
-    // Count by type for logging
-    const typeCounts: Record<string, number> = {};
-    for (const item of payload.items) {
-      typeCounts[item.type] = (typeCounts[item.type] ?? 0) + 1;
-    }
 
     logger.info('Webhook processed', {
       userId,
