@@ -68,11 +68,24 @@ export class ESCalendarEventRepository {
     if (params.calendarId) {
       filters.push({ term: { calendar_id: params.calendarId } });
     } else if (params.calendarIds && params.calendarIds.length > 0) {
-      filters.push({ terms: { calendar_id: params.calendarIds } });
+      // Include docs with matching calendar_id OR docs with no calendar_id (legacy)
+      filters.push({
+        bool: {
+          should: [
+            { terms: { calendar_id: params.calendarIds } },
+            { bool: { must_not: { exists: { field: 'calendar_id' } } } },
+          ],
+          minimum_should_match: 1,
+        },
+      });
     }
 
-    if (params.isTickler !== undefined) {
-      filters.push({ term: { is_tickler: params.isTickler } });
+    const mustNot: Record<string, unknown>[] = [];
+    if (params.isTickler === false) {
+      // Exclude ticklers: match docs where is_tickler is explicitly true
+      mustNot.push({ term: { is_tickler: true } });
+    } else if (params.isTickler === true) {
+      filters.push({ term: { is_tickler: true } });
     }
 
     if (params.includeAllDay === false) {
@@ -90,6 +103,7 @@ export class ESCalendarEventRepository {
         bool: {
           filter: filters,
           ...(must.length > 0 ? { must } : {}),
+          ...(mustNot.length > 0 ? { must_not: mustNot } : {}),
         },
       },
       sort: [{ start_time: { order: 'asc' } }],

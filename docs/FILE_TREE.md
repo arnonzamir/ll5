@@ -95,7 +95,7 @@ ll5/
 ├── packages/google/                   # calendar MCP — unified calendar layer (PG+ES)
 │   └── src/
 │       ├── repositories/postgres/     # OAuth tokens (encrypted), calendar config, user settings
-│       ├── repositories/elasticsearch/ # Calendar event read/write (shared ES index)
+│       ├── repositories/elasticsearch/ # Calendar event read/write (handles legacy + enriched docs)
 │       ├── tools/                     # 17 tools (auth, calendar CRUD+configure+tz+sync, gmail, tickler)
 │       ├── utils/encryption.ts        # AES-256-GCM for token storage
 │       └── server.ts                  # MCP server (dual auth) + OAuth callback + REST API

@@ -51,7 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
-- 2026-03-29: Fix action complete/edit not persisting (wrong param name: action_id→id), add build ID to dashboard footer
+- 2026-03-29: Fix ES calendar query for legacy docs (null is_tickler/calendar_id), fix build number color
 - 2026-03-29: Unified calendar layer — reads from ES, writes through Google API + ES, renamed google→calendar MCP
 - 2026-03-29: Audit log (ES ll5_audit_log) — all mutations in GTD + calendar MCPs write audit entries
 - 2026-03-29: Checkbox completion with animated fade-out on actions + shopping list pages
