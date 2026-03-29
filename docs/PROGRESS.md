@@ -51,6 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-03-29: Calendar update_event + delete_event tools (with readwrite access check)
 - 2026-03-29: Checkbox completion with animated fade-out on actions + shopping list pages
 - 2026-03-29: Per-tenant timezone (set_timezone tool), freeBusy support for read-only calendars, calendar settings UI
 - 2026-03-29: Calendar integration: Google MCP with OAuth callback, tickler calendar, periodic review, dashboard calendar page + insights panel

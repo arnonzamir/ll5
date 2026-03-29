@@ -393,4 +393,131 @@ export function registerCalendarTools(
       };
     },
   );
+
+  // ---------------------------------------------------------------------------
+  // update_event
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'update_event',
+    'Update an existing Google Calendar event. Only works on calendars with readwrite access. Only provided fields are changed.',
+    {
+      event_id: z.string().describe('Google event ID to update'),
+      calendar_id: z.string().optional().describe('Calendar ID the event belongs to (default: primary)'),
+      title: z.string().optional().describe('New event title'),
+      start: z.string().optional().describe('New start time (ISO 8601)'),
+      end: z.string().optional().describe('New end time (ISO 8601)'),
+      description: z.string().optional().describe('New description'),
+      location: z.string().optional().describe('New location'),
+      attendees: z.array(z.string()).optional().describe('Replace attendee list (email addresses)'),
+      all_day: z.boolean().optional().describe('Convert to/from all-day event'),
+    },
+    async ({ event_id, calendar_id, title, start, end, description, location, attendees, all_day }) => {
+      const userId = getUserId();
+      const auth = await getAuthenticatedClient(config, tokenRepo, userId);
+      const calendarApi = google.calendar({ version: 'v3', auth });
+      const settings = await userSettingsRepo.get(userId);
+
+      const calId = calendar_id ?? 'primary';
+
+      if (calId !== 'primary') {
+        const writable = await calendarConfigRepo.getWritableCalendarIds(userId);
+        if (!writable.includes(calId)) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ error: `Calendar ${calId} is not configured for readwrite access.` }),
+            }],
+          };
+        }
+      }
+
+      // Fetch current event to merge with updates
+      const current = await calendarApi.events.get({ calendarId: calId, eventId: event_id });
+      const patch: Record<string, unknown> = {};
+
+      if (title !== undefined) patch.summary = title;
+      if (description !== undefined) patch.description = description;
+      if (location !== undefined) patch.location = location;
+
+      if (attendees !== undefined) {
+        patch.attendees = attendees.map((email) => ({ email }));
+      }
+
+      const isAllDay = all_day ?? !current.data.start?.dateTime;
+
+      if (start !== undefined || all_day !== undefined) {
+        if (isAllDay) {
+          patch.start = { date: start ?? current.data.start?.date };
+        } else {
+          patch.start = { dateTime: start ?? current.data.start?.dateTime, timeZone: settings.timezone };
+        }
+      }
+
+      if (end !== undefined || all_day !== undefined) {
+        if (isAllDay) {
+          patch.end = { date: end ?? current.data.end?.date };
+        } else {
+          patch.end = { dateTime: end ?? current.data.end?.dateTime, timeZone: settings.timezone };
+        }
+      }
+
+      const response = await calendarApi.events.patch({
+        calendarId: calId,
+        eventId: event_id,
+        requestBody: patch as Parameters<typeof calendarApi.events.patch>[0] extends { requestBody?: infer R } ? R : never,
+      });
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            event_id: response.data.id ?? '',
+            html_link: response.data.htmlLink ?? '',
+            status: response.data.status ?? 'confirmed',
+            updated: true,
+          }, null, 2),
+        }],
+      };
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // delete_event
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'delete_event',
+    'Delete a Google Calendar event. Only works on calendars with readwrite access.',
+    {
+      event_id: z.string().describe('Google event ID to delete'),
+      calendar_id: z.string().optional().describe('Calendar ID the event belongs to (default: primary)'),
+    },
+    async ({ event_id, calendar_id }) => {
+      const userId = getUserId();
+      const auth = await getAuthenticatedClient(config, tokenRepo, userId);
+      const calendarApi = google.calendar({ version: 'v3', auth });
+
+      const calId = calendar_id ?? 'primary';
+
+      if (calId !== 'primary') {
+        const writable = await calendarConfigRepo.getWritableCalendarIds(userId);
+        if (!writable.includes(calId)) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ error: `Calendar ${calId} is not configured for readwrite access.` }),
+            }],
+          };
+        }
+      }
+
+      await calendarApi.events.delete({ calendarId: calId, eventId: event_id });
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ event_id, deleted: true }),
+        }],
+      };
+    },
+  );
 }

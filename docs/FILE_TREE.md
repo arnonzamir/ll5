@@ -94,7 +94,7 @@ ll5/
 ├── packages/google/                   # @ll5/google — PG-backed MCP [ready to deploy]
 │   └── src/
 │       ├── repositories/postgres/     # OAuth tokens (encrypted), calendar config (with role), user settings
-│       ├── tools/                     # 13 tools (auth, calendar+configure, gmail, tickler) — timezone-aware
+│       ├── tools/                     # 16 tools (auth, calendar CRUD+configure+tz, gmail, tickler)
 │       ├── utils/encryption.ts        # AES-256-GCM for token storage
 │       └── server.ts                  # MCP server (dual auth, blocks OAuth discovery) + callback + REST
 │
