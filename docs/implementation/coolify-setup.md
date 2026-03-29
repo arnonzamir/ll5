@@ -270,6 +270,7 @@ NODE_ENV=production
 PORT=3000
 LOG_LEVEL=info
 API_KEY=<your-mcp-api-key>
+USER_ID=<user-uuid>
 DATABASE_URL=postgresql://ll5:<postgres-password>@postgres:5432/ll5
 GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
 GOOGLE_CLIENT_SECRET=<your-google-oauth-client-secret>
@@ -282,6 +283,8 @@ Generate `ENCRYPTION_KEY` with: `openssl rand -hex 32`
 **Resource limits:** 256 MB RAM, 0.5 CPU.
 
 The `GOOGLE_REDIRECT_URI` must match exactly what is configured in the Google Cloud Console OAuth credentials. Make sure the domain is the one you assign in Coolify.
+
+The server provides a `GET /oauth/callback` endpoint that automatically handles the OAuth code exchange. After the user visits the auth URL and grants access, Google redirects to this endpoint, which stores the tokens and shows a success page.
 
 ### 3e. messaging MCP
 
@@ -322,11 +325,20 @@ NODE_ENV=production
 PORT=3000
 LOG_LEVEL=info
 ELASTICSEARCH_URL=http://elasticsearch:9200
+DATABASE_URL=postgresql://ll5:<postgres-password>@postgres:5432/ll5
+AUTH_SECRET=<your-auth-secret>
 GEOCODING_API_KEY=<your-geocoding-api-key>
 WEBHOOK_TOKENS={"<token1>":"<user-id-1>"}
+GOOGLE_MCP_URL=http://google:3000
+GOOGLE_MCP_API_KEY=<your-mcp-api-key>
+CALENDAR_REVIEW_TIMEZONE=Asia/Jerusalem
 ```
 
 `WEBHOOK_TOKENS` is a JSON object mapping webhook bearer tokens to user IDs. The phone sends its token in the request, and the gateway maps it to a user for data scoping.
+
+`GOOGLE_MCP_URL` and `GOOGLE_MCP_API_KEY` enable the gateway's calendar sync (every 30 min) and periodic calendar review (every 2 hours during active hours). The review sends system channel messages with upcoming events and tickler items.
+
+Optional calendar review tuning: `CALENDAR_REVIEW_START_HOUR` (default 7), `CALENDAR_REVIEW_END_HOUR` (default 22), `CALENDAR_REVIEW_INTERVAL_MINUTES` (default 120).
 
 **Resource limits:** 512 MB RAM, 1.0 CPU (the gateway handles more concurrent traffic than individual MCPs).
 

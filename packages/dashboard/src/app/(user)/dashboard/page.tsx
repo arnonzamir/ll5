@@ -1,14 +1,7 @@
-import {
-  Inbox,
-  CalendarClock,
-  AlertCircle,
-  Clock,
-} from "lucide-react";
-import { StatusCard } from "@/components/status-card";
-import { ProjectCard } from "@/components/project-card";
-import { InboxItem } from "@/components/inbox-item";
+import { RightNowCard } from "@/components/right-now-card";
+import { TodayTimeline } from "@/components/today-timeline";
+import { WeekPreview } from "@/components/week-preview";
 import { ChatWidget } from "@/components/chat-widget";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mcpCallJsonSafe } from "@/lib/api";
 
 export const metadata = { title: "Dashboard - LL5" };
@@ -23,116 +16,134 @@ interface GtdHealth {
   staleWaitingCount?: number;
   active_project_count?: number;
   activeProjectCount?: number;
-  active_action_count?: number;
-  activeActionCount?: number;
   [key: string]: unknown;
 }
 
-interface Project {
+interface GtdAction {
   id: string;
   title: string;
-  action_count?: number;
-  active_action_count?: number;
-  activeActionCount?: number;
-  category?: string | null;
+  due_date?: string | null;
   status?: string;
   [key: string]: unknown;
 }
 
-interface InboxEntry {
-  id: string;
-  title?: string;
-  content?: string;
-  source?: string | null;
-  captured_at?: string | null;
-  createdAt?: string | null;
+interface CalendarEvent {
+  event_id: string;
+  title: string;
+  start: string;
+  end: string;
+  all_day: boolean;
+  location?: string | null;
+  [key: string]: unknown;
+}
+
+interface Tickler {
+  event_id: string;
+  title: string;
+  start: string;
+  all_day: boolean;
   [key: string]: unknown;
 }
 
 export default async function DashboardPage() {
-  const [healthRaw, projectsRaw, inboxRaw] = await Promise.all([
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+  const threeDaysFromNow = new Date(today);
+  threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+  const threeDaysStr = threeDaysFromNow.toISOString();
+
+  // Fetch GTD data and Google data in parallel
+  // Google MCP calls use mcpCallJsonSafe — returns null if google MCP is unavailable
+  const [healthRaw, dueTodayRaw, overdueRaw, eventsRaw, ticklersRaw] = await Promise.all([
     mcpCallJsonSafe<Record<string, unknown>>("gtd", "get_gtd_health"),
-    mcpCallJsonSafe<Record<string, unknown>>("gtd", "list_projects", { status: "active" }),
-    mcpCallJsonSafe<Record<string, unknown>>("gtd", "list_inbox", { limit: 5 }),
+    mcpCallJsonSafe<Record<string, unknown>>("gtd", "list_actions", {
+      due_before: todayStr,
+      status: "active",
+      limit: 20,
+    }),
+    mcpCallJsonSafe<Record<string, unknown>>("gtd", "list_actions", {
+      overdue: true,
+      limit: 5,
+    }),
+    mcpCallJsonSafe<Record<string, unknown>>("google", "list_events"),
+    mcpCallJsonSafe<Record<string, unknown>>("google", "list_ticklers", {
+      to: threeDaysStr,
+    }),
   ]);
 
-  // MCP tools return wrapped objects — extract the data
+  // Extract GTD health
   const health = (healthRaw?.health ?? healthRaw ?? {}) as GtdHealth;
-  const projectsList = (projectsRaw?.projects ?? projectsRaw ?? []) as Project[];
-  const inboxList = (inboxRaw?.items ?? inboxRaw?.inbox ?? inboxRaw ?? []) as InboxEntry[];
-
   const inboxCount = health?.inbox_count ?? health?.inboxCount ?? 0;
-  const dueToday = health?.due_today_count ?? health?.overdueActionCount ?? 0;
-  const overdue = health?.overdue_count ?? health?.overdueActionCount ?? 0;
-  const waitingFor = health?.waiting_for_count ?? health?.staleWaitingCount ?? 0;
+  const overdueCount = health?.overdue_count ?? health?.overdueActionCount ?? 0;
+  const waitingForCount = health?.waiting_for_count ?? health?.staleWaitingCount ?? 0;
+  const activeProjectCount = health?.active_project_count ?? health?.activeProjectCount ?? 0;
 
-  const topProjects = Array.isArray(projectsList) ? projectsList.slice(0, 5) : [];
-  const recentInbox = Array.isArray(inboxList) ? inboxList.slice(0, 5) : [];
+  // Extract due-today actions
+  const dueTodayActions = (
+    (dueTodayRaw as Record<string, unknown>)?.actions ??
+    (Array.isArray(dueTodayRaw) ? dueTodayRaw : [])
+  ) as GtdAction[];
+
+  // Extract overdue actions (for count only)
+  const overdueActions = (
+    (overdueRaw as Record<string, unknown>)?.actions ??
+    (Array.isArray(overdueRaw) ? overdueRaw : [])
+  ) as GtdAction[];
+  const effectiveOverdueCount = overdueActions.length > 0 ? overdueActions.length : overdueCount;
+
+  // Extract calendar events (null if google MCP unavailable)
+  const events: CalendarEvent[] = eventsRaw
+    ? (Array.isArray(eventsRaw) ? eventsRaw : []) as CalendarEvent[]
+    : [];
+
+  // Extract ticklers (null if google MCP unavailable)
+  const ticklersData = ticklersRaw as Record<string, unknown> | null;
+  const ticklers: Tickler[] = ticklersData
+    ? ((ticklersData?.ticklers ?? (Array.isArray(ticklersData) ? ticklersData : [])) as Tickler[])
+    : [];
+
+  // For the week preview, we need events for the next 3 days
+  // The events call defaults to today, so we need a separate call for the 3-day window
+  // But to avoid an extra call, we'll re-use ticklers (which already spans 3 days)
+  // and fetch 3-day events separately
+  let weekEvents: CalendarEvent[] = [];
+  try {
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const weekEventsRaw = await mcpCallJsonSafe<Record<string, unknown>>("google", "list_events", {
+      from: tomorrow.toISOString(),
+      to: threeDaysStr,
+    });
+    if (weekEventsRaw) {
+      weekEvents = (Array.isArray(weekEventsRaw) ? weekEventsRaw : []) as CalendarEvent[];
+    }
+  } catch {
+    // Google MCP unavailable — no week events
+  }
 
   return (
     <div className="flex gap-6 overflow-hidden" style={{ height: 'calc(100vh - 6rem)' }}>
-      {/* Left panel — GTD summary */}
-      <div className="w-full lg:w-[45%] overflow-y-auto space-y-6 pb-6 min-h-0">
-        {/* Status cards */}
-        <div className="grid grid-cols-2 gap-3">
-          <StatusCard title="Inbox" value={inboxCount} icon={Inbox} />
-          <StatusCard
-            title="Due Today"
-            value={dueToday}
-            icon={CalendarClock}
-            variant={dueToday > 0 ? "warning" : "default"}
-          />
-          <StatusCard
-            title="Overdue"
-            value={overdue}
-            icon={AlertCircle}
-            variant={overdue > 0 ? "danger" : "default"}
-          />
-          <StatusCard title="Waiting For" value={waitingFor} icon={Clock} />
-        </div>
+      {/* Left panel — Insight-driven view */}
+      <div className="w-full lg:w-[45%] overflow-y-auto space-y-4 pb-6 min-h-0">
+        <RightNowCard
+          events={events}
+          ticklers={ticklers}
+          overdueCount={effectiveOverdueCount}
+        />
 
-        {/* Active Projects */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-gray-500">Active Projects</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {topProjects.length === 0 ? (
-              <p className="text-sm text-gray-400">No active projects</p>
-            ) : (
-              topProjects.map((p) => (
-                <ProjectCard
-                  key={p.id}
-                  title={p.title}
-                  actionCount={p.activeActionCount ?? p.active_action_count ?? p.action_count ?? 0}
-                  category={p.category}
-                  status={p.status}
-                />
-              ))
-            )}
-          </CardContent>
-        </Card>
+        <TodayTimeline
+          events={events}
+          ticklers={ticklers}
+          dueTodayActions={dueTodayActions}
+        />
 
-        {/* Recent Inbox */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-gray-500">Recent Inbox</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {recentInbox.length === 0 ? (
-              <p className="text-sm text-gray-400 px-6 pb-4">Inbox empty</p>
-            ) : (
-              recentInbox.map((item) => (
-                <InboxItem
-                  key={item.id}
-                  title={item.title ?? item.content ?? ""}
-                  source={item.source}
-                  capturedAt={item.captured_at ?? item.createdAt}
-                />
-              ))
-            )}
-          </CardContent>
-        </Card>
+        <WeekPreview
+          events={weekEvents}
+          ticklers={ticklers}
+          inboxCount={inboxCount}
+          waitingForCount={waitingForCount}
+          activeProjectCount={activeProjectCount}
+        />
       </div>
 
       {/* Right panel — Chat (hidden on mobile, shown on lg+) */}

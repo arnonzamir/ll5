@@ -4,6 +4,7 @@ export interface CalendarConfigRecord {
   calendar_name: string;
   enabled: boolean;
   color: string;
+  role: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -12,6 +13,7 @@ export interface UpsertCalendarConfigInput {
   calendar_id: string;
   calendar_name: string;
   color: string;
+  role?: string;
 }
 
 export interface CalendarConfigRepository {
@@ -20,6 +22,9 @@ export interface CalendarConfigRepository {
 
   /** List all calendar configs for a user. */
   list(userId: string): Promise<CalendarConfigRecord[]>;
+
+  /** Get calendar config by role (e.g., 'tickler'). */
+  getByRole(userId: string, role: string): Promise<CalendarConfigRecord | null>;
 
   /** Update enabled status for a calendar. */
   setEnabled(userId: string, calendarId: string, enabled: boolean): Promise<void>;

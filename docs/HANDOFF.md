@@ -13,19 +13,21 @@ Claude Code (ll5-run workspace)
   ├── personal-knowledge MCP (ES) — facts, people, places, profile, data gaps
   ├── gtd MCP (PG) — actions, projects, horizons, inbox, shopping, chat tools
   ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation
-  ├── google MCP (PG) — Calendar, Gmail, OAuth [not deployed]
+  ├── google MCP (PG) — Calendar, Gmail, OAuth, Tickler [ready to deploy]
   └── messaging MCP (PG) — WhatsApp, Telegram [not deployed]
 
 Gateway (Express)
   ├── POST /webhook/:token — phone push data (GPS, IM, calendar)
   ├── POST /auth/token — PIN login, returns signed token
   ├── /chat/* — message queue REST endpoints
-  └── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY)
+  ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY)
+  └── Schedulers — calendar sync (30min), periodic review (2h, 7am-10pm)
 
 Dashboard (Next.js 15)
   ├── /login — user_id + PIN auth
   ├── /dashboard — GTD status + chat panel (50/50)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
+  ├── /calendar — day/week calendar view with tickler events
   ├── /locations — Leaflet map with clustering, timeline, trail
   ├── /people, /places, /knowledge, /horizons — personal knowledge pages
   ├── /profile — user settings
@@ -62,6 +64,19 @@ Dashboard (Next.js 15)
 | Token format | `ll5.<base64url {uid,role,iat,exp}>.<32char hmac>` |
 | Token TTL | 7 days |
 
+## Google OAuth
+
+| Item | Value |
+|------|-------|
+| Client ID | Set in Coolify env `GOOGLE_CLIENT_ID` |
+| Client Secret | Set in Coolify env `GOOGLE_CLIENT_SECRET` |
+| Redirect URI | `https://mcp-google.noninoni.click/oauth/callback` |
+| Encryption Key | Set in Coolify env `ENCRYPTION_KEY` (generate with `openssl rand -hex 32`) |
+| Scopes | calendar.readonly, calendar.events, gmail.readonly, gmail.send |
+| Tickler Calendar | "LL5 System" (auto-created on first tickler use) |
+
+OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically.
+
 ## Databases
 
 **PostgreSQL** (ll5 database, user: ll5, password: changeme123):
@@ -74,7 +89,7 @@ Dashboard (Next.js 15)
 
 **Elasticsearch** (8.15.0, 10 indices):
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps
-- `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events, notable_events
+- `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
 
 ## CI/CD
 

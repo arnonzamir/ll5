@@ -12,7 +12,7 @@ import { logger } from '../utils/logger.js';
 
 // In-memory CSRF state store (keyed by state token -> userId)
 // In production with multiple instances, use Redis or DB.
-const pendingStates = new Map<string, { userId: string; scopes: string[] }>();
+export const pendingStates = new Map<string, { userId: string; scopes: string[] }>();
 
 export function registerAuthTools(
   server: McpServer,

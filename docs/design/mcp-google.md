@@ -1,8 +1,8 @@
 # MCP: google
 
-**Domain:** Google Calendar and Gmail integration via OAuth2.
+**Domain:** Google Calendar, Gmail, and Tickler system via OAuth2.
 
-**Storage:** PostgreSQL (OAuth tokens encrypted at rest, calendar configuration)
+**Storage:** PostgreSQL (OAuth tokens encrypted at rest, calendar configuration with role)
 
 **Transport:** HTTP + SSE (remote deployment)
 
@@ -10,9 +10,11 @@
 
 ## Purpose
 
-Manages Google OAuth2 tokens and provides tools to read/write Google Calendar events and Gmail messages. Handles token refresh automatically -- when an access token expires, the MCP refreshes it using the stored refresh token before retrying the API call. Maintains a per-user calendar enable/disable config so the agent only sees events from calendars the user cares about.
+Manages Google OAuth2 tokens and provides tools to read/write Google Calendar events, manage a tickler calendar (LL5 System), and access Gmail. Handles token refresh automatically -- when an access token expires, the MCP refreshes it using the stored refresh token before retrying the API call. Maintains a per-user calendar enable/disable config so the agent only sees events from calendars the user cares about.
 
 This MCP is the only component that talks to Google APIs. Other MCPs (like awareness) may cache Google Calendar data received via push, but all direct Google API interactions go through this MCP.
+
+The tickler calendar ("LL5 System") is a dedicated Google Calendar for temporal nudges — things Claude should remind the user about at a certain time. These are not meetings/appointments but GTD-style tickler items (e.g., "start planning X", "medication running out").
 
 ---
 
@@ -291,6 +293,89 @@ Sends an email via Gmail on behalf of the user.
 
 ---
 
+### create_tickler
+
+Creates a temporal nudge on the LL5 System calendar. Auto-creates the calendar on first use.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `title` | `string` | yes | What to be reminded about |
+| `due_date` | `string (YYYY-MM-DD)` | yes | When this should surface |
+| `due_time` | `string (HH:MM)` | no | Specific time (24h). If omitted, creates all-day event. |
+| `description` | `string` | no | Additional context |
+| `category` | `string` | no | Category: health, admin, planning, financial, social, errands |
+
+**Returns:**
+
+| Field | Type | Description |
+|---|---|---|
+| `event_id` | `string` | Created tickler event ID |
+| `title` | `string` | Full title (with category prefix if set) |
+| `due_date` | `string` | Due date |
+| `due_time` | `string` | Due time or "all-day" |
+
+---
+
+### list_ticklers
+
+Lists upcoming tickler reminders from the LL5 System calendar.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `from` | `string (ISO 8601)` | no | Start of range (default: today) |
+| `to` | `string (ISO 8601)` | no | End of range (default: 7 days) |
+| `include_past` | `boolean` | no | Include past ticklers (default: false) |
+
+**Returns:**
+
+Array of tickler events with `event_id`, `title`, `start`, `end`, `all_day`, `description`, `status`.
+
+---
+
+### complete_tickler
+
+Marks a tickler as done by deleting it from the LL5 System calendar.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `event_id` | `string` | yes | The event ID of the tickler to complete |
+
+**Returns:**
+
+| Field | Type | Description |
+|---|---|---|
+| `success` | `boolean` | Whether deletion succeeded |
+
+---
+
+## REST API Endpoints
+
+These endpoints are for internal use by the gateway (calendar sync and periodic review). Same auth as the MCP endpoint.
+
+### GET /api/events
+
+Returns calendar events across all enabled calendars.
+
+Query params: `from`, `to`, `calendar_id` (all optional, defaults to today).
+
+### GET /api/ticklers
+
+Returns tickler calendar events.
+
+Query params: `from`, `to` (optional, defaults to today through 7 days).
+
+### GET /oauth/callback
+
+OAuth2 redirect endpoint (no auth required). Handles the code exchange automatically and renders a success page.
+
+---
+
 ## Repository Interfaces
 
 ```typescript
@@ -333,6 +418,7 @@ interface CalendarConfigRecord {
   calendar_name: string;
   enabled: boolean;
   color: string;
+  role: string; // 'user' or 'tickler'
   created_at: Date;
   updated_at: Date;
 }
@@ -343,10 +429,14 @@ interface CalendarConfigRepository {
     calendar_id: string;
     calendar_name: string;
     color: string;
+    role?: string;
   }): Promise<void>;
 
   /** List all calendar configs for a user. */
   list(userId: string): Promise<CalendarConfigRecord[]>;
+
+  /** Get calendar config by role (e.g., 'tickler'). */
+  getByRole(userId: string, role: string): Promise<CalendarConfigRecord | null>;
 
   /** Update enabled status for a calendar. */
   setEnabled(userId: string, calendar_id: string, enabled: boolean): Promise<void>;

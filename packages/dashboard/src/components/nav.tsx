@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   LayoutDashboard,
+  CalendarDays,
   CheckSquare,
   FolderKanban,
   Inbox,
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils";
 
 const userLinks = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/actions", label: "Actions", icon: CheckSquare },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/inbox", label: "Inbox", icon: Inbox },

@@ -10,6 +10,7 @@ import { createChatRouter } from './chat.js';
 import { processCalendar } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
+import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, type ItemResult, type PushItem, type WebhookResponse } from './types/index.js';
 import type { EnvConfig } from './utils/env.js';
 import { logger } from './utils/logger.js';
@@ -91,13 +92,17 @@ const AWARENESS_INDICES: IndexDefinition[] = [
     mappings: {
       properties: {
         user_id: { type: 'keyword' },
-        title: { type: 'text', fields: { keyword: { type: 'keyword' } } },
-        start: { type: 'date' },
-        end: { type: 'date' },
+        title: { type: 'text', analyzer: 'multilingual', fields: { keyword: { type: 'keyword' } } },
+        description: { type: 'text', analyzer: 'multilingual' },
+        start_time: { type: 'date' },
+        end_time: { type: 'date' },
         location: { type: 'text' },
+        calendar_name: { type: 'keyword' },
         source: { type: 'keyword' },
         all_day: { type: 'boolean' },
-        timestamp: { type: 'date' },
+        attendees: { type: 'keyword' },
+        created_at: { type: 'date' },
+        updated_at: { type: 'date' },
       },
     },
   },
@@ -375,6 +380,9 @@ export async function startServer(config: EnvConfig): Promise<void> {
   logger.info('Ensuring Elasticsearch indices...');
   await ensureIndices(esClient);
   logger.info('Elasticsearch indices ready');
+
+  // Start calendar sync and review schedulers
+  startSchedulers(config, esClient, pgPool);
 
   app.listen(config.port, () => {
     logger.info(`Gateway listening on port ${config.port}`, {

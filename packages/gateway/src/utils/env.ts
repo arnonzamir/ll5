@@ -7,6 +7,14 @@ export interface EnvConfig {
   geocodingApiKey: string | undefined;
   authSecret: string;
   databaseUrl: string;
+  // Google MCP integration (for calendar sync and periodic review)
+  googleMcpUrl: string | undefined;
+  googleMcpApiKey: string | undefined;
+  // Calendar review schedule
+  calendarReviewStartHour: number;
+  calendarReviewEndHour: number;
+  calendarReviewIntervalMinutes: number;
+  calendarReviewTimezone: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -58,5 +66,11 @@ export function loadEnv(): EnvConfig {
     geocodingApiKey: process.env.GEOCODING_API_KEY,
     authSecret,
     databaseUrl,
+    googleMcpUrl: process.env.GOOGLE_MCP_URL,
+    googleMcpApiKey: process.env.GOOGLE_MCP_API_KEY,
+    calendarReviewStartHour: parseInt(process.env.CALENDAR_REVIEW_START_HOUR ?? '7', 10),
+    calendarReviewEndHour: parseInt(process.env.CALENDAR_REVIEW_END_HOUR ?? '22', 10),
+    calendarReviewIntervalMinutes: parseInt(process.env.CALENDAR_REVIEW_INTERVAL_MINUTES ?? '120', 10),
+    calendarReviewTimezone: process.env.CALENDAR_REVIEW_TIMEZONE ?? 'Asia/Jerusalem',
   };
 }

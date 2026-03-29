@@ -86,16 +86,17 @@ ll5/
 │   └── src/
 │       ├── auth.ts                    # POST /auth/token (PIN login)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
-│       ├── processors/                # GPS geocoding, IM processing, calendar, notable events
+│       ├── processors/                # GPS geocoding, IM processing, calendar (with dedup), notable events
+│       ├── scheduler/                 # Calendar sync (30min) + periodic review (2h)
 │       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger
-│       └── server.ts                  # Express app: webhooks, auth, chat, health
+│       └── server.ts                  # Express app: webhooks, auth, chat, health, schedulers
 │
-├── packages/google/                   # @ll5/google — PG-backed MCP [not deployed]
+├── packages/google/                   # @ll5/google — PG-backed MCP [ready to deploy]
 │   └── src/
-│       ├── repositories/postgres/     # OAuth tokens (encrypted), calendar config
-│       ├── tools/                     # 9 tools (auth, calendar, gmail)
+│       ├── repositories/postgres/     # OAuth tokens (encrypted), calendar config (with role)
+│       ├── tools/                     # 12 tools (auth, calendar, gmail, tickler)
 │       ├── utils/encryption.ts        # AES-256-GCM for token storage
-│       └── server.ts
+│       └── server.ts                  # MCP server + OAuth callback + REST API for gateway
 │
 ├── packages/messaging/                # @ll5/messaging — PG-backed MCP [not deployed]
 │   └── src/
@@ -107,7 +108,7 @@ ll5/
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
 │   └── src/
 │       ├── app/(auth)/login/          # Login page + server action
-│       ├── app/(user)/                # User pages: dashboard, actions, projects, inbox, shopping, locations, people, places, knowledge, horizons, profile
+│       ├── app/(user)/                # User pages: dashboard (insights panel), calendar, actions, projects, inbox, shopping, locations, people, places, knowledge, horizons, profile
 │       ├── app/(admin)/               # Admin pages: health, users, tools
 │       ├── app/api/chat/              # Proxy routes: messages, conversations
 │       ├── components/                # Nav, cards, chat widget, shadcn/ui primitives

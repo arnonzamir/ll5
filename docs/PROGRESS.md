@@ -6,7 +6,7 @@ Current state of the LL5 personal assistant system.
 
 ## Current Status
 
-**Phase:** Core system operational, dashboard live, chat bridge working
+**Phase:** Calendar integration complete, google MCP ready to deploy
 
 ### Deployed Services (Coolify @ 95.216.23.208)
 
@@ -24,7 +24,7 @@ Current state of the LL5 personal assistant system.
 
 | Service | Notes |
 |---------|-------|
-| google MCP | Needs Google OAuth credentials |
+| google MCP | OAuth creds ready, needs Coolify service + deploy |
 | messaging MCP | Needs Evolution API URL |
 
 ### Client (ll5-run)
@@ -45,12 +45,13 @@ Current state of the LL5 personal assistant system.
 | personal-knowledge | 17 |
 | gtd | 14 + 3 chat |
 | awareness | 8 |
-| google | 9 |
+| google | 12 (9 + 3 tickler) |
 | messaging | 8 |
-| **Total** | **59** |
+| **Total** | **62** |
 
 ## Recent Changes
 
+- 2026-03-29: Calendar integration: Google MCP with OAuth callback, tickler calendar, periodic review, dashboard calendar page + insights panel
 - 2026-03-29: Location map page with Leaflet, clustering, timeline slider, trail visualization
 - 2026-03-29: Shopping list fixed to parse grouped MCP response
 - 2026-03-29: All dashboard pages: search, edit/delete, profile page
@@ -65,6 +66,9 @@ Current state of the LL5 personal assistant system.
 
 ## Known Issues
 
+- Google MCP needs Coolify service creation + deploy (code ready, OAuth creds in Coolify env)
+- Need to add redirect URI `https://mcp-google.noninoni.click/oauth/callback` in Google Cloud Console
+- Production ES index `ll5_awareness_calendar_events` may have old field names (start/end vs start_time/end_time) — delete and recreate index on deploy
 - Dashboard MCP client sometimes gets stale responses (needs cache-busting)
 - FileChanged hook replaced by Channel MCP (channel approach works reliably)
 - Gateway SSE listener needs reconnect-on-error improvement

@@ -1,6 +1,7 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import pg from 'pg';
+import { google } from 'googleapis';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { loadEnv } from './utils/env.js';
@@ -10,6 +11,8 @@ import { runMigrations } from './utils/migration-runner.js';
 import { PostgresOAuthTokenRepository } from './repositories/postgres/oauth-token.repository.js';
 import { PostgresCalendarConfigRepository } from './repositories/postgres/calendar-config.repository.js';
 import { registerAllTools } from './tools/index.js';
+import { pendingStates } from './tools/auth.js';
+import { createOAuth2Client, getAuthenticatedClient } from './utils/google-client.js';
 
 const { Pool } = pg;
 
@@ -107,6 +110,211 @@ export async function startServer(): Promise<void> {
       }
     } catch {
       res.status(503).json({ status: 'unhealthy', service: 'll5-google' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // OAuth callback endpoint (no auth — Google redirects here)
+  // ---------------------------------------------------------------------------
+  app.get('/oauth/callback', async (req: Request, res: Response) => {
+    const { code, state, error } = req.query as { code?: string; state?: string; error?: string };
+
+    if (error) {
+      res.status(400).send(`<html><body><h2>Authorization failed</h2><p>${error}</p></body></html>`);
+      return;
+    }
+
+    if (!code || !state) {
+      res.status(400).send('<html><body><h2>Missing code or state parameter</h2></body></html>');
+      return;
+    }
+
+    // Validate CSRF state
+    const pending = pendingStates.get(state);
+    if (!pending) {
+      res.status(400).send('<html><body><h2>Invalid or expired state token</h2><p>Please try the OAuth flow again.</p></body></html>');
+      return;
+    }
+    pendingStates.delete(state);
+
+    try {
+      const oauth2Client = createOAuth2Client(googleConfig);
+      const { tokens } = await oauth2Client.getToken(code);
+
+      if (!tokens.access_token || !tokens.refresh_token) {
+        res.status(400).send('<html><body><h2>Missing tokens</h2><p>Ensure prompt=consent is set. Try again.</p></body></html>');
+        return;
+      }
+
+      const expiresAt = tokens.expiry_date ? new Date(tokens.expiry_date) : new Date(Date.now() + 3600_000);
+      const grantedScopes = tokens.scope ? tokens.scope.split(' ') : pending.scopes;
+
+      await tokenRepo.store(pending.userId, {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        token_type: tokens.token_type ?? 'Bearer',
+        expires_at: expiresAt,
+        scopes: grantedScopes,
+      });
+
+      let email = '';
+      try {
+        oauth2Client.setCredentials(tokens);
+        const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+        const userInfo = await oauth2.userinfo.get();
+        email = userInfo.data.email ?? '';
+      } catch {
+        logger.warn('Could not fetch user email after OAuth callback');
+      }
+
+      logger.info('OAuth callback successful', { userId: pending.userId, email });
+
+      res.send(`<html><body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0">
+        <div style="text-align:center">
+          <h2>Google connected!</h2>
+          <p>Account: ${email || 'connected'}</p>
+          <p>Scopes: ${grantedScopes.length} granted</p>
+          <p style="color:#666">You can close this tab.</p>
+        </div>
+      </body></html>`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('OAuth callback token exchange failed', { error: message });
+      res.status(500).send(`<html><body><h2>Token exchange failed</h2><p>${message}</p></body></html>`);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // REST API endpoints (for gateway consumption — same auth as /mcp)
+  // ---------------------------------------------------------------------------
+
+  // GET /api/events — returns calendar events across enabled calendars
+  app.get('/api/events', authMiddleware, async (req: Request, res: Response) => {
+    const userId = env.userId;
+    const { from, to, calendar_id } = req.query as { from?: string; to?: string; calendar_id?: string };
+
+    try {
+      const auth = await getAuthenticatedClient(googleConfig, tokenRepo, userId);
+      const calendarApi = google.calendar({ version: 'v3', auth });
+
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+
+      const timeMin = from ?? startOfDay.toISOString();
+      const timeMax = to ?? endOfDay.toISOString();
+
+      // Determine which calendars to query
+      let calendarIds: string[];
+      if (calendar_id) {
+        calendarIds = [calendar_id];
+      } else {
+        calendarIds = await calendarConfigRepo.getEnabledCalendarIds(userId);
+        if (calendarIds.length === 0) {
+          calendarIds = ['primary'];
+        }
+      }
+
+      const localConfigs = await calendarConfigRepo.list(userId);
+      const configMap = new Map(localConfigs.map((c) => [c.calendar_id, c]));
+
+      const allEvents: Record<string, unknown>[] = [];
+
+      for (const calId of calendarIds) {
+        try {
+          const response = await calendarApi.events.list({
+            calendarId: calId,
+            timeMin,
+            timeMax,
+            maxResults: 100,
+            singleEvents: true,
+            orderBy: 'startTime',
+          });
+
+          const config = configMap.get(calId);
+          for (const event of response.data.items ?? []) {
+            allEvents.push({
+              event_id: event.id ?? '',
+              calendar_id: calId,
+              calendar_name: config?.calendar_name ?? calId,
+              calendar_color: config?.color ?? '#4285f4',
+              title: event.summary ?? '(no title)',
+              start: event.start?.dateTime ?? event.start?.date ?? '',
+              end: event.end?.dateTime ?? event.end?.date ?? '',
+              all_day: !event.start?.dateTime,
+              location: event.location ?? null,
+              description: event.description ?? null,
+              attendees: (event.attendees ?? []).map((a) => ({
+                email: a.email ?? '',
+                name: a.displayName ?? null,
+                response_status: a.responseStatus ?? 'needsAction',
+              })),
+              html_link: event.htmlLink ?? '',
+              status: event.status ?? 'confirmed',
+              recurring: !!event.recurringEventId,
+            });
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn(`Failed to fetch events from calendar ${calId}`, { error: message });
+        }
+      }
+
+      allEvents.sort((a, b) => String(a.start ?? '').localeCompare(String(b.start ?? '')));
+      res.json({ events: allEvents, total: allEvents.length });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('GET /api/events failed', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // GET /api/ticklers — returns tickler calendar events
+  app.get('/api/ticklers', authMiddleware, async (req: Request, res: Response) => {
+    const userId = env.userId;
+    const { from, to } = req.query as { from?: string; to?: string };
+
+    try {
+      // Find the tickler calendar
+      const ticklerConfig = await calendarConfigRepo.getByRole(userId, 'tickler');
+
+      if (!ticklerConfig) {
+        res.json({ events: [], total: 0 });
+        return;
+      }
+
+      const auth = await getAuthenticatedClient(googleConfig, tokenRepo, userId);
+      const calendarApi = google.calendar({ version: 'v3', auth });
+
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const timeMin = from ?? startOfDay.toISOString();
+      const timeMax = to ?? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      const response = await calendarApi.events.list({
+        calendarId: ticklerConfig.calendar_id,
+        timeMin,
+        timeMax,
+        maxResults: 100,
+        singleEvents: true,
+        orderBy: 'startTime',
+      });
+
+      const events = (response.data.items ?? []).map((event) => ({
+        event_id: event.id ?? '',
+        title: event.summary ?? '',
+        start: event.start?.dateTime ?? event.start?.date ?? '',
+        end: event.end?.dateTime ?? event.end?.date ?? '',
+        all_day: !event.start?.dateTime,
+        description: event.description ?? null,
+        status: event.status ?? 'confirmed',
+      }));
+
+      res.json({ events, total: events.length });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('GET /api/ticklers failed', { error: message });
+      res.status(500).json({ error: message });
     }
   });
 
