@@ -90,6 +90,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `auth_users` — user accounts with PIN hash and role
 - `chat_messages` — message queue with status lifecycle
 - `notify_chat_message` — PG trigger for LISTEN/NOTIFY on new inbound messages
+- Channel constraint includes: web, telegram, whatsapp, cli, android, system
 
 **Elasticsearch** (8.15.0, 10 indices):
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps

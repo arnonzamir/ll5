@@ -89,7 +89,7 @@ ll5/
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
 │       ├── processors/                # GPS geocoding, IM processing, calendar (with dedup), notable events
 │       ├── scheduler/                 # Calendar sync (30min) + periodic review (2h)
-│       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger
+│       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, channel constraints
 │       └── server.ts                  # Express app: webhooks, auth, chat, health, schedulers
 │
 ├── packages/google/                   # @ll5/google — PG-backed MCP [ready to deploy]

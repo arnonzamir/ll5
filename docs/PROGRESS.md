@@ -70,7 +70,7 @@ Current state of the LL5 personal assistant system.
 ## Known Issues
 
 - Google MCP deployed with dual auth (ll5 tokens + API key), needs OAuth flow to connect Google account
-- Need to add redirect URI `https://mcp-google.noninoni.click/oauth/callback` in Google Cloud Console
+- Fixed gateway migration 004 constraint (was missing 'system' channel, causing crash on restart)
 - Production ES index `ll5_awareness_calendar_events` may have old field names (start/end vs start_time/end_time) — delete and recreate index on deploy
 - Dashboard MCP client sometimes gets stale responses (needs cache-busting)
 - FileChanged hook replaced by Channel MCP (channel approach works reliably)
