@@ -21,6 +21,7 @@ export interface CalendarEvent {
   start: string;
   end: string;
   all_day?: boolean;
+  source?: string;
   location?: string | null;
   description?: string | null;
   attendees?: Array<{ email: string; name?: string | null; response_status?: string }>;

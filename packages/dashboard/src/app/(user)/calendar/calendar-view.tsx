@@ -13,6 +13,7 @@ import {
   X,
   RefreshCw,
   Settings,
+  Database,
 } from "lucide-react";
 import {
   fetchEvents,
@@ -41,7 +42,6 @@ function addDays(d: Date, n: number): Date {
 function startOfWeek(d: Date): Date {
   const r = startOfDay(d);
   const day = r.getDay();
-  // Monday-based week
   const diff = day === 0 ? -6 : 1 - day;
   r.setDate(r.getDate() + diff);
   return r;
@@ -61,9 +61,9 @@ function formatDateISO(d: Date): string {
 
 function formatTime(d: Date): string {
   return d.toLocaleTimeString("en-US", {
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
-    hour12: true,
+    hour12: false,
   });
 }
 
@@ -79,6 +79,12 @@ function isToday(d: Date): boolean {
   return isSameDay(d, new Date());
 }
 
+function spansDay(ev: NormalizedEvent, day: Date): boolean {
+  const dayStart = startOfDay(day);
+  const dayEnd = addDays(dayStart, 1);
+  return ev.start < dayEnd && ev.end > dayStart;
+}
+
 // --- Types ---
 
 interface NormalizedEvent {
@@ -90,11 +96,23 @@ interface NormalizedEvent {
   end: Date;
   allDay: boolean;
   isTickler: boolean;
+  isHoliday: boolean;
+  calendarName?: string;
+  calendarColor?: string;
+  source?: string;
   attendees?: Array<{ email: string; name?: string; response_status?: string }>;
   htmlLink?: string;
 }
 
 // --- Normalize data ---
+
+const HOLIDAY_KEYWORDS = ["holiday", "חופש", "חג", "vacation", "school"];
+
+function isHolidayCalendar(calName?: string): boolean {
+  if (!calName) return false;
+  const lower = calName.toLowerCase();
+  return HOLIDAY_KEYWORDS.some((k) => lower.includes(k));
+}
 
 function normalizeEvents(
   events: CalendarEvent[],
@@ -103,7 +121,8 @@ function normalizeEvents(
   const normalized: NormalizedEvent[] = [];
 
   for (const ev of events) {
-    const allDay = ev.all_day === true || (ev.start.length <= 10 && ev.end.length <= 10);
+    const allDay =
+      ev.all_day === true || (ev.start.length <= 10 && ev.end.length <= 10);
     const start = allDay ? new Date(ev.start + "T00:00:00") : new Date(ev.start);
     const end = allDay ? new Date(ev.end + "T23:59:59") : new Date(ev.end);
 
@@ -116,20 +135,28 @@ function normalizeEvents(
       end,
       allDay,
       isTickler: false,
+      isHoliday: isHolidayCalendar(ev.calendar_name),
+      calendarName: ev.calendar_name,
+      calendarColor: ev.calendar_color,
+      source: ev.source,
       attendees: ev.attendees?.map((a) => ({
         email: a.email,
         name: a.name ?? undefined,
-        response_status: a.response_status,
+        response_status: a.response_status ?? undefined,
       })),
       htmlLink: ev.html_link,
     });
   }
 
   for (const t of ticklers) {
-    if (t.status === 'cancelled') continue;
+    if (t.status === "cancelled") continue;
     const allDay = t.all_day !== false || t.start.length <= 10;
     const start = allDay ? new Date(t.start + "T00:00:00") : new Date(t.start);
-    const end = t.end ? (allDay ? new Date(t.end + "T23:59:59") : new Date(t.end)) : start;
+    const end = t.end
+      ? allDay
+        ? new Date(t.end + "T23:59:59")
+        : new Date(t.end)
+      : start;
     normalized.push({
       id: `tickler-${t.event_id}`,
       title: t.title,
@@ -138,6 +165,8 @@ function normalizeEvents(
       end,
       allDay,
       isTickler: true,
+      isHoliday: false,
+      source: "tickler",
     });
   }
 
@@ -148,10 +177,33 @@ function normalizeEvents(
 
 const DAY_START_HOUR = 7;
 const DAY_END_HOUR = 22;
-const HOUR_HEIGHT = 60; // px per hour
+const HOUR_HEIGHT = 60;
 const TOTAL_HOURS = DAY_END_HOUR - DAY_START_HOUR;
 
-// --- Components ---
+// --- Hover tooltip ---
+
+function EventTooltip({ event }: { event: NormalizedEvent }) {
+  return (
+    <div className="absolute z-30 left-full ml-2 top-0 w-56 rounded-lg border border-gray-200 bg-white shadow-lg p-3 pointer-events-none">
+      <p className="text-sm font-medium truncate">{event.title}</p>
+      <p className="text-xs text-gray-500 mt-1">
+        {event.allDay
+          ? "All day"
+          : `${formatTime(event.start)} \u2013 ${formatTime(event.end)}`}
+      </p>
+      {event.location && (
+        <p className="text-xs text-gray-500 mt-0.5 truncate">{event.location}</p>
+      )}
+      {event.calendarName && (
+        <p className="text-[10px] text-gray-400 mt-1 truncate">
+          {event.calendarName}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// --- Full detail popover ---
 
 function EventPopover({
   event,
@@ -164,7 +216,10 @@ function EventPopover({
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node)
+      ) {
         onClose();
       }
     }
@@ -186,9 +241,14 @@ function EventPopover({
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2">
               <div
-                className={`h-3 w-3 rounded-full shrink-0 ${
-                  event.isTickler ? "bg-amber-500" : "bg-primary"
-                }`}
+                className="h-3 w-3 rounded-full shrink-0"
+                style={{
+                  backgroundColor: event.isTickler
+                    ? "#f59e0b"
+                    : event.isHoliday
+                    ? "#10b981"
+                    : event.calendarColor ?? "#3b82f6",
+                }}
               />
               <CardTitle className="text-base">{event.title}</CardTitle>
             </div>
@@ -207,8 +267,8 @@ function EventPopover({
               <span>All day &middot; {formatDate(event.start)}</span>
             ) : (
               <span>
-                {formatDate(event.start)} &middot; {formatTime(event.start)} &ndash;{" "}
-                {formatTime(event.end)}
+                {formatDate(event.start)} &middot; {formatTime(event.start)}{" "}
+                &ndash; {formatTime(event.end)}
               </span>
             )}
           </div>
@@ -239,47 +299,134 @@ function EventPopover({
             </p>
           )}
 
-          {event.isTickler && (
-            <Badge variant="warning" className="text-xs">
-              Tickler
-            </Badge>
-          )}
+          {/* Source info */}
+          <div className="flex items-center gap-2 text-xs text-gray-400 border-t border-gray-100 pt-3">
+            <Database className="h-3 w-3" />
+            <span>
+              {event.calendarName ?? "Unknown calendar"}
+              {event.source ? ` \u00b7 source: ${event.source}` : ""}
+            </span>
+            {event.isTickler && (
+              <Badge variant="warning" className="text-[10px] ml-auto">
+                Tickler
+              </Badge>
+            )}
+            {event.isHoliday && (
+              <Badge variant="success" className="text-[10px] ml-auto">
+                Holiday
+              </Badge>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>
   );
 }
 
-function AllDaySection({
+// --- Holiday/all-day banner at top ---
+
+function HolidayBanner({
   events,
+  date,
   onSelect,
 }: {
   events: NormalizedEvent[];
+  date: Date;
   onSelect: (e: NormalizedEvent) => void;
 }) {
-  if (events.length === 0) return null;
+  const holidays = events.filter((e) => e.isHoliday && e.allDay && spansDay(e, date));
+  if (holidays.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap gap-1.5 rounded-lg border border-gray-200 bg-gray-50 p-2 mb-2">
-      <span className="text-xs text-gray-400 font-medium self-center mr-1">
-        ALL DAY
-      </span>
-      {events.map((ev) => (
+    <div className="flex flex-wrap gap-1.5 rounded-t-lg bg-emerald-50 border border-emerald-200 px-3 py-1.5 mb-0">
+      {holidays.map((h) => (
         <button
-          key={ev.id}
-          onClick={() => onSelect(ev)}
-          className={`text-xs px-2 py-1 rounded-md border font-medium truncate max-w-[200px] transition-colors cursor-pointer ${
-            ev.isTickler
-              ? "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
-              : "bg-primary/5 border-primary/30 text-primary hover:bg-primary/10"
-          }`}
+          key={h.id}
+          onClick={() => onSelect(h)}
+          className="text-[11px] text-emerald-700 font-medium hover:underline cursor-pointer"
         >
-          {ev.title}
+          {h.title}
         </button>
       ))}
     </div>
   );
 }
+
+// --- All-day section (non-holiday) ---
+
+function AllDaySection({
+  events,
+  date,
+  onSelect,
+}: {
+  events: NormalizedEvent[];
+  date: Date;
+  onSelect: (e: NormalizedEvent) => void;
+}) {
+  const allDay = events.filter(
+    (e) => e.allDay && !e.isHoliday && spansDay(e, date)
+  );
+  if (allDay.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1.5 border border-gray-200 border-t-0 bg-gray-50 px-3 py-1.5">
+      <span className="text-[10px] text-gray-400 font-medium self-center mr-1 uppercase">
+        All day
+      </span>
+      {allDay.map((ev) => (
+        <HoverEvent key={ev.id} event={ev} onSelect={onSelect}>
+          <span
+            className={`text-xs px-2 py-0.5 rounded-md border font-medium truncate max-w-[200px] cursor-pointer ${
+              ev.isTickler
+                ? "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
+                : "bg-primary/5 border-primary/30 text-primary hover:bg-primary/10"
+            }`}
+          >
+            {ev.title}
+          </span>
+        </HoverEvent>
+      ))}
+    </div>
+  );
+}
+
+// --- Hover wrapper for events ---
+
+function HoverEvent({
+  event,
+  onSelect,
+  children,
+}: {
+  event: NormalizedEvent;
+  onSelect: (e: NormalizedEvent) => void;
+  children: React.ReactNode;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => {
+        timeoutRef.current = setTimeout(() => setHovered(true), 400);
+      }}
+      onMouseLeave={() => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        setHovered(false);
+      }}
+      onClick={() => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        setHovered(false);
+        onSelect(event);
+      }}
+    >
+      {children}
+      {hovered && <EventTooltip event={event} />}
+    </div>
+  );
+}
+
+// --- Day timeline ---
 
 function DayTimeline({
   date,
@@ -291,10 +438,7 @@ function DayTimeline({
   onSelect: (e: NormalizedEvent) => void;
 }) {
   const dayEvents = events.filter(
-    (e) => !e.allDay && isSameDay(e.start, date)
-  );
-  const allDayEvents = events.filter(
-    (e) => e.allDay && isSameDay(e.start, date)
+    (e) => !e.allDay && spansDay(e, date)
   );
 
   const hours = Array.from(
@@ -304,11 +448,15 @@ function DayTimeline({
 
   return (
     <div>
-      <AllDaySection events={allDayEvents} onSelect={onSelect} />
+      <HolidayBanner events={events} date={date} onSelect={onSelect} />
+      <AllDaySection events={events} date={date} onSelect={onSelect} />
 
-      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-        <div className="relative" style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}>
-          {/* Hour grid lines */}
+      <div className="rounded-b-lg border border-gray-200 bg-white overflow-hidden">
+        <div
+          className="relative"
+          style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}
+        >
+          {/* Hour grid */}
           {hours.map((hour) => {
             const top = (hour - DAY_START_HOUR) * HOUR_HEIGHT;
             return (
@@ -318,40 +466,35 @@ function DayTimeline({
                 style={{ top }}
               >
                 <span className="absolute -top-2.5 left-2 text-xs text-gray-400 bg-white px-1">
-                  {hour === 0
-                    ? "12 AM"
-                    : hour < 12
-                    ? `${hour} AM`
-                    : hour === 12
-                    ? "12 PM"
-                    : `${hour - 12} PM`}
+                  {`${hour}:00`}
                 </span>
               </div>
             );
           })}
 
-          {/* Current time indicator */}
-          {isToday(date) && (() => {
-            const now = new Date();
-            const nowHour = now.getHours() + now.getMinutes() / 60;
-            if (nowHour >= DAY_START_HOUR && nowHour <= DAY_END_HOUR) {
-              const top = (nowHour - DAY_START_HOUR) * HOUR_HEIGHT;
-              return (
-                <div
-                  className="absolute left-0 right-0 z-10 pointer-events-none"
-                  style={{ top }}
-                >
-                  <div className="flex items-center">
-                    <div className="h-2.5 w-2.5 rounded-full bg-red-500 -ml-1" />
-                    <div className="flex-1 h-px bg-red-500" />
+          {/* Current time */}
+          {isToday(date) &&
+            (() => {
+              const now = new Date();
+              const nowHour = now.getHours() + now.getMinutes() / 60;
+              if (nowHour >= DAY_START_HOUR && nowHour <= DAY_END_HOUR) {
+                const top = (nowHour - DAY_START_HOUR) * HOUR_HEIGHT;
+                return (
+                  <div
+                    className="absolute left-0 right-0 z-10 pointer-events-none"
+                    style={{ top }}
+                  >
+                    <div className="flex items-center">
+                      <div className="h-2.5 w-2.5 rounded-full bg-red-500 -ml-1" />
+                      <div className="flex-1 h-px bg-red-500" />
+                    </div>
                   </div>
-                </div>
-              );
-            }
-            return null;
-          })()}
+                );
+              }
+              return null;
+            })()}
 
-          {/* Events positioned absolutely */}
+          {/* Timed events */}
           {dayEvents.map((ev) => {
             const startHour =
               ev.start.getHours() + ev.start.getMinutes() / 60;
@@ -364,24 +507,24 @@ function DayTimeline({
               24
             );
 
+            const color = ev.isTickler
+              ? "bg-amber-50 border-amber-500 text-amber-900"
+              : "bg-primary/5 border-primary text-gray-900";
+
             return (
-              <button
-                key={ev.id}
-                onClick={() => onSelect(ev)}
-                className={`absolute left-14 right-2 rounded-md border-l-[3px] px-2 py-1 text-left transition-opacity hover:opacity-80 cursor-pointer overflow-hidden ${
-                  ev.isTickler
-                    ? "bg-amber-50 border-amber-500 text-amber-900"
-                    : "bg-primary/5 border-primary text-gray-900"
-                }`}
-                style={{ top, height }}
-              >
-                <p className="text-xs font-medium truncate">{ev.title}</p>
-                {height >= 40 && (
-                  <p className="text-[11px] text-gray-500 truncate">
-                    {formatTime(ev.start)} &ndash; {formatTime(ev.end)}
-                  </p>
-                )}
-              </button>
+              <HoverEvent key={ev.id} event={ev} onSelect={onSelect}>
+                <div
+                  className={`absolute left-14 right-2 rounded-md border-l-[3px] px-2 py-1 text-left transition-opacity hover:opacity-80 cursor-pointer overflow-hidden ${color}`}
+                  style={{ top, height }}
+                >
+                  <p className="text-xs font-medium truncate">{ev.title}</p>
+                  {height >= 40 && (
+                    <p className="text-[11px] text-gray-500 truncate">
+                      {formatTime(ev.start)} &ndash; {formatTime(ev.end)}
+                    </p>
+                  )}
+                </div>
+              </HoverEvent>
             );
           })}
         </div>
@@ -389,6 +532,8 @@ function DayTimeline({
     </div>
   );
 }
+
+// --- Week grid ---
 
 function WeekGrid({
   weekStart,
@@ -401,60 +546,97 @@ function WeekGrid({
 }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
-  return (
-    <div className="grid grid-cols-7 gap-px rounded-lg border border-gray-200 bg-gray-200 overflow-hidden">
-      {days.map((day) => {
-        const dayStr = formatDateISO(day);
-        const dayEvents = events.filter((e) => {
-          const evDay = formatDateISO(e.start);
-          return evDay === dayStr;
-        });
-        const today = isToday(day);
+  // Collect holidays spanning the week for a top banner
+  const weekHolidays = events.filter(
+    (e) =>
+      e.isHoliday &&
+      e.allDay &&
+      days.some((d) => spansDay(e, d))
+  );
+  const uniqueHolidays = weekHolidays.filter(
+    (h, i, arr) => arr.findIndex((x) => x.id === h.id) === i
+  );
 
-        return (
-          <div
-            key={dayStr}
-            className={`bg-white min-h-[140px] p-1.5 ${
-              today ? "bg-primary/[0.02]" : ""
-            }`}
-          >
-            <div className="flex items-center gap-1 mb-1">
-              <span
-                className={`text-xs font-medium ${
-                  today
-                    ? "bg-primary text-white rounded-full h-5 w-5 flex items-center justify-center"
-                    : "text-gray-500"
-                }`}
-              >
-                {day.getDate()}
-              </span>
-              <span className="text-[10px] text-gray-400 uppercase">
-                {day.toLocaleDateString("en-US", { weekday: "short" })}
-              </span>
-            </div>
-            <div className="space-y-0.5">
-              {dayEvents.map((ev) => (
-                <button
-                  key={ev.id}
-                  onClick={() => onSelect(ev)}
-                  className={`w-full text-left text-[11px] leading-tight px-1 py-0.5 rounded truncate transition-opacity hover:opacity-80 cursor-pointer ${
-                    ev.isTickler
-                      ? "bg-amber-50 text-amber-800 border border-amber-200"
-                      : "bg-primary/5 text-gray-800 border border-primary/20"
+  return (
+    <div>
+      {/* Week holiday banner */}
+      {uniqueHolidays.length > 0 && (
+        <div className="flex flex-wrap gap-2 rounded-t-lg bg-emerald-50 border border-emerald-200 px-3 py-1.5 mb-0">
+          {uniqueHolidays.map((h) => (
+            <button
+              key={h.id}
+              onClick={() => onSelect(h)}
+              className="text-[11px] text-emerald-700 font-medium hover:underline cursor-pointer"
+            >
+              {h.title}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div
+        className={`grid grid-cols-7 gap-px ${
+          uniqueHolidays.length > 0
+            ? "rounded-b-lg border border-t-0"
+            : "rounded-lg border"
+        } border-gray-200 bg-gray-200 overflow-hidden`}
+      >
+        {days.map((day) => {
+          const dayStr = formatDateISO(day);
+          const dayEvents = events.filter(
+            (e) => !e.isHoliday && spansDay(e, day)
+          );
+          const today = isToday(day);
+
+          return (
+            <div
+              key={dayStr}
+              className={`bg-white min-h-[140px] p-1.5 ${
+                today ? "bg-primary/[0.02]" : ""
+              }`}
+            >
+              <div className="flex items-center gap-1 mb-1">
+                <span
+                  className={`text-xs font-medium ${
+                    today
+                      ? "bg-primary text-white rounded-full h-5 w-5 flex items-center justify-center"
+                      : "text-gray-500"
                   }`}
                 >
-                  {!ev.allDay && (
-                    <span className="text-gray-400 mr-0.5">
-                      {formatTime(ev.start).replace(":00", "").toLowerCase()}
-                    </span>
-                  )}
-                  {ev.title}
-                </button>
-              ))}
+                  {day.getDate()}
+                </span>
+                <span className="text-[10px] text-gray-400 uppercase">
+                  {day.toLocaleDateString("en-US", { weekday: "short" })}
+                </span>
+              </div>
+              <div className="space-y-0.5">
+                {dayEvents.map((ev) => (
+                  <button
+                    key={ev.id}
+                    onClick={() => onSelect(ev)}
+                    className={`w-full text-left text-[11px] leading-tight px-1 py-0.5 rounded truncate transition-opacity hover:opacity-80 cursor-pointer ${
+                      ev.allDay
+                        ? ev.isTickler
+                          ? "bg-amber-50 text-amber-800 border border-amber-200"
+                          : "bg-primary/10 text-primary border border-primary/20 font-medium"
+                        : ev.isTickler
+                        ? "bg-amber-50 text-amber-800 border border-amber-200"
+                        : "bg-primary/5 text-gray-800 border border-primary/20"
+                    }`}
+                  >
+                    {!ev.allDay && (
+                      <span className="text-gray-400 mr-0.5">
+                        {formatTime(ev.start)}
+                      </span>
+                    )}
+                    {ev.title}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -466,10 +648,17 @@ function CalendarSettings({
   onUpdate,
 }: {
   configs: CalendarConfig[];
-  onUpdate: (calendarId: string, mode: "ignore" | "read" | "readwrite") => void;
+  onUpdate: (
+    calendarId: string,
+    mode: "ignore" | "read" | "readwrite"
+  ) => void;
 }) {
   const modes = ["ignore", "read", "readwrite"] as const;
-  const modeLabels = { ignore: "Ignore", read: "Read", readwrite: "Read/Write" };
+  const modeLabels = {
+    ignore: "Ignore",
+    read: "Read",
+    readwrite: "Read/Write",
+  };
   const modeColors = {
     ignore: "text-gray-400",
     read: "text-blue-600",
@@ -497,7 +686,10 @@ function CalendarSettings({
                 />
                 <span className="text-sm truncate">{cal.name}</span>
                 {cal.role === "tickler" && (
-                  <Badge variant="warning" className="text-[10px] px-1.5 py-0">
+                  <Badge
+                    variant="warning"
+                    className="text-[10px] px-1.5 py-0"
+                  >
                     tickler
                   </Badge>
                 )}
@@ -545,50 +737,44 @@ export function CalendarView() {
   const [calConfigs, setCalConfigs] = useState<CalendarConfig[]>([]);
   const [isPending, startTransition] = useTransition();
 
-  // Load calendar configs on mount
   useEffect(() => {
     void fetchCalendarConfigs().then(setCalConfigs);
   }, []);
 
   const handleAccessModeUpdate = useCallback(
     (calendarId: string, mode: "ignore" | "read" | "readwrite") => {
-      // Optimistic update
       setCalConfigs((prev) =>
         prev.map((c) =>
           c.calendar_id === calendarId ? { ...c, access_mode: mode } : c
         )
       );
-      // Persist
       void updateCalendarAccessMode(calendarId, mode);
     },
     []
   );
 
-  const loadData = useCallback(
-    (date: Date, mode: ViewMode) => {
-      startTransition(async () => {
-        let from: string;
-        let to: string;
+  const loadData = useCallback((date: Date, mode: ViewMode) => {
+    startTransition(async () => {
+      let from: string;
+      let to: string;
 
-        if (mode === "day") {
-          from = formatDateISO(date);
-          to = formatDateISO(addDays(date, 1));
-        } else {
-          const ws = startOfWeek(date);
-          from = formatDateISO(ws);
-          to = formatDateISO(addDays(ws, 7));
-        }
+      if (mode === "day") {
+        from = formatDateISO(date);
+        to = formatDateISO(addDays(date, 1));
+      } else {
+        const ws = startOfWeek(date);
+        from = formatDateISO(ws);
+        to = formatDateISO(addDays(ws, 7));
+      }
 
-        const [eventsData, ticklersData] = await Promise.all([
-          fetchEvents(from, to),
-          fetchTicklers(from, to),
-        ]);
+      const [eventsData, ticklersData] = await Promise.all([
+        fetchEvents(from, to),
+        fetchTicklers(from, to),
+      ]);
 
-        setEvents(normalizeEvents(eventsData, ticklersData));
-      });
-    },
-    []
-  );
+      setEvents(normalizeEvents(eventsData, ticklersData));
+    });
+  }, []);
 
   useEffect(() => {
     loadData(currentDate, viewMode);
@@ -597,11 +783,9 @@ export function CalendarView() {
   function goToday() {
     setCurrentDate(startOfDay(new Date()));
   }
-
   function goPrev() {
     setCurrentDate((d) => addDays(d, viewMode === "day" ? -1 : -7));
   }
-
   function goNext() {
     setCurrentDate((d) => addDays(d, viewMode === "day" ? 1 : 7));
   }
@@ -640,7 +824,6 @@ export function CalendarView() {
         <Button variant="outline" size="sm" onClick={goToday}>
           Today
         </Button>
-
         <div className="flex items-center gap-0.5">
           <Button variant="ghost" size="icon" onClick={goPrev} aria-label="Previous">
             <ChevronLeft className="h-4 w-4" />
@@ -649,11 +832,9 @@ export function CalendarView() {
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
-
         <span className="text-sm font-medium text-gray-700 min-w-0 truncate">
           {headerLabel}
         </span>
-
         <div className="ml-auto flex items-center gap-1">
           <Button
             variant="ghost"
@@ -661,9 +842,10 @@ export function CalendarView() {
             onClick={() => setShowSettings((s) => !s)}
             aria-label="Calendar settings"
           >
-            <Settings className={`h-4 w-4 ${showSettings ? "text-primary" : ""}`} />
+            <Settings
+              className={`h-4 w-4 ${showSettings ? "text-primary" : ""}`}
+            />
           </Button>
-
           <Button
             variant="ghost"
             size="icon"
@@ -675,8 +857,6 @@ export function CalendarView() {
               className={`h-4 w-4 ${isPending ? "animate-spin" : ""}`}
             />
           </Button>
-
-          {/* View toggle - hidden on mobile (always day view) */}
           <div className="hidden sm:flex items-center rounded-md border border-gray-200 p-0.5">
             <button
               onClick={() => setViewMode("day")}
@@ -702,7 +882,7 @@ export function CalendarView() {
         </div>
       </div>
 
-      {/* Calendar settings panel */}
+      {/* Settings */}
       {showSettings && (
         <div className="mb-4">
           <CalendarSettings
@@ -723,7 +903,6 @@ export function CalendarView() {
         </div>
       ) : (
         <>
-          {/* Day view (always visible on mobile, toggled on desktop) */}
           <div className={viewMode === "week" ? "hidden sm:hidden" : ""}>
             <DayTimeline
               date={currentDate}
@@ -731,21 +910,13 @@ export function CalendarView() {
               onSelect={setSelectedEvent}
             />
           </div>
-
-          {/* Week view (only on desktop) */}
-          <div
-            className={
-              viewMode === "week" ? "hidden sm:block" : "hidden"
-            }
-          >
+          <div className={viewMode === "week" ? "hidden sm:block" : "hidden"}>
             <WeekGrid
               weekStart={startOfWeek(currentDate)}
               events={events}
               onSelect={setSelectedEvent}
             />
           </div>
-
-          {/* Mobile always gets day view */}
           {viewMode === "week" && (
             <div className="sm:hidden">
               <DayTimeline
@@ -758,7 +929,6 @@ export function CalendarView() {
         </>
       )}
 
-      {/* Event detail popover */}
       {selectedEvent && (
         <EventPopover
           event={selectedEvent}

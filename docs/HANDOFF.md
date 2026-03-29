@@ -28,7 +28,7 @@ Dashboard (Next.js 15)
   ├── Build ID shown in footer (git short hash, injected at build time)
   ├── /dashboard — GTD status + chat panel (50/50)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
-  ├── /calendar — day/week calendar view + settings panel for access modes
+  ├── /calendar — day/week view, hover tooltips, click details with source, holiday banner, all-day overlay, settings
   ├── /locations — Leaflet map with clustering, timeline, trail
   ├── /people, /places, /knowledge, /horizons — personal knowledge pages
   ├── /profile — user settings

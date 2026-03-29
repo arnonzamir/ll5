@@ -51,7 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
-- 2026-03-29: Fix ES calendar query: use .keyword subfield, handle null is_tickler/calendar_id
+- 2026-03-29: Calendar UI: hover tooltips, click for full details with source, holiday banner, all-day overlay
 - 2026-03-29: Unified calendar layer — reads from ES, writes through Google API + ES, renamed google→calendar MCP
 - 2026-03-29: Audit log (ES ll5_audit_log) — all mutations in GTD + calendar MCPs write audit entries
 - 2026-03-29: Checkbox completion with animated fade-out on actions + shopping list pages
