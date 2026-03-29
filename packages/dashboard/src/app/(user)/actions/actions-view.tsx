@@ -273,7 +273,12 @@ export function ActionsView() {
                   ? "opacity-0 max-h-0 overflow-hidden"
                   : "opacity-100 max-h-24"
               }`}
-              onClick={() => openEditDialog(action)}
+              onClick={(e) => {
+                // Don't open edit dialog if clicking on checkbox
+                const target = e.target as HTMLElement;
+                if (target.closest('button[role="checkbox"]')) return;
+                openEditDialog(action);
+              }}
             >
               <ActionRow
                 id={action.id}

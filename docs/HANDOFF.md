@@ -75,7 +75,7 @@ Dashboard (Next.js 15)
 | Scopes | calendar.readonly, calendar.events, gmail.readonly, gmail.send |
 | Timezone | Per-user via `set_timezone` tool, stored in `google_user_settings` table (default: Asia/Jerusalem) |
 | Tickler Calendar | "LL5 System" (auto-created on first tickler use) |
-| Calendar Access Modes | ignore (hidden), read (read-only), readwrite (full CRUD) |
+| Calendar Access Modes | ignore, read, readwrite (CRUD enforced per mode) |
 
 OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically.
 
