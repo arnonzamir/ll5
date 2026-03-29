@@ -96,7 +96,7 @@ ll5/
 │       ├── repositories/postgres/     # OAuth tokens (encrypted), calendar config (with role)
 │       ├── tools/                     # 12 tools (auth, calendar, gmail, tickler)
 │       ├── utils/encryption.ts        # AES-256-GCM for token storage
-│       └── server.ts                  # MCP server (dual auth) + OAuth callback + REST API
+│       └── server.ts                  # MCP server (dual auth, blocks OAuth discovery) + callback + REST
 │
 ├── packages/messaging/                # @ll5/messaging — PG-backed MCP [not deployed]
 │   └── src/
