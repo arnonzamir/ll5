@@ -77,6 +77,8 @@ Dashboard (Next.js 15)
 
 OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically.
 
+Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API key. Set `AUTH_SECRET` env var for token auth.
+
 ## Databases
 
 **PostgreSQL** (ll5 database, user: ll5, password: changeme123):

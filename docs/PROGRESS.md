@@ -66,7 +66,7 @@ Current state of the LL5 personal assistant system.
 
 ## Known Issues
 
-- Google MCP needs Coolify service creation + deploy (code ready, OAuth creds in Coolify env)
+- Google MCP deployed, needs OAuth flow to connect Google account
 - Need to add redirect URI `https://mcp-google.noninoni.click/oauth/callback` in Google Cloud Console
 - Production ES index `ll5_awareness_calendar_events` may have old field names (start/end vs start_time/end_time) — delete and recreate index on deploy
 - Dashboard MCP client sometimes gets stale responses (needs cache-busting)
