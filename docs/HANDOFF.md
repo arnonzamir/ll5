@@ -74,6 +74,7 @@ Dashboard (Next.js 15)
 | Encryption Key | Set in Coolify env `ENCRYPTION_KEY` (generate with `openssl rand -hex 32`) |
 | Scopes | calendar.readonly, calendar.events, gmail.readonly, gmail.send |
 | Tickler Calendar | "LL5 System" (auto-created on first tickler use) |
+| Calendar Access Modes | ignore (hidden), read (read-only), readwrite (full access) |
 
 OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically.
 

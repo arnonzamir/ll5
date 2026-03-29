@@ -2,6 +2,7 @@ import { BasePostgresRepository } from './base.repository.js';
 import type {
   CalendarConfigRepository,
   CalendarConfigRecord,
+  CalendarAccessMode,
   UpsertCalendarConfigInput,
 } from '../interfaces/calendar-config.repository.js';
 
@@ -13,6 +14,7 @@ interface CalendarConfigRow {
   enabled: boolean;
   color: string;
   role: string;
+  access_mode: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -22,9 +24,10 @@ function mapRow(row: CalendarConfigRow): CalendarConfigRecord {
     user_id: row.user_id,
     calendar_id: row.calendar_id,
     calendar_name: row.calendar_name ?? '',
-    enabled: row.enabled,
+    enabled: row.access_mode !== 'ignore',
     color: row.color ?? '#4285f4',
     role: row.role ?? 'user',
+    access_mode: (row.access_mode ?? 'read') as CalendarAccessMode,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -34,15 +37,16 @@ export class PostgresCalendarConfigRepository extends BasePostgresRepository imp
 
   async upsert(userId: string, config: UpsertCalendarConfigInput): Promise<void> {
     const role = config.role ?? 'user';
+    const accessMode = config.access_mode ?? 'read';
     await this.query(
-      `INSERT INTO google_calendar_config (user_id, calendar_id, calendar_name, color, role)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO google_calendar_config (user_id, calendar_id, calendar_name, color, role, access_mode, enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (user_id, calendar_id) DO UPDATE SET
          calendar_name = EXCLUDED.calendar_name,
          color = EXCLUDED.color,
          role = EXCLUDED.role,
          updated_at = now()`,
-      [userId, config.calendar_id, config.calendar_name, config.color, role],
+      [userId, config.calendar_id, config.calendar_name, config.color, role, accessMode, accessMode !== 'ignore'],
     );
   }
 
@@ -62,16 +66,28 @@ export class PostgresCalendarConfigRepository extends BasePostgresRepository imp
     return row ? mapRow(row) : null;
   }
 
-  async setEnabled(userId: string, calendarId: string, enabled: boolean): Promise<void> {
+  async setAccessMode(userId: string, calendarId: string, mode: CalendarAccessMode): Promise<void> {
     await this.query(
-      `UPDATE google_calendar_config SET enabled = $1, updated_at = now() WHERE user_id = $2 AND calendar_id = $3`,
-      [enabled, userId, calendarId],
+      `UPDATE google_calendar_config
+       SET access_mode = $1, enabled = $2, updated_at = now()
+       WHERE user_id = $3 AND calendar_id = $4`,
+      [mode, mode !== 'ignore', userId, calendarId],
     );
   }
 
-  async getEnabledCalendarIds(userId: string): Promise<string[]> {
+  async getReadableCalendarIds(userId: string): Promise<string[]> {
     const rows = await this.query<{ calendar_id: string }>(
-      `SELECT calendar_id FROM google_calendar_config WHERE user_id = $1 AND enabled = true`,
+      `SELECT calendar_id FROM google_calendar_config
+       WHERE user_id = $1 AND access_mode IN ('read', 'readwrite')`,
+      [userId],
+    );
+    return rows.map((r) => r.calendar_id);
+  }
+
+  async getWritableCalendarIds(userId: string): Promise<string[]> {
+    const rows = await this.query<{ calendar_id: string }>(
+      `SELECT calendar_id FROM google_calendar_config
+       WHERE user_id = $1 AND access_mode = 'readwrite'`,
       [userId],
     );
     return rows.map((r) => r.calendar_id);

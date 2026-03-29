@@ -250,7 +250,7 @@ export async function startServer(): Promise<void> {
       if (calendar_id) {
         calendarIds = [calendar_id];
       } else {
-        calendarIds = await calendarConfigRepo.getEnabledCalendarIds(userId);
+        calendarIds = await calendarConfigRepo.getReadableCalendarIds(userId);
         if (calendarIds.length === 0) {
           calendarIds = ['primary'];
         }

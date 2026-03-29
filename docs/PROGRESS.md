@@ -51,6 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-03-29: Calendar access modes: per-calendar ignore/read/readwrite with configure_calendar tool
 - 2026-03-29: Calendar integration: Google MCP with OAuth callback, tickler calendar, periodic review, dashboard calendar page + insights panel
 - 2026-03-29: Location map page with Leaflet, clustering, timeline slider, trail visualization
 - 2026-03-29: Shopping list fixed to parse grouped MCP response

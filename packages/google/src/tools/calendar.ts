@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { google } from 'googleapis';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-token.repository.js';
-import type { CalendarConfigRepository } from '../repositories/interfaces/calendar-config.repository.js';
+import type { CalendarConfigRepository, CalendarAccessMode } from '../repositories/interfaces/calendar-config.repository.js';
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
 import { logger } from '../utils/logger.js';
 
@@ -19,7 +19,7 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'list_calendars',
-    'List Google Calendars accessible to the user, including enable/disable status. Syncs from Google and merges with local config.',
+    'List Google Calendars accessible to the user, with access mode (ignore/read/readwrite). Use refresh=true to sync from Google.',
     {
       refresh: z.boolean().optional().describe('Force refresh from Google API (default: false)'),
     },
@@ -36,10 +36,9 @@ export function registerCalendarTools(
               text: JSON.stringify(cached.map((c) => ({
                 calendar_id: c.calendar_id,
                 name: c.calendar_name,
-                enabled: c.enabled,
+                access_mode: c.access_mode,
+                role: c.role,
                 color: c.color,
-                access_role: 'unknown',
-                primary: false,
               })), null, 2),
             }],
           };
@@ -51,13 +50,18 @@ export function registerCalendarTools(
       const response = await calendar.calendarList.list();
       const items = response.data.items ?? [];
 
+      // Get existing configs to preserve access_mode
+      const existingConfigs = await calendarConfigRepo.list(userId);
+      const existingMap = new Map(existingConfigs.map((c) => [c.calendar_id, c]));
+
       const calendars = [];
       for (const item of items) {
         const calId = item.id ?? '';
         const calName = item.summary ?? '';
         const color = item.backgroundColor ?? '#4285f4';
+        const existing = existingMap.get(calId);
 
-        // Upsert into local config
+        // Upsert — preserves existing access_mode via ON CONFLICT (doesn't overwrite)
         await calendarConfigRepo.upsert(userId, {
           calendar_id: calId,
           calendar_name: calName,
@@ -67,21 +71,12 @@ export function registerCalendarTools(
         calendars.push({
           calendar_id: calId,
           name: calName,
-          enabled: true, // Will be overridden below
+          access_mode: existing?.access_mode ?? 'read',
+          role: existing?.role ?? 'user',
           color,
-          access_role: item.accessRole ?? 'reader',
+          google_access_role: item.accessRole ?? 'reader',
           primary: item.primary ?? false,
         });
-      }
-
-      // Merge with local enabled/disabled state
-      const localConfigs = await calendarConfigRepo.list(userId);
-      const localMap = new Map(localConfigs.map((c) => [c.calendar_id, c]));
-      for (const cal of calendars) {
-        const local = localMap.get(cal.calendar_id);
-        if (local) {
-          cal.enabled = local.enabled;
-        }
       }
 
       return {
@@ -94,11 +89,33 @@ export function registerCalendarTools(
   );
 
   // ---------------------------------------------------------------------------
+  // configure_calendar
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'configure_calendar',
+    'Set the access mode for a Google Calendar. Use "ignore" to hide it, "read" for read-only, "readwrite" for full access. Call list_calendars first to see available calendars.',
+    {
+      calendar_id: z.string().describe('Google Calendar ID'),
+      access_mode: z.enum(['ignore', 'read', 'readwrite']).describe('Access mode: ignore (hidden), read (read-only), readwrite (full access)'),
+    },
+    async ({ calendar_id, access_mode }) => {
+      const userId = getUserId();
+      await calendarConfigRepo.setAccessMode(userId, calendar_id, access_mode as CalendarAccessMode);
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ calendar_id, access_mode, updated: true }),
+        }],
+      };
+    },
+  );
+
+  // ---------------------------------------------------------------------------
   // list_events
   // ---------------------------------------------------------------------------
   server.tool(
     'list_events',
-    'List Google Calendar events within a date range. Merges all enabled calendars or filters to a specific one.',
+    'List Google Calendar events within a date range. Queries all readable calendars (read or readwrite) unless a specific calendar_id is given.',
     {
       from: z.string().optional().describe('Start of date range (ISO 8601). Default: start of today.'),
       to: z.string().optional().describe('End of date range (ISO 8601). Default: end of today.'),
@@ -126,7 +143,7 @@ export function registerCalendarTools(
       if (calendar_id) {
         calendarIds = [calendar_id];
       } else {
-        calendarIds = await calendarConfigRepo.getEnabledCalendarIds(userId);
+        calendarIds = await calendarConfigRepo.getReadableCalendarIds(userId);
         if (calendarIds.length === 0) {
           calendarIds = ['primary'];
         }
@@ -205,7 +222,7 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'create_event',
-    'Create a new event on a Google Calendar.',
+    'Create a new event on a Google Calendar. Only works on calendars with readwrite access.',
     {
       calendar_id: z.string().optional().describe('Target calendar ID (default: primary)'),
       title: z.string().describe('Event title'),
@@ -229,6 +246,22 @@ export function registerCalendarTools(
       const calendarApi = google.calendar({ version: 'v3', auth });
 
       const calId = calendar_id ?? 'primary';
+
+      // Check write access (skip check for 'primary' which is always writable)
+      if (calId !== 'primary') {
+        const writable = await calendarConfigRepo.getWritableCalendarIds(userId);
+        if (!writable.includes(calId)) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                error: `Calendar ${calId} is not configured for readwrite access. Use configure_calendar to change.`,
+              }),
+            }],
+          };
+        }
+      }
+
       const isAllDay = all_day === true;
 
       const eventBody: Record<string, unknown> = {
