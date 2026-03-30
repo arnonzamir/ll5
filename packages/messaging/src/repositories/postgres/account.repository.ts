@@ -138,4 +138,36 @@ export class PostgresAccountRepository extends BasePostgresRepository implements
       [userId, accountId, platform, recipient, messageId ?? null],
     );
   }
+
+  async createWhatsApp(
+    userId: string,
+    data: {
+      instance_name: string;
+      api_url: string;
+      api_key_encrypted: string;
+      instance_id?: string;
+      phone_number?: string;
+    },
+  ): Promise<WhatsAppAccountRecord> {
+    const row = await this.queryOne<WhatsAppAccountRecord>(
+      `INSERT INTO messaging_whatsapp_accounts
+         (user_id, instance_name, instance_id, api_url, api_key, phone_number, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'disconnected')
+       RETURNING id, user_id, instance_name, instance_id, api_url,
+                 '***' AS api_key, phone_number, status, last_error,
+                 last_seen_at, created_at, updated_at`,
+      [
+        userId,
+        data.instance_name,
+        data.instance_id ?? '',
+        data.api_url,
+        data.api_key_encrypted,
+        data.phone_number ?? null,
+      ],
+    );
+    if (!row) {
+      throw new Error('[PostgresAccountRepository][createWhatsApp] INSERT did not return a row');
+    }
+    return row;
+  }
 }

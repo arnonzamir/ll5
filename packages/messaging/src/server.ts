@@ -1,5 +1,6 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
+import crypto from 'node:crypto';
 import pg from 'pg';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -65,7 +66,7 @@ export async function startServer(): Promise<void> {
   const accountRepo = new PostgresAccountRepository(pool, env.encryptionKey);
   const conversationRepo = new PostgresConversationRepository(pool);
 
-  const deps = { accountRepo, conversationRepo };
+  const deps = { accountRepo, conversationRepo, encryptionKey: env.encryptionKey };
 
   // ---------------------------------------------------------------------------
   // Express app with auth middleware
@@ -73,21 +74,50 @@ export async function startServer(): Promise<void> {
   const app = express();
   app.use(express.json());
 
-  // Auth middleware
+  // Auth middleware — accepts ll5 signed tokens or legacy API key
   function authMiddleware(req: Request, res: Response, next: NextFunction): void {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
       res.status(401).json({ error: 'Missing authorization' });
       return;
     }
-    const key = authHeader.slice(7);
-    if (key !== env.apiKey) {
-      res.status(401).json({ error: 'Invalid API key' });
+
+    const bearer = authHeader.slice(7);
+
+    // Try ll5 signed token first
+    if (bearer.startsWith('ll5.')) {
+      const parts = bearer.split('.');
+      if (parts.length === 3) {
+        const [, payloadB64, signature] = parts;
+        try {
+          const authSecret = process.env.AUTH_SECRET;
+          if (authSecret) {
+            const expected = crypto.createHmac('sha256', authSecret)
+              .update(payloadB64).digest('hex').slice(0, 32);
+            if (signature.length === 32 &&
+                crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
+              const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
+              if (payload.exp > Date.now() / 1000) {
+                currentUserId = payload.uid;
+                next();
+                return;
+              }
+              res.status(401).json({ error: 'token_expired' });
+              return;
+            }
+          }
+        } catch { /* fall through to legacy check */ }
+      }
+    }
+
+    // Legacy API key fallback
+    if (bearer === env.apiKey) {
+      currentUserId = env.userId;
+      next();
       return;
     }
-    // Set the current user ID for tool handlers
-    currentUserId = env.userId;
-    next();
+
+    res.status(401).json({ error: 'Invalid credentials' });
   }
 
   // Health endpoint (no auth required)

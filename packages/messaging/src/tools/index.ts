@@ -9,10 +9,12 @@ import { registerUpdatePermissionsTool } from './update-permissions.js';
 import { registerReadMessagesTool } from './read-messages.js';
 import { registerSyncWhatsAppTool } from './sync-whatsapp.js';
 import { registerGetAccountStatusTool } from './get-account-status.js';
+import { registerCreateWhatsAppAccountTool } from './create-whatsapp-account.js';
 
 export interface ToolDependencies {
   accountRepo: AccountRepository;
   conversationRepo: ConversationRepository;
+  encryptionKey: string;
 }
 
 export function registerAllTools(
@@ -28,4 +30,5 @@ export function registerAllTools(
   registerReadMessagesTool(server, deps.accountRepo, deps.conversationRepo, getUserId);
   registerSyncWhatsAppTool(server, deps.accountRepo, deps.conversationRepo, getUserId);
   registerGetAccountStatusTool(server, deps.accountRepo, getUserId);
+  registerCreateWhatsAppAccountTool(server, deps.accountRepo, deps.encryptionKey, getUserId);
 }

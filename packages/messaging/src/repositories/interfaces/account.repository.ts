@@ -69,4 +69,16 @@ export interface AccountRepository {
     recipient: string,
     messageId?: string,
   ): Promise<void>;
+
+  /** Create a WhatsApp account. API key should already be encrypted. */
+  createWhatsApp(
+    userId: string,
+    data: {
+      instance_name: string;
+      api_url: string;
+      api_key_encrypted: string;
+      instance_id?: string;
+      phone_number?: string;
+    },
+  ): Promise<WhatsAppAccountRecord>;
 }

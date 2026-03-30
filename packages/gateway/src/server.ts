@@ -12,6 +12,7 @@ import { processCalendar } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
 import { NotificationRuleMatcher } from './processors/notification-rules.js';
+import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type WebhookResponse } from './types/index.js';
 import type { EnvConfig } from './utils/env.js';
@@ -304,6 +305,27 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         status: 'error',
         message: 'Elasticsearch unavailable',
       });
+    }
+  });
+
+  // --- WhatsApp webhook from Evolution API (internal, no auth required) ---
+  app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
+    try {
+      const payload = req.body;
+
+      // Get the default user ID from webhook tokens
+      const userId = Object.values(config.webhookTokens)[0];
+      if (!userId) {
+        res.status(500).json({ error: 'No user configured' });
+        return;
+      }
+
+      await processWhatsAppWebhook(esClient, pgPool, notificationMatcher, userId, payload);
+      res.json({ status: 'ok' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[webhook/whatsapp] Processing failed', { error: message });
+      res.status(500).json({ error: message });
     }
   });
 
