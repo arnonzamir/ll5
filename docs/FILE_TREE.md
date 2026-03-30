@@ -97,7 +97,7 @@ ll5/
 │   └── src/
 │       ├── repositories/postgres/     # OAuth tokens (encrypted), calendar config, user settings
 │       ├── repositories/elasticsearch/ # Calendar event read/write (uses .keyword for text-mapped fields)
-│       ├── tools/                     # 17 tools (auth, calendar CRUD+configure+tz+sync, gmail, tickler)
+│       ├── tools/                     # 17 tools — unified calendar (CRUD, sync, tickler), Gmail, OAuth
 │       ├── utils/encryption.ts        # AES-256-GCM for token storage
 │       └── server.ts                  # MCP server (dual auth) + OAuth callback + REST API
 │

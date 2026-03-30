@@ -255,7 +255,7 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'list_events',
-    'List calendar events from the unified timeline. Reads from the aggregated cache (includes phone-enriched data). Use refresh=true to sync from Google first.',
+    'List calendar events from the unified timeline. Aggregates all sources: Google Calendar, phone-pushed events (which may have richer details than Google for some calendars), and ticklers. Results include a "source" field showing where each event came from. Use refresh=true to force a fresh sync from Google.',
     {
       from: z.string().optional().describe('Start of range (ISO 8601). Default: start of today.'),
       to: z.string().optional().describe('End of range (ISO 8601). Default: end of today.'),
@@ -363,7 +363,7 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'create_event',
-    'Create a calendar event. Only works on calendars with readwrite access. Writes to Google Calendar and updates the unified timeline.',
+    'Create a calendar event. Writes to the calendar and immediately updates the unified timeline. Only works on calendars with readwrite access.',
     {
       calendar_id: z.string().optional().describe('Target calendar ID (default: primary)'),
       title: z.string().describe('Event title'),
@@ -463,7 +463,7 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'update_event',
-    'Update a calendar event. Only provided fields are changed. Writes to Google Calendar and updates the unified timeline.',
+    'Update a calendar event. Only provided fields are changed. Writes to the calendar and immediately updates the unified timeline.',
     {
       event_id: z.string().describe('Event ID to update'),
       calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
@@ -549,7 +549,7 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'delete_event',
-    'Delete a calendar event. Only works on calendars with readwrite access.',
+    'Delete a calendar event from both the calendar and the unified timeline. Only works on calendars with readwrite access.',
     {
       event_id: z.string().describe('Event ID to delete'),
       calendar_id: z.string().optional().describe('Calendar ID (default: primary)'),
@@ -588,7 +588,7 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'sync_calendar',
-    'Sync calendar events from Google to the unified timeline. Use after initial setup or to refresh stale data.',
+    'Sync calendar events from Google to the unified timeline. The gateway also syncs automatically every 30 minutes and phone pushes arrive in real-time. Use this for a manual full refresh.',
     {
       from: z.string().optional().describe('Start of sync window (ISO 8601). Default: 7 days ago.'),
       to: z.string().optional().describe('End of sync window (ISO 8601). Default: 30 days from now.'),
