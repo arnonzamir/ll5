@@ -78,7 +78,7 @@ Dashboard (Next.js 15)
 | Encryption Key | Set in Coolify env `ENCRYPTION_KEY` (generate with `openssl rand -hex 32`) |
 | Scopes | calendar.readonly, calendar.events, gmail.readonly, gmail.send |
 | Timezone | Per-user via `set_timezone` tool, stored in `google_user_settings` table (default: Asia/Jerusalem) |
-| Tickler Calendar | "LL5 System" (auto-created on first tickler use) |
+| Tickler Calendar | "LL5 System" (role=tickler). Defaults to 08:00, pass due_time="all_day" for all-day |
 | Calendar Access Modes | ignore, read, readwrite (CRUD enforced per mode) |
 
 OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically.

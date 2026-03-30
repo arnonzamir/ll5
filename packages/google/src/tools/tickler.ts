@@ -74,7 +74,7 @@ export function registerTicklerTools(
     {
       title: z.string().describe('What to be reminded about'),
       due_date: z.string().describe('When this should surface (YYYY-MM-DD)'),
-      due_time: z.string().optional().describe('Specific time (HH:MM, 24h format). If omitted, creates an all-day event.'),
+      due_time: z.string().optional().describe('Specific time (HH:MM, 24h format). Default: 08:00. Pass "all_day" to create an all-day event.'),
       description: z.string().optional().describe('Additional context or notes'),
       category: z.string().optional().describe('Category: health, admin, planning, financial, social, errands'),
     },
@@ -85,7 +85,9 @@ export function registerTicklerTools(
       const calendarApi = google.calendar({ version: 'v3', auth });
 
       const fullTitle = category ? `[${category}] ${title}` : title;
-      const isAllDay = !due_time;
+      const effectiveTime = (!due_time || due_time === 'all_day') ? null : due_time;
+      const isAllDay = due_time === 'all_day';
+      const resolvedTime = effectiveTime ?? (isAllDay ? null : '08:00');
 
       const eventBody: Record<string, unknown> = {
         summary: fullTitle,
@@ -101,7 +103,7 @@ export function registerTicklerTools(
         eventBody.start = { date: due_date };
         eventBody.end = { date: endDateStr };
       } else {
-        const startDateTime = `${due_date}T${due_time}:00`;
+        const startDateTime = `${due_date}T${resolvedTime}:00`;
         const endDate = new Date(startDateTime);
         endDate.setMinutes(endDate.getMinutes() + 30); // 30-min default duration
         eventBody.start = { dateTime: startDateTime, timeZone: 'Asia/Jerusalem' };
