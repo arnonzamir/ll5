@@ -309,7 +309,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   });
 
   // --- WhatsApp webhook from Evolution API (internal, no auth required) ---
-  app.post('/webhook/whatsapp', async (req: Request, res: Response) => {
+  app.post('/webhook/whatsapp*', async (req: Request, res: Response) => {
     try {
       const payload = req.body;
 
