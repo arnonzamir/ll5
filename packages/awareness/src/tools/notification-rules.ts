@@ -60,11 +60,11 @@ export function registerNotificationRuleTools(
     'create_notification_rule',
     'Create a notification priority rule for phone-pushed IM messages. Immediate rules wake Claude instantly. Batch rules are reviewed periodically.',
     {
-      rule_type: z.enum(['sender', 'app', 'keyword', 'group', 'app_direct']).describe(
-        'Match type: sender (name contains), app (exact), keyword (body contains), group (group name), app_direct (app + not a group)',
+      rule_type: z.enum(['sender', 'app', 'keyword', 'group', 'app_direct', 'app_group', 'wildcard']).describe(
+        'Match type: sender (name contains), app (all from app), keyword (body contains), group (group name), app_direct (app DMs only), app_group (app group chats only), wildcard (catch-all default). Use * as match_value for broad matches.',
       ),
-      match_value: z.string().describe('Value to match against (case-insensitive)'),
-      priority: z.enum(['immediate', 'batch']).optional().describe('Priority level (default: immediate)'),
+      match_value: z.string().describe('Value to match (case-insensitive). Use * for wildcard/catch-all.'),
+      priority: z.enum(['immediate', 'batch', 'ignore']).optional().describe('Priority: immediate (wake Claude), batch (periodic review), ignore (skip entirely). Default: immediate'),
     },
     async ({ rule_type, match_value, priority }) => {
       const userId = getUserId();

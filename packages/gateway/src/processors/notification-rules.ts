@@ -56,28 +56,38 @@ export class NotificationRuleMatcher {
 
     const senderLower = message.sender.toLowerCase();
     const bodyLower = message.body.toLowerCase();
+    const appLower = message.app.toLowerCase();
+
+    // Specific rules first, wildcard/catch-all last
+    let wildcardResult: 'immediate' | 'batch' | 'ignore' | null = null;
 
     for (const rule of userRules) {
       const val = rule.match_value.toLowerCase();
       switch (rule.rule_type) {
         case 'sender':
-          if (senderLower.includes(val)) return rule.priority;
+          if (val === '*' || senderLower.includes(val)) return rule.priority;
           break;
         case 'app':
-          if (message.app.toLowerCase() === val) return rule.priority;
+          if (val === '*' || appLower === val) return rule.priority;
           break;
         case 'app_direct':
-          if (message.app.toLowerCase() === val && !message.is_group) return rule.priority;
+          if ((val === '*' || appLower === val) && !message.is_group) return rule.priority;
+          break;
+        case 'app_group':
+          if ((val === '*' || appLower === val) && message.is_group) return rule.priority;
           break;
         case 'keyword':
           if (bodyLower.includes(val)) return rule.priority;
           break;
         case 'group':
-          if (message.is_group && message.group_name?.toLowerCase().includes(val))
+          if (message.is_group && (val === '*' || message.group_name?.toLowerCase().includes(val)))
             return rule.priority;
+          break;
+        case 'wildcard':
+          wildcardResult = rule.priority;
           break;
       }
     }
-    return null;
+    return wildcardResult;
   }
 }

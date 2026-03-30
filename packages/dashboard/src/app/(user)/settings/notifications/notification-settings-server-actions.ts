@@ -8,7 +8,7 @@ import { getToken } from "@/lib/auth";
 export interface NotificationRule {
   id: string;
   user_id: string;
-  rule_type: "sender" | "app" | "keyword" | "group" | "app_direct";
+  rule_type: "sender" | "app" | "keyword" | "group" | "app_direct" | "app_group" | "wildcard";
   match_value: string;
   priority: "immediate" | "batch" | "ignore";
   created_at: string;

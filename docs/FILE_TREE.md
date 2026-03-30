@@ -90,7 +90,7 @@ ll5/
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
 │       ├── processors/                # GPS geocoding, IM processing, calendar (with dedup), notable events
 │       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch
-│       ├── processors/notification-rules.ts  # Priority rule matcher (ignore/batch/immediate)
+│       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, channels
 │       └── server.ts                  # Express app: webhooks, auth, chat, health, schedulers
 │
