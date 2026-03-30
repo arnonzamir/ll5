@@ -43,9 +43,12 @@ export async function processMessage(
     refresh: false,
   });
 
-  logger.debug('Message stored', {
+  logger.info('IM message received', {
     sender: item.sender,
     app: item.app,
+    is_group: item.is_group ?? false,
+    group_name: item.group_name ?? null,
+    bodyLength: item.body.length,
   });
 
   // Update entity status — use sender as entity_name
@@ -60,6 +63,13 @@ export async function processMessage(
       is_group: item.is_group,
       group_name: item.group_name,
     });
+
+    logger.info('Notification rule match', {
+      sender: item.sender,
+      app: item.app,
+      priority: priority ?? 'no-match',
+    });
+
     if (priority === 'immediate') {
       const truncBody = item.body.length > 200 ? item.body.slice(0, 200) + '...' : item.body;
       const groupInfo = item.is_group && item.group_name ? ` (group: ${item.group_name})` : '';
@@ -68,7 +78,10 @@ export async function processMessage(
         userId,
         `[IM Notification] ${item.sender} on ${item.app}${groupInfo}: "${truncBody}"`,
       );
+      logger.info('Immediate notification sent', { sender: item.sender, app: item.app });
     }
+  } else {
+    logger.warn('Notification rule matcher not available', { hasPgPool: !!pgPool, hasMatcher: !!matcher });
   }
 }
 
