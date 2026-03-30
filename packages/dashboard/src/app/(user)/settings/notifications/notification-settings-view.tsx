@@ -91,7 +91,7 @@ function PeopleSection({
 }: {
   senders: KnownSender[];
   rules: NotificationRule[];
-  onSetPriority: (sender: string, priority: "immediate" | "batch") => void;
+  onSetPriority: (sender: string, priority: "immediate" | "batch" | "ignore") => void;
   onClearRule: (ruleId: string) => void;
   isPending: boolean;
 }) {
@@ -179,7 +179,7 @@ function SenderRow({
 }: {
   sender: KnownSender;
   rule: NotificationRule | undefined;
-  onSetPriority: (sender: string, priority: "immediate" | "batch") => void;
+  onSetPriority: (sender: string, priority: "immediate" | "batch" | "ignore") => void;
   onClearRule: (ruleId: string) => void;
   isPending: boolean;
 }) {
@@ -220,7 +220,7 @@ function SenderRow({
               key={p}
               onClick={() => {
                 if (p === "batch" && !rule) return; // already default
-                onSetPriority(sender.sender, p as "immediate" | "batch");
+                onSetPriority(sender.sender, p);
               }}
               disabled={isPending}
               className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
@@ -412,7 +412,7 @@ export function NotificationSettingsView() {
 
   function handleSetSenderPriority(
     senderName: string,
-    priority: "immediate" | "batch"
+    priority: "immediate" | "batch" | "ignore"
   ) {
     // If a rule already exists with same priority, do nothing
     const existing = rules.find(

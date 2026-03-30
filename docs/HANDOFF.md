@@ -33,7 +33,7 @@ Dashboard (Next.js 15)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
   ├── /calendar — day/week view, hover tooltips, click details with source, holiday banner, settings
   ├── /phone-data — review phone-pushed data (locations, messages, calendar) with type/time filters
-  ├── /settings/notifications — People tab (sender priorities) + Keywords tab (keyword rules), 3 levels
+  ├── /settings/notifications — People + Keywords tabs, 3 levels: ignore/batch/immediate
   ├── /locations — Leaflet map with clustering, timeline, trail
   ├── /people, /places, /knowledge, /horizons — personal knowledge pages
   ├── /profile — user settings

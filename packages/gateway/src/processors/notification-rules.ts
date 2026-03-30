@@ -5,7 +5,7 @@ interface Rule {
   id: string;
   rule_type: string;
   match_value: string;
-  priority: 'immediate' | 'batch';
+  priority: 'immediate' | 'batch' | 'ignore';
 }
 
 export class NotificationRuleMatcher {
@@ -28,7 +28,7 @@ export class NotificationRuleMatcher {
           id: row.id,
           rule_type: row.rule_type,
           match_value: row.match_value,
-          priority: row.priority as 'immediate' | 'batch',
+          priority: row.priority as 'immediate' | 'batch' | 'ignore',
         });
         this.rules.set(row.user_id, list);
       }
@@ -49,7 +49,7 @@ export class NotificationRuleMatcher {
       is_group?: boolean;
       group_name?: string | null;
     },
-  ): Promise<'immediate' | 'batch' | null> {
+  ): Promise<'immediate' | 'batch' | 'ignore' | null> {
     await this.refresh();
     const userRules = this.rules.get(userId);
     if (!userRules || userRules.length === 0) return null;

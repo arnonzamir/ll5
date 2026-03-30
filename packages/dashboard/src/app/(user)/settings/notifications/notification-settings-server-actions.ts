@@ -10,7 +10,7 @@ export interface NotificationRule {
   user_id: string;
   rule_type: "sender" | "app" | "keyword" | "group" | "app_direct";
   match_value: string;
-  priority: "immediate" | "batch";
+  priority: "immediate" | "batch" | "ignore";
   created_at: string;
 }
 
