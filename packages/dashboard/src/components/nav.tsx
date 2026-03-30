@@ -23,21 +23,61 @@ import {
   Mail,
   Shield,
   LogOut,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logoutAction } from "@/app/(user)/logout-action";
 
-const userLinks = [
+interface NavLink {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const topLevelLinks: NavLink[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/actions", label: "Actions", icon: CheckSquare },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/inbox", label: "Inbox", icon: Inbox },
-  { href: "/shopping", label: "Shopping", icon: ShoppingCart },
-  { href: "/people", label: "People", icon: Users },
-  { href: "/locations", label: "Locations", icon: Navigation },
-  { href: "/places", label: "Places", icon: MapPin },
-  { href: "/phone-data", label: "Phone", icon: Smartphone },
+];
+
+interface NavGroup {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  items: NavLink[];
+}
+
+const navGroups: NavGroup[] = [
+  {
+    label: "Organize",
+    icon: FolderKanban,
+    items: [
+      { href: "/projects", label: "Projects", icon: FolderKanban },
+      { href: "/inbox", label: "Inbox", icon: Inbox },
+      { href: "/shopping", label: "Shopping", icon: ShoppingCart },
+    ],
+  },
+  {
+    label: "People & Places",
+    icon: Users,
+    items: [
+      { href: "/people", label: "People", icon: Users },
+      { href: "/locations", label: "Locations", icon: Navigation },
+      { href: "/places", label: "Places", icon: MapPin },
+    ],
+  },
+  {
+    label: "Data",
+    icon: Database,
+    items: [
+      { href: "/phone-data", label: "Phone", icon: Smartphone },
+    ],
+  },
+];
+
+// All links flattened for mobile menu
+const allLinks: NavLink[] = [
+  ...topLevelLinks,
+  ...navGroups.flatMap((g) => g.items),
 ];
 
 interface NavProps {
@@ -49,9 +89,11 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const groupRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -60,13 +102,30 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
       ) {
         setProfileOpen(false);
       }
+
+      // Check if click is outside all group dropdowns
+      if (openGroup) {
+        const ref = groupRefs.current[openGroup];
+        if (ref && !ref.contains(event.target as Node)) {
+          setOpenGroup(null);
+        }
+      }
     }
-    if (profileOpen) {
+    if (profileOpen || openGroup) {
       document.addEventListener("mousedown", handleClickOutside);
       return () =>
         document.removeEventListener("mousedown", handleClickOutside);
     }
-  }, [profileOpen]);
+  }, [profileOpen, openGroup]);
+
+  function isGroupActive(group: NavGroup): boolean {
+    return group.items.some((item) => pathname === item.href);
+  }
+
+  function toggleGroup(label: string) {
+    setOpenGroup((prev) => (prev === label ? null : label));
+    setProfileOpen(false);
+  }
 
   return (
     <nav className="border-b border-gray-200 bg-white">
@@ -77,7 +136,8 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
               LL5
             </Link>
             <div className="hidden md:flex items-center gap-1">
-              {userLinks.map((link) => {
+              {/* Top-level links */}
+              {topLevelLinks.map((link) => {
                 const Icon = link.icon;
                 const active = pathname === link.href;
                 return (
@@ -96,6 +156,69 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                   </Link>
                 );
               })}
+
+              {/* Grouped dropdowns */}
+              {navGroups.map((group) => {
+                const GroupIcon = group.icon;
+                const active = isGroupActive(group);
+                const isOpen = openGroup === group.label;
+
+                return (
+                  <div
+                    key={group.label}
+                    className="relative"
+                    ref={(el) => {
+                      groupRefs.current[group.label] = el;
+                    }}
+                  >
+                    <button
+                      onClick={() => toggleGroup(group.label)}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                        active || isOpen
+                          ? "bg-primary/10 text-primary"
+                          : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                      )}
+                    >
+                      <GroupIcon className="h-4 w-4" />
+                      {group.label}
+                      <ChevronDown
+                        className={cn(
+                          "h-3 w-3 transition-transform",
+                          isOpen && "rotate-180"
+                        )}
+                      />
+                    </button>
+
+                    {isOpen && (
+                      <div className="absolute left-0 mt-1 w-48 rounded-md border border-gray-200 bg-white shadow-lg z-50">
+                        <div className="py-1">
+                          {group.items.map((item) => {
+                            const ItemIcon = item.icon;
+                            const itemActive = pathname === item.href;
+                            return (
+                              <Link
+                                key={item.href}
+                                href={item.href}
+                                onClick={() => setOpenGroup(null)}
+                                className={cn(
+                                  "flex items-center gap-2 px-4 py-2 text-sm transition-colors",
+                                  itemActive
+                                    ? "bg-primary/10 text-primary font-medium"
+                                    : "text-gray-700 hover:bg-gray-100"
+                                )}
+                              >
+                                <ItemIcon className="h-4 w-4" />
+                                {item.label}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -103,7 +226,10 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
             {/* Profile dropdown — desktop */}
             <div className="hidden md:block relative" ref={dropdownRef}>
               <button
-                onClick={() => setProfileOpen(!profileOpen)}
+                onClick={() => {
+                  setProfileOpen(!profileOpen);
+                  setOpenGroup(null);
+                }}
                 className={cn(
                   "flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                   profileOpen
@@ -196,7 +322,7 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
 
         {mobileOpen && (
           <div className="md:hidden pb-3 space-y-1">
-            {userLinks.map((link) => {
+            {allLinks.map((link) => {
               const Icon = link.icon;
               const active = pathname === link.href;
               return (

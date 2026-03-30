@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { getToken, clearToken, decodeTokenPayload } from "@/lib/auth";
+import { mcpCallJsonSafe } from "@/lib/api";
 
 interface UserInfo {
   userId: string;
@@ -27,6 +28,38 @@ export async function getUserInfo(): Promise<UserInfo | null> {
     name: (payload.name ?? payload.sub ?? payload.user_id ?? "") as string,
     expiresAt: exp,
   };
+}
+
+interface KnowledgeProfile {
+  name?: string;
+  timezone?: string;
+  location?: string;
+  bio?: string;
+}
+
+export async function getDisplayName(): Promise<string> {
+  try {
+    const data = await mcpCallJsonSafe<{ profile: KnowledgeProfile | null }>(
+      "knowledge",
+      "get_profile"
+    );
+    return data?.profile?.name ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export async function updateDisplayName(name: string): Promise<{ success: boolean; name: string }> {
+  try {
+    const data = await mcpCallJsonSafe<{ profile: KnowledgeProfile }>(
+      "knowledge",
+      "update_profile",
+      { name }
+    );
+    return { success: true, name: data?.profile?.name ?? name };
+  } catch {
+    return { success: false, name };
+  }
 }
 
 export async function logout(): Promise<void> {

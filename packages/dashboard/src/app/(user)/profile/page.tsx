@@ -5,9 +5,10 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Shield, LogOut } from "lucide-react";
-import { getUserInfo, logout } from "./profile-server-actions";
+import { Shield, LogOut, Check } from "lucide-react";
+import { getUserInfo, getDisplayName, updateDisplayName, logout } from "./profile-server-actions";
 
 interface UserInfo {
   userId: string;
@@ -18,14 +19,27 @@ interface UserInfo {
 
 export default function ProfilePage() {
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [displayNameSaved, setDisplayNameSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     startTransition(async () => {
-      const info = await getUserInfo();
+      const [info, name] = await Promise.all([getUserInfo(), getDisplayName()]);
       setUser(info);
+      setDisplayName(name);
     });
   }, []);
+
+  function handleSaveDisplayName() {
+    startTransition(async () => {
+      const result = await updateDisplayName(displayName);
+      if (result.success) {
+        setDisplayNameSaved(true);
+        setTimeout(() => setDisplayNameSaved(false), 2000);
+      }
+    });
+  }
 
   function handleLogout() {
     startTransition(async () => {
@@ -81,6 +95,45 @@ export default function ProfilePage() {
               </span>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Display Name */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-gray-500">
+            Display Name
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Input
+              value={displayName}
+              onChange={(e) => {
+                setDisplayName(e.target.value);
+                setDisplayNameSaved(false);
+              }}
+              placeholder="Enter your display name"
+              className="flex-1"
+            />
+            <Button
+              size="sm"
+              onClick={handleSaveDisplayName}
+              disabled={isPending}
+            >
+              {displayNameSaved ? (
+                <>
+                  <Check className="h-4 w-4 mr-1" />
+                  Saved
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-gray-400">
+            This name is shown in the navigation bar and used across the system.
+          </p>
         </CardContent>
       </Card>
 
