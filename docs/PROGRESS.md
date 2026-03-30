@@ -51,7 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
-- 2026-03-30: Notification rules settings UI (/settings/notifications) — manage sender priorities + keyword rules
+- 2026-03-30: Notification settings UI: People/Keywords tabs, 3 priority levels (ignore/batch/immediate), scrollable
 - 2026-03-30: Message priority rules (immediate/batch routing) + 5 proactive schedulers
 - 2026-03-29: Fix calendar push: accept null fields, per-item validation (skip bad items, don't fail batch)
 - 2026-03-29: Calendar UI: hover tooltips, click for full details with source, holiday banner, all-day overlay

@@ -183,23 +183,18 @@ function SenderRow({
   onClearRule: (ruleId: string) => void;
   isPending: boolean;
 }) {
-  const priorities = ["batch", "immediate"] as const;
+  const priorities = ["ignore", "batch", "immediate"] as const;
   const priorityConfig = {
-    batch: {
-      label: "Batch",
-      icon: Clock,
-      activeClass: "bg-gray-100 text-gray-700",
-    },
-    immediate: {
-      label: "Immediate",
-      icon: Zap,
-      activeClass: "bg-amber-100 text-amber-800",
-    },
+    ignore: { label: "Ignore", activeClass: "bg-red-50 text-red-600" },
+    batch: { label: "Batch", activeClass: "bg-gray-100 text-gray-700" },
+    immediate: { label: "Immediate", activeClass: "bg-amber-100 text-amber-800" },
   };
+
+  // Default highlight: batch (when no rule exists)
+  const activePriority = rule?.priority ?? "batch";
 
   return (
     <div className="flex items-center gap-3 py-2.5">
-      {/* Sender info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium truncate">{sender.sender}</span>
@@ -216,39 +211,28 @@ function SenderRow({
         </div>
       </div>
 
-      {/* Priority toggle */}
-      <div className="flex items-center gap-1">
-        {rule && (
-          <button
-            onClick={() => onClearRule(rule.id)}
-            disabled={isPending}
-            className="p-1 text-gray-300 hover:text-gray-500 transition-colors mr-1 cursor-pointer"
-            title="Remove rule (use default)"
-            aria-label="Remove rule"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        )}
-        <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
-          {priorities.map((p) => {
-            const config = priorityConfig[p];
-            const isActive = rule?.priority === p;
-            return (
-              <button
-                key={p}
-                onClick={() => onSetPriority(sender.sender, p)}
-                disabled={isPending}
-                className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                  isActive
-                    ? config.activeClass
-                    : "text-gray-400 hover:text-gray-600"
-                }`}
-              >
-                {config.label}
-              </button>
-            );
-          })}
-        </div>
+      <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
+        {priorities.map((p) => {
+          const config = priorityConfig[p];
+          const isActive = activePriority === p;
+          return (
+            <button
+              key={p}
+              onClick={() => {
+                if (p === "batch" && !rule) return; // already default
+                onSetPriority(sender.sender, p as "immediate" | "batch");
+              }}
+              disabled={isPending}
+              className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                isActive
+                  ? config.activeClass
+                  : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              {config.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -498,53 +482,71 @@ export function NotificationSettingsView() {
     });
   }
 
+  const [tab, setTab] = useState<"people" | "keywords">("people");
+
   return (
-    <div className="space-y-6">
-      {/* Header with refresh */}
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col" style={{ height: "calc(100vh - 8rem)" }}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4 shrink-0">
         <div>
           <h1 className="text-2xl font-bold">Notification Rules</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Control which messages trigger immediate notifications vs. batch
-            review.
+            Control which messages trigger immediate notifications vs. batch review.
           </p>
         </div>
-        <Button
-          onClick={loadData}
-          disabled={isPending}
-          variant="outline"
-          size="sm"
-        >
-          <RefreshCw
-            className={`h-4 w-4 mr-1 ${isPending ? "animate-spin" : ""}`}
-          />
+        <Button onClick={loadData} disabled={isPending} variant="outline" size="sm">
+          <RefreshCw className={`h-4 w-4 mr-1 ${isPending ? "animate-spin" : ""}`} />
           Refresh
         </Button>
       </div>
 
-      {/* People section */}
-      <PeopleSection
-        senders={senders}
-        rules={rules}
-        onSetPriority={handleSetSenderPriority}
-        onClearRule={handleClearRule}
-        isPending={isPending}
-      />
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-gray-200 mb-4 shrink-0">
+        <button
+          onClick={() => setTab("people")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+            tab === "people"
+              ? "border-primary text-primary"
+              : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          People ({senders.length})
+        </button>
+        <button
+          onClick={() => setTab("keywords")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+            tab === "keywords"
+              ? "border-primary text-primary"
+              : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Keywords ({rules.filter((r) => r.rule_type === "keyword").length})
+        </button>
+        <div className="ml-auto text-xs text-gray-400 self-end pb-2">
+          {rules.length} rule{rules.length !== 1 ? "s" : ""} total
+        </div>
+      </div>
 
-      {/* Keywords section */}
-      <KeywordsSection
-        rules={rules}
-        onAddKeyword={handleAddKeyword}
-        onDeleteRule={handleDeleteRule}
-        isPending={isPending}
-      />
-
-      {/* Summary */}
-      {rules.length > 0 && (
-        <p className="text-xs text-gray-400 text-right">
-          {rules.length} rule{rules.length !== 1 ? "s" : ""} configured
-        </p>
-      )}
+      {/* Tab content — scrollable */}
+      <div className="flex-1 overflow-y-auto min-h-0 pb-4">
+        {tab === "people" && (
+          <PeopleSection
+            senders={senders}
+            rules={rules}
+            onSetPriority={handleSetSenderPriority}
+            onClearRule={handleClearRule}
+            isPending={isPending}
+          />
+        )}
+        {tab === "keywords" && (
+          <KeywordsSection
+            rules={rules}
+            onAddKeyword={handleAddKeyword}
+            onDeleteRule={handleDeleteRule}
+            isPending={isPending}
+          />
+        )}
+      </div>
     </div>
   );
 }
