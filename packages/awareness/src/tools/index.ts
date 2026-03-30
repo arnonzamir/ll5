@@ -9,6 +9,7 @@ import { registerMessageTools } from './messages.js';
 import { registerEntityStatusTools } from './entity-statuses.js';
 import { registerNotableEventTools } from './notable-events.js';
 import { registerSituationTools } from './situation.js';
+import { registerNotificationRuleTools } from './notification-rules.js';
 
 export interface Repositories {
   location: LocationRepository;
@@ -23,6 +24,8 @@ export function registerAllTools(
   repos: Repositories,
   getUserId: () => string,
   timezone: string,
+  gatewayUrl?: string,
+  authSecret?: string,
 ): void {
   registerLocationTools(server, repos.location, getUserId);
   registerMessageTools(server, repos.message, getUserId);
@@ -40,4 +43,7 @@ export function registerAllTools(
     getUserId,
     timezone,
   );
+  if (gatewayUrl && authSecret) {
+    registerNotificationRuleTools(server, getUserId, gatewayUrl, authSecret);
+  }
 }

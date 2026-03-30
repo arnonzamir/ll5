@@ -15,6 +15,13 @@ export interface EnvConfig {
   calendarReviewEndHour: number;
   calendarReviewIntervalMinutes: number;
   calendarReviewTimezone: string;
+  // Proactive scheduler config
+  dailyReviewHour: number;
+  ticklerAlertIntervalMinutes: number;
+  gtdHealthIntervalHours: number;
+  weeklyReviewDay: number;
+  weeklyReviewHour: number;
+  messageBatchIntervalMinutes: number;
 }
 
 export function loadEnv(): EnvConfig {
@@ -72,5 +79,11 @@ export function loadEnv(): EnvConfig {
     calendarReviewEndHour: parseInt(process.env.CALENDAR_REVIEW_END_HOUR ?? '22', 10),
     calendarReviewIntervalMinutes: parseInt(process.env.CALENDAR_REVIEW_INTERVAL_MINUTES ?? '120', 10),
     calendarReviewTimezone: process.env.CALENDAR_REVIEW_TIMEZONE ?? 'Asia/Jerusalem',
+    dailyReviewHour: parseInt(process.env.DAILY_REVIEW_HOUR ?? '7', 10),
+    ticklerAlertIntervalMinutes: parseInt(process.env.TICKLER_ALERT_INTERVAL_MINUTES ?? '60', 10),
+    gtdHealthIntervalHours: parseInt(process.env.GTD_HEALTH_INTERVAL_HOURS ?? '4', 10),
+    weeklyReviewDay: parseInt(process.env.WEEKLY_REVIEW_DAY ?? '5', 10),
+    weeklyReviewHour: parseInt(process.env.WEEKLY_REVIEW_HOUR ?? '14', 10),
+    messageBatchIntervalMinutes: parseInt(process.env.MESSAGE_BATCH_INTERVAL_MINUTES ?? '30', 10),
   };
 }

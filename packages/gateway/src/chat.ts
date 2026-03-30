@@ -12,7 +12,7 @@ interface AuthenticatedRequest extends Request {
  * Auth middleware for chat endpoints.
  * Replicates the same ll5 token validation used by MCP services.
  */
-function chatAuthMiddleware(authSecret: string) {
+export function chatAuthMiddleware(authSecret: string) {
   return async (req: Request, res: Response, next: () => void): Promise<void> => {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ll5.')) {

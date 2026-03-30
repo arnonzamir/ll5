@@ -51,7 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
-- 2026-03-30: Tickler defaults to 08:00 timed event (not all-day). Fix calendar day view TZ bug, nav display name + grouped menus
+- 2026-03-30: Message priority rules (immediate/batch routing) + 5 proactive schedulers (daily review, tickler alerts, GTD health, weekly review, message batch)
 - 2026-03-29: Fix calendar push: accept null fields, per-item validation (skip bad items, don't fail batch)
 - 2026-03-29: Calendar UI: hover tooltips, click for full details with source, holiday banner, all-day overlay
 - 2026-03-29: Unified calendar layer — reads from ES, writes through Google API + ES, renamed google→calendar MCP

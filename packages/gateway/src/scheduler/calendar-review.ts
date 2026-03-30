@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
+import { insertSystemMessage } from '../utils/system-message.js';
 
 interface ReviewConfig {
   startHour: number;
@@ -153,7 +154,7 @@ export class CalendarReviewScheduler {
       }
     }
 
-    await this.insertSystemMessage(lines.join('\n'));
+    await this.sendSystemMessage(lines.join('\n'));
     logger.info('Morning review sent', { events: todayEvents.length, ticklers: ticklers.length });
   }
 
@@ -201,7 +202,7 @@ export class CalendarReviewScheduler {
       }
     }
 
-    await this.insertSystemMessage(lines.join('\n'));
+    await this.sendSystemMessage(lines.join('\n'));
     logger.info('Periodic review sent', { events: upcomingEvents.length, ticklers: ticklers.length });
   }
 
@@ -224,16 +225,7 @@ export class CalendarReviewScheduler {
     });
   }
 
-  private async insertSystemMessage(content: string): Promise<void> {
-    try {
-      await this.pool.query(
-        `INSERT INTO chat_messages (user_id, conversation_id, channel, direction, role, content, status, metadata)
-         VALUES ($1, gen_random_uuid(), 'system', 'inbound', 'system', $2, 'pending', '{}')`,
-        [this.config.userId, content],
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn('Failed to insert calendar review system message', { error: message });
-    }
+  private async sendSystemMessage(content: string): Promise<void> {
+    await insertSystemMessage(this.pool, this.config.userId, content);
   }
 }

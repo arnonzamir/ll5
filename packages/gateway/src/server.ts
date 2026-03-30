@@ -7,10 +7,11 @@ import pg from 'pg';
 import { ZodError } from 'zod';
 import { initAppLog, appLog } from '@ll5/shared';
 import { createAuthRouter } from './auth.js';
-import { createChatRouter } from './chat.js';
+import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { processCalendar } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
+import { NotificationRuleMatcher } from './processors/notification-rules.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type WebhookResponse } from './types/index.js';
 import type { EnvConfig } from './utils/env.js';
@@ -196,6 +197,7 @@ async function processItem(
   itemIndex: number,
   config: EnvConfig,
   pgPool?: pg.Pool,
+  matcher?: NotificationRuleMatcher,
 ): Promise<ItemResult> {
   try {
     switch (item.type) {
@@ -203,7 +205,7 @@ async function processItem(
         await processLocation(es, userId, item, config.geocodingApiKey, pgPool);
         break;
       case 'message':
-        await processMessage(es, userId, item);
+        await processMessage(es, userId, item, pgPool, matcher);
         break;
       case 'calendar_event':
         await processCalendar(es, userId, item);
@@ -250,6 +252,44 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Mount chat routes
   app.use('/chat', createChatRouter(pgPool, config.authSecret));
+
+  // Create notification rule matcher
+  const notificationMatcher = new NotificationRuleMatcher(pgPool);
+
+  // --- Notification rules CRUD ---
+  const authMw = chatAuthMiddleware(config.authSecret);
+
+  app.get('/notification-rules', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const result = await pgPool.query(
+      'SELECT * FROM notification_rules WHERE user_id = $1 ORDER BY created_at',
+      [userId],
+    );
+    res.json({ rules: result.rows });
+  });
+
+  app.post('/notification-rules', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { rule_type, match_value, priority } = req.body;
+    if (!rule_type || !match_value) {
+      res.status(400).json({ error: 'rule_type and match_value required' });
+      return;
+    }
+    const result = await pgPool.query(
+      'INSERT INTO notification_rules (user_id, rule_type, match_value, priority) VALUES ($1, $2, $3, $4) RETURNING *',
+      [userId, rule_type, match_value, priority || 'immediate'],
+    );
+    res.status(201).json(result.rows[0]);
+  });
+
+  app.delete('/notification-rules/:id', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    await pgPool.query(
+      'DELETE FROM notification_rules WHERE id = $1 AND user_id = $2',
+      [req.params.id, userId],
+    );
+    res.json({ deleted: true });
+  });
 
   // --- Health endpoint ---
   app.get('/health', async (_req: Request, res: Response) => {
@@ -357,7 +397,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       }
       const item = parsed.data;
       typeCounts[item.type] = (typeCounts[item.type] ?? 0) + 1;
-      const result = await processItem(esClient, userId, item, i, config, pgPool);
+      const result = await processItem(esClient, userId, item, i, config, pgPool, notificationMatcher);
       results.push(result);
     }
 

@@ -1,7 +1,10 @@
 import type { Client } from '@elastic/elasticsearch';
 import crypto from 'node:crypto';
+import type { Pool } from 'pg';
 import type { PushMessageItem } from '../types/index.js';
 import { logger } from '../utils/logger.js';
+import { insertSystemMessage } from '../utils/system-message.js';
+import type { NotificationRuleMatcher } from './notification-rules.js';
 
 /**
  * Process a message push item:
@@ -12,6 +15,8 @@ export async function processMessage(
   es: Client,
   userId: string,
   item: PushMessageItem,
+  pgPool?: Pool,
+  matcher?: NotificationRuleMatcher,
 ): Promise<void> {
   // Write message document
   const messageDoc: Record<string, unknown> = {
@@ -45,6 +50,26 @@ export async function processMessage(
 
   // Update entity status — use sender as entity_name
   await updateEntityStatus(es, userId, item);
+
+  // Check notification rules for immediate priority messages
+  if (pgPool && matcher) {
+    const priority = await matcher.match(userId, {
+      sender: item.sender,
+      app: item.app,
+      body: item.body,
+      is_group: item.is_group,
+      group_name: item.group_name,
+    });
+    if (priority === 'immediate') {
+      const truncBody = item.body.length > 200 ? item.body.slice(0, 200) + '...' : item.body;
+      const groupInfo = item.is_group && item.group_name ? ` (group: ${item.group_name})` : '';
+      await insertSystemMessage(
+        pgPool,
+        userId,
+        `[IM Notification] ${item.sender} on ${item.app}${groupInfo}: "${truncBody}"`,
+      );
+    }
+  }
 }
 
 /**

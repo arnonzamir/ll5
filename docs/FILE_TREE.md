@@ -89,7 +89,8 @@ ll5/
 │       ├── auth.ts                    # POST /auth/token (PIN login)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
 │       ├── processors/                # GPS geocoding, IM processing, calendar (with dedup), notable events
-│       ├── scheduler/                 # Calendar sync (30min) + periodic review (2h)
+│       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch
+│       ├── processors/notification-rules.ts  # Priority rule matcher (immediate/batch routing)
 │       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, channels
 │       └── server.ts                  # Express app: webhooks, auth, chat, health, schedulers
 │

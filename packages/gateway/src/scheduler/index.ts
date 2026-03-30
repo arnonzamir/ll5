@@ -4,6 +4,11 @@ import type { EnvConfig } from '../utils/env.js';
 import { createGoogleCalendarClient } from './google-calendar-client.js';
 import { CalendarSyncScheduler } from './calendar-sync.js';
 import { CalendarReviewScheduler } from './calendar-review.js';
+import { DailyReviewScheduler } from './daily-review.js';
+import { TicklerAlertScheduler } from './tickler-alert.js';
+import { GTDHealthScheduler } from './gtd-health.js';
+import { WeeklyReviewReminder } from './weekly-review.js';
+import { MessageBatchReviewScheduler } from './message-batch-review.js';
 import { logger } from '../utils/logger.js';
 
 export function startSchedulers(
@@ -11,16 +16,52 @@ export function startSchedulers(
   es: Client,
   pgPool: Pool,
 ): void {
-  const googleClient = createGoogleCalendarClient(config.googleMcpUrl, config.googleMcpApiKey);
-  if (!googleClient) {
-    logger.info('Schedulers not started — Google MCP not configured');
-    return;
-  }
-
   // Get the first user ID from webhook tokens for scheduler context
   const userId = Object.values(config.webhookTokens)[0];
   if (!userId) {
     logger.warn('Schedulers not started — no user ID in webhook tokens');
+    return;
+  }
+
+  const timezone = config.calendarReviewTimezone;
+
+  // --- Independent schedulers (always start) ---
+
+  // GTD health check: periodic reminder
+  const gtdHealthScheduler = new GTDHealthScheduler(pgPool, {
+    intervalHours: config.gtdHealthIntervalHours,
+    startHour: config.calendarReviewStartHour,
+    endHour: config.calendarReviewEndHour,
+    timezone,
+    userId,
+  });
+  gtdHealthScheduler.start();
+
+  // Weekly review reminder
+  const weeklyReviewScheduler = new WeeklyReviewReminder(pgPool, {
+    reviewDay: config.weeklyReviewDay,
+    reviewHour: config.weeklyReviewHour,
+    timezone,
+    userId,
+  });
+  weeklyReviewScheduler.start();
+
+  // Message batch review
+  const messageBatchScheduler = new MessageBatchReviewScheduler(es, pgPool, {
+    intervalMinutes: config.messageBatchIntervalMinutes,
+    startHour: config.calendarReviewStartHour,
+    endHour: config.calendarReviewEndHour,
+    timezone,
+    userId,
+  });
+  messageBatchScheduler.start();
+
+  // --- Google-dependent schedulers (only start if googleClient exists) ---
+
+  const googleClient = createGoogleCalendarClient(config.googleMcpUrl, config.googleMcpApiKey);
+  if (!googleClient) {
+    logger.info('Google-dependent schedulers not started — Google MCP not configured');
+    logger.info('Independent schedulers started (GTD health, weekly review, message batch)');
     return;
   }
 
@@ -33,10 +74,28 @@ export function startSchedulers(
     startHour: config.calendarReviewStartHour,
     endHour: config.calendarReviewEndHour,
     intervalMinutes: config.calendarReviewIntervalMinutes,
-    timezone: config.calendarReviewTimezone,
+    timezone,
     userId,
   });
   reviewScheduler.start();
+
+  // Daily review (morning briefing)
+  const dailyReviewScheduler = new DailyReviewScheduler(pgPool, googleClient, {
+    reviewHour: config.dailyReviewHour,
+    timezone,
+    userId,
+  });
+  dailyReviewScheduler.start();
+
+  // Tickler alerts
+  const ticklerAlertScheduler = new TicklerAlertScheduler(pgPool, googleClient, {
+    intervalMinutes: config.ticklerAlertIntervalMinutes,
+    startHour: config.calendarReviewStartHour,
+    endHour: config.calendarReviewEndHour,
+    timezone,
+    userId,
+  });
+  ticklerAlertScheduler.start();
 
   logger.info('All schedulers started');
 }

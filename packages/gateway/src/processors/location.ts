@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import type { PushLocationItem } from '../types/index.js';
 import { reverseGeocode } from '../utils/geocoding.js';
 import { logger } from '../utils/logger.js';
+import { insertSystemMessage } from '../utils/system-message.js';
 import { writeNotableEvent } from './notable.js';
 
 interface PlaceHit {
@@ -135,29 +136,6 @@ async function getPreviousLocation(
 function formatDistance(km: number): string {
   if (km < 1) return `${Math.round(km * 1000)}m`;
   return `${km.toFixed(1)}km`;
-}
-
-/**
- * Insert a system chat message directly into PG (no HTTP round-trip).
- * Fire-and-forget: errors are logged but do not propagate.
- */
-async function insertSystemMessage(
-  pool: Pool,
-  userId: string,
-  content: string,
-): Promise<void> {
-  try {
-    await pool.query(
-      `INSERT INTO chat_messages (user_id, conversation_id, channel, direction, role, content, status, metadata)
-       VALUES ($1, gen_random_uuid(), 'system', 'inbound', 'system', $2, 'pending', '{}')`,
-      [userId, content],
-    );
-    logger.debug('System location-change message inserted');
-  } catch (err) {
-    logger.warn('Failed to insert system location-change message', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
 }
 
 /**

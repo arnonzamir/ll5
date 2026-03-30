@@ -21,7 +21,8 @@ Gateway (Express)
   ├── POST /auth/token — PIN login, returns signed token
   ├── /chat/* — message queue REST endpoints
   ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY)
-  └── Schedulers — calendar sync (30min), periodic review (2h, 7am-10pm)
+  └── Schedulers — calendar sync (30min), calendar review (2h), daily briefing (7am),
+      tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00), message batch (30min)
 
 Dashboard (Next.js 15)
   ├── /login — user_id + PIN auth (all pages redirect here if unauthenticated)

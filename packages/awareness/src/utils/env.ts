@@ -8,6 +8,7 @@ export interface EnvConfig {
   elasticsearchUrl: string;
   elasticsearchApiKey?: string;
   timezone: string;
+  gatewayUrl: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -33,5 +34,6 @@ export function loadEnv(): EnvConfig {
     elasticsearchUrl,
     elasticsearchApiKey: process.env.ELASTICSEARCH_API_KEY,
     timezone: process.env.TZ || 'Asia/Jerusalem',
+    gatewayUrl: process.env.GATEWAY_URL || 'http://gateway:3000',
   };
 }
