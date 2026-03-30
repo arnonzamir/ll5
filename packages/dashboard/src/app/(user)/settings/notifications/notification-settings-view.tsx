@@ -149,21 +149,52 @@ function PeopleSection({
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
-            {filteredSenders.map((sender) => {
-              const rule = findSenderRule(sender.sender);
-              return (
-                <SenderRow
-                  key={`${sender.sender}-${sender.app}`}
-                  sender={sender}
-                  rule={rule}
-                  onSetPriority={onSetPriority}
-                  onClearRule={onClearRule}
-                  isPending={isPending}
-                />
-              );
-            })}
-          </div>
+          (() => {
+            const groups: Record<string, typeof filteredSenders> = {};
+            for (const s of filteredSenders) {
+              const cat = s.category ?? "other";
+              if (!groups[cat]) groups[cat] = [];
+              groups[cat].push(s);
+            }
+            const categoryLabels: Record<string, string> = {
+              family: "Family",
+              friends: "Friends",
+              work: "Work",
+              other: "Other",
+            };
+            const categoryOrder = ["family", "friends", "work", "other"];
+
+            return (
+              <div className="space-y-4">
+                {categoryOrder.map((cat) => {
+                  const group = groups[cat];
+                  if (!group || group.length === 0) return null;
+                  return (
+                    <div key={cat}>
+                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 px-1">
+                        {categoryLabels[cat]} ({group.length})
+                      </div>
+                      <div className="divide-y divide-gray-100">
+                        {group.map((sender) => {
+                          const rule = findSenderRule(sender.sender);
+                          return (
+                            <SenderRow
+                              key={`${sender.sender}-${sender.app}`}
+                              sender={sender}
+                              rule={rule}
+                              onSetPriority={onSetPriority}
+                              onClearRule={onClearRule}
+                              isPending={isPending}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()
         )}
       </CardContent>
     </Card>

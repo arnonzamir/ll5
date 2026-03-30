@@ -2,6 +2,7 @@
 
 import { env } from "@/lib/env";
 import { getToken } from "@/lib/auth";
+import { mcpCallJsonSafe } from "@/lib/api";
 
 // --- Types ---
 
@@ -14,11 +15,15 @@ export interface NotificationRule {
   created_at: string;
 }
 
+export type SenderCategory = "family" | "friends" | "work" | "other";
+
 export interface KnownSender {
   sender: string;
   app: string;
   messageCount: number;
   lastSeen: string;
+  category: SenderCategory;
+  relationship?: string;
 }
 
 // --- Gateway helpers ---
@@ -159,12 +164,63 @@ export async function fetchKnownSenders(): Promise<KnownSender[]> {
           app: appBucket.key,
           messageCount: appBucket.doc_count,
           lastSeen: senderBucket.last_message.value_as_string,
+          category: "other",
         });
       }
     }
 
-    // Sort by message count descending
-    results.sort((a, b) => b.messageCount - a.messageCount);
+    // Cross-reference with knowledge MCP for relationships
+    const peopleRaw = await mcpCallJsonSafe<Record<string, unknown>>("knowledge", "list_people");
+    const people = (
+      peopleRaw && typeof peopleRaw === "object"
+        ? (Array.isArray(peopleRaw)
+            ? peopleRaw
+            : (peopleRaw as Record<string, unknown>).people ?? [])
+        : []
+    ) as Array<{ name?: string; aliases?: string[]; relationship?: string }>;
+
+    // Build a name→category map
+    const FAMILY_TERMS = ["family", "parent", "mother", "father", "mom", "dad", "sister", "brother", "wife", "husband", "spouse", "son", "daughter", "child", "aunt", "uncle", "cousin", "grandmother", "grandfather", "משפחה"];
+    const WORK_TERMS = ["work", "colleague", "coworker", "boss", "manager", "employee", "client", "partner", "business", "עבודה"];
+    const FRIEND_TERMS = ["friend", "חבר", "חברה"];
+
+    function categorize(rel?: string): SenderCategory {
+      if (!rel) return "other";
+      const lower = rel.toLowerCase();
+      if (FAMILY_TERMS.some((t) => lower.includes(t))) return "family";
+      if (WORK_TERMS.some((t) => lower.includes(t))) return "work";
+      if (FRIEND_TERMS.some((t) => lower.includes(t))) return "friends";
+      return "other";
+    }
+
+    // Map person names+aliases to their category
+    const nameToCategory = new Map<string, { category: SenderCategory; relationship?: string }>();
+    for (const person of people) {
+      const cat = categorize(person.relationship);
+      if (person.name) {
+        nameToCategory.set(person.name.toLowerCase(), { category: cat, relationship: person.relationship });
+      }
+      for (const alias of person.aliases ?? []) {
+        nameToCategory.set(alias.toLowerCase(), { category: cat, relationship: person.relationship });
+      }
+    }
+
+    // Assign categories to senders
+    for (const sender of results) {
+      const match = nameToCategory.get(sender.sender.toLowerCase());
+      if (match) {
+        sender.category = match.category;
+        sender.relationship = match.relationship;
+      }
+    }
+
+    // Sort: family first, then friends, then work, then other. Within each, by message count desc.
+    const ORDER: Record<SenderCategory, number> = { family: 0, friends: 1, work: 2, other: 3 };
+    results.sort((a, b) => {
+      const catDiff = ORDER[a.category] - ORDER[b.category];
+      if (catDiff !== 0) return catDiff;
+      return b.messageCount - a.messageCount;
+    });
 
     return results;
   } catch {

@@ -112,7 +112,7 @@ ll5/
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
 │   └── src/
 │       ├── app/(auth)/login/          # Login page + server action
-│       ├── app/(user)/                # User pages: dashboard, calendar, actions, projects, inbox, shopping, people, locations, places, phone-data, settings, profile
+│       ├── app/(user)/                # dashboard, calendar, actions, projects, inbox, shopping, people, locations, places, phone-data, settings, profile
 │       ├── app/(admin)/               # Admin pages: health, users, tools
 │       ├── app/api/chat/              # Proxy routes: messages, conversations
 │       ├── components/                # Nav (grouped menu, profile dropdown), cards, chat widget, shadcn/ui
