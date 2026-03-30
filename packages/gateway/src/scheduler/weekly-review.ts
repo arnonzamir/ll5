@@ -85,7 +85,6 @@ export class WeeklyReviewReminder {
         this.pool,
         this.config.userId,
         '[Weekly Review] Time for your weekly GTD review. Review all projects, process inbox to zero, review next actions, update waiting-for items, and scan the horizons of focus. Run the weekly review skill or get_gtd_health to start.',
-        24 * 60, // dedup: max once per day
       );
 
       logger.info('Weekly review reminder sent', { week: currentWeek });

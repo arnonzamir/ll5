@@ -115,7 +115,7 @@ export class DailyReviewScheduler {
         }
       }
 
-      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), 12 * 60); // once per 12h
+      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'));
       logger.info('Morning briefing sent', { events: todayEvents.length, ticklers: ticklers.length });
     } catch (err) {
       logger.warn('Daily review tick failed', {

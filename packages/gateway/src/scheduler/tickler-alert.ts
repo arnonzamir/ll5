@@ -103,7 +103,7 @@ export class TicklerAlertScheduler {
         this.alertedIds.add(tickler.event_id);
       }
 
-      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), 30); // dedup 30 min
+      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'));
       logger.info('Tickler alert sent', { count: newTicklers.length });
     } catch (err) {
       logger.warn('Tickler alert tick failed', {

@@ -226,6 +226,6 @@ export class CalendarReviewScheduler {
   }
 
   private async sendSystemMessage(content: string): Promise<void> {
-    await insertSystemMessage(this.pool, this.config.userId, content, this.config.intervalMinutes);
+    await insertSystemMessage(this.pool, this.config.userId, content);
   }
 }

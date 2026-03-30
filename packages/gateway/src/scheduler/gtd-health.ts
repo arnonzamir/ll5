@@ -69,7 +69,6 @@ export class GTDHealthScheduler {
         this.pool,
         this.config.userId,
         '[GTD Health Check] Time for a periodic GTD health check. Please run get_gtd_health to review the state of actions, projects, and identify any items needing attention.',
-        this.config.intervalHours * 60,
       );
 
       logger.info('GTD health check reminder sent');
