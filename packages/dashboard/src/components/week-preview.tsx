@@ -25,14 +25,18 @@ interface WeekPreviewProps {
   activeProjectCount: number;
 }
 
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function getDayName(date: Date): string {
   const today = new Date();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  const dateStr = date.toISOString().split("T")[0];
-  const todayStr = today.toISOString().split("T")[0];
-  const tomorrowStr = tomorrow.toISOString().split("T")[0];
+  const dateStr = localDateStr(date);
+  const todayStr = localDateStr(today);
+  const tomorrowStr = localDateStr(tomorrow);
 
   if (dateStr === todayStr) return "Today";
   if (dateStr === tomorrowStr) return "Tomorrow";
@@ -40,7 +44,7 @@ function getDayName(date: Date): string {
 }
 
 function getDateStr(date: Date): string {
-  return date.toISOString().split("T")[0];
+  return localDateStr(date);
 }
 
 interface DayPreview {
@@ -74,7 +78,8 @@ function buildDayPreviews(events: CalendarEvent[]): DayPreview[] {
 }
 
 function getUpcomingTicklers(ticklers: Tickler[]): Tickler[] {
-  const today = new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const today = localDateStr(now);
   // Return ticklers that are after today (tomorrow onwards)
   return ticklers.filter((t) => {
     const ticklerDate = t.start.split("T")[0];

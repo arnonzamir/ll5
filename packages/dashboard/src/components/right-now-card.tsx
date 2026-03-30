@@ -60,7 +60,8 @@ function getNextEvent(events: CalendarEvent[]): CalendarEvent | null {
 }
 
 function getTodayTicklers(ticklers: Tickler[]): Tickler[] {
-  const today = new Date().toISOString().split("T")[0];
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   return ticklers.filter((t) => {
     const ticklerDate = t.start.split("T")[0];
     return ticklerDate === today;

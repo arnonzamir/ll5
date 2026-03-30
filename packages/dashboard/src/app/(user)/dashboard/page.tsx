@@ -46,14 +46,16 @@ interface Tickler {
 }
 
 export default async function DashboardPage() {
-  const today = new Date();
-  const todayStr = today.toISOString().split("T")[0];
-  const threeDaysFromNow = new Date(today);
+  // Use Israel timezone for "today" calculation (server runs in UTC)
+  const TZ = "Asia/Jerusalem";
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
+  const todayStr = fmt.format(new Date());
+  const threeDaysFromNow = new Date();
   threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
-  const threeDaysStr = threeDaysFromNow.toISOString();
+  const threeDaysStr = fmt.format(threeDaysFromNow) + "T23:59:59";
 
-  // Fetch GTD data and Google data in parallel
-  // Google MCP calls use mcpCallJsonSafe — returns null if google MCP is unavailable
+  // Fetch GTD data and calendar data in parallel
+  // Calendar MCP defaults to user's timezone for "today" when no from/to given
   const [healthRaw, dueTodayRaw, overdueRaw, eventsRaw, ticklersRaw] = await Promise.all([
     mcpCallJsonSafe<Record<string, unknown>>("gtd", "get_gtd_health"),
     mcpCallJsonSafe<Record<string, unknown>>("gtd", "list_actions", {
@@ -108,10 +110,11 @@ export default async function DashboardPage() {
   // and fetch 3-day events separately
   let weekEvents: CalendarEvent[] = [];
   try {
-    const tomorrow = new Date(today);
+    const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = fmt.format(tomorrow);
     const weekEventsRaw = await mcpCallJsonSafe<Record<string, unknown>>("calendar", "list_events", {
-      from: tomorrow.toISOString(),
+      from: tomorrowStr,
       to: threeDaysStr,
     });
     if (weekEventsRaw) {

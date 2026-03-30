@@ -25,7 +25,8 @@ Gateway (Express)
 
 Dashboard (Next.js 15)
   ├── /login — user_id + PIN auth (all pages redirect here if not logged in)
-  ├── Build ID shown in footer (git short hash, injected at build time)
+  ├── Build ID in footer (left-aligned, black)
+  ├── Dashboard uses Asia/Jerusalem TZ for server-side "today" calculation
   ├── /dashboard — GTD status + chat panel (50/50)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
   ├── /calendar — day/week view, hover tooltips, click details with source, holiday banner, settings
