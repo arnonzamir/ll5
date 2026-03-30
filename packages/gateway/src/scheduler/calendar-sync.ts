@@ -18,7 +18,7 @@ export class CalendarSyncScheduler {
   ) {}
 
   start(): void {
-    logger.info('Calendar sync scheduler started', { intervalMs: this.intervalMs });
+    logger.info('[CalendarSyncScheduler][start] Calendar sync scheduler started', { intervalMs: this.intervalMs });
     // Run immediately, then on interval
     void this.sync();
     this.timer = setInterval(() => void this.sync(), this.intervalMs);
@@ -41,7 +41,7 @@ export class CalendarSyncScheduler {
       const events = await this.googleClient.getEvents(from, to);
 
       if (events.length === 0) {
-        logger.debug('Calendar sync: no events found');
+        logger.debug('[CalendarSyncScheduler][sync] No events found');
         return;
       }
 
@@ -72,11 +72,11 @@ export class CalendarSyncScheduler {
 
       if (operations.length > 0) {
         await this.es.bulk({ operations, refresh: false });
-        logger.info('Calendar sync completed', { eventCount: events.length });
+        logger.info('[CalendarSyncScheduler][sync] Calendar sync completed', { eventCount: events.length });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.warn('Calendar sync failed (non-blocking)', { error: message });
+      logger.warn('[CalendarSyncScheduler][sync] Calendar sync failed (non-blocking)', { error: message });
     }
   }
 }

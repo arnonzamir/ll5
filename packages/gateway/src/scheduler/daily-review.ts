@@ -24,7 +24,7 @@ export class DailyReviewScheduler {
   ) {}
 
   start(): void {
-    logger.info('Daily review scheduler started', {
+    logger.info('[DailyReviewScheduler][start] Daily review scheduler started', {
       reviewHour: this.config.reviewHour,
       timezone: this.config.timezone,
     });
@@ -116,9 +116,9 @@ export class DailyReviewScheduler {
       }
 
       await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'));
-      logger.info('Morning briefing sent', { events: todayEvents.length, ticklers: ticklers.length });
+      logger.info('[DailyReviewScheduler][tick] Morning briefing sent', { events: todayEvents.length, ticklers: ticklers.length });
     } catch (err) {
-      logger.warn('Daily review tick failed', {
+      logger.warn('[DailyReviewScheduler][tick] Daily review tick failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

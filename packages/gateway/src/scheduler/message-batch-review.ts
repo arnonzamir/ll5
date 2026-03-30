@@ -38,7 +38,7 @@ export class MessageBatchReviewScheduler {
   ) {}
 
   start(): void {
-    logger.info('Message batch review scheduler started', {
+    logger.info('[MessageBatchReviewScheduler][start] Message batch review scheduler started', {
       intervalMinutes: this.config.intervalMinutes,
       startHour: this.config.startHour,
       endHour: this.config.endHour,
@@ -98,7 +98,7 @@ export class MessageBatchReviewScheduler {
 
       const hits = response.hits.hits as MessageHit[];
       if (hits.length === 0) {
-        logger.debug('Message batch review: no unprocessed messages');
+        logger.debug('[MessageBatchReviewScheduler][tick] No unprocessed messages');
         return;
       }
 
@@ -142,12 +142,12 @@ export class MessageBatchReviewScheduler {
         await this.es.bulk({ body: bulkBody, refresh: false });
       }
 
-      logger.info('Message batch review sent', {
+      logger.info('[MessageBatchReviewScheduler][tick] Message batch review sent', {
         messages: hits.length,
         senders: groups.size,
       });
     } catch (err) {
-      logger.warn('Message batch review tick failed', {
+      logger.warn('[MessageBatchReviewScheduler][tick] Message batch review tick failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

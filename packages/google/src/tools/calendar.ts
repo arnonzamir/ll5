@@ -118,7 +118,7 @@ async function fetchEventsFromGoogle(
         }
       }
     } catch (err) {
-      logger.warn('FreeBusy query failed', { error: err instanceof Error ? err.message : String(err) });
+      logger.warn('[fetchEventsFromGoogle] FreeBusy query failed', { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -298,7 +298,7 @@ export function registerCalendarTools(
             }
           }
         } catch (err) {
-          logger.warn('On-demand sync failed, reading from cache', { error: err instanceof Error ? err.message : String(err) });
+          logger.warn('[list_events] On-demand sync failed, reading from cache', { error: err instanceof Error ? err.message : String(err) });
         }
       }
 
@@ -339,7 +339,7 @@ export function registerCalendarTools(
             }],
           };
         } catch (err) {
-          logger.warn('ES read failed, falling back to Google API', { error: err instanceof Error ? err.message : String(err) });
+          logger.warn('[list_events] ES read failed, falling back to Google API', { error: err instanceof Error ? err.message : String(err) });
         }
       }
 

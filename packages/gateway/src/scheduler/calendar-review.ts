@@ -26,7 +26,7 @@ export class CalendarReviewScheduler {
   ) {}
 
   start(): void {
-    logger.info('Calendar review scheduler started', {
+    logger.info('[CalendarReviewScheduler][start] Calendar review scheduler started', {
       startHour: this.config.startHour,
       endHour: this.config.endHour,
       intervalMinutes: this.config.intervalMinutes,
@@ -100,12 +100,12 @@ export class CalendarReviewScheduler {
       this.lastReviewTime = new Date();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.warn('Calendar review tick failed', { error: message });
+      logger.warn('[CalendarReviewScheduler][tick] Calendar review tick failed', { error: message });
     }
   }
 
   private async runMorningReview(): Promise<void> {
-    logger.info('Running morning calendar review');
+    logger.info('[CalendarReviewScheduler][runMorningReview] Running morning calendar review');
 
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -155,11 +155,11 @@ export class CalendarReviewScheduler {
     }
 
     await this.sendSystemMessage(lines.join('\n'));
-    logger.info('Morning review sent', { events: todayEvents.length, ticklers: ticklers.length });
+    logger.info('[CalendarReviewScheduler][runMorningReview] Morning review sent', { events: todayEvents.length, ticklers: ticklers.length });
   }
 
   private async runPeriodicReview(): Promise<void> {
-    logger.debug('Running periodic calendar review');
+    logger.debug('[CalendarReviewScheduler][runPeriodicReview] Running periodic calendar review');
 
     const now = new Date();
     const fourHoursLater = new Date(now.getTime() + 4 * 60 * 60 * 1000);
@@ -175,7 +175,7 @@ export class CalendarReviewScheduler {
 
     // Only send a message if there are upcoming events or ticklers
     if (upcomingEvents.length === 0 && ticklers.length === 0) {
-      logger.debug('Periodic review: nothing upcoming in next 4 hours');
+      logger.debug('[CalendarReviewScheduler][runPeriodicReview] Nothing upcoming in next 4 hours');
       return;
     }
 
@@ -203,7 +203,7 @@ export class CalendarReviewScheduler {
     }
 
     await this.sendSystemMessage(lines.join('\n'));
-    logger.info('Periodic review sent', { events: upcomingEvents.length, ticklers: ticklers.length });
+    logger.info('[CalendarReviewScheduler][runPeriodicReview] Periodic review sent', { events: upcomingEvents.length, ticklers: ticklers.length });
   }
 
   private formatTime(isoString: string): string {

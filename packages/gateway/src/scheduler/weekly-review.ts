@@ -23,7 +23,7 @@ export class WeeklyReviewReminder {
   ) {}
 
   start(): void {
-    logger.info('Weekly review reminder started', {
+    logger.info('[WeeklyReviewReminder][start] Weekly review reminder started', {
       reviewDay: this.config.reviewDay,
       reviewHour: this.config.reviewHour,
       timezone: this.config.timezone,
@@ -87,9 +87,9 @@ export class WeeklyReviewReminder {
         '[Weekly Review] Time for your weekly GTD review. Review all projects, process inbox to zero, review next actions, update waiting-for items, and scan the horizons of focus. Run the weekly review skill or get_gtd_health to start.',
       );
 
-      logger.info('Weekly review reminder sent', { week: currentWeek });
+      logger.info('[WeeklyReviewReminder][tick] Weekly review reminder sent', { week: currentWeek });
     } catch (err) {
-      logger.warn('Weekly review tick failed', {
+      logger.warn('[WeeklyReviewReminder][tick] Weekly review tick failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

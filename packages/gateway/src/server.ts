@@ -174,15 +174,15 @@ async function ensureIndices(client: Client): Promise<void> {
   for (const def of AWARENESS_INDICES) {
     const exists = await client.indices.exists({ index: def.index });
     if (!exists) {
-      logger.info(`Creating index: ${def.index}`);
+      logger.info(`[ensureIndices] Creating index: ${def.index}`);
       await client.indices.create({
         index: def.index,
         settings: INDEX_SETTINGS,
         mappings: def.mappings,
       });
-      logger.info(`Index created: ${def.index}`);
+      logger.info(`[ensureIndices] Index created: ${def.index}`);
     } else {
-      logger.debug(`Index already exists: ${def.index}`);
+      logger.debug(`[ensureIndices] Index already exists: ${def.index}`);
     }
   }
 }
@@ -214,7 +214,7 @@ async function processItem(
     return { index: itemIndex, type: item.type, status: 'ok' };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    logger.error('Failed to process item', {
+    logger.error('[processItem] Failed to process item', {
       index: itemIndex,
       type: item.type,
       error: errorMessage,
@@ -297,7 +297,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       await esClient.ping();
       res.json({ status: 'ok' });
     } catch (err) {
-      logger.error('Health check failed', {
+      logger.error('[startServer] Health check failed', {
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(503).json({
@@ -391,7 +391,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       const parsed = PushItemSchema.safeParse(payload.items[i]);
       if (!parsed.success) {
         const errors = parsed.error.errors.map((e: { path: (string | number)[]; message: string }) => `${e.path.join('.')}: ${e.message}`).join('; ');
-        logger.warn('Skipping invalid webhook item', { index: i, errors });
+        logger.warn('[startServer] Skipping invalid webhook item', { index: i, errors });
         results.push({ index: i, type: (payload.items[i] as Record<string, unknown>)?.type as string ?? 'unknown', status: 'error', error: errors });
         continue;
       }
@@ -404,7 +404,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     const accepted = results.filter((r) => r.status === 'ok').length;
     const failed = results.filter((r) => r.status === 'error').length;
 
-    logger.info('Webhook processed', {
+    logger.info('[startServer] Webhook processed', {
       userId,
       total: payload.items.length,
       accepted,
@@ -445,7 +445,7 @@ async function runMigrations(pool: pg.Pool): Promise<void> {
   const migrationsDir = path.join(__dirname, 'migrations');
 
   if (!fs.existsSync(migrationsDir)) {
-    logger.warn('No migrations directory found', { path: migrationsDir });
+    logger.warn('[runMigrations] No migrations directory found', { path: migrationsDir });
     return;
   }
 
@@ -455,7 +455,7 @@ async function runMigrations(pool: pg.Pool): Promise<void> {
 
   for (const file of files) {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-    logger.info(`Running migration: ${file}`);
+    logger.info(`[runMigrations] Running migration: ${file}`);
     await pool.query(sql);
   }
 }
@@ -470,20 +470,20 @@ export async function startServer(config: EnvConfig): Promise<void> {
   const { app, esClient, pgPool } = createApp(config);
 
   // Run database migrations
-  logger.info('Running database migrations...');
+  logger.info('[startServer] Running database migrations...');
   await runMigrations(pgPool);
-  logger.info('Database migrations complete');
+  logger.info('[startServer] Database migrations complete');
 
   // Ensure awareness indices exist
-  logger.info('Ensuring Elasticsearch indices...');
+  logger.info('[startServer] Ensuring Elasticsearch indices...');
   await ensureIndices(esClient);
-  logger.info('Elasticsearch indices ready');
+  logger.info('[startServer] Elasticsearch indices ready');
 
   // Start calendar sync and review schedulers
   startSchedulers(config, esClient, pgPool);
 
   app.listen(config.port, () => {
-    logger.info(`Gateway listening on port ${config.port}`, {
+    logger.info(`[startServer] Gateway listening on port ${config.port}`, {
       env: config.nodeEnv,
       tokenCount: Object.keys(config.webhookTokens).length,
     });

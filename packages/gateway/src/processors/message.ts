@@ -43,7 +43,7 @@ export async function processMessage(
     refresh: false,
   });
 
-  logger.info('IM message received', {
+  logger.info('[processMessage] IM message received', {
     sender: item.sender,
     app: item.app,
     is_group: item.is_group ?? false,
@@ -64,7 +64,7 @@ export async function processMessage(
       group_name: item.group_name,
     });
 
-    logger.info('Notification rule match', {
+    logger.info('[processMessage] Notification rule match', {
       sender: item.sender,
       app: item.app,
       priority: priority ?? 'no-match',
@@ -78,10 +78,10 @@ export async function processMessage(
         userId,
         `[IM Notification] ${item.sender} on ${item.app}${groupInfo}: "${truncBody}"`,
       );
-      logger.info('Immediate notification sent', { sender: item.sender, app: item.app });
+      logger.info('[processMessage] Immediate notification sent', { sender: item.sender, app: item.app });
     }
   } else {
-    logger.warn('Notification rule matcher not available', { hasPgPool: !!pgPool, hasMatcher: !!matcher });
+    logger.warn('[processMessage] Notification rule matcher not available', { hasPgPool: !!pgPool, hasMatcher: !!matcher });
   }
 }
 
@@ -118,13 +118,13 @@ async function updateEntityStatus(
       refresh: false,
     });
 
-    logger.debug('Entity status updated', {
+    logger.debug('[updateEntityStatus] Entity status updated', {
       entity_name: item.sender,
       source: item.app,
     });
   } catch (err) {
     // Entity status update is non-critical — log and continue
-    logger.warn('Failed to update entity status', {
+    logger.warn('[updateEntityStatus] Failed to update entity status', {
       error: err instanceof Error ? err.message : String(err),
       sender: item.sender,
     });

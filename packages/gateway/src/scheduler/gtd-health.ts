@@ -24,7 +24,7 @@ export class GTDHealthScheduler {
   ) {}
 
   start(): void {
-    logger.info('GTD health scheduler started', {
+    logger.info('[GTDHealthScheduler][start] GTD health scheduler started', {
       intervalHours: this.config.intervalHours,
       startHour: this.config.startHour,
       endHour: this.config.endHour,
@@ -71,9 +71,9 @@ export class GTDHealthScheduler {
         '[GTD Health Check] Time for a periodic GTD health check. Please run get_gtd_health to review the state of actions, projects, and identify any items needing attention.',
       );
 
-      logger.info('GTD health check reminder sent');
+      logger.info('[GTDHealthScheduler][tick] GTD health check reminder sent');
     } catch (err) {
-      logger.warn('GTD health tick failed', {
+      logger.warn('[GTDHealthScheduler][tick] GTD health tick failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

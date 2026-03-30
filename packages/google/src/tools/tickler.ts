@@ -52,7 +52,7 @@ async function getOrCreateTicklerCalendar(
     role: 'tickler',
   });
 
-  logger.info('Created tickler calendar', { calendarId, userId });
+  logger.info('[getOrCreateTicklerCalendar] Created tickler calendar', { calendarId, userId });
   return calendarId;
 }
 
@@ -204,7 +204,7 @@ export function registerTicklerTools(
             }],
           };
         } catch {
-          logger.warn('ES read failed for ticklers, falling back to Google API');
+          logger.warn('[list_ticklers] ES read failed for ticklers, falling back to Google API');
         }
       }
 

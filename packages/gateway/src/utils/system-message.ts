@@ -13,6 +13,6 @@ export async function insertSystemMessage(pool: Pool, userId: string, content: s
       [userId, content],
     );
   } catch (err) {
-    logger.warn('Failed to insert system message', { error: err instanceof Error ? err.message : String(err) });
+    logger.warn('[insertSystemMessage] Failed to insert system message', { error: err instanceof Error ? err.message : String(err) });
   }
 }

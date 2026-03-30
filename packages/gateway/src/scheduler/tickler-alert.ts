@@ -27,7 +27,7 @@ export class TicklerAlertScheduler {
   ) {}
 
   start(): void {
-    logger.info('Tickler alert scheduler started', {
+    logger.info('[TicklerAlertScheduler][start] Tickler alert scheduler started', {
       intervalMinutes: this.config.intervalMinutes,
       startHour: this.config.startHour,
       endHour: this.config.endHour,
@@ -104,9 +104,9 @@ export class TicklerAlertScheduler {
       }
 
       await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'));
-      logger.info('Tickler alert sent', { count: newTicklers.length });
+      logger.info('[TicklerAlertScheduler][tick] Tickler alert sent', { count: newTicklers.length });
     } catch (err) {
-      logger.warn('Tickler alert tick failed', {
+      logger.warn('[TicklerAlertScheduler][tick] Tickler alert tick failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

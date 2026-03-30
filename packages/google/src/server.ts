@@ -41,7 +41,7 @@ export async function startServer(): Promise<void> {
     });
   }
 
-  logger.info('Starting Google MCP server', { port: env.port });
+  logger.info('[startServer] Starting Google MCP server', { port: env.port });
 
   // ---------------------------------------------------------------------------
   // PostgreSQL connection pool
@@ -57,16 +57,16 @@ export async function startServer(): Promise<void> {
     try {
       const client = await pool.connect();
       client.release();
-      logger.info('PostgreSQL connection established');
+      logger.info('[startServer] PostgreSQL connection established');
       break;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (attempt === maxRetries) {
-        logger.error('Failed to connect to PostgreSQL after retries', { error: message, attempts: maxRetries });
+        logger.error('[startServer] Failed to connect to PostgreSQL after retries', { error: message, attempts: maxRetries });
         process.exit(1);
       }
       const code = (err as Record<string, unknown>).code;
-      logger.warn(`PostgreSQL not ready, retrying (${attempt}/${maxRetries})...`, { error: message || code || 'unknown' });
+      logger.warn(`[startServer] PostgreSQL not ready, retrying (${attempt}/${maxRetries})...`, { error: message || code || 'unknown' });
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
@@ -88,9 +88,9 @@ export async function startServer(): Promise<void> {
   const esCalendarRepo = esClient ? new ESCalendarEventRepository(esClient) : null;
 
   if (esClient) {
-    logger.info('Elasticsearch connected for calendar reads/writes');
+    logger.info('[startServer] Elasticsearch connected for calendar reads/writes');
   } else {
-    logger.warn('ELASTICSEARCH_URL not set — calendar reads will fall back to live Google API');
+    logger.warn('[startServer] ELASTICSEARCH_URL not set — calendar reads will fall back to live Google API');
   }
 
   const googleConfig = {
@@ -229,10 +229,10 @@ export async function startServer(): Promise<void> {
         const userInfo = await oauth2.userinfo.get();
         email = userInfo.data.email ?? '';
       } catch {
-        logger.warn('Could not fetch user email after OAuth callback');
+        logger.warn('[startServer] Could not fetch user email after OAuth callback');
       }
 
-      logger.info('OAuth callback successful', { userId: pending.userId, email });
+      logger.info('[startServer] OAuth callback successful', { userId: pending.userId, email });
 
       res.send(`<html><body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0">
         <div style="text-align:center">
@@ -244,7 +244,7 @@ export async function startServer(): Promise<void> {
       </body></html>`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('OAuth callback token exchange failed', { error: message });
+      logger.error('[startServer] OAuth callback token exchange failed', { error: message });
       res.status(500).send(`<html><body><h2>Token exchange failed</h2><p>${message}</p></body></html>`);
     }
   });
@@ -321,7 +321,7 @@ export async function startServer(): Promise<void> {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           const responseData = (err as { response?: { status?: number; data?: unknown } }).response;
-          logger.warn(`Failed to fetch events from calendar ${calId}`, {
+          logger.warn(`[startServer] Failed to fetch events from calendar ${calId}`, {
             error: message,
             status: responseData?.status,
             details: responseData?.data ? JSON.stringify(responseData.data) : undefined,
@@ -335,7 +335,7 @@ export async function startServer(): Promise<void> {
       res.json({ events: allEvents, total: allEvents.length });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('GET /api/events failed', { error: message });
+      logger.error('[startServer] GET /api/events failed', { error: message });
       res.status(500).json({ error: message });
     }
   });
@@ -384,7 +384,7 @@ export async function startServer(): Promise<void> {
       res.json({ events, total: events.length });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('GET /api/ticklers failed', { error: message });
+      logger.error('[startServer] GET /api/ticklers failed', { error: message });
       res.status(500).json({ error: message });
     }
   });
@@ -405,7 +405,7 @@ export async function startServer(): Promise<void> {
       await transport.handleRequest(req, res, req.body);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('MCP request failed', { error: message });
+      logger.error('[startServer] MCP request failed', { error: message });
       if (!res.headersSent) {
         res.status(500).json({ error: 'Internal server error' });
       }
@@ -417,24 +417,24 @@ export async function startServer(): Promise<void> {
   // Initialize audit logging (reuse esUrl from above)
   if (esUrl) {
     initAudit(esUrl);
-    logger.info('Audit logging enabled');
+    logger.info('[startServer] Audit logging enabled');
   }
 
   // ---------------------------------------------------------------------------
   const server = app.listen(env.port, () => {
-    logger.info(`Google MCP server listening on port ${env.port}`);
+    logger.info(`[startServer] Google MCP server listening on port ${env.port}`);
   });
 
   // ---------------------------------------------------------------------------
   // Graceful shutdown
   // ---------------------------------------------------------------------------
   const shutdown = async (signal: string) => {
-    logger.info(`Received ${signal}, shutting down gracefully`);
+    logger.info(`[startServer] Received ${signal}, shutting down gracefully`);
     server.close(() => {
-      logger.info('HTTP server closed');
+      logger.info('[startServer] HTTP server closed');
     });
     await pool.end();
-    logger.info('PostgreSQL pool closed');
+    logger.info('[startServer] PostgreSQL pool closed');
     process.exit(0);
   };
 

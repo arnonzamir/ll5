@@ -60,7 +60,7 @@ export async function getAuthenticatedClient(
   const now = Date.now();
   const expiresAt = tokens.expires_at.getTime();
   if (expiresAt - now < 60_000) {
-    logger.info('Access token expired or expiring soon, refreshing', { userId });
+    logger.info('[getAuthenticatedClient] Access token expired or expiring soon, refreshing', { userId });
     try {
       const { credentials } = await oauth2Client.refreshAccessToken();
       const newAccessToken = credentials.access_token;
@@ -69,11 +69,11 @@ export async function getAuthenticatedClient(
       if (newAccessToken && newExpiryDate) {
         await tokenRepo.updateAccessToken(userId, newAccessToken, new Date(newExpiryDate));
         oauth2Client.setCredentials(credentials);
-        logger.info('Access token refreshed successfully', { userId });
+        logger.info('[getAuthenticatedClient] Access token refreshed successfully', { userId });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('Failed to refresh access token', { userId, error: message });
+      logger.error('[getAuthenticatedClient] Failed to refresh access token', { userId, error: message });
       throw new Error(`Failed to refresh Google access token: ${message}`);
     }
   }

@@ -34,7 +34,7 @@ export class NotificationRuleMatcher {
       }
       this.lastRefresh = Date.now();
     } catch (err) {
-      logger.warn('Failed to refresh notification rules', {
+      logger.warn('[NotificationRuleMatcher][refresh] Failed to refresh notification rules', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

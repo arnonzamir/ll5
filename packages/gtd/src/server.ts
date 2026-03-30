@@ -35,7 +35,7 @@ export async function startServer(): Promise<void> {
     });
   }
 
-  logger.info('Starting GTD MCP server', { port: env.port });
+  logger.info('[startServer] Starting GTD MCP server', { port: env.port });
 
   // -------------------------------------------------------------------------
   // PostgreSQL connection pool
@@ -51,16 +51,16 @@ export async function startServer(): Promise<void> {
     try {
       const client = await pool.connect();
       client.release();
-      logger.info('PostgreSQL connection established');
+      logger.info('[startServer] PostgreSQL connection established');
       break;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (attempt === maxRetries) {
-        logger.error('Failed to connect to PostgreSQL after retries', { error: message, attempts: maxRetries });
+        logger.error('[startServer] Failed to connect to PostgreSQL after retries', { error: message, attempts: maxRetries });
         process.exit(1);
       }
       const code = (err as Record<string, unknown>).code;
-      logger.warn(`PostgreSQL not ready, retrying (${attempt}/${maxRetries})...`, { error: message || code || 'unknown' });
+      logger.warn(`[startServer] PostgreSQL not ready, retrying (${attempt}/${maxRetries})...`, { error: message || code || 'unknown' });
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
@@ -124,7 +124,7 @@ export async function startServer(): Promise<void> {
       await transport.handleRequest(req, res, req.body);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('MCP request failed', { error: message });
+      logger.error('[startServer] MCP request failed', { error: message });
       if (!res.headersSent) {
         res.status(500).json({ error: 'Internal server error' });
       }
@@ -135,25 +135,25 @@ export async function startServer(): Promise<void> {
   // Initialize audit logging
   if (env.elasticsearchUrl) {
     initAudit(env.elasticsearchUrl);
-    logger.info('Audit logging enabled');
+    logger.info('[startServer] Audit logging enabled');
   }
 
   // Start listening
   // -------------------------------------------------------------------------
   const server = app.listen(env.port, () => {
-    logger.info(`GTD MCP server listening on port ${env.port}`);
+    logger.info(`[startServer] GTD MCP server listening on port ${env.port}`);
   });
 
   // -------------------------------------------------------------------------
   // Graceful shutdown
   // -------------------------------------------------------------------------
   const shutdown = async (signal: string) => {
-    logger.info(`Received ${signal}, shutting down gracefully`);
+    logger.info(`[startServer] Received ${signal}, shutting down gracefully`);
     server.close(() => {
-      logger.info('HTTP server closed');
+      logger.info('[startServer] HTTP server closed');
     });
     await pool.end();
-    logger.info('PostgreSQL pool closed');
+    logger.info('[startServer] PostgreSQL pool closed');
     process.exit(0);
   };
 

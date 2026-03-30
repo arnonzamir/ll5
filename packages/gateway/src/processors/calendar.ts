@@ -97,7 +97,7 @@ export async function processCalendar(
             updated_at: now,
           },
         });
-        logger.debug('Enriched Google event with phone data', {
+        logger.debug('[processCalendar] Enriched Google event with phone data', {
           docId: hit._id,
           title: item.title,
         });
@@ -106,13 +106,13 @@ export async function processCalendar(
 
       // Case 2: Same title and similar time — skip duplicate
       if (existing.title === item.title) {
-        logger.debug('Skipping duplicate calendar event', { title: item.title });
+        logger.debug('[processCalendar] Skipping duplicate calendar event', { title: item.title });
         return;
       }
     }
   } catch (err) {
     // Dedup is best-effort — don't fail the push if search fails
-    logger.warn('Calendar dedup search failed, writing anyway', {
+    logger.warn('[processCalendar] Calendar dedup search failed, writing anyway', {
       error: err instanceof Error ? err.message : String(err),
     });
   }
@@ -140,7 +140,7 @@ export async function processCalendar(
     refresh: false,
   });
 
-  logger.debug('Calendar event stored', {
+  logger.debug('[processCalendar] Calendar event stored', {
     title: item.title,
     start: item.start,
   });
