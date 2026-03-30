@@ -91,7 +91,8 @@ ll5/
 │       ├── processors/                # GPS geocoding, IM processing, calendar (with dedup), notable events
 │       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
-│       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, channels
+│       ├── utils/system-message.ts    # Shared system message writer with dedup
+│       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, notification_rules
 │       └── server.ts                  # Express app: webhooks, auth, chat, health, schedulers
 │
 ├── packages/google/                   # calendar MCP — unified calendar layer (PG+ES)
