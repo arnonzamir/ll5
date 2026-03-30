@@ -27,7 +27,7 @@ Dashboard (Next.js 15)
   ├── /login — user_id + PIN auth (all pages redirect here if unauthenticated)
   ├── Nav: display name from profile, grouped menus (Organize, People & Places, Data), profile dropdown with logout
   ├── Build ID in footer (left-aligned, black)
-  ├── Dashboard uses Asia/Jerusalem TZ for server-side "today" calculation
+  ├── Dashboard + calendar use local timezone (not UTC) for all date calculations
   ├── /dashboard — GTD status + chat panel (50/50)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
   ├── /calendar — day/week view, hover tooltips, click details with source, holiday banner, settings

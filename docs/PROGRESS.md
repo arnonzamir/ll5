@@ -51,7 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
-- 2026-03-30: Nav: display name from profile (not UUID), grouped menu items (Organize, People & Places, Data), fix locations invalid date
+- 2026-03-30: Fix calendar day view blank (formatDateISO UTC bug), nav display name + grouped menus, fix locations invalid date
 - 2026-03-29: Fix calendar push: accept null fields, per-item validation (skip bad items, don't fail batch)
 - 2026-03-29: Calendar UI: hover tooltips, click for full details with source, holiday banner, all-day overlay
 - 2026-03-29: Unified calendar layer — reads from ES, writes through Google API + ES, renamed google→calendar MCP
