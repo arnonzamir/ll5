@@ -66,6 +66,7 @@ export async function processWhatsAppWebhook(
     : new Date().toISOString();
 
   // Write to ES — same index as phone-pushed messages
+  const docId = crypto.randomUUID();
   const messageDoc = {
     user_id: userId,
     sender,
@@ -80,7 +81,7 @@ export async function processWhatsAppWebhook(
 
   await es.index({
     index: 'll5_awareness_messages',
-    id: crypto.randomUUID(),
+    id: docId,
     document: messageDoc,
     refresh: false,
   });
@@ -132,16 +133,21 @@ export async function processWhatsAppWebhook(
   if (priority === 'immediate') {
     const truncBody = text.length > 200 ? text.slice(0, 200) + '...' : text;
     const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
+    // No FCM notify — immediate WhatsApp goes to agent via system message → SSE only
     await insertSystemMessage(
       pgPool,
       userId,
       `[WhatsApp] ${sender}${groupInfo}: "${truncBody}"`,
-      {
-        title: 'WhatsApp',
-        type: 'whatsapp',
-        priority: 'high',
-      },
     );
+
+    // Mark as processed so batch review doesn't re-report it
+    await es.update({
+      index: 'll5_awareness_messages',
+      id: docId,
+      doc: { processed: true },
+      refresh: false,
+    });
+
     logger.info('[processWhatsAppWebhook] Immediate notification sent', { sender });
   }
 }

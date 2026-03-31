@@ -36,9 +36,10 @@ export async function processMessage(
     messageDoc.group_name = item.group_name;
   }
 
+  const docId = crypto.randomUUID();
   await es.index({
     index: 'll5_awareness_messages',
-    id: crypto.randomUUID(),
+    id: docId,
     document: messageDoc,
     refresh: false,
   });
@@ -78,6 +79,15 @@ export async function processMessage(
         userId,
         `[IM Notification] ${item.sender} on ${item.app}${groupInfo}: "${truncBody}"`,
       );
+
+      // Mark as processed so batch review doesn't re-report it
+      await es.update({
+        index: 'll5_awareness_messages',
+        id: docId,
+        doc: { processed: true },
+        refresh: false,
+      });
+
       logger.info('[processMessage] Immediate notification sent', { sender: item.sender, app: item.app });
     }
   } else {

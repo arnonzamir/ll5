@@ -51,6 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-03-31: Fix message dedup: immediate messages marked processed (no double-report in batch), batch review drops time-window filter (no orphans), WhatsApp immediates no longer send FCM notification (agent-only path)
 - 2026-03-31: check_availability: device_freebusy mode — uses phone's Workspace OAuth token for same-domain coworker availability
 - 2026-03-31: Fix check_availability device fallback auth — generate ll5 token instead of using API_KEY
 - 2026-03-31: Messaging UI: "Named only" filter + sort by name/permission for conversations

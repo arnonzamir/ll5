@@ -88,7 +88,7 @@ ll5/
 │   └── src/
 │       ├── auth.ts                    # POST /auth/token (PIN login)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
-│       ├── processors/                # GPS geocoding, IM processing, calendar (with dedup), notable events
+│       ├── processors/                # GPS geocoding, IM processing (immediate→processed), calendar (with dedup), WhatsApp webhook, notable events
 │       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/system-message.ts    # Shared system message writer with dedup

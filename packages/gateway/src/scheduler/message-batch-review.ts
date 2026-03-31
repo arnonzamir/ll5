@@ -79,8 +79,7 @@ export class MessageBatchReviewScheduler {
     try {
       this.lastCheckTime = now;
 
-      // Query ES for unprocessed messages from this user within the last interval
-      const since = new Date(now - intervalMs).toISOString();
+      // Query ES for ALL unprocessed messages (no time window — avoids orphaned messages)
       const response = await this.es.search({
         index: 'll5_awareness_messages',
         query: {
@@ -88,7 +87,6 @@ export class MessageBatchReviewScheduler {
             filter: [
               { term: { user_id: this.config.userId } },
               { term: { processed: false } },
-              { range: { timestamp: { gte: since } } },
             ],
           },
         },
@@ -139,7 +137,7 @@ export class MessageBatchReviewScheduler {
           { update: { _index: 'll5_awareness_messages', _id: id } },
           { doc: { processed: true } },
         ]);
-        await this.es.bulk({ body: bulkBody, refresh: false });
+        await this.es.bulk({ body: bulkBody, refresh: 'wait_for' });
       }
 
       logger.info('[MessageBatchReviewScheduler][tick] Message batch review sent', {
