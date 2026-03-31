@@ -119,6 +119,20 @@ const AWARENESS_INDICES: IndexDefinition[] = [
     },
   },
   {
+    index: 'll5_session_history',
+    mappings: {
+      properties: {
+        session_id: { type: 'keyword' },
+        workspace: { type: 'keyword' },
+        message_count: { type: 'integer' },
+        first_message: { type: 'date' },
+        last_message: { type: 'date' },
+        messages: { type: 'object', enabled: false },
+        indexed_at: { type: 'date' },
+      },
+    },
+  },
+  {
     index: 'll5_app_log',
     mappings: {
       properties: {
