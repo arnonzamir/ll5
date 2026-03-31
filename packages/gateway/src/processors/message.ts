@@ -71,6 +71,17 @@ export async function processMessage(
       priority: priority ?? 'no-match',
     });
 
+    if (priority === 'ignore') {
+      await es.update({
+        index: 'll5_awareness_messages',
+        id: docId,
+        doc: { processed: true },
+        refresh: false,
+      });
+      logger.debug('[processMessage] Ignored message marked processed', { sender: item.sender, app: item.app });
+      return;
+    }
+
     if (priority === 'immediate') {
       const truncBody = item.body.length > 200 ? item.body.slice(0, 200) + '...' : item.body;
       const groupInfo = item.is_group && item.group_name ? ` (group: ${item.group_name})` : '';

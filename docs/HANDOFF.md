@@ -25,7 +25,7 @@ Gateway (Express)
   ├── Schedulers — calendar sync (30min), calendar review (2h), daily briefing (7am),
       tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00), message batch (30min)
   ├── System message dedup — checks PG for recent duplicate before inserting
-  └── Immediate messages mark ES doc as processed (prevents double-report in batch review)
+  └── Immediate + ignored messages mark ES doc as processed (prevents double-report/leak in batch review)
 
 Dashboard (Next.js 15)
   ├── /login — user_id + PIN auth (all pages redirect here if unauthenticated)

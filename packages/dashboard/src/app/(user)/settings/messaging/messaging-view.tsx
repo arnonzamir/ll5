@@ -276,7 +276,7 @@ function ConversationsSection({
     .filter((c) => {
       if (filter === "direct" && c.is_group) return false;
       if (filter === "group" && !c.is_group) return false;
-      if (namedOnly && !c.name) return false;
+      if (namedOnly && (!c.name || /^\+?\d[\d\s\-()]+$/.test(c.name) || c.name.includes("@"))) return false;
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         const name = (c.name || c.conversation_id).toLowerCase();

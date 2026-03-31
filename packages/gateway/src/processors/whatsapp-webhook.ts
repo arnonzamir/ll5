@@ -130,6 +130,18 @@ export async function processWhatsAppWebhook(
     priority: priority ?? 'no-match',
   });
 
+  if (priority === 'ignore') {
+    // Mark as processed so batch review skips it
+    await es.update({
+      index: 'll5_awareness_messages',
+      id: docId,
+      doc: { processed: true },
+      refresh: false,
+    });
+    logger.debug('[processWhatsAppWebhook] Ignored message marked processed', { sender });
+    return;
+  }
+
   if (priority === 'immediate') {
     const truncBody = text.length > 200 ? text.slice(0, 200) + '...' : text;
     const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
