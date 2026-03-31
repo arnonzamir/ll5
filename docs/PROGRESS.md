@@ -51,6 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-03-31: Fix FCM sender — `require('node:fs')` silently failed in ESM gateway, FCM pushes never sent
 - 2026-03-30: Device command queue — gateway queues commands for Android app via FCM, with confirm/fail lifecycle
 - 2026-03-30: System message dedup — prevents spam on gateway restart (checks PG for recent duplicates)
 - 2026-03-30: Message priority rules (immediate/batch routing) + 5 proactive schedulers

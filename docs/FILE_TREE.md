@@ -93,6 +93,7 @@ ll5/
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/system-message.ts    # Shared system message writer with dedup
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message
+│       ├── utils/fcm-sender.ts       # FCM v1 API sender (service account JWT + OAuth2)
 │       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, notification_rules, device_commands
 │       └── server.ts                  # Express app: webhooks, auth, chat, commands, health, schedulers
 │

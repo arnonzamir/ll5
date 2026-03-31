@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { Pool } from 'pg';
 import { logger } from './logger.js';
 
@@ -28,11 +29,14 @@ function loadServiceAccount(): ServiceAccount | null {
     const path = process.env.FCM_SERVICE_ACCOUNT_PATH;
     if (!path) return null;
     try {
-      const fs = require('node:fs');
-      const data = JSON.parse(fs.readFileSync(path, 'utf-8'));
+      const data = JSON.parse(readFileSync(path, 'utf-8'));
       serviceAccount = data;
       return serviceAccount;
-    } catch {
+    } catch (err) {
+      logger.warn('[loadServiceAccount] Failed to load service account file', {
+        path,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return null;
     }
   }
@@ -40,7 +44,10 @@ function loadServiceAccount(): ServiceAccount | null {
   try {
     serviceAccount = JSON.parse(json);
     return serviceAccount;
-  } catch {
+  } catch (err) {
+    logger.warn('[loadServiceAccount] Failed to parse FCM_SERVICE_ACCOUNT_JSON', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
