@@ -22,6 +22,7 @@ import {
   KeyRound,
   Mail,
   Bell,
+  MessageSquare,
   Shield,
   LogOut,
   Database,
@@ -282,6 +283,14 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                     >
                       <Bell className="h-4 w-4" />
                       Notifications
+                    </Link>
+                    <Link
+                      href="/settings/messaging"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      Messaging
                     </Link>
 
                     <div className="my-1 border-t border-gray-200" />
