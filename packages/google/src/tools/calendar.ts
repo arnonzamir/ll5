@@ -636,4 +636,69 @@ export function registerCalendarTools(
       };
     },
   );
+
+  // ---------------------------------------------------------------------------
+  // check_availability — query free/busy for people or calendars
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'check_availability',
+    'Check availability (free/busy) for specific people (by email) or calendars. Returns busy time blocks. Useful for finding meeting times. Works for any Google user whose calendar shares free/busy info (default for Workspace users).',
+    {
+      emails: z.array(z.string()).optional().describe('Email addresses of people to check'),
+      calendar_ids: z.array(z.string()).optional().describe('Calendar IDs to check (from your own account)'),
+      from: z.string().describe('Start of time range (ISO 8601)'),
+      to: z.string().describe('End of time range (ISO 8601)'),
+      include_own: z.boolean().optional().describe('Include your own primary calendar for comparison (default: true)'),
+    },
+    async ({ emails, calendar_ids, from, to, include_own }) => {
+      const userId = getUserId();
+
+      const items: { id: string }[] = [];
+      if (emails?.length) {
+        for (const email of emails) items.push({ id: email });
+      }
+      if (calendar_ids?.length) {
+        for (const calId of calendar_ids) items.push({ id: calId });
+      }
+      if (include_own !== false) {
+        items.push({ id: 'primary' });
+      }
+
+      if (items.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Provide at least one email or calendar_id' }) }],
+          isError: true,
+        };
+      }
+
+      const auth = await getAuthenticatedClient(config, tokenRepo, userId);
+      const calendarApi = google.calendar({ version: 'v3', auth });
+
+      const response = await calendarApi.freebusy.query({
+        requestBody: { timeMin: from, timeMax: to, items },
+      });
+
+      const results: Record<string, { busy: { start: string; end: string }[]; errors?: string[] }> = {};
+
+      for (const [calId, calData] of Object.entries(response.data.calendars ?? {})) {
+        const label = calId === 'primary' ? 'you' : calId;
+        results[label] = {
+          busy: (calData.busy ?? []).map((slot) => ({
+            start: slot.start ?? '',
+            end: slot.end ?? '',
+          })),
+        };
+        if (calData.errors?.length) {
+          results[label].errors = calData.errors.map((e) => e.reason ?? 'unknown');
+        }
+      }
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify(results, null, 2),
+        }],
+      };
+    },
+  );
 }

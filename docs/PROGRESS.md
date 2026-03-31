@@ -45,12 +45,13 @@ Current state of the LL5 personal assistant system.
 | personal-knowledge | 17 |
 | gtd | 14 + 3 chat |
 | awareness | 8 |
-| google | 12 (9 + 3 tickler) |
+| google | 13 (10 + 3 tickler) |
 | messaging | 8 |
-| **Total** | **62** |
+| **Total** | **63** |
 
 ## Recent Changes
 
+- 2026-03-31: check_availability tool — query free/busy for people (by email) or calendars
 - 2026-03-31: Fix FCM sender — `require('node:fs')` silently failed in ESM gateway, FCM pushes never sent
 - 2026-03-30: Device command queue — gateway queues commands for Android app via FCM, with confirm/fail lifecycle
 - 2026-03-30: System message dedup — prevents spam on gateway restart (checks PG for recent duplicates)

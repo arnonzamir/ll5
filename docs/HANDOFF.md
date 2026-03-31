@@ -84,6 +84,7 @@ Dashboard (Next.js 15)
 | Timezone | Per-user via `set_timezone` tool, stored in `google_user_settings` table (default: Asia/Jerusalem) |
 | Tickler Calendar | "LL5 System" (role=tickler). Defaults to 08:00, pass due_time="all_day" for all-day |
 | Calendar Access Modes | ignore, read, readwrite (CRUD enforced per mode) |
+| Availability Check | `check_availability` tool — FreeBusy API, works for any Google user sharing free/busy info |
 
 OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically.
 
