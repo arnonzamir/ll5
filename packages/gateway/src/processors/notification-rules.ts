@@ -1,11 +1,14 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 
+export type Priority = 'immediate' | 'batch' | 'ignore' | 'agent';
+
 interface Rule {
   id: string;
   rule_type: string;
   match_value: string;
-  priority: 'immediate' | 'batch' | 'ignore';
+  priority: Priority;
+  platform: string | null;
 }
 
 export class NotificationRuleMatcher {
@@ -19,7 +22,7 @@ export class NotificationRuleMatcher {
     if (Date.now() - this.lastRefresh < this.refreshInterval) return;
     try {
       const result = await this.pool.query<{ user_id: string } & Rule>(
-        'SELECT id, user_id, rule_type, match_value, priority FROM notification_rules',
+        'SELECT id, user_id, rule_type, match_value, priority, platform FROM notification_rules',
       );
       this.rules.clear();
       for (const row of result.rows) {
@@ -28,7 +31,8 @@ export class NotificationRuleMatcher {
           id: row.id,
           rule_type: row.rule_type,
           match_value: row.match_value,
-          priority: row.priority as 'immediate' | 'batch' | 'ignore',
+          priority: row.priority as Priority,
+          platform: row.platform ?? null,
         });
         this.rules.set(row.user_id, list);
       }
@@ -48,8 +52,10 @@ export class NotificationRuleMatcher {
       body: string;
       is_group?: boolean;
       group_name?: string | null;
+      platform?: string;
+      conversation_id?: string;
     },
-  ): Promise<'immediate' | 'batch' | 'ignore' | null> {
+  ): Promise<Priority | null> {
     await this.refresh();
     const userRules = this.rules.get(userId);
     if (!userRules || userRules.length === 0) return null;
@@ -58,8 +64,19 @@ export class NotificationRuleMatcher {
     const bodyLower = message.body.toLowerCase();
     const appLower = message.app.toLowerCase();
 
-    // Specific rules first, wildcard/catch-all last
-    let wildcardResult: 'immediate' | 'batch' | 'ignore' | null = null;
+    // 1. Conversation-specific rules — highest priority
+    if (message.platform && message.conversation_id) {
+      for (const rule of userRules) {
+        if (rule.rule_type === 'conversation' &&
+            rule.platform === message.platform &&
+            rule.match_value === message.conversation_id) {
+          return rule.priority;
+        }
+      }
+    }
+
+    // 2. Pattern-based rules (sender, app, keyword, group)
+    let wildcardResult: Priority | null = null;
 
     for (const rule of userRules) {
       const val = rule.match_value.toLowerCase();
@@ -86,8 +103,11 @@ export class NotificationRuleMatcher {
         case 'wildcard':
           wildcardResult = rule.priority;
           break;
+        // 'conversation' already handled above
       }
     }
+
+    // 3. Wildcard — lowest priority
     return wildcardResult;
   }
 }

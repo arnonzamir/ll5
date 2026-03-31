@@ -58,15 +58,16 @@ export function registerNotificationRuleTools(
 
   server.tool(
     'create_notification_rule',
-    'Create a notification priority rule for phone-pushed IM messages. Immediate rules wake Claude instantly. Batch rules are reviewed periodically.',
+    'Create a message priority rule. Controls how inbound messages are routed: ignore (drop), batch (periodic summary), immediate (alert agent), agent (alert + agent can respond).',
     {
-      rule_type: z.enum(['sender', 'app', 'keyword', 'group', 'app_direct', 'app_group', 'wildcard']).describe(
-        'Match type: sender (name contains), app (all from app), keyword (body contains), group (group name), app_direct (app DMs only), app_group (app group chats only), wildcard (catch-all default). Use * as match_value for broad matches.',
+      rule_type: z.enum(['sender', 'app', 'keyword', 'group', 'app_direct', 'app_group', 'wildcard', 'conversation']).describe(
+        'Match type: sender, app, keyword, group, app_direct, app_group, wildcard (catch-all), conversation (specific chat). Use * as match_value for broad matches.',
       ),
-      match_value: z.string().describe('Value to match (case-insensitive). Use * for wildcard/catch-all.'),
-      priority: z.enum(['immediate', 'batch', 'ignore']).optional().describe('Priority: immediate (wake Claude), batch (periodic review), ignore (skip entirely). Default: immediate'),
+      match_value: z.string().describe('Value to match (case-insensitive). For conversation type, use the platform conversation ID.'),
+      priority: z.enum(['immediate', 'batch', 'ignore', 'agent']).optional().describe('Priority: ignore (drop), batch (periodic review), immediate (alert agent), agent (alert + can respond). Default: immediate'),
+      platform: z.string().optional().describe('Platform (required for conversation rules): whatsapp, telegram'),
     },
-    async ({ rule_type, match_value, priority }) => {
+    async ({ rule_type, match_value, priority, platform }) => {
       const userId = getUserId();
       const token = makeServiceToken(userId, authSecret);
 
@@ -81,6 +82,7 @@ export function registerNotificationRuleTools(
             rule_type,
             match_value,
             priority: priority ?? 'immediate',
+            platform: platform ?? undefined,
           }),
         });
 

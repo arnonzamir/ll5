@@ -1,51 +1,46 @@
 import { z } from 'zod';
+import type { Pool } from 'pg';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { ConversationRepository } from '../repositories/interfaces/conversation.repository.js';
+
+const LEGACY_MAP: Record<string, string> = { input: 'batch' };
 
 export function registerUpdatePermissionsTool(
   server: McpServer,
-  conversationRepo: ConversationRepository,
+  pool: Pool,
   getUserId: () => string,
 ): void {
   server.tool(
     'update_conversation_permissions',
-    'Set the permission mode (agent/input/ignore) for a conversation, controlling what the agent can do.',
+    'Set the priority level for a conversation: ignore (drop), batch (periodic summary), immediate (notify agent), agent (notify + agent can respond).',
     {
       platform: z.enum(['whatsapp', 'telegram']).describe('Platform'),
       conversation_id: z.string().describe('Platform-specific conversation ID'),
-      permission: z.enum(['agent', 'input', 'ignore']).describe('New permission level'),
+      permission: z.enum(['agent', 'immediate', 'batch', 'ignore', 'input']).describe('Priority level (input is legacy alias for batch)'),
     },
     async (params) => {
       const userId = getUserId();
+      const priority = LEGACY_MAP[params.permission] ?? params.permission;
 
-      try {
-        const result = await conversationRepo.updatePermission(
-          userId,
-          params.platform,
-          params.conversation_id,
-          params.permission,
-        );
+      // Upsert into notification_rules
+      const result = await pool.query(
+        `INSERT INTO notification_rules (user_id, rule_type, match_value, priority, platform)
+         VALUES ($1, 'conversation', $2, $3, $4)
+         ON CONFLICT (user_id, platform, match_value) WHERE rule_type = 'conversation'
+         DO UPDATE SET priority = EXCLUDED.priority
+         RETURNING id`,
+        [userId, params.conversation_id, priority, params.platform],
+      );
 
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              success: true,
-              previous_permission: result.previous_permission,
-              new_permission: params.permission,
-            }, null, 2),
-          }],
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (message === 'CONVERSATION_NOT_FOUND') {
-          return {
-            content: [{ type: 'text' as const, text: JSON.stringify({ error: 'CONVERSATION_NOT_FOUND' }) }],
-            isError: true,
-          };
-        }
-        throw err;
-      }
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            success: true,
+            rule_id: result.rows[0]?.id,
+            priority,
+          }, null, 2),
+        }],
+      };
     },
   );
 }

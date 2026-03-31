@@ -116,13 +116,15 @@ export async function processWhatsAppWebhook(
     });
   }
 
-  // Check notification rules
+  // Check notification rules (conversation-specific rules checked first)
   const priority = await matcher.match(userId, {
     sender,
     app: 'whatsapp',
     body: text,
     is_group: isGroup,
     group_name: groupName,
+    platform: 'whatsapp',
+    conversation_id: remoteJid,
   });
 
   logger.info('[processWhatsAppWebhook] Notification rule match', {
@@ -142,7 +144,7 @@ export async function processWhatsAppWebhook(
     return;
   }
 
-  if (priority === 'immediate') {
+  if (priority === 'immediate' || priority === 'agent') {
     const truncBody = text.length > 200 ? text.slice(0, 200) + '...' : text;
     const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
     // No FCM notify — immediate WhatsApp goes to agent via system message → SSE only

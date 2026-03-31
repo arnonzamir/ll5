@@ -22,12 +22,19 @@ import {
   Search,
 } from "lucide-react";
 import {
+  MessageSquare,
+  Users,
+  User,
+} from "lucide-react";
+import {
   fetchRules,
   createRule,
   deleteRule,
   fetchKnownSenders,
+  fetchConversations,
   type NotificationRule,
   type KnownSender,
+  type ConversationInfo,
 } from "./notification-settings-server-actions";
 
 // --- Helpers ---
@@ -419,21 +426,206 @@ function KeywordsSection({
   );
 }
 
+// --- Conversations Section ---
+
+const PRIORITY_OPTIONS = ["ignore", "batch", "immediate", "agent"] as const;
+const PRIORITY_CONFIG = {
+  ignore: { label: "Ignore", activeClass: "bg-red-50 text-red-600" },
+  batch: { label: "Batch", activeClass: "bg-gray-100 text-gray-700" },
+  immediate: { label: "Immediate", activeClass: "bg-amber-100 text-amber-800" },
+  agent: { label: "Agent", activeClass: "bg-green-100 text-green-800" },
+};
+
+function ConversationsSection({
+  conversations,
+  rules,
+  onSetPriority,
+  isPending,
+}: {
+  conversations: ConversationInfo[];
+  rules: NotificationRule[];
+  onSetPriority: (platform: string, conversationId: string, priority: "ignore" | "batch" | "immediate" | "agent") => void;
+  isPending: boolean;
+}) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "direct" | "group">("all");
+  const [namedOnly, setNamedOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<"priority" | "name">("priority");
+
+  // Build a map of conversation rules
+  const ruleMap = new Map<string, NotificationRule>();
+  for (const r of rules) {
+    if (r.rule_type === "conversation" && r.platform) {
+      ruleMap.set(`${r.platform}:${r.match_value}`, r);
+    }
+  }
+
+  const filtered = conversations
+    .filter((c) => {
+      if (filter === "direct" && c.is_group) return false;
+      if (filter === "group" && !c.is_group) return false;
+      if (namedOnly && (!c.name || /^\+?\d[\d\s\-()]+$/.test(c.name) || c.name.includes("@"))) return false;
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const name = (c.name || c.conversation_id).toLowerCase();
+        return name.includes(query);
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "name") {
+        const nameA = (a.name || a.conversation_id).toLowerCase();
+        const nameB = (b.name || b.conversation_id).toLowerCase();
+        return nameA.localeCompare(nameB);
+      }
+      // Sort by priority: agent > immediate > batch > ignore > no-rule
+      const order = { agent: 0, immediate: 1, batch: 2, ignore: 3 };
+      const prioA = ruleMap.get(`${a.platform}:${a.conversation_id}`)?.priority;
+      const prioB = ruleMap.get(`${b.platform}:${b.conversation_id}`)?.priority;
+      const oA = prioA ? order[prioA as keyof typeof order] ?? 4 : 4;
+      const oB = prioB ? order[prioB as keyof typeof order] ?? 4 : 4;
+      return oA - oB;
+    });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <MessageSquare className="h-4 w-4" />
+          Conversations
+        </CardTitle>
+        <CardDescription>
+          Set priority per conversation. Agent = can respond, Immediate = notify now, Batch = periodic summary, Ignore = drop.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search conversations..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
+            {(["all", "direct", "group"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                  filter === f ? "bg-gray-100 text-gray-800" : "text-gray-400 hover:text-gray-600"
+                }`}
+              >
+                {f === "all" ? `All (${conversations.length})`
+                  : f === "direct" ? `Direct (${conversations.filter((c) => !c.is_group).length})`
+                  : `Groups (${conversations.filter((c) => c.is_group).length})`}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setNamedOnly((v) => !v)}
+            className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors cursor-pointer shrink-0 ${
+              namedOnly ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200 hover:text-gray-700"
+            }`}
+          >
+            Named only
+          </button>
+          <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
+            {(["priority", "name"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSortBy(s)}
+                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                  sortBy === s ? "bg-gray-100 text-gray-800" : "text-gray-400 hover:text-gray-600"
+                }`}
+              >
+                {s === "priority" ? "By priority" : "By name"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+            <MessageSquare className="h-8 w-8 mb-2" />
+            <p className="text-sm">No conversations match your filters.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {filtered.map((c) => {
+              const rule = ruleMap.get(`${c.platform}:${c.conversation_id}`);
+              const activePriority = rule?.priority ?? "batch";
+              return (
+                <div key={`${c.platform}:${c.conversation_id}`} className="flex items-center gap-3 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      {c.is_group ? (
+                        <Users className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                      ) : (
+                        <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                      )}
+                      <span className="text-sm font-medium truncate">
+                        {c.name || c.conversation_id}
+                      </span>
+                      <AppBadge app={c.platform} />
+                    </div>
+                    {c.last_message_at && (
+                      <div className="flex items-center gap-2 mt-0.5 pl-5.5">
+                        <span className="text-xs text-gray-400">{formatLastSeen(c.last_message_at)}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
+                    {PRIORITY_OPTIONS.map((p) => {
+                      const config = PRIORITY_CONFIG[p];
+                      const isActive = activePriority === p;
+                      return (
+                        <button
+                          key={p}
+                          onClick={() => {
+                            if (isActive) return;
+                            onSetPriority(c.platform, c.conversation_id, p);
+                          }}
+                          disabled={isPending}
+                          className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                            isActive ? config.activeClass : "text-gray-400 hover:text-gray-600"
+                          }`}
+                        >
+                          {config.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // --- Main View ---
 
 export function NotificationSettingsView() {
   const [rules, setRules] = useState<NotificationRule[]>([]);
   const [senders, setSenders] = useState<KnownSender[]>([]);
+  const [conversations, setConversations] = useState<ConversationInfo[]>([]);
   const [isPending, startTransition] = useTransition();
 
   const loadData = useCallback(() => {
     startTransition(async () => {
-      const [rulesData, sendersData] = await Promise.all([
+      const [rulesData, sendersData, convosData] = await Promise.all([
         fetchRules(),
         fetchKnownSenders(),
+        fetchConversations(),
       ]);
       setRules(rulesData);
       setSenders(sendersData);
+      setConversations(convosData);
     });
   }, []);
 
@@ -513,16 +705,37 @@ export function NotificationSettingsView() {
     });
   }
 
-  const [tab, setTab] = useState<"people" | "keywords">("people");
+  function handleSetConversationPriority(
+    platform: string,
+    conversationId: string,
+    priority: "ignore" | "batch" | "immediate" | "agent"
+  ) {
+    startTransition(async () => {
+      const created = await createRule("conversation", conversationId, priority, platform);
+      if (created) {
+        setRules((prev) => [
+          ...prev.filter(
+            (r) => !(r.rule_type === "conversation" && r.match_value === conversationId && r.platform === platform)
+          ),
+          created,
+        ]);
+      } else {
+        const fresh = await fetchRules();
+        setRules(fresh);
+      }
+    });
+  }
+
+  const [tab, setTab] = useState<"people" | "conversations" | "keywords">("people");
 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 8rem)" }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-bold">Notification Rules</h1>
+          <h1 className="text-2xl font-bold">Message Rules</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Control which messages trigger immediate notifications vs. batch review.
+            Control how messages are routed: ignore, batch summary, immediate alert, or agent response.
           </p>
         </div>
         <Button onClick={loadData} disabled={isPending} variant="outline" size="sm">
@@ -533,26 +746,23 @@ export function NotificationSettingsView() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-gray-200 mb-4 shrink-0">
-        <button
-          onClick={() => setTab("people")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
-            tab === "people"
-              ? "border-primary text-primary"
-              : "border-transparent text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          People ({senders.length})
-        </button>
-        <button
-          onClick={() => setTab("keywords")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
-            tab === "keywords"
-              ? "border-primary text-primary"
-              : "border-transparent text-gray-500 hover:text-gray-700"
-          }`}
-        >
-          Keywords ({rules.filter((r) => r.rule_type === "keyword").length})
-        </button>
+        {([
+          { key: "people" as const, label: `People (${senders.length})` },
+          { key: "conversations" as const, label: `Conversations (${conversations.length})` },
+          { key: "keywords" as const, label: `Keywords (${rules.filter((r) => r.rule_type === "keyword").length})` },
+        ]).map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+              tab === key
+                ? "border-primary text-primary"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
         <div className="ml-auto text-xs text-gray-400 self-end pb-2">
           {rules.length} rule{rules.length !== 1 ? "s" : ""} total
         </div>
@@ -566,6 +776,14 @@ export function NotificationSettingsView() {
             rules={rules}
             onSetPriority={handleSetSenderPriority}
             onClearRule={handleClearRule}
+            isPending={isPending}
+          />
+        )}
+        {tab === "conversations" && (
+          <ConversationsSection
+            conversations={conversations}
+            rules={rules}
+            onSetPriority={handleSetConversationPriority}
             isPending={isPending}
           />
         )}

@@ -1,13 +1,16 @@
 import { z } from 'zod';
+import type { Pool } from 'pg';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AccountRepository } from '../repositories/interfaces/account.repository.js';
 import type { ConversationRepository } from '../repositories/interfaces/conversation.repository.js';
 import { EvolutionClient } from '../clients/evolution.client.js';
+import { getConversationPriority } from '../utils/permission-checker.js';
 
 export function registerSendWhatsAppTool(
   server: McpServer,
   accountRepo: AccountRepository,
   conversationRepo: ConversationRepository,
+  pool: Pool,
   getUserId: () => string,
 ): void {
   server.tool(
@@ -37,15 +40,16 @@ export function registerSendWhatsAppTool(
         };
       }
 
-      // Check conversation permission
+      // Check conversation permission via unified notification rules
       const conversationId = params.to.includes('@') ? params.to : `${params.to}@s.whatsapp.net`;
-      const conversation = await conversationRepo.get(userId, 'whatsapp', conversationId);
-      if (conversation && conversation.permission !== 'agent') {
+      const priority = await getConversationPriority(pool, userId, 'whatsapp', conversationId);
+      if (priority !== 'agent') {
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'PERMISSION_DENIED', permission: conversation.permission }) }],
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'PERMISSION_DENIED', priority: priority ?? 'no-rule', message: 'Only conversations with "agent" priority can receive messages' }) }],
           isError: true,
         };
       }
+      const conversation = await conversationRepo.get(userId, 'whatsapp', conversationId);
 
       // Send via Evolution API
       const client = new EvolutionClient(account.api_url, account.instance_name, account.api_key);

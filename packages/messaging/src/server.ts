@@ -68,7 +68,7 @@ export async function startServer(): Promise<void> {
   const conversationRepo = new PostgresConversationRepository(pool);
   const contactRepo = new PostgresContactRepository(pool);
 
-  const deps = { accountRepo, conversationRepo, contactRepo, encryptionKey: env.encryptionKey };
+  const deps = { accountRepo, conversationRepo, contactRepo, encryptionKey: env.encryptionKey, pool };
 
   // ---------------------------------------------------------------------------
   // Express app with auth middleware

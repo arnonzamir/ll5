@@ -9,10 +9,19 @@ import { mcpCallJsonSafe } from "@/lib/api";
 export interface NotificationRule {
   id: string;
   user_id: string;
-  rule_type: "sender" | "app" | "keyword" | "group" | "app_direct" | "app_group" | "wildcard";
+  rule_type: "sender" | "app" | "keyword" | "group" | "app_direct" | "app_group" | "wildcard" | "conversation";
   match_value: string;
-  priority: "immediate" | "batch" | "ignore";
+  priority: "immediate" | "batch" | "ignore" | "agent";
+  platform?: string;
   created_at: string;
+}
+
+export interface ConversationInfo {
+  conversation_id: string;
+  platform: string;
+  name: string | null;
+  is_group: boolean;
+  last_message_at: string | null;
 }
 
 export type SenderCategory = "family" | "friends" | "work" | "other";
@@ -62,18 +71,33 @@ export async function fetchRules(): Promise<NotificationRule[]> {
 export async function createRule(
   rule_type: NotificationRule["rule_type"],
   match_value: string,
-  priority: NotificationRule["priority"]
+  priority: NotificationRule["priority"],
+  platform?: string
 ): Promise<NotificationRule | null> {
   try {
+    const body: Record<string, unknown> = { rule_type, match_value, priority };
+    if (platform) body.platform = platform;
     const res = await gatewayFetch("/notification-rules", {
       method: "POST",
-      body: JSON.stringify({ rule_type, match_value, priority }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) return null;
     return (await res.json()) as NotificationRule;
   } catch {
     return null;
   }
+}
+
+export async function fetchConversations(): Promise<ConversationInfo[]> {
+  const raw = await mcpCallJsonSafe<Record<string, unknown>>(
+    "messaging",
+    "list_conversations",
+    { limit: 500 }
+  );
+  if (!raw || typeof raw !== "object") return [];
+  const list = Array.isArray(raw) ? raw : (raw as Record<string, unknown>).conversations;
+  if (!Array.isArray(list)) return [];
+  return list as ConversationInfo[];
 }
 
 export async function deleteRule(id: string): Promise<boolean> {

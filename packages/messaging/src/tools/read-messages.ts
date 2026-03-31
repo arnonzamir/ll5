@@ -1,14 +1,17 @@
 import { z } from 'zod';
+import type { Pool } from 'pg';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AccountRepository } from '../repositories/interfaces/account.repository.js';
 import type { ConversationRepository } from '../repositories/interfaces/conversation.repository.js';
 import { EvolutionClient } from '../clients/evolution.client.js';
 import { TelegramClient } from '../clients/telegram.client.js';
+import { getConversationPriority } from '../utils/permission-checker.js';
 
 export function registerReadMessagesTool(
   server: McpServer,
   accountRepo: AccountRepository,
   conversationRepo: ConversationRepository,
+  pool: Pool,
   getUserId: () => string,
 ): void {
   server.tool(
@@ -24,18 +27,20 @@ export function registerReadMessagesTool(
       const userId = getUserId();
       const limit = params.limit ?? 20;
 
-      // Look up conversation
-      const conversation = await conversationRepo.get(userId, params.platform, params.conversation_id);
-      if (!conversation) {
+      // Check permission via unified notification rules
+      const priority = await getConversationPriority(pool, userId, params.platform, params.conversation_id);
+      if (priority === 'ignore') {
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'CONVERSATION_NOT_FOUND' }) }],
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'PERMISSION_DENIED', priority: 'ignore' }) }],
           isError: true,
         };
       }
 
-      if (conversation.permission === 'ignore') {
+      // Look up conversation for metadata (account_id, etc.)
+      const conversation = await conversationRepo.get(userId, params.platform, params.conversation_id);
+      if (!conversation) {
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'PERMISSION_DENIED', permission: 'ignore' }) }],
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'CONVERSATION_NOT_FOUND' }) }],
           isError: true,
         };
       }

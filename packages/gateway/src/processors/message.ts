@@ -82,7 +82,7 @@ export async function processMessage(
       return;
     }
 
-    if (priority === 'immediate') {
+    if (priority === 'immediate' || priority === 'agent') {
       const truncBody = item.body.length > 200 ? item.body.slice(0, 200) + '...' : item.body;
       const groupInfo = item.is_group && item.group_name ? ` (group: ${item.group_name})` : '';
       await insertSystemMessage(

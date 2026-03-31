@@ -16,11 +16,14 @@ import { registerResolveContactTool } from './resolve-contact.js';
 import { registerLinkContactTool, registerUnlinkContactTool } from './link-contact.js';
 import { registerAutoMatchContactsTool } from './auto-match-contacts.js';
 
+import type { Pool } from 'pg';
+
 export interface ToolDependencies {
   accountRepo: AccountRepository;
   conversationRepo: ConversationRepository;
   contactRepo: ContactRepository;
   encryptionKey: string;
+  pool: Pool;
 }
 
 export function registerAllTools(
@@ -29,11 +32,11 @@ export function registerAllTools(
   getUserId: () => string,
 ): void {
   registerListAccountsTool(server, deps.accountRepo, getUserId);
-  registerSendWhatsAppTool(server, deps.accountRepo, deps.conversationRepo, getUserId);
-  registerSendTelegramTool(server, deps.accountRepo, deps.conversationRepo, getUserId);
+  registerSendWhatsAppTool(server, deps.accountRepo, deps.conversationRepo, deps.pool, getUserId);
+  registerSendTelegramTool(server, deps.accountRepo, deps.conversationRepo, deps.pool, getUserId);
   registerListConversationsTool(server, deps.conversationRepo, getUserId);
-  registerUpdatePermissionsTool(server, deps.conversationRepo, getUserId);
-  registerReadMessagesTool(server, deps.accountRepo, deps.conversationRepo, getUserId);
+  registerUpdatePermissionsTool(server, deps.pool, getUserId);
+  registerReadMessagesTool(server, deps.accountRepo, deps.conversationRepo, deps.pool, getUserId);
   registerSyncWhatsAppTool(server, deps.accountRepo, deps.conversationRepo, deps.contactRepo, getUserId);
   registerGetAccountStatusTool(server, deps.accountRepo, getUserId);
   registerCreateWhatsAppAccountTool(server, deps.accountRepo, deps.encryptionKey, getUserId);

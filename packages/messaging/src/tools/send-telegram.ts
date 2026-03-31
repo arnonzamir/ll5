@@ -1,13 +1,16 @@
 import { z } from 'zod';
+import type { Pool } from 'pg';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AccountRepository } from '../repositories/interfaces/account.repository.js';
 import type { ConversationRepository } from '../repositories/interfaces/conversation.repository.js';
 import { TelegramClient } from '../clients/telegram.client.js';
+import { getConversationPriority } from '../utils/permission-checker.js';
 
 export function registerSendTelegramTool(
   server: McpServer,
   accountRepo: AccountRepository,
   conversationRepo: ConversationRepository,
+  pool: Pool,
   getUserId: () => string,
 ): void {
   server.tool(
@@ -38,14 +41,15 @@ export function registerSendTelegramTool(
         };
       }
 
-      // Check conversation permission
-      const conversation = await conversationRepo.get(userId, 'telegram', params.chat_id);
-      if (conversation && conversation.permission !== 'agent') {
+      // Check conversation permission via unified notification rules
+      const priority = await getConversationPriority(pool, userId, 'telegram', params.chat_id);
+      if (priority !== 'agent') {
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'PERMISSION_DENIED', permission: conversation.permission }) }],
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'PERMISSION_DENIED', priority: priority ?? 'no-rule', message: 'Only conversations with "agent" priority can receive messages' }) }],
           isError: true,
         };
       }
+      const conversation = await conversationRepo.get(userId, 'telegram', params.chat_id);
 
       // Send via Telegram Bot API
       const client = new TelegramClient(account.bot_token);
