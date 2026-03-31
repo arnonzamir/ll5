@@ -99,13 +99,17 @@ export function registerSyncWhatsAppTool(
       }
 
       // Also upsert contacts from chats (some contacts may only appear in chats, not in findContacts)
-      const chatContactInputs = chats.map((chat) => ({
-        platform: 'whatsapp' as const,
-        platform_id: chat.id,
-        display_name: chat.name,
-        phone_number: phoneFromJid(chat.id) ?? undefined,
-        is_group: chat.isGroup,
-      }));
+      const chatContactInputs = chats.map((chat) => {
+        // Only use name if it's not just the JID (fallback from Evolution client)
+        const isRealName = chat.name && chat.name !== chat.id && !chat.name.includes('@');
+        return {
+          platform: 'whatsapp' as const,
+          platform_id: chat.id,
+          display_name: isRealName ? chat.name : undefined,
+          phone_number: phoneFromJid(chat.id) ?? undefined,
+          is_group: chat.isGroup,
+        };
+      });
 
       if (chatContactInputs.length > 0) {
         const chatContactCount = await contactRepo.bulkUpsert(userId, chatContactInputs);
