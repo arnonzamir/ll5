@@ -88,23 +88,40 @@ export class EvolutionClient {
    * Fetch all chats from Evolution API.
    */
   async findChats(): Promise<EvolutionChat[]> {
-    const result = await this.request<
-      Array<{
-        id: string;
-        name?: string | null;
-        pushName?: string | null;
-        subject?: string | null;
-        remoteJid?: string | null;
-        isGroup?: boolean;
-        lastMessageTimestamp?: number;
-      }>
-    >('POST', `/chat/findChats/${this.instanceName}`, {});
+    // Fetch chats and contacts in parallel
+    const [chats, contacts] = await Promise.all([
+      this.request<
+        Array<{
+          id: string;
+          name?: string | null;
+          pushName?: string | null;
+          subject?: string | null;
+          remoteJid?: string | null;
+          isGroup?: boolean;
+          lastMessageTimestamp?: number;
+        }>
+      >('POST', `/chat/findChats/${this.instanceName}`, {}),
+      this.request<
+        Array<{
+          remoteJid?: string | null;
+          pushName?: string | null;
+        }>
+      >('POST', `/chat/findContacts/${this.instanceName}`, { where: {} }).catch(() => [] as Array<{ remoteJid?: string | null; pushName?: string | null }>),
+    ]);
 
-    return (result || [])
+    // Build a JID → name lookup from contacts
+    const contactNames = new Map<string, string>();
+    for (const c of contacts || []) {
+      if (c.remoteJid && c.pushName) {
+        contactNames.set(c.remoteJid, c.pushName);
+      }
+    }
+
+    return (chats || [])
       .filter((chat) => chat.remoteJid || chat.id)
       .map((chat) => {
         const jid = chat.remoteJid || chat.id;
-        const displayName = chat.name || chat.pushName || chat.subject || jid;
+        const displayName = chat.name || chat.pushName || chat.subject || contactNames.get(jid) || jid;
         return {
           id: jid,
           name: displayName,
