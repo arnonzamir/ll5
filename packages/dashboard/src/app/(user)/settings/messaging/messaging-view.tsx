@@ -269,23 +269,32 @@ function ConversationsSection({
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "direct" | "group">("all");
+  const [namedOnly, setNamedOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<"permission" | "name">("permission");
 
-  const filtered = conversations.filter((c) => {
-    // Type filter
-    if (filter === "direct" && c.is_group) return false;
-    if (filter === "group" && !c.is_group) return false;
+  const filtered = conversations
+    .filter((c) => {
+      if (filter === "direct" && c.is_group) return false;
+      if (filter === "group" && !c.is_group) return false;
+      if (namedOnly && !c.name) return false;
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const name = (c.name || c.conversation_id).toLowerCase();
+        const platform = c.platform.toLowerCase();
+        return name.includes(query) || platform.includes(query);
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "name") {
+        const nameA = (a.name || a.conversation_id).toLowerCase();
+        const nameB = (b.name || b.conversation_id).toLowerCase();
+        return nameA.localeCompare(nameB);
+      }
+      return 0; // keep original order for permission grouping
+    });
 
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      const name = (c.name || c.conversation_id).toLowerCase();
-      const platform = c.platform.toLowerCase();
-      return name.includes(query) || platform.includes(query);
-    }
-    return true;
-  });
-
-  // Separate by permission for display
+  // Separate by permission for display (only used when sorting by permission)
   const agentConvos = filtered.filter((c) => c.permission === "agent");
   const inputConvos = filtered.filter((c) => c.permission === "input");
   const ignoreConvos = filtered.filter((c) => c.permission === "ignore");
@@ -310,8 +319,8 @@ function ConversationsSection({
       </CardHeader>
       <CardContent>
         {/* Filters */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <div className="relative flex-1 min-w-[180px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
               placeholder="Search conversations..."
@@ -339,6 +348,31 @@ function ConversationsSection({
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setNamedOnly((v) => !v)}
+            className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors cursor-pointer shrink-0 ${
+              namedOnly
+                ? "bg-gray-800 text-white border-gray-800"
+                : "bg-white text-gray-500 border-gray-200 hover:text-gray-700"
+            }`}
+          >
+            Named only
+          </button>
+          <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
+            {(["permission", "name"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSortBy(s)}
+                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                  sortBy === s
+                    ? "bg-gray-100 text-gray-800"
+                    : "text-gray-400 hover:text-gray-600"
+                }`}
+              >
+                {s === "permission" ? "By permission" : "By name"}
+              </button>
+            ))}
+          </div>
         </div>
 
         {filtered.length === 0 ? (
@@ -349,6 +383,22 @@ function ConversationsSection({
                 ? "No conversations found. Try syncing your accounts."
                 : "No conversations match your filters."}
             </p>
+          </div>
+        ) : sortBy === "name" ? (
+          <div>
+            <div className="text-xs text-gray-400 mb-1 px-1">
+              {filtered.length} conversation{filtered.length !== 1 ? "s" : ""}
+            </div>
+            <div className="divide-y divide-gray-100">
+              {filtered.map((conversation) => (
+                <ConversationRow
+                  key={conversation.id}
+                  conversation={conversation}
+                  onPermissionChange={onPermissionChange}
+                  isPending={isPending}
+                />
+              ))}
+            </div>
           </div>
         ) : (
           <div className="space-y-4">

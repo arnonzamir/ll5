@@ -51,6 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-03-31: Messaging UI: "Named only" filter + sort by name/permission for conversations
 - 2026-03-31: People filter dropdown uses high-level groups (family/friend/colleague/acquaintance/other) instead of raw values
 - 2026-03-31: check_availability with device fallback — Google FreeBusy + phone CalendarProvider for any synced account
 - 2026-03-31: Fix FCM sender — `require('node:fs')` silently failed in ESM gateway, FCM pushes never sent
