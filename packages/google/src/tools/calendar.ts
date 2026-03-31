@@ -6,7 +6,7 @@ import type { CalendarConfigRepository, CalendarAccessMode } from '../repositori
 import type { UserSettingsRepository } from '../repositories/interfaces/user-settings.repository.js';
 import type { ESCalendarEventRepository } from '../repositories/elasticsearch/calendar-event.repository.js';
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
-import { logAudit } from '@ll5/shared';
+import { logAudit, generateToken } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
 /** Get start-of-day in a given timezone as an ISO string. */
@@ -706,7 +706,11 @@ export function registerCalendarTools(
         }
 
         const gatewayUrl = process.env.GATEWAY_URL ?? 'http://gateway-xkkcc0g4o48kkcows8488so4:3000';
-        const token = process.env.API_KEY ?? '';
+        const authSecret = process.env.AUTH_SECRET ?? '';
+        if (!authSecret) {
+          return { error: 'AUTH_SECRET not configured — cannot call gateway' };
+        }
+        const token = generateToken(userId, authSecret, 1, 'user');
 
         const response = await fetch(`${gatewayUrl}/availability/check`, {
           method: 'POST',
