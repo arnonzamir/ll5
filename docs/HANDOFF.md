@@ -85,7 +85,7 @@ Dashboard (Next.js 15)
 | Timezone | Per-user via `set_timezone` tool, stored in `google_user_settings` table (default: Asia/Jerusalem) |
 | Tickler Calendar | "LL5 System" (role=tickler). Defaults to 08:00, pass due_time="all_day" for all-day |
 | Calendar Access Modes | ignore, read, readwrite (CRUD enforced per mode) |
-| Availability Check | `check_availability` tool — FreeBusy API + device fallback via CalendarProvider for non-sharing accounts |
+| Availability Check | `check_availability` — 3 paths: google (server FreeBusy), device (phone CalendarProvider), device_freebusy (phone's Workspace OAuth → Google FreeBusy for same-domain coworkers) |
 
 OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically.
 

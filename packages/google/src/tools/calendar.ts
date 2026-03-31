@@ -642,17 +642,18 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'check_availability',
-    'Check availability (free/busy) for specific people (by email) or calendars. Two modes: (1) Google FreeBusy API — works for Workspace users sharing free/busy. (2) Device — queries the phone\'s CalendarProvider for any synced calendar account. Use source="device" when FreeBusy returns errors or empty results.',
+    'Check availability (free/busy) for people or calendars. Three paths: (1) google — FreeBusy API via this server\'s OAuth (works if target shares free/busy). (2) device — queries phone\'s CalendarProvider for locally synced calendars. (3) device_freebusy — calls Google FreeBusy API using a phone account\'s OAuth token (works for same-Workspace-domain coworkers). Auto mode tries google first, falls back to device_freebusy if errors.',
     {
-      emails: z.array(z.string()).optional().describe('Email addresses of people to check (Google FreeBusy mode)'),
+      emails: z.array(z.string()).optional().describe('Email addresses of people to check'),
       calendar_ids: z.array(z.string()).optional().describe('Calendar IDs to check'),
-      accounts: z.array(z.string()).optional().describe('Account emails synced on the phone (device mode)'),
+      accounts: z.array(z.string()).optional().describe('Account emails synced on the phone (for local calendar query)'),
+      via_account: z.string().optional().describe('Phone Google account to use for FreeBusy API (e.g. "arnon@sunbit.com"). Required for device_freebusy mode.'),
       from: z.string().describe('Start of time range (ISO 8601)'),
       to: z.string().describe('End of time range (ISO 8601)'),
       include_own: z.boolean().optional().describe('Include your own primary calendar for comparison (default: true)'),
-      source: z.enum(['google', 'device', 'auto']).optional().describe('Where to check: google (FreeBusy API), device (phone CalendarProvider), auto (try google first, fall back to device). Default: auto'),
+      source: z.enum(['google', 'device', 'device_freebusy', 'auto']).optional().describe('google = server FreeBusy API, device = phone CalendarProvider, device_freebusy = phone Google FreeBusy via AccountManager, auto = try google then device_freebusy. Default: auto'),
     },
-    async ({ emails, calendar_ids, accounts, from, to, include_own, source }) => {
+    async ({ emails, calendar_ids, accounts, via_account, from, to, include_own, source }) => {
       const userId = getUserId();
       const mode = source ?? 'auto';
 
@@ -698,74 +699,83 @@ export function registerCalendarTools(
         return { results, hasErrors };
       };
 
-      // Device path — call gateway /availability/check
-      const tryDevice = async (): Promise<Record<string, unknown>> => {
-        const deviceAccounts = accounts ?? emails ?? [];
-        if (deviceAccounts.length === 0) {
-          return { error: 'No accounts specified for device check. Provide accounts or emails.' };
-        }
-
+      // Helper: call gateway /availability/check
+      const callGateway = async (payload: Record<string, unknown>): Promise<Record<string, unknown>> => {
         const gatewayUrl = process.env.GATEWAY_URL ?? 'http://gateway-xkkcc0g4o48kkcows8488so4:3000';
         const authSecret = process.env.AUTH_SECRET ?? '';
-        if (!authSecret) {
-          return { error: 'AUTH_SECRET not configured — cannot call gateway' };
-        }
-        const token = generateToken(userId, authSecret, 1, 'user');
+        if (!authSecret) return { error: 'AUTH_SECRET not configured' };
+        const gwToken = generateToken(userId, authSecret, 1, 'user');
 
         const response = await fetch(`${gatewayUrl}/availability/check`, {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ accounts: deviceAccounts, from, to }),
+          headers: { 'Authorization': `Bearer ${gwToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, from, to }),
         });
 
         if (!response.ok) {
           const text = await response.text();
           return { error: `Device check failed: ${response.status} ${text}` };
         }
-
         return await response.json() as Record<string, unknown>;
+      };
+
+      // Device local path — query CalendarProvider for synced calendars
+      const tryDeviceLocal = async (): Promise<Record<string, unknown>> => {
+        const deviceAccounts = accounts ?? emails ?? [];
+        if (deviceAccounts.length === 0) return { error: 'No accounts specified' };
+        return callGateway({ accounts: deviceAccounts });
+      };
+
+      // Device FreeBusy path — use phone's Google account to call FreeBusy API
+      const tryDeviceFreeBusy = async (checkEmailList?: string[]): Promise<Record<string, unknown>> => {
+        const targetEmails = checkEmailList ?? emails ?? [];
+        const account = via_account ?? '';
+        if (targetEmails.length === 0) return { error: 'No emails specified' };
+        if (!account) return { error: 'via_account required for device_freebusy' };
+        return callGateway({ check_emails: targetEmails, via_account: account });
       };
 
       try {
         if (mode === 'device') {
-          const deviceResult = await tryDevice();
-          return {
-            content: [{ type: 'text' as const, text: JSON.stringify({ source: 'device', ...deviceResult }, null, 2) }],
-          };
+          const result = await tryDeviceLocal();
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ source: 'device', ...result }, null, 2) }] };
+        }
+
+        if (mode === 'device_freebusy') {
+          const result = await tryDeviceFreeBusy();
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ source: 'device_freebusy', ...result }, null, 2) }] };
         }
 
         if (mode === 'google') {
           const { results } = await tryGoogle();
-          return {
-            content: [{ type: 'text' as const, text: JSON.stringify({ source: 'google', ...results }, null, 2) }],
-          };
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ source: 'google', ...results }, null, 2) }] };
         }
 
-        // auto: try Google first, fall back to device if errors
+        // auto: try Google first, fall back to device_freebusy for errored accounts
         const { results, hasErrors } = await tryGoogle();
 
         if (!hasErrors) {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ source: 'google', ...results }, null, 2) }] };
+        }
+
+        // Collect emails that had errors from Google
+        const erroredEmails = Object.entries(results)
+          .filter(([, v]) => v.errors?.length)
+          .map(([email]) => email);
+
+        if (erroredEmails.length > 0 && via_account) {
+          logger.info('[check_availability] Google FreeBusy had errors, trying device_freebusy fallback', { erroredEmails });
+          const deviceResult = await tryDeviceFreeBusy(erroredEmails);
           return {
-            content: [{ type: 'text' as const, text: JSON.stringify({ source: 'google', ...results }, null, 2) }],
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ source: 'auto', google: results, device_freebusy: deviceResult }, null, 2),
+            }],
           };
         }
 
-        // Google had errors — try device for the failed accounts
-        logger.info('[check_availability] Google FreeBusy had errors, trying device fallback');
-        const deviceResult = await tryDevice();
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              source: 'auto',
-              google: results,
-              device: deviceResult,
-            }, null, 2),
-          }],
-        };
+        // No via_account — return Google results with errors noted
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ source: 'google', ...results, note: 'Some accounts had errors. Provide via_account to try device_freebusy fallback.' }, null, 2) }] };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],

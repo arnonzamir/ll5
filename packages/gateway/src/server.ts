@@ -426,21 +426,29 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // --- Availability check via device ---
   app.post('/availability/check', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
-    const { accounts, from, to, timeout_ms } = req.body;
+    const { accounts, check_emails, via_account, from, to, timeout_ms } = req.body;
 
-    if (!from || !to || !Array.isArray(accounts) || accounts.length === 0) {
-      res.status(400).json({ error: 'accounts (string[]), from, to are required' });
+    const hasLocal = Array.isArray(accounts) && accounts.length > 0;
+    const hasFreeBusy = Array.isArray(check_emails) && check_emails.length > 0 && via_account;
+
+    if (!from || !to || (!hasLocal && !hasFreeBusy)) {
+      res.status(400).json({ error: 'from, to, and either accounts[] or (check_emails[] + via_account) are required' });
       return;
     }
 
     const maxTimeout = Math.min(timeout_ms ?? 15000, 30000);
 
     try {
-      const commandId = await queueDeviceCommand(pgPool, userId, 'check_availability', {
-        accounts,
-        from,
-        to,
-      });
+      // Build command payload — either local CalendarProvider or Google FreeBusy via phone
+      const payload: Record<string, unknown> = { from, to };
+      if (hasFreeBusy) {
+        payload.check_emails = check_emails;
+        payload.via_account = via_account;
+      } else {
+        payload.accounts = accounts;
+      }
+
+      const commandId = await queueDeviceCommand(pgPool, userId, 'check_availability', payload);
 
       // Poll for result
       const startTime = Date.now();
