@@ -396,7 +396,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   app.post('/commands/:id/confirm', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     const commandId = req.params.id;
-    const { success, error } = req.body;
+    const { success, error, result_data } = req.body;
     if (typeof success !== 'boolean') {
       res.status(400).json({ error: 'success (boolean) is required' });
       return;
@@ -405,10 +405,10 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       const newStatus = success ? 'confirmed' : 'failed';
       const result = await pgPool.query(
         `UPDATE device_commands
-         SET status = $1, confirmed_at = now(), error = $2, updated_at = now()
-         WHERE id = $3 AND user_id = $4
+         SET status = $1, confirmed_at = now(), error = $2, result_data = $3, updated_at = now()
+         WHERE id = $4 AND user_id = $5
          RETURNING id`,
-        [newStatus, error ?? null, commandId, userId],
+        [newStatus, error ?? null, result_data ? JSON.stringify(result_data) : null, commandId, userId],
       );
       if (result.rowCount === 0) {
         res.status(404).json({ error: 'Command not found' });
@@ -419,6 +419,59 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[commands/confirm] Failed to confirm command', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // --- Availability check via device ---
+  app.post('/availability/check', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { accounts, from, to, timeout_ms } = req.body;
+
+    if (!from || !to || !Array.isArray(accounts) || accounts.length === 0) {
+      res.status(400).json({ error: 'accounts (string[]), from, to are required' });
+      return;
+    }
+
+    const maxTimeout = Math.min(timeout_ms ?? 15000, 30000);
+
+    try {
+      const commandId = await queueDeviceCommand(pgPool, userId, 'check_availability', {
+        accounts,
+        from,
+        to,
+      });
+
+      // Poll for result
+      const startTime = Date.now();
+      while (Date.now() - startTime < maxTimeout) {
+        await new Promise((r) => setTimeout(r, 500));
+
+        const result = await pgPool.query<{ status: string; result_data: unknown; error: string | null }>(
+          `SELECT status, result_data, error FROM device_commands WHERE id = $1 AND user_id = $2`,
+          [commandId, userId],
+        );
+
+        if (result.rows.length === 0) break;
+        const cmd = result.rows[0];
+
+        if (cmd.status === 'confirmed' && cmd.result_data) {
+          logger.info('[availability/check] Result received from device', { commandId });
+          res.json({ source: 'device', data: cmd.result_data });
+          return;
+        }
+        if (cmd.status === 'failed') {
+          logger.warn('[availability/check] Device command failed', { commandId, error: cmd.error });
+          res.status(502).json({ error: cmd.error ?? 'Device command failed' });
+          return;
+        }
+      }
+
+      logger.warn('[availability/check] Timed out waiting for device response', { commandId, timeout: maxTimeout });
+      res.status(504).json({ error: 'Device did not respond in time', command_id: commandId });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[availability/check] Failed', { error: message });
       res.status(500).json({ error: message });
     }
   });

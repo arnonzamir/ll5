@@ -42,7 +42,7 @@ export async function fetchAccounts(): Promise<Account[]> {
 export async function fetchConversations(
   accountId?: string
 ): Promise<Conversation[]> {
-  const args: Record<string, unknown> = {};
+  const args: Record<string, unknown> = { limit: 500 };
   if (accountId) args.account_id = accountId;
 
   const raw = await mcpCallJsonSafe<Record<string, unknown>>(

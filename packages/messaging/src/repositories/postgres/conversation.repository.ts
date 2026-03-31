@@ -31,7 +31,7 @@ export class PostgresConversationRepository
       values.push(params.is_group);
     }
 
-    const limit = params?.limit ?? 50;
+    const limit = params?.limit ?? 500;
     conditions.push(`TRUE`); // ensure at least one condition after AND
 
     const sql = `

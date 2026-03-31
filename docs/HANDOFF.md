@@ -84,7 +84,7 @@ Dashboard (Next.js 15)
 | Timezone | Per-user via `set_timezone` tool, stored in `google_user_settings` table (default: Asia/Jerusalem) |
 | Tickler Calendar | "LL5 System" (role=tickler). Defaults to 08:00, pass due_time="all_day" for all-day |
 | Calendar Access Modes | ignore, read, readwrite (CRUD enforced per mode) |
-| Availability Check | `check_availability` tool — FreeBusy API, works for any Google user sharing free/busy info |
+| Availability Check | `check_availability` tool — FreeBusy API + device fallback via CalendarProvider for non-sharing accounts |
 
 OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically.
 
@@ -100,7 +100,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `chat_messages` — message queue with status lifecycle
 - `notify_chat_message` — PG trigger for LISTEN/NOTIFY on new inbound messages
 - Channel constraint includes: web, telegram, whatsapp, cli, android, system
-- `device_commands` — command queue for Android app (pending/sent/confirmed/failed/expired)
+- `device_commands` — command queue for Android app (pending/sent/confirmed/failed/expired), result_data JSONB for return values
 - `fcm_tokens` — FCM registration tokens per user/device
 
 **Elasticsearch** (8.15.0, 10 indices):

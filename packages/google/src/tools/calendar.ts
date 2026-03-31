@@ -642,63 +642,132 @@ export function registerCalendarTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'check_availability',
-    'Check availability (free/busy) for specific people (by email) or calendars. Returns busy time blocks. Useful for finding meeting times. Works for any Google user whose calendar shares free/busy info (default for Workspace users).',
+    'Check availability (free/busy) for specific people (by email) or calendars. Two modes: (1) Google FreeBusy API — works for Workspace users sharing free/busy. (2) Device — queries the phone\'s CalendarProvider for any synced calendar account. Use source="device" when FreeBusy returns errors or empty results.',
     {
-      emails: z.array(z.string()).optional().describe('Email addresses of people to check'),
-      calendar_ids: z.array(z.string()).optional().describe('Calendar IDs to check (from your own account)'),
+      emails: z.array(z.string()).optional().describe('Email addresses of people to check (Google FreeBusy mode)'),
+      calendar_ids: z.array(z.string()).optional().describe('Calendar IDs to check'),
+      accounts: z.array(z.string()).optional().describe('Account emails synced on the phone (device mode)'),
       from: z.string().describe('Start of time range (ISO 8601)'),
       to: z.string().describe('End of time range (ISO 8601)'),
       include_own: z.boolean().optional().describe('Include your own primary calendar for comparison (default: true)'),
+      source: z.enum(['google', 'device', 'auto']).optional().describe('Where to check: google (FreeBusy API), device (phone CalendarProvider), auto (try google first, fall back to device). Default: auto'),
     },
-    async ({ emails, calendar_ids, from, to, include_own }) => {
+    async ({ emails, calendar_ids, accounts, from, to, include_own, source }) => {
       const userId = getUserId();
+      const mode = source ?? 'auto';
 
-      const items: { id: string }[] = [];
-      if (emails?.length) {
-        for (const email of emails) items.push({ id: email });
-      }
-      if (calendar_ids?.length) {
-        for (const calId of calendar_ids) items.push({ id: calId });
-      }
-      if (include_own !== false) {
-        items.push({ id: 'primary' });
-      }
+      // Google FreeBusy path
+      const tryGoogle = async (): Promise<{ results: Record<string, { busy: { start: string; end: string }[]; errors?: string[] }>; hasErrors: boolean }> => {
+        const items: { id: string }[] = [];
+        if (emails?.length) {
+          for (const email of emails) items.push({ id: email });
+        }
+        if (calendar_ids?.length) {
+          for (const calId of calendar_ids) items.push({ id: calId });
+        }
+        if (include_own !== false) {
+          items.push({ id: 'primary' });
+        }
 
-      if (items.length === 0) {
+        if (items.length === 0) return { results: {}, hasErrors: false };
+
+        const auth = await getAuthenticatedClient(config, tokenRepo, userId);
+        const calendarApi = google.calendar({ version: 'v3', auth });
+
+        const response = await calendarApi.freebusy.query({
+          requestBody: { timeMin: from, timeMax: to, items },
+        });
+
+        const results: Record<string, { busy: { start: string; end: string }[]; errors?: string[] }> = {};
+        let hasErrors = false;
+
+        for (const [calId, calData] of Object.entries(response.data.calendars ?? {})) {
+          const label = calId === 'primary' ? 'you' : calId;
+          results[label] = {
+            busy: (calData.busy ?? []).map((slot) => ({
+              start: slot.start ?? '',
+              end: slot.end ?? '',
+            })),
+          };
+          if (calData.errors?.length) {
+            results[label].errors = calData.errors.map((e) => e.reason ?? 'unknown');
+            hasErrors = true;
+          }
+        }
+
+        return { results, hasErrors };
+      };
+
+      // Device path — call gateway /availability/check
+      const tryDevice = async (): Promise<Record<string, unknown>> => {
+        const deviceAccounts = accounts ?? emails ?? [];
+        if (deviceAccounts.length === 0) {
+          return { error: 'No accounts specified for device check. Provide accounts or emails.' };
+        }
+
+        const gatewayUrl = process.env.GATEWAY_URL ?? 'http://gateway-xkkcc0g4o48kkcows8488so4:3000';
+        const token = process.env.API_KEY ?? '';
+
+        const response = await fetch(`${gatewayUrl}/availability/check`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ accounts: deviceAccounts, from, to }),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          return { error: `Device check failed: ${response.status} ${text}` };
+        }
+
+        return await response.json() as Record<string, unknown>;
+      };
+
+      try {
+        if (mode === 'device') {
+          const deviceResult = await tryDevice();
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({ source: 'device', ...deviceResult }, null, 2) }],
+          };
+        }
+
+        if (mode === 'google') {
+          const { results } = await tryGoogle();
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({ source: 'google', ...results }, null, 2) }],
+          };
+        }
+
+        // auto: try Google first, fall back to device if errors
+        const { results, hasErrors } = await tryGoogle();
+
+        if (!hasErrors) {
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({ source: 'google', ...results }, null, 2) }],
+          };
+        }
+
+        // Google had errors — try device for the failed accounts
+        logger.info('[check_availability] Google FreeBusy had errors, trying device fallback');
+        const deviceResult = await tryDevice();
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Provide at least one email or calendar_id' }) }],
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              source: 'auto',
+              google: results,
+              device: deviceResult,
+            }, null, 2),
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],
           isError: true,
         };
       }
-
-      const auth = await getAuthenticatedClient(config, tokenRepo, userId);
-      const calendarApi = google.calendar({ version: 'v3', auth });
-
-      const response = await calendarApi.freebusy.query({
-        requestBody: { timeMin: from, timeMax: to, items },
-      });
-
-      const results: Record<string, { busy: { start: string; end: string }[]; errors?: string[] }> = {};
-
-      for (const [calId, calData] of Object.entries(response.data.calendars ?? {})) {
-        const label = calId === 'primary' ? 'you' : calId;
-        results[label] = {
-          busy: (calData.busy ?? []).map((slot) => ({
-            start: slot.start ?? '',
-            end: slot.end ?? '',
-          })),
-        };
-        if (calData.errors?.length) {
-          results[label].errors = calData.errors.map((e) => e.reason ?? 'unknown');
-        }
-      }
-
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify(results, null, 2),
-        }],
-      };
     },
   );
 }
