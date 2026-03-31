@@ -136,6 +136,11 @@ export async function processWhatsAppWebhook(
       pgPool,
       userId,
       `[WhatsApp] ${sender}${groupInfo}: "${truncBody}"`,
+      {
+        title: 'WhatsApp',
+        type: 'whatsapp',
+        priority: 'high',
+      },
     );
     logger.info('[processWhatsAppWebhook] Immediate notification sent', { sender });
   }

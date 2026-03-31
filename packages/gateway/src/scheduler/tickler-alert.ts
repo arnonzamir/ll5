@@ -103,7 +103,11 @@ export class TicklerAlertScheduler {
         this.alertedIds.add(tickler.event_id);
       }
 
-      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'));
+      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), {
+        title: 'Tickler Alert',
+        type: 'tickler_alert',
+        priority: 'high',
+      });
       logger.info('[TicklerAlertScheduler][tick] Tickler alert sent', { count: newTicklers.length });
     } catch (err) {
       logger.warn('[TicklerAlertScheduler][tick] Tickler alert tick failed', {

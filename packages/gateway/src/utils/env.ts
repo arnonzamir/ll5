@@ -22,6 +22,7 @@ export interface EnvConfig {
   weeklyReviewDay: number;
   weeklyReviewHour: number;
   messageBatchIntervalMinutes: number;
+  fcmServerKey?: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -85,5 +86,6 @@ export function loadEnv(): EnvConfig {
     weeklyReviewDay: parseInt(process.env.WEEKLY_REVIEW_DAY ?? '5', 10),
     weeklyReviewHour: parseInt(process.env.WEEKLY_REVIEW_HOUR ?? '14', 10),
     messageBatchIntervalMinutes: parseInt(process.env.MESSAGE_BATCH_INTERVAL_MINUTES ?? '30', 10),
+    fcmServerKey: process.env.FCM_SERVER_KEY,
   };
 }

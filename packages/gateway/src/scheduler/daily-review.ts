@@ -115,7 +115,11 @@ export class DailyReviewScheduler {
         }
       }
 
-      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'));
+      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), {
+        title: 'Morning Briefing',
+        type: 'morning_briefing',
+        priority: 'normal',
+      });
       logger.info('[DailyReviewScheduler][tick] Morning briefing sent', { events: todayEvents.length, ticklers: ticklers.length });
     } catch (err) {
       logger.warn('[DailyReviewScheduler][tick] Daily review tick failed', {

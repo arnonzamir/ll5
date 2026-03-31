@@ -292,6 +292,52 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     res.json({ deleted: true });
   });
 
+  // --- FCM token management ---
+
+  app.post('/fcm/register', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { token, device_name } = req.body;
+    if (!token || typeof token !== 'string') {
+      res.status(400).json({ error: 'token is required' });
+      return;
+    }
+    try {
+      await pgPool.query(
+        `INSERT INTO fcm_tokens (user_id, token, device_name)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, token) DO UPDATE SET device_name = EXCLUDED.device_name, updated_at = now()`,
+        [userId, token, device_name ?? null],
+      );
+      logger.info('[fcm/register] FCM token registered', { userId, device_name });
+      res.json({ registered: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[fcm/register] Failed to register FCM token', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.delete('/fcm/unregister', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { token } = req.body;
+    if (!token || typeof token !== 'string') {
+      res.status(400).json({ error: 'token is required' });
+      return;
+    }
+    try {
+      await pgPool.query(
+        'DELETE FROM fcm_tokens WHERE user_id = $1 AND token = $2',
+        [userId, token],
+      );
+      logger.info('[fcm/unregister] FCM token unregistered', { userId });
+      res.json({ unregistered: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[fcm/unregister] Failed to unregister FCM token', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
   // --- Health endpoint ---
   app.get('/health', async (_req: Request, res: Response) => {
     try {
