@@ -95,7 +95,7 @@ export class EvolutionClient {
         isGroup?: boolean;
         lastMessageTimestamp?: number;
       }>
-    >('GET', `/chat/findChats/${this.instanceName}`);
+    >('POST', `/chat/findChats/${this.instanceName}`, {});
 
     return (result || []).map((chat) => ({
       id: chat.id,
