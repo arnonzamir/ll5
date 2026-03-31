@@ -12,6 +12,16 @@ export interface EvolutionChat {
   lastMessageTimestamp?: number;
 }
 
+export interface EvolutionContact {
+  remoteJid: string;
+  pushName: string | null;
+}
+
+export interface FindChatsResult {
+  chats: EvolutionChat[];
+  contacts: EvolutionContact[];
+}
+
 /**
  * HTTP client for Evolution API (WhatsApp gateway).
  */
@@ -86,10 +96,11 @@ export class EvolutionClient {
 
   /**
    * Fetch all chats from Evolution API.
+   * Returns both processed chats and raw contacts for contact registry ingestion.
    */
-  async findChats(): Promise<EvolutionChat[]> {
+  async findChats(): Promise<FindChatsResult> {
     // Fetch chats and contacts in parallel
-    const [chats, contacts] = await Promise.all([
+    const [chats, rawContacts] = await Promise.all([
       this.request<
         Array<{
           id: string;
@@ -111,13 +122,13 @@ export class EvolutionClient {
 
     // Build a JID → name lookup from contacts
     const contactNames = new Map<string, string>();
-    for (const c of contacts || []) {
+    for (const c of rawContacts || []) {
       if (c.remoteJid && c.pushName) {
         contactNames.set(c.remoteJid, c.pushName);
       }
     }
 
-    return (chats || [])
+    const processedChats = (chats || [])
       .filter((chat) => chat.remoteJid || chat.id)
       .map((chat) => {
         const jid = chat.remoteJid || chat.id;
@@ -129,6 +140,16 @@ export class EvolutionClient {
           lastMessageTimestamp: chat.lastMessageTimestamp,
         };
       });
+
+    // Normalize raw contacts for the contact registry
+    const contacts: EvolutionContact[] = (rawContacts || [])
+      .filter((c): c is { remoteJid: string; pushName?: string | null } => !!c.remoteJid)
+      .map((c) => ({
+        remoteJid: c.remoteJid,
+        pushName: c.pushName ?? null,
+      }));
+
+    return { chats: processedChats, contacts };
   }
 
   /**

@@ -10,6 +10,7 @@ import type { LogLevel } from './utils/logger.js';
 import { runMigrations } from './utils/migration-runner.js';
 import { PostgresAccountRepository } from './repositories/postgres/account.repository.js';
 import { PostgresConversationRepository } from './repositories/postgres/conversation.repository.js';
+import { PostgresContactRepository } from './repositories/postgres/contact.repository.js';
 import { registerAllTools } from './tools/index.js';
 
 const { Pool } = pg;
@@ -65,8 +66,9 @@ export async function startServer(): Promise<void> {
   // ---------------------------------------------------------------------------
   const accountRepo = new PostgresAccountRepository(pool, env.encryptionKey);
   const conversationRepo = new PostgresConversationRepository(pool);
+  const contactRepo = new PostgresContactRepository(pool);
 
-  const deps = { accountRepo, conversationRepo, encryptionKey: env.encryptionKey };
+  const deps = { accountRepo, conversationRepo, contactRepo, encryptionKey: env.encryptionKey };
 
   // ---------------------------------------------------------------------------
   // Express app with auth middleware
