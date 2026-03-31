@@ -97,7 +97,7 @@ export class EvolutionClient {
       }>
     >('POST', `/chat/findChats/${this.instanceName}`, {});
 
-    return (result || []).map((chat) => ({
+    return (result || []).filter((chat) => chat.id).map((chat) => ({
       id: chat.id,
       name: chat.name || chat.id,
       isGroup: chat.isGroup ?? chat.id.endsWith('@g.us'),
