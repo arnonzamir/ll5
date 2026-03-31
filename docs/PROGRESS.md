@@ -51,6 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-03-30: Device command queue — gateway queues commands for Android app via FCM, with confirm/fail lifecycle
 - 2026-03-30: System message dedup — prevents spam on gateway restart (checks PG for recent duplicates)
 - 2026-03-30: Message priority rules (immediate/batch routing) + 5 proactive schedulers
 - 2026-03-29: Fix calendar push: accept null fields, per-item validation (skip bad items, don't fail batch)

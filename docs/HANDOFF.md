@@ -21,7 +21,8 @@ Gateway (Express)
   ├── POST /auth/token — PIN login, returns signed token
   ├── /chat/* — message queue REST endpoints
   ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY)
-  └── Schedulers — calendar sync (30min), calendar review (2h), daily briefing (7am),
+  ├── /commands/* — device command queue (queue, pending, confirm)
+  ├── Schedulers — calendar sync (30min), calendar review (2h), daily briefing (7am),
       tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00), message batch (30min)
   └── System message dedup — checks PG for recent duplicate before inserting
 
@@ -98,6 +99,8 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `chat_messages` — message queue with status lifecycle
 - `notify_chat_message` — PG trigger for LISTEN/NOTIFY on new inbound messages
 - Channel constraint includes: web, telegram, whatsapp, cli, android, system
+- `device_commands` — command queue for Android app (pending/sent/confirmed/failed/expired)
+- `fcm_tokens` — FCM registration tokens per user/device
 
 **Elasticsearch** (8.15.0, 10 indices):
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps

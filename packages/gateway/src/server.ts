@@ -15,6 +15,7 @@ import { NotificationRuleMatcher } from './processors/notification-rules.js';
 import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type WebhookResponse } from './types/index.js';
+import { queueDeviceCommand } from './utils/device-commands.js';
 import type { EnvConfig } from './utils/env.js';
 import { logger } from './utils/logger.js';
 
@@ -348,6 +349,76 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[fcm/unregister] Failed to unregister FCM token', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // --- Device command queue ---
+
+  app.post('/commands/queue', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { command_type, payload } = req.body;
+    if (!command_type || typeof command_type !== 'string') {
+      res.status(400).json({ error: 'command_type is required' });
+      return;
+    }
+    if (!payload || typeof payload !== 'object') {
+      res.status(400).json({ error: 'payload object is required' });
+      return;
+    }
+    try {
+      const commandId = await queueDeviceCommand(pgPool, userId, command_type, payload);
+      res.status(201).json({ command_id: commandId, status: 'sent' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[commands/queue] Failed to queue command', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.get('/commands/pending', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const result = await pgPool.query(
+        `SELECT id, command_type, payload, created_at FROM device_commands
+         WHERE user_id = $1 AND status IN ('pending', 'sent')
+         ORDER BY created_at ASC`,
+        [userId],
+      );
+      res.json({ commands: result.rows });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[commands/pending] Failed to fetch pending commands', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.post('/commands/:id/confirm', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const commandId = req.params.id;
+    const { success, error } = req.body;
+    if (typeof success !== 'boolean') {
+      res.status(400).json({ error: 'success (boolean) is required' });
+      return;
+    }
+    try {
+      const newStatus = success ? 'confirmed' : 'failed';
+      const result = await pgPool.query(
+        `UPDATE device_commands
+         SET status = $1, confirmed_at = now(), error = $2, updated_at = now()
+         WHERE id = $3 AND user_id = $4
+         RETURNING id`,
+        [newStatus, error ?? null, commandId, userId],
+      );
+      if (result.rowCount === 0) {
+        res.status(404).json({ error: 'Command not found' });
+        return;
+      }
+      logger.info('[commands/confirm] Command confirmed', { commandId, success, error });
+      res.json({ confirmed: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[commands/confirm] Failed to confirm command', { error: message });
       res.status(500).json({ error: message });
     }
   });

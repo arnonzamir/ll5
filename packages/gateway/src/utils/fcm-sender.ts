@@ -7,6 +7,7 @@ interface FCMMessage {
   body: string;
   type: string;
   priority: 'normal' | 'high';
+  data?: Record<string, string>; // extra data fields merged into FCM data payload
 }
 
 interface ServiceAccount {
@@ -146,6 +147,7 @@ export async function sendFCMNotification(
               title: message.title,
               body: message.body,
               priority: message.priority,
+              ...(message.data ?? {}),
             },
             android: {
               priority: message.priority === 'high' ? 'high' : 'normal',
