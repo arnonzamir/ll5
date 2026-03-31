@@ -91,18 +91,27 @@ export class EvolutionClient {
     const result = await this.request<
       Array<{
         id: string;
-        name?: string;
+        name?: string | null;
+        pushName?: string | null;
+        subject?: string | null;
+        remoteJid?: string | null;
         isGroup?: boolean;
         lastMessageTimestamp?: number;
       }>
     >('POST', `/chat/findChats/${this.instanceName}`, {});
 
-    return (result || []).filter((chat) => chat.id).map((chat) => ({
-      id: chat.id,
-      name: chat.name || chat.id,
-      isGroup: chat.isGroup ?? chat.id.endsWith('@g.us'),
-      lastMessageTimestamp: chat.lastMessageTimestamp,
-    }));
+    return (result || [])
+      .filter((chat) => chat.remoteJid || chat.id)
+      .map((chat) => {
+        const jid = chat.remoteJid || chat.id;
+        const displayName = chat.name || chat.pushName || chat.subject || jid;
+        return {
+          id: jid,
+          name: displayName,
+          isGroup: chat.isGroup ?? jid.endsWith('@g.us'),
+          lastMessageTimestamp: chat.lastMessageTimestamp,
+        };
+      });
   }
 
   /**
