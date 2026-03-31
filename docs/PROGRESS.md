@@ -51,6 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-03-31: People filter dropdown uses high-level groups (family/friend/colleague/acquaintance/other) instead of raw values
 - 2026-03-31: check_availability with device fallback — Google FreeBusy + phone CalendarProvider for any synced account
 - 2026-03-31: Fix FCM sender — `require('node:fs')` silently failed in ESM gateway, FCM pushes never sent
 - 2026-03-30: Device command queue — gateway queues commands for Android app via FCM, with confirm/fail lifecycle

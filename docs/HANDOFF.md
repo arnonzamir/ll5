@@ -145,3 +145,4 @@ See docs/implementation/deployment-log.md for full details:
 - MCP StreamableHTTP needs per-request server+transport pair
 - FileChanged hook doesn't reliably wake Claude — Channel MCP is the working solution
 - Gateway is ESM — never use `require()` for node builtins; use static `import` instead
+- People relationship field is free-text; UI groups them into family/friend/colleague/acquaintance/other for filtering

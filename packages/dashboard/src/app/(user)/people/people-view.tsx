@@ -29,7 +29,26 @@ import {
   type Person,
 } from "./people-server-actions";
 
-const RELATIONSHIPS = ["family", "friend", "colleague", "acquaintance"] as const;
+const RELATIONSHIP_GROUPS = ["family", "friend", "colleague", "acquaintance", "other"] as const;
+
+/** Map a free-text relationship to a high-level group for filtering. */
+function relationshipGroup(rel: string | null | undefined): string {
+  if (!rel) return "other";
+  const lower = rel.toLowerCase();
+  if (lower.includes("family") || lower.includes("parent") || lower.includes("mother") || lower.includes("father") ||
+      lower.includes("sister") || lower.includes("brother") || lower.includes("wife") || lower.includes("husband") ||
+      lower.includes("son") || lower.includes("daughter") || lower.includes("aunt") || lower.includes("uncle") ||
+      lower.includes("cousin") || lower.includes("grandpa") || lower.includes("grandma") || lower === "spouse") {
+    return "family";
+  }
+  if (lower.includes("friend") || lower.includes("boyfriend") || lower.includes("girlfriend")) return "friend";
+  if (lower.includes("colleague") || lower.includes("boss") || lower.includes("report") || lower.includes("director") ||
+      lower.includes("manager") || lower.includes("coworker") || lower.includes("co-run")) {
+    return "colleague";
+  }
+  if (lower.includes("acquaintance")) return "acquaintance";
+  return "other";
+}
 
 const RELATIONSHIP_VARIANT: Record<
   string,
@@ -97,23 +116,6 @@ export function PeopleView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Collect unique relationship values from the data (case-insensitive, prefer lowercase canonical form)
-  const relationshipOptions = useMemo(() => {
-    const seen = new Map<string, string>(); // lowercase -> first-seen original
-    for (const p of people) {
-      const rel = p.relationship?.trim();
-      if (rel) {
-        const key = rel.toLowerCase();
-        if (!seen.has(key)) seen.set(key, key);
-      }
-    }
-    // Merge with the canonical list so all standard options always appear
-    for (const r of RELATIONSHIPS) {
-      if (!seen.has(r)) seen.set(r, r);
-    }
-    return Array.from(seen.values()).sort();
-  }, [people]);
-
   const filtered = useMemo(() => {
     let list = people;
     if (search.trim()) {
@@ -126,7 +128,7 @@ export function PeopleView() {
     }
     if (filterRelationship !== "all") {
       list = list.filter(
-        (p) => p.relationship?.toLowerCase() === filterRelationship.toLowerCase()
+        (p) => relationshipGroup(p.relationship) === filterRelationship
       );
     }
     return list;
@@ -214,7 +216,7 @@ export function PeopleView() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All relationships</SelectItem>
-            {relationshipOptions.map((r) => (
+            {RELATIONSHIP_GROUPS.map((r) => (
               <SelectItem key={r} value={r}>
                 {r.charAt(0).toUpperCase() + r.slice(1)}
               </SelectItem>
@@ -331,7 +333,7 @@ export function PeopleView() {
                   <SelectValue placeholder="Select relationship" />
                 </SelectTrigger>
                 <SelectContent>
-                  {RELATIONSHIPS.map((r) => (
+                  {RELATIONSHIP_GROUPS.filter((r) => r !== "other").map((r) => (
                     <SelectItem key={r} value={r}>
                       {r.charAt(0).toUpperCase() + r.slice(1)}
                     </SelectItem>
