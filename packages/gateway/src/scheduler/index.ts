@@ -9,6 +9,7 @@ import { TicklerAlertScheduler } from './tickler-alert.js';
 import { GTDHealthScheduler } from './gtd-health.js';
 import { WeeklyReviewReminder } from './weekly-review.js';
 import { MessageBatchReviewScheduler } from './message-batch-review.js';
+import { HeartbeatScheduler } from './heartbeat.js';
 import { logger } from '../utils/logger.js';
 
 export function startSchedulers(
@@ -55,6 +56,16 @@ export function startSchedulers(
     userId,
   });
   messageBatchScheduler.start();
+
+  // Heartbeat: nudge agent with current time after silence
+  const heartbeatScheduler = new HeartbeatScheduler(pgPool, {
+    silenceMinutes: 60,
+    startHour: config.calendarReviewStartHour,
+    endHour: config.calendarReviewEndHour,
+    timezone,
+    userId,
+  });
+  heartbeatScheduler.start();
 
   // --- Google-dependent schedulers (only start if googleClient exists) ---
 
