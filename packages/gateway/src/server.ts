@@ -505,6 +505,71 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Sessions API ---
+  app.post('/sessions', authMw, async (req: Request, res: Response) => {
+    try {
+      const { session_id, messages, message_count, first_message, last_message, workspace } = req.body;
+      if (!session_id) {
+        res.status(400).json({ error: 'session_id required' });
+        return;
+      }
+      await esClient.index({
+        index: 'll5_session_history',
+        id: session_id,
+        document: {
+          user_id: (req as any).userId,
+          session_id,
+          message_count: message_count ?? 0,
+          first_message: first_message ?? null,
+          last_message: last_message ?? null,
+          messages: messages ?? [],
+          workspace: workspace ?? 'll5-run',
+          indexed_at: new Date().toISOString(),
+        },
+      });
+      res.status(201).json({ indexed: true, session_id });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[sessions] Failed to index session', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.get('/sessions', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { limit: limitStr, offset: offsetStr } = req.query as { limit?: string; offset?: string };
+    const limit = Math.min(parseInt(limitStr || '20', 10), 100);
+    const offset = parseInt(offsetStr || '0', 10);
+    try {
+      const result = await esClient.search({
+        index: 'll5_session_history',
+        query: { term: { user_id: userId } },
+        sort: [{ last_message: { order: 'desc' } }],
+        size: limit,
+        from: offset,
+        _source: ['session_id', 'message_count', 'first_message', 'last_message', 'workspace', 'indexed_at'],
+      });
+      const sessions = (result.hits.hits as Array<{ _source?: Record<string, unknown> }>).map((h) => h._source);
+      const total = typeof result.hits.total === 'object' ? result.hits.total.value : result.hits.total;
+      res.json({ sessions, total });
+    } catch (err) {
+      // Index might not exist yet
+      res.json({ sessions: [], total: 0 });
+    }
+  });
+
+  app.get('/sessions/:id', authMw, async (req: Request, res: Response) => {
+    try {
+      const result = await esClient.get({
+        index: 'll5_session_history',
+        id: req.params.id,
+      });
+      res.json(result._source);
+    } catch {
+      res.status(404).json({ error: 'Session not found' });
+    }
+  });
+
   // --- Health endpoint ---
   app.get('/health', async (_req: Request, res: Response) => {
     try {
