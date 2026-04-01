@@ -117,7 +117,7 @@ ll5/
 │       ├── app/(auth)/login/          # Login page + server action
 │       ├── app/(user)/                # dashboard, calendar, actions, projects, inbox, shopping, people (grouped filter), locations, places, phone-data, settings (notifications, messaging), profile
 │       ├── app/(admin)/               # Admin pages: health, users, tools
-│       ├── app/api/chat/              # Proxy routes: messages, conversations
+│       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations
 │       ├── components/                # Nav (grouped menu, profile dropdown), cards, chat widget (status indicators + typing), shadcn/ui
 │       ├── lib/                       # MCP client, auth helpers, env
 │       └── providers/                 # React Query

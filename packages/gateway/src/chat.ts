@@ -137,7 +137,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
       limit?: string;
     };
 
-    const limit = Math.min(parseInt(limitStr || '50', 10), 200);
+    const limit = Math.min(parseInt(limitStr || '100', 10), 500);
     const conditions: string[] = ['user_id = $1'];
     const params: unknown[] = [userId];
     let paramIdx = 2;
@@ -167,11 +167,14 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
       );
       const total = parseInt(countResult.rows[0].count, 10);
 
+      // Get the latest N messages (DESC for limit, then re-sort ASC for display order)
       const messagesResult = await pool.query(
-        `SELECT id, conversation_id, channel, direction, role, content, status, reply_to_id, metadata, created_at, updated_at
-         FROM chat_messages WHERE ${where}
-         ORDER BY created_at ASC
-         LIMIT $${paramIdx}`,
+        `SELECT * FROM (
+           SELECT id, conversation_id, channel, direction, role, content, status, reply_to_id, metadata, created_at, updated_at
+           FROM chat_messages WHERE ${where}
+           ORDER BY created_at DESC
+           LIMIT $${paramIdx}
+         ) sub ORDER BY created_at ASC`,
         [...params, limit],
       );
 
