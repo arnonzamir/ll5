@@ -1,6 +1,7 @@
 import { Client } from '@elastic/elasticsearch';
 import express from 'express';
 import type { Request, Response } from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -265,6 +266,11 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Mount auth routes
   app.use('/auth', createAuthRouter(pgPool, config.authSecret));
+
+  // Serve uploaded files
+  const uploadsDir = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  app.use('/uploads', express.static(uploadsDir));
 
   // Mount chat routes
   app.use('/chat', createChatRouter(pgPool, config.authSecret));

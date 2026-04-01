@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Check, CheckCheck, AlertCircle } from "lucide-react";
+import { Send, Check, CheckCheck, AlertCircle, ImagePlus, X } from "lucide-react";
 
 interface Message {
   id: string;
@@ -49,6 +49,8 @@ export function ChatWidget() {
   const seenIds = useRef(new Set<string>());
   const pendingIdMap = useRef(new Map<string, string>()); // realId -> tempId
   const messagesEnd = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingImage, setPendingImage] = useState<{ file: File; preview: string } | null>(null);
 
   const scrollToBottom = () => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
@@ -193,25 +195,50 @@ export function ChatWidget() {
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if ((!text && !pendingImage) || sending) return;
     setInput("");
     setSending(true);
+
+    // Upload image first if pending
+    let imageUrl: string | undefined;
+    let imageFilename: string | undefined;
+    if (pendingImage) {
+      try {
+        const formData = new FormData();
+        formData.append("file", pendingImage.file);
+        const uploadRes = await fetch("/api/chat/upload", {
+          method: "POST",
+          body: formData,
+        });
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          imageUrl = uploadData.url;
+          imageFilename = uploadData.filename;
+        }
+      } catch { /* ignore upload error */ }
+      URL.revokeObjectURL(pendingImage.preview);
+      setPendingImage(null);
+    }
 
     // Optimistic add with pending status
     const tempId = `temp-${Date.now()}`;
     const userMsg: Message = {
       id: tempId,
       role: "user",
-      content: text,
+      content: text || "",
       status: "pending",
       created_at: new Date().toISOString(),
+      ...(imageUrl ? { metadata: { attachments: [{ type: "image", url: imageUrl, filename: imageFilename }] } } : {}),
     };
     setMessages((prev) => [...prev, userMsg]);
     seenIds.current.add(tempId);
 
     try {
-      const body: Record<string, string> = { channel: "web", content: text };
+      const body: Record<string, unknown> = { channel: "web", content: text || "" };
       if (convId) body.conversation_id = convId;
+      if (imageUrl) {
+        body.metadata = { attachments: [{ type: "image", url: imageUrl, filename: imageFilename }] };
+      }
       const res = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -277,6 +304,17 @@ export function ChatWidget() {
                   : "bg-gray-100 text-gray-900 rounded-bl-sm"
               }`}
             >
+              {m.metadata?.attachments?.filter((a: {type: string}) => a.type === "image").map((att: {url: string; filename?: string}, i: number) => (
+                <img
+                  key={i}
+                  src={`/api/uploads${att.url.replace('/uploads', '')}`}
+                  alt={att.filename || "Image"}
+                  className="max-w-full rounded-lg mb-1 cursor-pointer"
+                  style={{ maxHeight: "300px" }}
+                  onClick={() => window.open(`/api/uploads${att.url.replace('/uploads', '')}`, "_blank")}
+                  loading="lazy"
+                />
+              ))}
               {m.content}
             </div>
             {m.role === "user" && (
@@ -290,8 +328,50 @@ export function ChatWidget() {
         <div ref={messagesEnd} />
       </div>
 
+      {/* Image preview */}
+      {pendingImage && (
+        <div className="px-3 pt-2 border-t border-gray-200 flex items-center gap-2">
+          <div className="relative inline-block">
+            <img
+              src={pendingImage.preview}
+              alt="Preview"
+              className="h-16 rounded-lg object-cover"
+            />
+            <button
+              className="absolute -top-1 -right-1 bg-gray-700 text-white rounded-full p-0.5 hover:bg-gray-900"
+              onClick={() => {
+                URL.revokeObjectURL(pendingImage.preview);
+                setPendingImage(null);
+              }}
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Input */}
-      <div className="p-3 border-t border-gray-200 flex gap-2">
+      <div className={`p-3 ${!pendingImage ? "border-t border-gray-200" : ""} flex gap-2`}>
+        <input
+          type="file"
+          ref={fileInputRef}
+          className="hidden"
+          accept="image/*"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              setPendingImage({ file, preview: URL.createObjectURL(file) });
+            }
+            e.target.value = "";
+          }}
+        />
+        <button
+          className="p-2 text-gray-400 hover:text-gray-600 rounded-full"
+          onClick={() => fileInputRef.current?.click()}
+          type="button"
+        >
+          <ImagePlus className="w-4 h-4" />
+        </button>
         <input
           className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-primary/50"
           placeholder="Type a message..."
@@ -307,7 +387,7 @@ export function ChatWidget() {
         <button
           className="p-2 bg-primary text-white rounded-full hover:bg-primary/90 disabled:opacity-50"
           onClick={sendMessage}
-          disabled={sending || !input.trim()}
+          disabled={sending || (!input.trim() && !pendingImage)}
         >
           <Send className="w-4 h-4" />
         </button>

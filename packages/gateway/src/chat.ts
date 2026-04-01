@@ -1,8 +1,38 @@
+import crypto from 'node:crypto';
+import path from 'node:path';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
+import multer from 'multer';
 import pg from 'pg';
 import type { Pool } from 'pg';
 import { logger } from './utils/logger.js';
+
+const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, UPLOAD_DIR);
+  },
+  filename: (req, file, cb) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const ext = path.extname(file.originalname).slice(1) || 'bin';
+    const randomHex = crypto.randomBytes(4).toString('hex');
+    cb(null, `${userId}_${Date.now()}_${randomHex}.${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type: ${file.mimetype}. Allowed: ${allowed.join(', ')}`));
+    }
+  },
+});
 
 interface AuthenticatedRequest extends Request {
   userId: string;
@@ -88,7 +118,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
       role?: string;
     };
 
-    if (!channel || !content) {
+    if (!channel || content == null) {
       res.status(400).json({ error: 'Missing required fields: channel, content' });
       return;
     }
@@ -367,6 +397,36 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
       res.write(`data: {"type":"error","message":"Connection failed"}\n\n`);
       res.end();
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /chat/upload — upload an image file
+  // ---------------------------------------------------------------------------
+  router.post('/upload', auth, (req: Request, res: Response, next: () => void) => {
+    upload.single('file')(req, res, (err: unknown) => {
+      if (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+          res.status(413).json({ error: 'File too large. Maximum size is 10MB.' });
+          return;
+        }
+        res.status(400).json({ error: message });
+        return;
+      }
+      next();
+    });
+  }, (req: Request, res: Response) => {
+    if (!req.file) {
+      res.status(400).json({ error: 'No file uploaded' });
+      return;
+    }
+
+    const filename = req.file.filename;
+    res.status(201).json({
+      id: filename,
+      url: `/uploads/${filename}`,
+      filename: req.file.originalname,
+    });
   });
 
   return router;

@@ -25,6 +25,7 @@ COPY --from=build /app/packages/shared/dist ./node_modules/@ll5/shared/dist
 COPY --from=build /app/packages/shared/package.json ./node_modules/@ll5/shared/
 
 RUN addgroup -S app && adduser -S app -G app
+RUN mkdir -p /app/uploads && chown app:app /app/uploads
 USER app
 
 EXPOSE 3000
