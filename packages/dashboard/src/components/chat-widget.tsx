@@ -47,6 +47,7 @@ export function ChatWidget() {
   const [convId, setConvId] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const seenIds = useRef(new Set<string>());
+  const pendingIdMap = useRef(new Map<string, string>()); // realId -> tempId
   const messagesEnd = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -106,10 +107,11 @@ export function ChatWidget() {
           if (data.conversation_id && data.conversation_id !== convId) return;
 
           if (data.event === "status_update") {
-            // Update status of existing message
+            // Update status — check both real ID and temp ID mapping
+            const tempId = pendingIdMap.current.get(data.id);
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === data.id ? { ...m, status: data.status } : m
+                (m.id === data.id || m.id === tempId) ? { ...m, id: data.id, status: data.status } : m
               )
             );
           } else if (data.event === "new_message") {
@@ -219,6 +221,7 @@ export function ChatWidget() {
         const data = await res.json();
         if (data.id) {
           seenIds.current.add(data.id);
+          pendingIdMap.current.set(data.id, tempId);
           // Map temp id to real id so SSE status updates work
           setMessages((prev) =>
             prev.map((m) => (m.id === tempId ? { ...m, id: data.id } : m))

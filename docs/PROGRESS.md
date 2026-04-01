@@ -51,7 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
-- 2026-04-01: Chat SSE: dashboard uses real-time SSE instead of 3s polling, safety sweep every 30s. PG trigger fires on all inserts + status updates. Channel MCP filters to inbound only.
+- 2026-04-01: Chat SSE: real-time via PG NOTIFY on all changes. Channel MCP strict filter (inbound+content only). Temp ID mapping for status updates.
 - 2026-04-01: Fix chat message fetch: return latest N messages (was returning oldest N, cutting off recent messages)
 - 2026-04-01: Chat progress feedback — status indicators (pending/processing/delivered/failed) + typing indicator in dashboard and Android
 - 2026-03-31: Unified message priority system — 4 levels (ignore/batch/immediate/agent), conversation rules, single gateway rule matcher for all sources. Fix: earlier migrations must be forward-compatible with later constraint additions.
