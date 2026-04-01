@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Check, CheckCheck, Loader2, AlertCircle } from "lucide-react";
+import { Send, Check, CheckCheck, AlertCircle } from "lucide-react";
 
 interface Message {
   id: string;
@@ -20,7 +20,7 @@ function MessageStatus({ status }: { status?: string }) {
     case "pending":
       return <Check className="w-3 h-3 text-gray-400" />;
     case "processing":
-      return <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />;
+      return <CheckCheck className="w-3 h-3 text-blue-500" />;
     case "delivered":
       return <CheckCheck className="w-3 h-3 text-blue-500" />;
     case "failed":
