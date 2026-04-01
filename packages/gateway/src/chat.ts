@@ -224,6 +224,27 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
   });
 
   // ---------------------------------------------------------------------------
+  // GET /chat/messages/:id — get a single message by ID
+  // ---------------------------------------------------------------------------
+  router.get('/messages/:id', auth, async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    try {
+      const result = await pool.query(
+        'SELECT * FROM chat_messages WHERE id = $1 AND user_id = $2',
+        [req.params.id, userId],
+      );
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: 'Message not found' });
+        return;
+      }
+      res.json(result.rows[0]);
+    } catch (err) {
+      logger.error('Failed to fetch message', { error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // GET /chat/pending — get unread inbound messages (for Claude to check)
   // ---------------------------------------------------------------------------
   router.get('/pending', auth, async (req: Request, res: Response) => {

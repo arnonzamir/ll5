@@ -6,6 +6,7 @@ CREATE OR REPLACE FUNCTION notify_chat_message() RETURNS trigger AS $body$
 BEGIN
   IF TG_OP = 'INSERT' THEN
     -- New message (inbound or outbound)
+    -- Keep payload under PG NOTIFY 8000-byte limit: send has_attachments flag instead of full metadata
     PERFORM pg_notify('chat_messages', json_build_object(
       'event', 'new_message',
       'id', NEW.id,
@@ -16,7 +17,7 @@ BEGIN
       'role', NEW.role,
       'content', substring(NEW.content from 1 for 200),
       'status', NEW.status,
-      'metadata', NEW.metadata,
+      'has_attachments', (NEW.metadata ? 'attachments') IS NOT NULL AND jsonb_array_length(NEW.metadata -> 'attachments') > 0,
       'created_at', NEW.created_at
     )::text);
   ELSIF TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status THEN

@@ -262,9 +262,12 @@ export function ChatWidget() {
     setSending(false);
   };
 
-  // Check if agent is processing
+  // Check if agent is processing — timeout after 60s to avoid stuck dots
   const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
-  const isProcessing = lastUserMsg?.status === "processing";
+  // Show typing dots for pending (just sent) and processing (agent working) — timeout after 60s
+  const isWaiting = (lastUserMsg?.status === "processing" || lastUserMsg?.status === "pending") && (
+    !lastUserMsg?.created_at || (Date.now() - new Date(lastUserMsg.created_at).getTime()) < 60000
+  );
 
   return (
     <div className="flex flex-col h-full bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -324,7 +327,7 @@ export function ChatWidget() {
             )}
           </div>
         ))}
-        {isProcessing && <TypingIndicator />}
+        {isWaiting && <TypingIndicator />}
         <div ref={messagesEnd} />
       </div>
 
