@@ -14,15 +14,21 @@ interface AuthenticatedRequest extends Request {
  */
 export function chatAuthMiddleware(authSecret: string) {
   return async (req: Request, res: Response, next: () => void): Promise<void> => {
+    // Accept token from Authorization header or ?token= query param (for EventSource SSE)
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ll5.')) {
+    const queryToken = req.query.token as string | undefined;
+    const rawToken = authHeader?.startsWith('Bearer ll5.')
+      ? authHeader.slice(7)
+      : queryToken?.startsWith('ll5.') ? queryToken : null;
+
+    if (!rawToken) {
       res.status(401).json({ error: 'Missing or invalid authorization' });
       return;
     }
 
     try {
       const crypto = await import('node:crypto');
-      const token = authHeader.slice(7); // Remove "Bearer "
+      const token = rawToken;
       const parts = token.split('.');
       if (parts.length !== 3 || parts[0] !== 'll5') {
         res.status(401).json({ error: 'Invalid token format' });
@@ -328,10 +334,10 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
         if (msg.channel !== 'chat_messages') return;
         try {
           const data = JSON.parse(msg.payload || '{}');
-          // Only forward messages for this user
-          // Note: the NOTIFY payload doesn't include user_id for security
-          // Since this is an authenticated endpoint, we forward all messages
-          // from the trigger (which only fires on inbound pending)
+          // Filter to this user's messages only
+          if (data.user_id && data.user_id !== userId) return;
+          // Strip user_id before sending to client
+          delete data.user_id;
           res.write(`data: ${JSON.stringify(data)}\n\n`);
         } catch { /* skip malformed */ }
       });

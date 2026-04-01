@@ -48,7 +48,6 @@ export function ChatWidget() {
   const [initialized, setInitialized] = useState(false);
   const seenIds = useRef(new Set<string>());
   const messagesEnd = useRef<HTMLDivElement>(null);
-  const lastTs = useRef("");
 
   const scrollToBottom = () => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
@@ -75,68 +74,6 @@ export function ChatWidget() {
     })();
   }, []);
 
-  // Poll for new messages + status updates
-  const poll = useCallback(async () => {
-    if (!convId) return;
-    const since = lastTs.current ? `&since=${encodeURIComponent(lastTs.current)}` : "";
-    try {
-      const res = await fetch(`/api/chat/messages?conversation_id=${convId}${since}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const newMsgs: Message[] = [];
-      const statusUpdates = new Map<string, string>();
-
-      for (const m of data.messages ?? []) {
-        if (seenIds.current.has(m.id)) {
-          // Already seen — track status change
-          if (m.status) statusUpdates.set(m.id, m.status);
-          continue;
-        }
-        seenIds.current.add(m.id);
-        if (m.role !== "user" || m.direction === "outbound") {
-          newMsgs.push(m);
-        }
-        lastTs.current = m.created_at;
-        // Mark assistant messages as delivered
-        if (m.role !== "user" && (m.status === "pending" || m.status === "processing")) {
-          fetch(`/api/chat/messages/${m.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "delivered" }),
-          }).catch(() => {});
-        }
-      }
-
-      if (newMsgs.length > 0 || statusUpdates.size > 0) {
-        setMessages((prev) => {
-          let updated = prev;
-          // Apply status updates to existing messages
-          if (statusUpdates.size > 0) {
-            updated = updated.map((msg) => {
-              const newStatus = statusUpdates.get(msg.id);
-              return newStatus && newStatus !== msg.status ? { ...msg, status: newStatus } : msg;
-            });
-          }
-          // Append new messages
-          if (newMsgs.length > 0) {
-            updated = [...updated, ...newMsgs];
-          }
-          return updated;
-        });
-      }
-    } catch { /* ignore */ }
-  }, [convId]);
-
-  // Poll faster (1s) when waiting for a reply, slower (3s) when idle
-  const waitingForReply = useRef(false);
-  useEffect(() => {
-    const tick = () => {
-      poll();
-    };
-    const interval = setInterval(tick, waitingForReply.current ? 1000 : 3000);
-    return () => clearInterval(interval);
-  }, [poll]);
-
   // Load history when convId is set
   useEffect(() => {
     if (!convId) return;
@@ -150,11 +87,106 @@ export function ChatWidget() {
         for (const m of data.messages ?? []) {
           seenIds.current.add(m.id);
           loaded.push(m);
-          lastTs.current = m.created_at;
         }
         setMessages(loaded);
       } catch { /* ignore */ }
     })();
+  }, [convId]);
+
+  // SSE: real-time updates via dashboard proxy
+  useEffect(() => {
+    if (!convId) return;
+
+    const es = new EventSource("/api/chat/listen");
+
+    es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "connected" || data.type === "error") return;
+          if (data.conversation_id && data.conversation_id !== convId) return;
+
+          if (data.event === "status_update") {
+            // Update status of existing message
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === data.id ? { ...m, status: data.status } : m
+              )
+            );
+          } else if (data.event === "new_message") {
+            // New message (inbound or outbound)
+            if (seenIds.current.has(data.id)) return;
+            seenIds.current.add(data.id);
+            // Only show assistant/system messages from SSE (user messages are added optimistically)
+            if (data.role !== "user" || data.direction === "outbound") {
+              const newMsg: Message = {
+                id: data.id,
+                role: data.role,
+                content: data.content,
+                status: data.status,
+                created_at: data.created_at,
+                metadata: data.metadata,
+              };
+              setMessages((prev) => [...prev, newMsg]);
+            }
+            // Mark assistant messages as delivered
+            if (data.role !== "user" && data.status !== "delivered") {
+              fetch(`/api/chat/messages/${data.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: "delivered" }),
+              }).catch(() => {});
+            }
+          } else {
+            // Legacy format (from channel MCP SSE listener)
+            if (data.id && !seenIds.current.has(data.id)) {
+              seenIds.current.add(data.id);
+            }
+          }
+        } catch { /* skip malformed */ }
+      };
+
+    es.onerror = () => {
+      // EventSource auto-reconnects
+    };
+
+    return () => {
+      es.close();
+    };
+  }, [convId]);
+
+  // Safety sweep: slow poll every 30s to catch anything SSE missed
+  useEffect(() => {
+    if (!convId) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/chat/messages?conversation_id=${convId}&limit=100`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const serverMsgs = (data.messages ?? []) as Message[];
+
+        setMessages((prev) => {
+          const statusMap = new Map(serverMsgs.map((m) => [m.id, m.status]));
+          let updated = prev.map((msg) => {
+            const serverStatus = statusMap.get(msg.id);
+            return serverStatus && serverStatus !== msg.status
+              ? { ...msg, status: serverStatus }
+              : msg;
+          });
+
+          const existingIds = new Set(prev.map((m) => m.id));
+          const newMsgs = serverMsgs.filter(
+            (m) => !existingIds.has(m.id) && !seenIds.current.has(m.id)
+          );
+          for (const m of newMsgs) seenIds.current.add(m.id);
+
+          if (newMsgs.length > 0) {
+            updated = [...updated, ...newMsgs];
+          }
+          return updated;
+        });
+      } catch { /* ignore */ }
+    }, 30000);
+    return () => clearInterval(interval);
   }, [convId]);
 
   const sendMessage = async () => {
@@ -185,27 +217,24 @@ export function ChatWidget() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.id) seenIds.current.add(data.id);
+        if (data.id) {
+          seenIds.current.add(data.id);
+          // Map temp id to real id so SSE status updates work
+          setMessages((prev) =>
+            prev.map((m) => (m.id === tempId ? { ...m, id: data.id } : m))
+          );
+        }
         if (!convId && data.conversation_id) {
           setConvId(data.conversation_id);
         }
       }
     } catch { /* ignore */ }
     setSending(false);
-    // Start fast polling to catch processing → delivered transition
-    waitingForReply.current = true;
-    // Immediate poll after send
-    setTimeout(poll, 500);
   };
 
   // Check if agent is processing
   const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
   const isProcessing = lastUserMsg?.status === "processing";
-
-  // Stop fast polling once we get a reply
-  if (waitingForReply.current && lastUserMsg?.status === "delivered") {
-    waitingForReply.current = false;
-  }
 
   return (
     <div className="flex flex-col h-full bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
@@ -219,7 +248,6 @@ export function ChatWidget() {
               setConvId(null);
               setMessages([]);
               seenIds.current.clear();
-              lastTs.current = "";
             }}
           >
             New
