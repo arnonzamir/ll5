@@ -127,8 +127,13 @@ export function ChatWidget() {
     } catch { /* ignore */ }
   }, [convId]);
 
+  // Poll faster (1s) when waiting for a reply, slower (3s) when idle
+  const waitingForReply = useRef(false);
   useEffect(() => {
-    const interval = setInterval(poll, 3000);
+    const tick = () => {
+      poll();
+    };
+    const interval = setInterval(tick, waitingForReply.current ? 1000 : 3000);
     return () => clearInterval(interval);
   }, [poll]);
 
@@ -187,11 +192,20 @@ export function ChatWidget() {
       }
     } catch { /* ignore */ }
     setSending(false);
+    // Start fast polling to catch processing → delivered transition
+    waitingForReply.current = true;
+    // Immediate poll after send
+    setTimeout(poll, 500);
   };
 
   // Check if agent is processing
   const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
   const isProcessing = lastUserMsg?.status === "processing";
+
+  // Stop fast polling once we get a reply
+  if (waitingForReply.current && lastUserMsg?.status === "delivered") {
+    waitingForReply.current = false;
+  }
 
   return (
     <div className="flex flex-col h-full bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
