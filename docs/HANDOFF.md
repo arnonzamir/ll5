@@ -37,6 +37,7 @@ Dashboard (Next.js 15)
   ├── /calendar — day/week view, hover tooltips, click details with source, holiday banner, settings
   ├── /phone-data — review phone-pushed data (locations, messages, calendar) with type/time filters
   ├── /settings/notifications — People + Conversations + Keywords tabs, 4 priority levels (ignore/batch/immediate/agent)
+  ├── Chat: status indicators (✓ pending, ⏳ processing, ✓✓ delivered, ⚠ failed) + typing dots
   ├── /locations — Leaflet map with clustering, timeline, trail
   ├── /people, /places, /knowledge, /horizons — personal knowledge pages
   ├── /profile — user settings

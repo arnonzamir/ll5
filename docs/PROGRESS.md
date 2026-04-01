@@ -51,6 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-01: Chat progress feedback — status indicators (pending/processing/delivered/failed) + typing indicator in dashboard and Android
 - 2026-03-31: Unified message priority system — 4 levels (ignore/batch/immediate/agent), conversation rules, single gateway rule matcher for all sources. Fix: earlier migrations must be forward-compatible with later constraint additions.
 - 2026-03-31: Fix message dedup: immediate + ignored messages marked processed (no double-report/leak in batch), batch review drops time-window filter (no orphans), WhatsApp immediates no longer send FCM notification (agent-only path)
 - 2026-03-31: check_availability: device_freebusy mode — uses phone's Workspace OAuth token for same-domain coworker availability

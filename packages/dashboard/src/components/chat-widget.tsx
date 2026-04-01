@@ -1,13 +1,43 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send } from "lucide-react";
+import { Send, Check, CheckCheck, Loader2, AlertCircle } from "lucide-react";
 
 interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  status?: string;
   created_at: string;
+  metadata?: {
+    attachments?: { type: string; url: string; filename?: string }[];
+    [key: string]: unknown;
+  };
+}
+
+function MessageStatus({ status }: { status?: string }) {
+  switch (status) {
+    case "pending":
+      return <Check className="w-3 h-3 text-gray-400" />;
+    case "processing":
+      return <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />;
+    case "delivered":
+      return <CheckCheck className="w-3 h-3 text-blue-500" />;
+    case "failed":
+      return <AlertCircle className="w-3 h-3 text-red-500" />;
+    default:
+      return null;
+  }
+}
+
+function TypingIndicator() {
+  return (
+    <div className="mr-auto flex gap-1 px-3 py-2 bg-gray-100 rounded-2xl rounded-bl-sm">
+      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+    </div>
+  );
 }
 
 export function ChatWidget() {
@@ -35,22 +65,17 @@ export function ChatWidget() {
         });
         if (res.ok) {
           const data = await res.json();
-          console.log("[chat] conversations:", data);
           const latest = data.conversations?.[0];
           if (latest?.conversation_id) {
             setConvId(latest.conversation_id);
           }
-        } else {
-          console.log("[chat] conversations failed:", res.status);
         }
-      } catch (e) {
-        console.log("[chat] conversations error:", e);
-      }
+      } catch { /* ignore */ }
       setInitialized(true);
     })();
   }, []);
 
-  // Poll for new messages
+  // Poll for new messages + status updates
   const poll = useCallback(async () => {
     if (!convId) return;
     const since = lastTs.current ? `&since=${encodeURIComponent(lastTs.current)}` : "";
@@ -59,15 +84,21 @@ export function ChatWidget() {
       if (!res.ok) return;
       const data = await res.json();
       const newMsgs: Message[] = [];
+      const statusUpdates = new Map<string, string>();
+
       for (const m of data.messages ?? []) {
-        if (seenIds.current.has(m.id)) continue;
+        if (seenIds.current.has(m.id)) {
+          // Already seen — track status change
+          if (m.status) statusUpdates.set(m.id, m.status);
+          continue;
+        }
         seenIds.current.add(m.id);
         if (m.role !== "user" || m.direction === "outbound") {
           newMsgs.push(m);
         }
         lastTs.current = m.created_at;
-        // Mark as delivered
-        if (m.status === "pending" || m.status === "processing") {
+        // Mark assistant messages as delivered
+        if (m.role !== "user" && (m.status === "pending" || m.status === "processing")) {
           fetch(`/api/chat/messages/${m.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -75,8 +106,23 @@ export function ChatWidget() {
           }).catch(() => {});
         }
       }
-      if (newMsgs.length > 0) {
-        setMessages((prev) => [...prev, ...newMsgs]);
+
+      if (newMsgs.length > 0 || statusUpdates.size > 0) {
+        setMessages((prev) => {
+          let updated = prev;
+          // Apply status updates to existing messages
+          if (statusUpdates.size > 0) {
+            updated = updated.map((msg) => {
+              const newStatus = statusUpdates.get(msg.id);
+              return newStatus && newStatus !== msg.status ? { ...msg, status: newStatus } : msg;
+            });
+          }
+          // Append new messages
+          if (newMsgs.length > 0) {
+            updated = [...updated, ...newMsgs];
+          }
+          return updated;
+        });
       }
     } catch { /* ignore */ }
   }, [convId]);
@@ -112,12 +158,13 @@ export function ChatWidget() {
     setInput("");
     setSending(true);
 
-    // Optimistic add
+    // Optimistic add with pending status
     const tempId = `temp-${Date.now()}`;
     const userMsg: Message = {
       id: tempId,
       role: "user",
       content: text,
+      status: "pending",
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -142,6 +189,10 @@ export function ChatWidget() {
     setSending(false);
   };
 
+  // Check if agent is processing
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
+  const isProcessing = lastUserMsg?.status === "processing";
+
   return (
     <div className="flex flex-col h-full bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
       {/* Header */}
@@ -163,7 +214,7 @@ export function ChatWidget() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0">
+      <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-0">
         {messages.length === 0 && (
           <p className="text-sm text-gray-400 text-center mt-8">
             Send a message to start a conversation
@@ -172,15 +223,25 @@ export function ChatWidget() {
         {messages.map((m) => (
           <div
             key={m.id}
-            className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap ${
-              m.role === "user"
-                ? "ml-auto bg-primary text-white rounded-br-sm"
-                : "mr-auto bg-gray-100 text-gray-900 rounded-bl-sm"
-            }`}
+            className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
           >
-            {m.content}
+            <div
+              className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap ${
+                m.role === "user"
+                  ? "bg-primary text-white rounded-br-sm"
+                  : "bg-gray-100 text-gray-900 rounded-bl-sm"
+              }`}
+            >
+              {m.content}
+            </div>
+            {m.role === "user" && (
+              <div className="mt-0.5 mr-1">
+                <MessageStatus status={m.status} />
+              </div>
+            )}
           </div>
         ))}
+        {isProcessing && <TypingIndicator />}
         <div ref={messagesEnd} />
       </div>
 
