@@ -106,6 +106,22 @@ const INDICES: IndexDefinition[] = [
       },
     },
   },
+  {
+    index: 'll5_agent_journal',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        type: { type: 'keyword' },
+        topic: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+        content: { type: 'text', analyzer: 'multilingual' },
+        signal: { type: 'keyword' },
+        status: { type: 'keyword' },
+        session_id: { type: 'keyword' },
+        created_at: { type: 'date' },
+        updated_at: { type: 'date' },
+      },
+    },
+  },
 ];
 
 export async function ensureIndices(client: Client): Promise<void> {

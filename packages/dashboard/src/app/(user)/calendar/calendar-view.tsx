@@ -451,9 +451,9 @@ function DayTimeline({
       <HolidayBanner events={events} date={date} onSelect={onSelect} />
       <AllDaySection events={events} date={date} onSelect={onSelect} />
 
-      {dayEvents.length === 0 && events.filter((e) => e.allDay && spansDay(e, date)).length > 0 ? (
+      {dayEvents.length === 0 ? (
         <div className="rounded-b-lg border border-gray-200 bg-white p-6 text-center text-sm text-gray-400">
-          No timed events — all-day events shown above
+          No timed events{events.filter((e) => e.allDay && spansDay(e, date)).length > 0 ? " — all-day events shown above" : ""}
         </div>
       ) : (
       <div className="rounded-b-lg border border-gray-200 bg-white overflow-hidden">

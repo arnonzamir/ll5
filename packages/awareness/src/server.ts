@@ -120,7 +120,7 @@ export async function startServer(): Promise<void> {
         version: '0.1.0',
       });
       withToolLogging(reqServer, getUserId);
-      registerAllTools(reqServer, repos, getUserId, env.timezone, env.gatewayUrl, env.authSecret);
+      registerAllTools(reqServer, repos, getUserId, env.timezone, env.gatewayUrl, env.authSecret, esClient);
       await reqServer.connect(transport);
 
       await transport.handleRequest(req, res, req.body);

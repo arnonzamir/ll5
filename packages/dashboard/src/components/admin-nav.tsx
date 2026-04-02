@@ -8,6 +8,7 @@ import {
   Users,
   Wrench,
   ScrollText,
+  BookOpen,
   ArrowLeft,
   Menu,
   X,
@@ -19,6 +20,7 @@ const adminLinks = [
   { href: "/admin/logs", label: "Logs", icon: ScrollText },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/tools", label: "MCP Tools", icon: Wrench },
+  { href: "/admin/journal", label: "Journal", icon: BookOpen },
 ];
 
 export function AdminNav() {

@@ -505,6 +505,78 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Agent Journal API ---
+  app.get('/journal', authMw, async (req: Request, res: Response) => {
+    try {
+      const { type, status, topic, since, limit: limitStr } = req.query as Record<string, string | undefined>;
+      const limit = Math.min(parseInt(limitStr || '50', 10), 200);
+      const statusFilter = status ?? 'open';
+
+      const filters: Record<string, unknown>[] = [];
+      if (type) {
+        filters.push({ term: { type } });
+      }
+      if (statusFilter !== 'all') {
+        filters.push({ term: { status: statusFilter } });
+      }
+      if (since) {
+        filters.push({ range: { created_at: { gte: since } } });
+      }
+
+      const must: Record<string, unknown>[] = [];
+      if (topic) {
+        must.push({ multi_match: { query: topic, fields: ['topic', 'content'] } });
+      }
+
+      const result = await esClient.search({
+        index: 'll5_agent_journal',
+        query: {
+          bool: {
+            ...(filters.length > 0 ? { filter: filters } : {}),
+            ...(must.length > 0 ? { must } : {}),
+          },
+        },
+        sort: [{ created_at: { order: 'desc' } }],
+        size: limit,
+      });
+
+      const entries = (result.hits.hits as Array<{ _id: string; _source?: Record<string, unknown> }>).map((h) => ({
+        id: h._id,
+        ...h._source,
+      }));
+      const total = typeof result.hits.total === 'object' ? result.hits.total.value : result.hits.total;
+      res.json({ entries, total });
+    } catch (err) {
+      // Index might not exist yet
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[journal] Failed to query journal', { error: message });
+      res.json({ entries: [], total: 0 });
+    }
+  });
+
+  app.patch('/journal/:id', authMw, async (req: Request, res: Response) => {
+    try {
+      const { status } = req.body;
+      if (!status || !['resolved', 'open', 'consolidated'].includes(status)) {
+        res.status(400).json({ error: 'status must be one of: resolved, open, consolidated' });
+        return;
+      }
+      await esClient.update({
+        index: 'll5_agent_journal',
+        id: req.params.id as string,
+        doc: {
+          status,
+          updated_at: new Date().toISOString(),
+        },
+      });
+      res.json({ updated: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[journal] Failed to update journal entry', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
   // --- Sessions API ---
   app.post('/sessions', authMw, async (req: Request, res: Response) => {
     try {
@@ -562,7 +634,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     try {
       const result = await esClient.get({
         index: 'll5_session_history',
-        id: req.params.id,
+        id: req.params.id as string,
       });
       res.json(result._source);
     } catch {

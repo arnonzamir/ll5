@@ -1,4 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { Client } from '@elastic/elasticsearch';
 import type { LocationRepository } from '../repositories/interfaces/location.repository.js';
 import type { MessageRepository } from '../repositories/interfaces/message.repository.js';
 import type { EntityStatusRepository } from '../repositories/interfaces/entity-status.repository.js';
@@ -10,6 +11,7 @@ import { registerEntityStatusTools } from './entity-statuses.js';
 import { registerNotableEventTools } from './notable-events.js';
 import { registerSituationTools } from './situation.js';
 import { registerNotificationRuleTools } from './notification-rules.js';
+import { registerJournalTools } from './journal.js';
 
 export interface Repositories {
   location: LocationRepository;
@@ -26,6 +28,7 @@ export function registerAllTools(
   timezone: string,
   gatewayUrl?: string,
   authSecret?: string,
+  esClient?: Client,
 ): void {
   registerLocationTools(server, repos.location, getUserId);
   registerMessageTools(server, repos.message, getUserId);
@@ -45,5 +48,8 @@ export function registerAllTools(
   );
   if (gatewayUrl && authSecret) {
     registerNotificationRuleTools(server, getUserId, gatewayUrl, authSecret);
+  }
+  if (esClient) {
+    registerJournalTools(server, esClient, getUserId);
   }
 }
