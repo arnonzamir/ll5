@@ -178,8 +178,32 @@ export function LogViewer() {
     load();
   }, [load]);
 
+  const title = index === "audit" ? "Audit Log" : "Application Log";
+  const subtitle = index === "audit"
+    ? "All data mutations across MCPs"
+    : "Tool calls, webhooks, and errors";
+
   return (
     <div>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h1 className="text-2xl font-bold">{title}</h1>
+          <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={load}
+          disabled={isPending}
+          aria-label="Refresh"
+        >
+          <RefreshCw
+            className={`h-4 w-4 ${isPending ? "animate-spin" : ""}`}
+          />
+        </Button>
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <div className="space-y-1">
@@ -241,17 +265,6 @@ export function LogViewer() {
           </div>
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={load}
-          disabled={isPending}
-          aria-label="Refresh"
-        >
-          <RefreshCw
-            className={`h-4 w-4 ${isPending ? "animate-spin" : ""}`}
-          />
-        </Button>
       </div>
 
       {/* Results count */}

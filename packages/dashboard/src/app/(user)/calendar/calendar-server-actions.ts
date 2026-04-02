@@ -10,6 +10,7 @@ export interface CalendarConfig {
   color: string;
   google_access_role?: string;
   primary?: boolean;
+  source?: string;
 }
 
 export interface CalendarEvent {
@@ -61,12 +62,14 @@ export async function fetchEvents(
   }
 }
 
-export async function fetchCalendarConfigs(): Promise<CalendarConfig[]> {
+export async function fetchCalendarConfigs(
+  refresh = false
+): Promise<CalendarConfig[]> {
   try {
     const raw = await mcpCallJsonSafe<unknown>(
       "calendar",
       "list_calendars",
-      { refresh: false }
+      { refresh }
     );
     if (!raw) return [];
     if (Array.isArray(raw)) return raw as CalendarConfig[];

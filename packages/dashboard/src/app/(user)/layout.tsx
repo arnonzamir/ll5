@@ -41,7 +41,7 @@ export default async function UserLayout({
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <Nav username={displayName} isAdmin={isAdmin} />
-      <main className="flex-1 mx-auto w-full max-w-7xl px-4 py-4 min-h-0">{children}</main>
+      <main className="flex-1 mx-auto w-full max-w-7xl px-4 py-4 min-h-0 overflow-y-auto">{children}</main>
       <footer className="shrink-0 text-left text-[10px] text-black py-1 px-4">
         build {process.env.NEXT_PUBLIC_BUILD_ID ?? "dev"}
       </footer>

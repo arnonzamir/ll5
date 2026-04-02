@@ -655,21 +655,46 @@ function WeekGrid({
 
 // --- Calendar Settings ---
 
+function getSourceLabel(cal: CalendarConfig): { label: string; className: string } {
+  if (cal.role === "tickler") {
+    return { label: "Tickler", className: "bg-amber-50 text-amber-700 border-amber-200" };
+  }
+  if (cal.source === "phone") {
+    return { label: "Phone", className: "bg-purple-50 text-purple-700 border-purple-200" };
+  }
+  return { label: "Google", className: "bg-blue-50 text-blue-700 border-blue-200" };
+}
+
+function getAccessRoleLabel(role?: string): string | null {
+  if (!role) return null;
+  const map: Record<string, string> = {
+    owner: "owner",
+    writer: "writer",
+    reader: "reader",
+    freeBusyReader: "free/busy",
+  };
+  return map[role] ?? role;
+}
+
 function CalendarSettings({
   configs,
   onUpdate,
+  onRefresh,
+  isRefreshing,
 }: {
   configs: CalendarConfig[];
   onUpdate: (
     calendarId: string,
     mode: "ignore" | "read" | "readwrite"
   ) => void;
+  onRefresh: () => void;
+  isRefreshing: boolean;
 }) {
   const modes = ["ignore", "read", "readwrite"] as const;
   const modeLabels = {
     ignore: "Ignore",
     read: "Read",
-    readwrite: "Read/Write",
+    readwrite: "R/W",
   };
   const modeColors = {
     ignore: "text-gray-400",
@@ -680,53 +705,90 @@ function CalendarSettings({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium text-gray-500">
-          Calendar Sources
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-medium text-gray-500">
+            Calendar Sources
+          </CardTitle>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            className="h-7 px-2 text-xs text-gray-500"
+          >
+            <RefreshCw
+              className={`h-3 w-3 mr-1 ${isRefreshing ? "animate-spin" : ""}`}
+            />
+            Sync
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-2">
-          {configs.map((cal) => (
-            <div
-              key={cal.calendar_id}
-              className="flex items-center justify-between gap-3 py-1.5 border-b border-gray-50 last:border-0"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <div
-                  className="h-3 w-3 rounded-full shrink-0"
-                  style={{ backgroundColor: cal.color || "#4285f4" }}
-                />
-                <span className="text-sm truncate">{cal.name}</span>
-                {cal.role === "tickler" && (
+        <div className="space-y-1">
+          {configs.map((cal) => {
+            const source = getSourceLabel(cal);
+            const accessRole = getAccessRoleLabel(cal.google_access_role);
+
+            return (
+              <div
+                key={cal.calendar_id}
+                className="flex items-center justify-between gap-2 py-2 border-b border-gray-50 last:border-0"
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <div
+                    className="h-3 w-3 rounded-full shrink-0"
+                    style={{ backgroundColor: cal.color || "#4285f4" }}
+                  />
+                  <span className="text-sm truncate" title={cal.name}>
+                    {cal.name}
+                  </span>
+                  {cal.primary && (
+                    <Badge
+                      variant="outline"
+                      className="text-[9px] px-1 py-0 border-gray-300 text-gray-500 shrink-0"
+                    >
+                      primary
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
                   <Badge
-                    variant="warning"
-                    className="text-[10px] px-1.5 py-0"
+                    variant="outline"
+                    className={`text-[10px] px-1.5 py-0 ${source.className}`}
                   >
-                    tickler
+                    {source.label}
                   </Badge>
-                )}
+                  {accessRole && source.label === "Google" && (
+                    <Badge
+                      variant="outline"
+                      className="text-[9px] px-1 py-0 border-gray-200 text-gray-400"
+                    >
+                      {accessRole}
+                    </Badge>
+                  )}
+                  <div className="flex items-center rounded-md border border-gray-200 p-0.5">
+                    {modes.map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => onUpdate(cal.calendar_id, mode)}
+                        className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                          cal.access_mode === mode
+                            ? `bg-gray-100 ${modeColors[mode]}`
+                            : "text-gray-400 hover:text-gray-600"
+                        }`}
+                      >
+                        {modeLabels[mode]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
-                {modes.map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => onUpdate(cal.calendar_id, mode)}
-                    className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                      cal.access_mode === mode
-                        ? `bg-gray-100 ${modeColors[mode]}`
-                        : "text-gray-400 hover:text-gray-600"
-                    }`}
-                  >
-                    {modeLabels[mode]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         {configs.length === 0 && (
           <p className="text-sm text-gray-400">
-            No calendars configured. Connect Google first.
+            No calendars configured. Click Sync to load from Google.
           </p>
         )}
       </CardContent>
@@ -748,6 +810,18 @@ export function CalendarView() {
   const [showSettings, setShowSettings] = useState(false);
   const [calConfigs, setCalConfigs] = useState<CalendarConfig[]>([]);
   const [isPending, startTransition] = useTransition();
+  const [isRefreshingConfigs, setIsRefreshingConfigs] = useState(false);
+  const hasRefreshedConfigs = useRef(false);
+
+  const refreshCalendarConfigs = useCallback(async () => {
+    setIsRefreshingConfigs(true);
+    try {
+      const configs = await fetchCalendarConfigs(true);
+      setCalConfigs(configs);
+    } finally {
+      setIsRefreshingConfigs(false);
+    }
+  }, []);
 
   useEffect(() => {
     void fetchCalendarConfigs().then(setCalConfigs);
@@ -756,6 +830,14 @@ export function CalendarView() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-refresh configs on first settings open
+  useEffect(() => {
+    if (showSettings && !hasRefreshedConfigs.current) {
+      hasRefreshedConfigs.current = true;
+      void refreshCalendarConfigs();
+    }
+  }, [showSettings, refreshCalendarConfigs]);
 
   const handleAccessModeUpdate = useCallback(
     (calendarId: string, mode: "ignore" | "read" | "readwrite") => {
@@ -904,6 +986,8 @@ export function CalendarView() {
           <CalendarSettings
             configs={calConfigs}
             onUpdate={handleAccessModeUpdate}
+            onRefresh={refreshCalendarConfigs}
+            isRefreshing={isRefreshingConfigs}
           />
         </div>
       )}

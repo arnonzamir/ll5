@@ -245,7 +245,10 @@ export function JournalView() {
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">Agent Journal</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Agent Journal</h1>
+          <p className="text-sm text-gray-500 mt-1">Observations, decisions, and learning from agent sessions</p>
+        </div>
         <Button
           variant="ghost"
           size="icon"
