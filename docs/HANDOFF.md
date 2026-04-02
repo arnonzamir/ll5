@@ -12,7 +12,7 @@ Claude Code is the agent. 5 MCP servers are the data layer. Gateway handles webh
 Claude Code (ll5-run workspace)
   ├── personal-knowledge MCP (ES) — facts, people, places, profile, data gaps
   ├── gtd MCP (PG) — actions, projects, horizons, inbox, shopping, chat tools
-  ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation
+  ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation, journal, user model
   ├── calendar MCP (PG+ES) — Unified timeline (Google+phone+tickler), Gmail, OAuth
   └── messaging MCP (PG) — WhatsApp, Telegram [not deployed]
 
@@ -23,7 +23,8 @@ Gateway (Express)
   ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY)
   ├── /commands/* — device command queue (queue, pending, confirm)
   ├── Schedulers — calendar sync (30min), calendar review (2h), daily briefing (7am),
-      tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00), message batch (30min)
+      tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00), message batch (30min),
+      journal consolidation (2am)
   ├── System message dedup — checks PG for recent duplicate before inserting
   └── Immediate + ignored messages mark ES doc as processed (prevents double-report/leak in batch review)
 
@@ -108,6 +109,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 **Elasticsearch** (8.15.0, 10 indices):
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps
 - `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
+- `ll5_agent_*` — journal (micro-entries), user_model (consolidated sections keyed by userId_section)
 - `ll5_app_log` — all tool calls, webhooks, errors (service, level, action, tool_name, duration_ms)
 - `ll5_audit_log` — all mutations across MCPs
 - Note: calendar index has text-mapped calendar_id (use .keyword subfield for term queries)

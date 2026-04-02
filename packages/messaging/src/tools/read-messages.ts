@@ -80,7 +80,10 @@ async function readWhatsAppMessages(
   }
 
   const client = new EvolutionClient(account.api_url, account.instance_name, account.api_key);
-  const rawMessages = await client.fetchMessages(conversationId, limit);
+  const rawResult = await client.fetchMessages(conversationId, limit);
+
+  // Defensive: ensure rawMessages is always an array
+  const rawMessages = Array.isArray(rawResult) ? rawResult : [];
 
   const messages = rawMessages
     .map((msg) => {

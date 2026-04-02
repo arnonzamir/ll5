@@ -50,6 +50,29 @@ export async function fetchJournalEntries(
   }
 }
 
+export interface UserModelSection {
+  id: string;
+  section: string;
+  content: Record<string, unknown>;
+  last_updated: string;
+}
+
+export async function fetchUserModel(): Promise<UserModelSection[]> {
+  const token = await getToken();
+  if (!token) return [];
+
+  try {
+    const response = await fetch(`${env.GATEWAY_URL}/user-model`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) return [];
+    const data = (await response.json()) as { sections: UserModelSection[] };
+    return data.sections;
+  } catch {
+    return [];
+  }
+}
+
 export async function resolveEntry(
   id: string
 ): Promise<{ updated: boolean }> {

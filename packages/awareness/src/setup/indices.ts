@@ -122,6 +122,18 @@ const INDICES: IndexDefinition[] = [
       },
     },
   },
+  {
+    index: 'll5_agent_user_model',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        section: { type: 'keyword' },
+        content: { type: 'object', enabled: false },
+        last_updated: { type: 'date' },
+        created_at: { type: 'date' },
+      },
+    },
+  },
 ];
 
 export async function ensureIndices(client: Client): Promise<void> {

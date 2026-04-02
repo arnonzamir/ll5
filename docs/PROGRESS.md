@@ -44,13 +44,14 @@ Current state of the LL5 personal assistant system.
 |-----|-------|
 | personal-knowledge | 17 |
 | gtd | 14 + 3 chat |
-| awareness | 8 |
+| awareness | 10 |
 | google | 13 (10 + 3 tickler) |
 | messaging | 8 |
-| **Total** | **63** |
+| **Total** | **65** |
 
 ## Recent Changes
 
+- 2026-04-01: Journal consolidation system — user model ES index (ll5_agent_user_model), read/write_user_model tools in awareness MCP, nightly consolidation trigger (2am) in gateway scheduler
 - 2026-04-01: Chat SSE: real-time via PG NOTIFY on all changes. Channel MCP strict filter (inbound+content only). Temp ID mapping for status updates.
 - 2026-04-01: Fix chat message fetch: return latest N messages (was returning oldest N, cutting off recent messages)
 - 2026-04-01: Chat progress feedback — status indicators (pending/processing/delivered/failed) + typing indicator in dashboard and Android

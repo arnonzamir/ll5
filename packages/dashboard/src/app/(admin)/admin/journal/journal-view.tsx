@@ -13,10 +13,19 @@ import {
 } from "@/components/ui/select";
 import { RefreshCw, Search, Check } from "lucide-react";
 import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import {
   fetchJournalEntries,
+  fetchUserModel,
   resolveEntry,
   type JournalEntry,
   type JournalFilters,
+  type UserModelSection,
 } from "./journal-server-actions";
 
 const TYPE_COLORS: Record<string, string> = {
@@ -128,9 +137,71 @@ function EntryRow({
   );
 }
 
+function UserModelView({ sections, isPending }: { sections: UserModelSection[]; isPending: boolean }) {
+  if (isPending) {
+    return <p className="p-6 text-sm text-gray-400 text-center">Loading...</p>;
+  }
+
+  if (sections.length === 0) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-8 text-center">
+        <p className="text-sm text-gray-500">
+          No user model built yet. The agent builds this through the /consolidate skill.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4">
+      {sections.map((section) => (
+        <Card key={section.id}>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">
+              {section.section
+                .split("_")
+                .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(" ")}
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Last updated: {new Date(section.last_updated).toLocaleString()}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {typeof section.content === "object" && section.content !== null ? (
+              <dl className="grid gap-2">
+                {Object.entries(section.content).map(([key, value]) => (
+                  <div key={key}>
+                    <dt className="text-xs font-medium text-gray-500">
+                      {key.replace(/_/g, " ")}
+                    </dt>
+                    <dd className="text-sm text-gray-800 whitespace-pre-wrap">
+                      {typeof value === "string"
+                        ? value
+                        : JSON.stringify(value, null, 2)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <pre className="text-sm text-gray-700 whitespace-pre-wrap">
+                {JSON.stringify(section.content, null, 2)}
+              </pre>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+type TabId = "journal" | "user-model";
+
 export function JournalView() {
+  const [activeTab, setActiveTab] = useState<TabId>("journal");
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [total, setTotal] = useState(0);
+  const [userModelSections, setUserModelSections] = useState<UserModelSection[]>([]);
   const [isPending, startTransition] = useTransition();
 
   // Filters
@@ -145,9 +216,13 @@ export function JournalView() {
       if (statusFilter !== "all") filters.status = statusFilter;
       if (topicSearch) filters.topic = topicSearch;
 
-      const result = await fetchJournalEntries(filters);
-      setEntries(result.entries);
-      setTotal(result.total);
+      const [journalResult, modelSections] = await Promise.all([
+        fetchJournalEntries(filters),
+        fetchUserModel(),
+      ]);
+      setEntries(journalResult.entries);
+      setTotal(journalResult.total);
+      setUserModelSections(modelSections);
     });
   }, [typeFilter, statusFilter, topicSearch]);
 
@@ -160,6 +235,11 @@ export function JournalView() {
   for (const e of entries) {
     typeCounts[e.type] = (typeCounts[e.type] ?? 0) + 1;
   }
+
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "journal", label: "Journal Entries" },
+    { id: "user-model", label: "User Model" },
+  ];
 
   return (
     <div>
@@ -179,91 +259,121 @@ export function JournalView() {
         </Button>
       </div>
 
-      {/* Stats bar */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <span className="text-sm text-gray-500">
-          {total} {total === 1 ? "entry" : "entries"}
-        </span>
-        {Object.entries(typeCounts).map(([t, count]) => {
-          const color =
-            TYPE_COLORS[t] ?? "bg-gray-50 text-gray-700 border-gray-200";
-          return (
-            <Badge
-              key={t}
-              className={`text-[11px] px-2 py-0.5 font-medium border ${color}`}
-            >
-              {t}: {count}
-            </Badge>
-          );
-        })}
+      {/* Tab bar */}
+      <div className="flex border-b border-gray-200 mb-4">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tab.id
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            }`}
+          >
+            {tab.label}
+            {tab.id === "user-model" && userModelSections.length > 0 && (
+              <span className="ml-1.5 text-xs text-gray-400">
+                ({userModelSections.length})
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 mb-4">
-        <div className="space-y-1">
-          <span className="text-xs text-gray-500">Type</span>
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ENTRY_TYPES.map((t) => (
-                <SelectItem key={t} value={t}>
-                  {t === "all" ? "All Types" : t.charAt(0).toUpperCase() + t.slice(1)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-1">
-          <span className="text-xs text-gray-500">Status</span>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="open">Open</SelectItem>
-              <SelectItem value="resolved">Resolved</SelectItem>
-              <SelectItem value="all">All</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex-1 min-w-[200px] space-y-1">
-          <span className="text-xs text-gray-500">Topic</span>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
-            <Input
-              value={topicSearch}
-              onChange={(e) => setTopicSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && load()}
-              placeholder="Search topics..."
-              className="pl-8 h-9"
-            />
+      {activeTab === "journal" && (
+        <>
+          {/* Stats bar */}
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <span className="text-sm text-gray-500">
+              {total} {total === 1 ? "entry" : "entries"}
+            </span>
+            {Object.entries(typeCounts).map(([t, count]) => {
+              const color =
+                TYPE_COLORS[t] ?? "bg-gray-50 text-gray-700 border-gray-200";
+              return (
+                <Badge
+                  key={t}
+                  className={`text-[11px] px-2 py-0.5 font-medium border ${color}`}
+                >
+                  {t}: {count}
+                </Badge>
+              );
+            })}
           </div>
-        </div>
-      </div>
 
-      {/* Results count */}
-      <div className="text-xs text-gray-400 mb-2">
-        {isPending
-          ? "Loading..."
-          : `${entries.length} of ${total} entries`}
-      </div>
+          {/* Filters */}
+          <div className="flex flex-wrap items-end gap-3 mb-4">
+            <div className="space-y-1">
+              <span className="text-xs text-gray-500">Type</span>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ENTRY_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t === "all" ? "All Types" : t.charAt(0).toUpperCase() + t.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-      {/* Entry list */}
-      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-        {entries.length === 0 ? (
-          <p className="p-6 text-sm text-gray-400 text-center">
-            {isPending ? "Loading..." : "No journal entries found"}
-          </p>
-        ) : (
-          entries.map((entry) => (
-            <EntryRow key={entry.id} entry={entry} onResolved={load} />
-          ))
-        )}
-      </div>
+            <div className="space-y-1">
+              <span className="text-xs text-gray-500">Status</span>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="open">Open</SelectItem>
+                  <SelectItem value="resolved">Resolved</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex-1 min-w-[200px] space-y-1">
+              <span className="text-xs text-gray-500">Topic</span>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                <Input
+                  value={topicSearch}
+                  onChange={(e) => setTopicSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && load()}
+                  placeholder="Search topics..."
+                  className="pl-8 h-9"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Results count */}
+          <div className="text-xs text-gray-400 mb-2">
+            {isPending
+              ? "Loading..."
+              : `${entries.length} of ${total} entries`}
+          </div>
+
+          {/* Entry list */}
+          <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+            {entries.length === 0 ? (
+              <p className="p-6 text-sm text-gray-400 text-center">
+                {isPending ? "Loading..." : "No journal entries found"}
+              </p>
+            ) : (
+              entries.map((entry) => (
+                <EntryRow key={entry.id} entry={entry} onResolved={load} />
+              ))
+            )}
+          </div>
+        </>
+      )}
+
+      {activeTab === "user-model" && (
+        <UserModelView sections={userModelSections} isPending={isPending} />
+      )}
     </div>
   );
 }

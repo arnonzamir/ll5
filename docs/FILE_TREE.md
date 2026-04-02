@@ -80,7 +80,7 @@ ll5/
 ├── packages/awareness/                # @ll5/awareness — ES-backed MCP
 │   └── src/
 │       ├── repositories/elasticsearch/  # 5 ES repositories (location, message, entity-status, calendar, notable)
-│       ├── tools/                       # 8 MCP tools (situation, location, messages, etc.)
+│       ├── tools/                       # 10 MCP tools (situation, location, messages, journal, user model, etc.)
 │       ├── setup/indices.ts
 │       └── server.ts
 │
@@ -89,7 +89,7 @@ ll5/
 │       ├── auth.ts                    # POST /auth/token (PIN login)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
 │       ├── processors/                # GPS geocoding, IM processing, calendar (dedup), WhatsApp webhook, unified rule matcher (4 levels + conversation type)
-│       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch
+│       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, journal consolidation
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/system-message.ts    # Shared system message writer with dedup
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message

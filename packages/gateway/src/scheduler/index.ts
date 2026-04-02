@@ -11,6 +11,7 @@ import { WeeklyReviewReminder } from './weekly-review.js';
 import { MessageBatchReviewScheduler } from './message-batch-review.js';
 import { HeartbeatScheduler } from './heartbeat.js';
 import { JournalHealthScheduler } from './journal-health.js';
+import { JournalConsolidationScheduler } from './journal-consolidation.js';
 import { logger } from '../utils/logger.js';
 
 export function startSchedulers(
@@ -77,6 +78,14 @@ export function startSchedulers(
     userId,
   });
   journalHealthScheduler.start();
+
+  // Journal consolidation: nightly trigger to consolidate journal → user model
+  const journalConsolidationScheduler = new JournalConsolidationScheduler(pgPool, {
+    consolidationHour: config.journalConsolidationHour,
+    timezone,
+    userId,
+  });
+  journalConsolidationScheduler.start();
 
   // --- Google-dependent schedulers (only start if googleClient exists) ---
 

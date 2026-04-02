@@ -577,6 +577,36 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- User Model API ---
+  app.get('/user-model', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const result = await esClient.search({
+        index: 'll5_agent_user_model',
+        query: {
+          bool: {
+            filter: [{ term: { user_id: userId } }],
+          },
+        },
+        sort: [{ last_updated: { order: 'desc' } }],
+        size: 20,
+      });
+
+      const sections = (result.hits.hits as Array<{ _id: string; _source?: Record<string, unknown> }>).map((h) => ({
+        id: h._id,
+        section: (h._source as Record<string, unknown>)?.section,
+        content: (h._source as Record<string, unknown>)?.content,
+        last_updated: (h._source as Record<string, unknown>)?.last_updated,
+      }));
+      res.json({ sections });
+    } catch (err) {
+      // Index might not exist yet
+      const message = err instanceof Error ? err.message : String(err);
+      logger.debug('[user-model] Failed to query user model (index may not exist)', { error: message });
+      res.json({ sections: [] });
+    }
+  });
+
   // --- Sessions API ---
   app.post('/sessions', authMw, async (req: Request, res: Response) => {
     try {

@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
 
 const INDEX = 'll5_agent_journal';
+const USER_MODEL_INDEX = 'll5_agent_user_model';
 
 export function registerJournalTools(
   server: McpServer,
@@ -156,6 +157,115 @@ export function registerJournalTools(
           {
             type: 'text' as const,
             text: JSON.stringify({ resolved_count: resolvedCount }),
+          },
+        ],
+      };
+    },
+  );
+
+  server.tool(
+    'read_user_model',
+    'Read the persistent user model. Optionally load a single section (e.g. "communication", "relationships", "routines", "goals", "work", "active_context") or all sections at once.',
+    {
+      section: z.string().optional().describe('Section name to load. If omitted, loads all sections.'),
+    },
+    async (params) => {
+      const userId = getUserId();
+
+      if (params.section) {
+        try {
+          const result = await esClient.get({
+            index: USER_MODEL_INDEX,
+            id: `${userId}_${params.section}`,
+          });
+          const source = result._source as Record<string, unknown>;
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: JSON.stringify({
+                  section: params.section,
+                  content: source.content,
+                  last_updated: source.last_updated,
+                }),
+              },
+            ],
+          };
+        } catch (err: unknown) {
+          const isNotFound =
+            err instanceof Error &&
+            'meta' in err &&
+            (err as { meta?: { statusCode?: number } }).meta?.statusCode === 404;
+          if (isNotFound) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({ section: null }),
+                },
+              ],
+            };
+          }
+          throw err;
+        }
+      }
+
+      // Load all sections for this user
+      const result = await esClient.search({
+        index: USER_MODEL_INDEX,
+        size: 20,
+        query: { term: { user_id: userId } },
+      });
+
+      const sections = result.hits.hits.map((hit) => {
+        const source = hit._source as Record<string, unknown>;
+        return {
+          section: source.section,
+          content: source.content,
+          last_updated: source.last_updated,
+        };
+      });
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({ sections }),
+          },
+        ],
+      };
+    },
+  );
+
+  server.tool(
+    'write_user_model',
+    'Write or update a section of the persistent user model. Sections are topic-based (e.g. "communication", "relationships", "routines", "goals", "work", "active_context").',
+    {
+      section: z.string().describe('Section name (e.g. "communication", "relationships", "routines")'),
+      content: z.record(z.unknown()).describe('Section content as a JSON object'),
+    },
+    async (params) => {
+      const userId = getUserId();
+      const now = new Date().toISOString();
+
+      await esClient.index({
+        index: USER_MODEL_INDEX,
+        id: `${userId}_${params.section}`,
+        document: {
+          user_id: userId,
+          section: params.section,
+          content: params.content,
+          last_updated: now,
+          created_at: now,
+        },
+        refresh: 'wait_for',
+      });
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({ section: params.section, updated: true }),
           },
         ],
       };
