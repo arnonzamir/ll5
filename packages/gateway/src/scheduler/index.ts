@@ -10,6 +10,7 @@ import { GTDHealthScheduler } from './gtd-health.js';
 import { WeeklyReviewReminder } from './weekly-review.js';
 import { MessageBatchReviewScheduler } from './message-batch-review.js';
 import { HeartbeatScheduler } from './heartbeat.js';
+import { JournalHealthScheduler } from './journal-health.js';
 import { logger } from '../utils/logger.js';
 
 export function startSchedulers(
@@ -66,6 +67,16 @@ export function startSchedulers(
     userId,
   });
   heartbeatScheduler.start();
+
+  // Journal health: nudge agent if not journaling
+  const journalHealthScheduler = new JournalHealthScheduler(es, pgPool, {
+    intervalHours: 2,
+    startHour: config.calendarReviewStartHour,
+    endHour: config.calendarReviewEndHour,
+    timezone,
+    userId,
+  });
+  journalHealthScheduler.start();
 
   // --- Google-dependent schedulers (only start if googleClient exists) ---
 
