@@ -95,6 +95,19 @@ For email accounts where API access isn't available (e.g., work Exchange behind 
 
 ---
 
+## Calendar Source Management UI
+
+Dashboard UI for selecting which calendars to sync, ignore, or configure. The `configure_calendar` tool already supports `ignore/read/readwrite` per calendar — this adds the visual interface.
+
+- **Calendar list**: show all discovered calendars (Google, phone-pushed, future sources) with current access mode
+- **Per-calendar toggle**: ignore / read / readwrite
+- **Color picker**: assign display colors per calendar
+- **Source badges**: Google, Phone, Tickler — so user knows where each calendar comes from
+- **Auto-discovery**: when new calendars appear (from Google sync or phone push), show them as "new" for user to configure
+- **Location**: calendar settings panel (gear icon on calendar page) — extend the existing settings UI
+
+---
+
 ## GTD Review Skill
 
 The agent should proactively drive the GTD review workflow — not just remind the user, but actually do the work.
