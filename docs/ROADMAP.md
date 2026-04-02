@@ -172,6 +172,19 @@ Verify and extend GTD horizon support:
 
 ---
 
+## User Management
+
+Adding and managing multiple users:
+
+- **User CRUD**: dashboard UI for creating, editing, disabling users (currently only admin user exists, seeded manually)
+- **Role management**: admin vs regular user permissions
+- **Per-user config**: timezone, notification preferences, connected accounts
+- **Multi-tenant isolation**: already built into the data layer (every record has user_id), needs UI
+- **Auth improvements**: password hashing upgrade, token refresh, session management
+- **Onboarding flow**: new user setup wizard (connect Google, set timezone, install Android app)
+
+---
+
 ## Technical Debt & Infrastructure
 
 - **SSE for Android chat**: replace polling with OkHttp SSE (web already uses SSE)
