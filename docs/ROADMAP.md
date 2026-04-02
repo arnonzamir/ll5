@@ -82,6 +82,31 @@ Currently only captures messages the user RECEIVES. Need to also capture what th
 
 ---
 
+## WhatsApp Message History Sync
+
+Evolution API only stores messages received after connection. For groups and contacts with existing history, we need a backfill mechanism.
+
+### Approach options:
+
+1. **Evolution API `fetchMessages` with pagination** — Evolution stores messages in its internal DB (PostgreSQL). The `findMessages` endpoint may work with different query parameters (e.g., `where.key.remoteJid` vs `where.remoteJid`). Investigate the exact v2 API schema.
+
+2. **WhatsApp Web export** — WhatsApp allows exporting chat history as `.txt` files. Build a parser that ingests exported chats → writes to ES `ll5_awareness_messages`. Manual but covers full history.
+
+3. **Android WhatsApp ContentProvider** — on some devices, WhatsApp's local SQLite DB (`msgstore.db`) is accessible. The Android app could read it and push historical messages. Fragile (path changes between versions) but automated.
+
+4. **Evolution webhook backfill** — when a new conversation is synced, trigger Evolution to fetch recent messages from the WhatsApp cloud backup. Evolution may support this via `fetchMessages` with broader parameters.
+
+### What to store:
+- Same format as webhook messages: sender, content, timestamp, is_group, group_name, from_me
+- Write to ES `ll5_awareness_messages` with `source: "backfill"`
+- Mark as `processed: true` (don't trigger notifications for old messages)
+
+### Priority:
+- Start with option 1 (investigate Evolution API deeper)
+- Fallback to option 2 (WhatsApp export parser) for one-time backfill
+
+---
+
 ## Email Sync from Phone
 
 For email accounts where API access isn't available (e.g., work Exchange behind Workspace policies):
