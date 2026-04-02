@@ -453,6 +453,7 @@ function ConversationsSection({
   const [conversations, setConversations] = useState<ConversationInfo[]>([]);
   const [totalConversations, setTotalConversations] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [namedOnly, setNamedOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [isLoading, startLoading] = useTransition();
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -533,6 +534,14 @@ function ConversationsSection({
               className="pl-9"
             />
           </div>
+          <button
+            onClick={() => setNamedOnly((v) => !v)}
+            className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors cursor-pointer shrink-0 ${
+              namedOnly ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200 hover:text-gray-700"
+            }`}
+          >
+            Named only
+          </button>
         </div>
 
         {conversations.length === 0 && !isLoading ? (
@@ -543,9 +552,13 @@ function ConversationsSection({
         ) : (
           <>
             <div className="divide-y divide-gray-100">
-              {conversations.map((c) => {
+              {conversations
+                .filter((c) => !namedOnly || (c.name && !/^\+?\d[\d\s\-()]+$/.test(c.name) && !c.name.includes("@")))
+                .map((c) => {
                 const rule = ruleMap.get(`${c.platform}:${c.conversation_id}`);
-                const activePriority = rule?.priority ?? "batch";
+                // Default: no name → ignore, has name → batch
+                const hasRealName = c.name && !/^\+?\d[\d\s\-()]+$/.test(c.name) && !c.name.includes("@");
+                const activePriority = rule?.priority ?? (hasRealName ? "batch" : "ignore");
                 return (
                   <div key={`${c.platform}:${c.conversation_id}`} className="flex items-center gap-3 py-2.5">
                     <div className="flex-1 min-w-0">

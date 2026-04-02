@@ -1,9 +1,13 @@
 import type { Client } from '@elastic/elasticsearch';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
 import type { NotificationRuleMatcher } from './notification-rules.js';
+
+const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 
 interface EvolutionMessageData {
   key: {
@@ -15,6 +19,13 @@ interface EvolutionMessageData {
   message?: {
     conversation?: string;
     extendedTextMessage?: { text?: string };
+    imageMessage?: {
+      url?: string;
+      directPath?: string;
+      mimetype?: string;
+      caption?: string;
+      mediaKey?: string;
+    };
   };
   messageTimestamp?: number | string;
 }
@@ -41,13 +52,16 @@ export async function processWhatsAppWebhook(
   const data = payload.data;
   const fromMe = data.key.fromMe;
 
-  // Extract message text
+  // Extract message text + detect image
   const text = data.message?.conversation
     ?? data.message?.extendedTextMessage?.text
+    ?? data.message?.imageMessage?.caption
     ?? '';
+  const imageMessage = data.message?.imageMessage;
+  const hasImage = !!imageMessage;
 
-  if (!text) {
-    logger.debug('[processWhatsAppWebhook][handle] Skipping message with no text content');
+  if (!text && !hasImage) {
+    logger.debug('[processWhatsAppWebhook][handle] Skipping message with no text or image content');
     return;
   }
 
@@ -55,25 +69,79 @@ export async function processWhatsAppWebhook(
   const remoteJid = data.key.remoteJid;
   const isGroup = remoteJid.endsWith('@g.us');
   const sender = fromMe ? '(me)' : (data.pushName ?? remoteJid.split('@')[0]);
-  const groupName = isGroup ? remoteJid : null; // TODO: resolve group name
+  const groupName = isGroup ? remoteJid : null;
+
+  // Check priority early for image handling — only download images for non-ignore conversations
+  let imageUrl: string | null = null;
+  let mediaId: string | null = null;
+  if (hasImage && imageMessage?.url) {
+    // Check conversation priority before downloading
+    const imgPriority = await matcher.match(userId, {
+      sender, app: 'whatsapp', body: text || '[image]',
+      is_group: isGroup, group_name: groupName,
+      platform: 'whatsapp', conversation_id: remoteJid,
+    });
+
+    if (imgPriority && imgPriority !== 'ignore') {
+      try {
+        // Download image from WhatsApp CDN
+        const imgRes = await fetch(imageMessage.url);
+        if (imgRes.ok) {
+          const buf = Buffer.from(await imgRes.arrayBuffer());
+          const ext = imageMessage.mimetype?.split('/')[1] ?? 'jpg';
+          const filename = `wa_${userId.slice(0, 8)}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          const filePath = path.join(UPLOAD_DIR, filename);
+          fs.writeFileSync(filePath, buf);
+          imageUrl = `/uploads/${filename}`;
+
+          // Register in ll5_media
+          const mediaResult = await es.index({
+            index: 'll5_media',
+            document: {
+              user_id: userId,
+              url: imageUrl,
+              mime_type: imageMessage.mimetype ?? 'image/jpeg',
+              filename,
+              size_bytes: buf.length,
+              source: 'whatsapp',
+              tags: isGroup && groupName ? [groupName] : [],
+              created_at: new Date().toISOString(),
+            },
+          });
+          mediaId = mediaResult._id;
+          logger.info('[processWhatsAppWebhook][handle] WhatsApp image saved', { filename, size: buf.length, priority: imgPriority });
+        }
+      } catch (err) {
+        logger.warn('[processWhatsAppWebhook][handle] Failed to download WhatsApp image', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } else {
+      logger.debug('[processWhatsAppWebhook][handle] Skipping image download — conversation priority is ignore or unset');
+    }
+  }
   const timestamp = typeof data.messageTimestamp === 'number'
     ? new Date(data.messageTimestamp * 1000).toISOString()
     : new Date().toISOString();
 
   // Write to ES — same index as phone-pushed messages
   const docId = crypto.randomUUID();
-  const messageDoc = {
+  const messageDoc: Record<string, unknown> = {
     user_id: userId,
     sender,
     app: 'whatsapp',
-    content: text,
+    content: text || (hasImage ? '[image]' : ''),
     is_group: isGroup,
     group_name: groupName,
-    processed: fromMe, // outbound messages are immediately marked processed (no batch/notification)
+    processed: fromMe,
     from_me: fromMe,
     timestamp,
     source: 'evolution',
   };
+  if (imageUrl) {
+    messageDoc.image_url = imageUrl;
+    messageDoc.media_id = mediaId;
+  }
 
   await es.index({
     index: 'll5_awareness_messages',
