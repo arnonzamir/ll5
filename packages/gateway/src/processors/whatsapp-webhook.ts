@@ -89,8 +89,39 @@ export async function processWhatsAppWebhook(
     bodyLength: text.length,
   });
 
-  // Outbound messages: stored in ES for context but no notifications or entity status updates
-  if (fromMe) return;
+  // Outbound messages: check notification rules for the conversation (user's side of the chat)
+  if (fromMe) {
+    const priority = await matcher.match(userId, {
+      sender: '(me)',
+      app: 'whatsapp',
+      body: text,
+      is_group: isGroup,
+      group_name: groupName,
+      platform: 'whatsapp',
+      conversation_id: remoteJid,
+    });
+
+    // Only notify agent for conversations with immediate or agent priority
+    if (priority === 'immediate' || priority === 'agent') {
+      const truncBody = text.length > 200 ? text.slice(0, 200) + '...' : text;
+      const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
+      await insertSystemMessage(
+        pgPool,
+        userId,
+        `[WhatsApp] You sent${groupInfo}: "${truncBody}"`,
+      );
+
+      await es.update({
+        index: 'll5_awareness_messages',
+        id: docId,
+        doc: { processed: true },
+        refresh: false,
+      });
+
+      logger.info('[processWhatsAppWebhook] Outbound message notified to agent', { isGroup, priority });
+    }
+    return;
+  }
 
   // Update entity status
   try {
