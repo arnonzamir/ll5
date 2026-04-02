@@ -615,7 +615,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     try {
       const result = await esClient.search({
         index: 'll5_session_history',
-        query: { term: { user_id: userId } },
+        query: { term: { 'user_id.keyword': userId } },
         sort: [{ last_message: { order: 'desc' } }],
         size: limit,
         from: offset,
