@@ -324,12 +324,12 @@ export function ActionsView() {
               <ActionRow
                 id={action.id}
                 title={action.title}
-                contexts={action.contexts}
+                contexts={action.context}
                 energy={action.energy}
-                dueDate={action.due_date}
-                projectName={action.project_name}
-                listType={action.list_type}
-                waitingFor={action.waiting_for}
+                dueDate={action.dueDate}
+                projectName={action.projectTitle}
+                listType={action.listType}
+                waitingFor={action.waitingFor}
                 completed={action.status === "completed" || justCompleted.has(action.id)}
                 onToggle={handleToggle}
               />
@@ -368,7 +368,7 @@ function EditActionForm({
   onSubmit: (formData: FormData) => void;
   isPending: boolean;
 }) {
-  const [listType, setListType] = useState(action.list_type ?? "todo");
+  const [editListType, setEditListType] = useState(action.listType ?? "todo");
 
   return (
     <form action={onSubmit} className="space-y-4">
@@ -410,7 +410,7 @@ function EditActionForm({
         <Input
           id="edit-contexts"
           name="contexts"
-          defaultValue={action.contexts?.join(", ") ?? ""}
+          defaultValue={action.context?.join(", ") ?? ""}
           placeholder="@home, @phone"
         />
       </div>
@@ -421,15 +421,15 @@ function EditActionForm({
             id="edit-due-date"
             name="due_date"
             type="date"
-            defaultValue={action.due_date ?? ""}
+            defaultValue={action.dueDate ?? ""}
           />
         </div>
         <div className="space-y-2">
           <Label htmlFor="edit-list-type">List Type</Label>
           <Select
             name="list_type"
-            defaultValue={listType}
-            onValueChange={setListType}
+            defaultValue={editListType}
+            onValueChange={setEditListType}
           >
             <SelectTrigger>
               <SelectValue />
@@ -443,13 +443,13 @@ function EditActionForm({
           </Select>
         </div>
       </div>
-      {listType === "waiting" && (
+      {editListType === "waiting" && (
         <div className="space-y-2">
           <Label htmlFor="edit-waiting-for">Waiting For</Label>
           <Input
             id="edit-waiting-for"
             name="waiting_for"
-            defaultValue={action.waiting_for ?? ""}
+            defaultValue={action.waitingFor ?? ""}
             placeholder="Person or event"
           />
         </div>

@@ -47,7 +47,7 @@ export async function updateAction(
   if (listType) args.list_type = listType;
   if (waitingFor) args.waiting_for = waitingFor;
   if (contextsRaw !== undefined) {
-    args.contexts = contextsRaw
+    args.context = contextsRaw
       .split(",")
       .map((c) => c.trim())
       .filter(Boolean);
@@ -68,7 +68,7 @@ export async function createAction(formData: FormData): Promise<void> {
   if (dueDate) args.due_date = dueDate;
   if (listType) args.list_type = listType;
   if (contextsRaw) {
-    args.contexts = contextsRaw
+    args.context = contextsRaw
       .split(",")
       .map((c) => c.trim())
       .filter(Boolean);

@@ -52,6 +52,7 @@ Current state of the LL5 personal assistant system.
 ## Recent Changes
 
 - 2026-03-31: Tiered push notifications — 3 urgency levels (urgent/info/low). New Android channels ("urgent" with vibrate+sound+heads-up, "info" silent badge-only). FCM data payload includes `notification_level` field. Android skips notification for level "low". Legacy channels kept for backward compat.
+- 2026-03-31: Actions page: list_type filter (todo/waiting/someday/all), list_type in create dialog, fix camelCase field mapping (dueDate/context/listType/waitingFor/projectTitle), someday+waiting badges in ActionRow. CLAUDE.md updated with explicit someday/maybe guidance for agent.
 - 2026-03-31: Dashboard list view audit — added subtitles to all page headers (actions, projects, inbox, shopping, people, knowledge, horizons, phone-data, sessions), dynamic title for admin logs (Application Log / Audit Log), overflow-y-auto on user layout main, metadata exports for sessions page
 - 2026-04-01: Journal consolidation system — user model ES index (ll5_agent_user_model), read/write_user_model tools in awareness MCP, nightly consolidation trigger (2am) in gateway scheduler
 - 2026-04-01: Chat SSE: real-time via PG NOTIFY on all changes. Channel MCP strict filter (inbound+content only). Temp ID mapping for status updates.
