@@ -134,6 +134,34 @@ const INDICES: IndexDefinition[] = [
       },
     },
   },
+  {
+    index: 'll5_media',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        url: { type: 'keyword' },
+        mime_type: { type: 'keyword' },
+        filename: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+        size_bytes: { type: 'integer' },
+        description: { type: 'text', analyzer: 'multilingual' },
+        source: { type: 'keyword' },
+        tags: { type: 'keyword' },
+        created_at: { type: 'date' },
+      },
+    },
+  },
+  {
+    index: 'll5_media_links',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        media_id: { type: 'keyword' },
+        entity_type: { type: 'keyword' },
+        entity_id: { type: 'keyword' },
+        linked_at: { type: 'date' },
+      },
+    },
+  },
 ];
 
 export async function ensureIndices(client: Client): Promise<void> {

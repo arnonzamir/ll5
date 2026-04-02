@@ -273,7 +273,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   app.use('/uploads', express.static(uploadsDir));
 
   // Mount chat routes
-  app.use('/chat', createChatRouter(pgPool, config.authSecret));
+  app.use('/chat', createChatRouter(pgPool, config.authSecret, esClient));
 
   // Create notification rule matcher
   const notificationMatcher = new NotificationRuleMatcher(pgPool);

@@ -12,6 +12,7 @@ import { registerNotableEventTools } from './notable-events.js';
 import { registerSituationTools } from './situation.js';
 import { registerNotificationRuleTools } from './notification-rules.js';
 import { registerJournalTools } from './journal.js';
+import { registerMediaTools } from './media.js';
 
 export interface Repositories {
   location: LocationRepository;
@@ -51,5 +52,6 @@ export function registerAllTools(
   }
   if (esClient) {
     registerJournalTools(server, esClient, getUserId);
+    registerMediaTools(server, esClient, getUserId);
   }
 }

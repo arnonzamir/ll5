@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import type { Client } from '@elastic/elasticsearch';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import multer from 'multer';
@@ -101,7 +102,7 @@ export function chatAuthMiddleware(authSecret: string) {
 /**
  * Create the /chat router with message queue endpoints.
  */
-export function createChatRouter(pool: Pool, authSecret: string): Router {
+export function createChatRouter(pool: Pool, authSecret: string, esClient?: Client): Router {
   const router = Router();
   const auth = chatAuthMiddleware(authSecret);
 
@@ -441,13 +442,37 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
       }
       next();
     });
-  }, (req: Request, res: Response) => {
+  }, async (req: Request, res: Response) => {
     if (!req.file) {
       res.status(400).json({ error: 'No file uploaded' });
       return;
     }
 
     const filename = req.file.filename;
+
+    // Auto-register in ll5_media
+    if (esClient) {
+      try {
+        await esClient.index({
+          index: 'll5_media',
+          document: {
+            user_id: (req as AuthenticatedRequest).userId,
+            url: `/uploads/${filename}`,
+            mime_type: req.file.mimetype,
+            filename: req.file.originalname,
+            size_bytes: req.file.size,
+            source: 'chat',
+            created_at: new Date().toISOString(),
+          },
+        });
+      } catch (err) {
+        logger.warn('[chat][upload] Failed to register media in ES', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // Non-fatal — the upload itself succeeded
+      }
+    }
+
     res.status(201).json({
       id: filename,
       url: `/uploads/${filename}`,
