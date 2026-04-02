@@ -205,7 +205,7 @@ export function LocationsView() {
         : getDateRange(rangePreset);
 
     const [locData, curLoc] = await Promise.all([
-      fetchLocations({ ...range, limit: 5000 }),
+      fetchLocations({ ...range, limit: 500 }),
       fetchCurrentLocation(),
     ]);
 
