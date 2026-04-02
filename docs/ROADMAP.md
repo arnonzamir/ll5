@@ -154,3 +154,5 @@ Verify and extend GTD horizon support:
 - **Test coverage**: unit + integration tests for gateway, MCPs, channel MCP
 - **CI deploy**: automated SSH deploy in GitHub Actions (currently manual `docker compose pull && up`)
 - **Session resume**: ensure `--resume` works with channel MCP, or document that `./ll5` is required
+- **UI list views audit**: review ALL list views (actions, projects, inbox, people, contacts, conversations, logs, audit logs) — ensure scrollable, filterable, correct titles/headers. Logs and audit logs currently show with no titles.
+- **Uniform logging format**: all services should use `[ClassName][methodName] message` format consistently. Audit existing logs across gateway, MCPs, and channel MCP.
