@@ -103,7 +103,7 @@ export async function processWhatsAppWebhook(
 
     // Only notify agent for conversations with immediate or agent priority
     if (priority === 'immediate' || priority === 'agent') {
-      const truncBody = text.length > 200 ? text.slice(0, 200) + '...' : text;
+      const truncBody = text.length > 2000 ? text.slice(0, 2000) + '...' : text;
       const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
       await insertSystemMessage(
         pgPool,

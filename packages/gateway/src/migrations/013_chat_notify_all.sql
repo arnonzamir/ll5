@@ -15,7 +15,7 @@ BEGIN
       'channel', NEW.channel,
       'direction', NEW.direction,
       'role', NEW.role,
-      'content', substring(NEW.content from 1 for 200),
+      'content', substring(NEW.content from 1 for 4000),
       'status', NEW.status,
       'has_attachments', (NEW.metadata ? 'attachments') IS NOT NULL AND jsonb_array_length(NEW.metadata -> 'attachments') > 0,
       'created_at', NEW.created_at

@@ -83,7 +83,7 @@ export async function processMessage(
     }
 
     if (priority === 'immediate' || priority === 'agent') {
-      const truncBody = item.body.length > 200 ? item.body.slice(0, 200) + '...' : item.body;
+      const truncBody = item.body.length > 2000 ? item.body.slice(0, 2000) + '...' : item.body;
       const groupInfo = item.is_group && item.group_name ? ` (group: ${item.group_name})` : '';
       await insertSystemMessage(
         pgPool,

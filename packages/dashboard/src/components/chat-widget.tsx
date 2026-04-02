@@ -169,12 +169,13 @@ export function ChatWidget() {
         const serverMsgs = (data.messages ?? []) as Message[];
 
         setMessages((prev) => {
-          const statusMap = new Map(serverMsgs.map((m) => [m.id, m.status]));
+          const serverMap = new Map(serverMsgs.map((m) => [m.id, m]));
           let updated = prev.map((msg) => {
-            const serverStatus = statusMap.get(msg.id);
-            return serverStatus && serverStatus !== msg.status
-              ? { ...msg, status: serverStatus }
-              : msg;
+            const server = serverMap.get(msg.id);
+            if (!server) return msg;
+            // Update status AND content (SSE may have delivered truncated content)
+            const needsUpdate = server.status !== msg.status || server.content.length > msg.content.length;
+            return needsUpdate ? { ...msg, status: server.status, content: server.content } : msg;
           });
 
           const existingIds = new Set(prev.map((m) => m.id));
