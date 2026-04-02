@@ -21,6 +21,7 @@ Gateway (Express)
   ├── POST /auth/token — PIN login, returns signed token
   ├── /chat/* — message queue REST endpoints
   ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY)
+  ├── /media, /media/:id/links — media file listing + linked entities (ES ll5_media, ll5_media_links)
   ├── /commands/* — device command queue (queue, pending, confirm)
   ├── Schedulers — calendar sync (30min), calendar review (2h), daily briefing (7am),
       tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00), message batch (30min),
@@ -39,6 +40,7 @@ Dashboard (Next.js 15)
   ├── /phone-data — review phone-pushed data (locations, messages, calendar) with type/time filters
   ├── /settings/notifications — People + Conversations + Keywords tabs, 4 priority levels (ignore/batch/immediate/agent)
   ├── Chat: SSE real-time (PG NOTIFY on insert+update), status indicators, typing dots, 30s safety sweep
+  ├── /media — media gallery (images, videos, files) with gallery/list views, source filter, search, detail dialog
   ├── /locations — Leaflet map with clustering, timeline, trail
   ├── /people, /places, /knowledge, /horizons — personal knowledge pages
   ├── /profile — user settings

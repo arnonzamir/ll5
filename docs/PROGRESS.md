@@ -51,6 +51,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-03-31: Media gallery page in dashboard — gateway endpoints (GET /media, GET /media/:id/links) querying ES ll5_media + ll5_media_links, dashboard gallery/list views with search, source filter, detail dialog with preview, linked entities
 - 2026-03-31: Tiered push notifications — 3 urgency levels (urgent/info/low). New Android channels ("urgent" with vibrate+sound+heads-up, "info" silent badge-only). FCM data payload includes `notification_level` field. Android skips notification for level "low". Legacy channels kept for backward compat.
 - 2026-03-31: Actions page: list_type filter (todo/waiting/someday/all), list_type in create dialog, fix camelCase field mapping (dueDate/context/listType/waitingFor/projectTitle), someday+waiting badges in ActionRow. CLAUDE.md updated with explicit someday/maybe guidance for agent.
 - 2026-03-31: Dashboard list view audit — added subtitles to all page headers (actions, projects, inbox, shopping, people, knowledge, horizons, phone-data, sessions), dynamic title for admin logs (Application Log / Audit Log), overflow-y-auto on user layout main, metadata exports for sessions page

@@ -505,6 +505,72 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Media API ---
+  app.get('/media', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const { query, source, mime_type, since, limit: limitStr, offset: offsetStr } = req.query as Record<string, string | undefined>;
+      const limit = Math.min(parseInt(limitStr || '30', 10), 200);
+      const offset = parseInt(offsetStr || '0', 10);
+
+      const filters: Record<string, unknown>[] = [{ term: { user_id: userId } }];
+      if (source) filters.push({ term: { source } });
+      if (mime_type) filters.push({ prefix: { mime_type } });
+      if (since) filters.push({ range: { created_at: { gte: since } } });
+
+      const must: Record<string, unknown>[] = [];
+      if (query) {
+        must.push({ multi_match: { query, fields: ['filename', 'description'] } });
+      }
+
+      const result = await esClient.search({
+        index: 'll5_media',
+        query: {
+          bool: {
+            filter: filters,
+            ...(must.length > 0 ? { must } : {}),
+          },
+        },
+        sort: [{ created_at: { order: 'desc' } }],
+        size: limit,
+        from: offset,
+      });
+
+      const media = (result.hits.hits as Array<{ _id: string; _source?: Record<string, unknown> }>).map((h) => ({
+        id: h._id,
+        ...h._source,
+      }));
+      const total = typeof result.hits.total === 'object' ? result.hits.total.value : result.hits.total;
+      res.json({ media, total });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][getMedia] Failed to query media', { error: message });
+      res.json({ media: [], total: 0 });
+    }
+  });
+
+  app.get('/media/:id/links', authMw, async (req: Request, res: Response) => {
+    try {
+      const mediaId = req.params.id as string;
+      const result = await esClient.search({
+        index: 'll5_media_links',
+        query: {
+          bool: {
+            filter: [{ term: { media_id: mediaId } }],
+          },
+        },
+        size: 100,
+      });
+
+      const links = (result.hits.hits as Array<{ _source?: Record<string, unknown> }>).map((h) => h._source);
+      res.json({ links });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][getMediaLinks] Failed to query media links', { error: message });
+      res.json({ links: [] });
+    }
+  });
+
   // --- Agent Journal API ---
   app.get('/journal', authMw, async (req: Request, res: Response) => {
     try {

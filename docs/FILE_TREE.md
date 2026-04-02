@@ -95,7 +95,7 @@ ll5/
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message
 │       ├── utils/fcm-sender.ts       # FCM v1 API sender (service account JWT + OAuth2, includes notification_level in data payload)
 │       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, notification_rules (unified 4-level), device_commands
-│       └── server.ts                  # Express app: webhooks, auth, chat, commands, availability check, health, schedulers
+│       └── server.ts                  # Express app: webhooks, auth, chat, media, commands, availability check, health, schedulers
 │
 ├── packages/google/                   # calendar MCP — unified calendar layer (PG+ES)
 │   └── src/
@@ -115,7 +115,7 @@ ll5/
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
 │   └── src/
 │       ├── app/(auth)/login/          # Login page + server action
-│       ├── app/(user)/                # dashboard, calendar, actions, projects, inbox, shopping, people (grouped filter), locations, places, phone-data, settings (notifications, messaging), profile
+│       ├── app/(user)/                # dashboard, calendar, actions, projects, inbox, shopping, people (grouped filter), locations, places, media, phone-data, sessions, settings (notifications, messaging), profile
 │       ├── app/(admin)/               # Admin pages: health, users, tools
 │       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations
 │       ├── components/                # Nav (grouped menu, profile dropdown), cards, chat widget (SSE real-time + status + typing), shadcn/ui

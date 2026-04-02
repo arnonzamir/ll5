@@ -28,6 +28,7 @@ import {
   LogOut,
   Database,
   BookOpen,
+  Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logoutAction } from "@/app/(user)/logout-action";
@@ -75,6 +76,7 @@ const navGroups: NavGroup[] = [
     icon: Database,
     items: [
       { href: "/phone-data", label: "Phone", icon: Smartphone },
+      { href: "/media", label: "Media", icon: ImageIcon },
       { href: "/sessions", label: "Sessions", icon: MessageSquare },
       { href: "/admin/journal", label: "Journal", icon: BookOpen },
     ],
