@@ -775,12 +775,12 @@ export function CalendarView() {
       let to: string;
 
       if (mode === "day") {
-        from = formatDateISO(date);
-        to = formatDateISO(addDays(date, 1));
+        from = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString();
+        to = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).toISOString();
       } else {
         const ws = startOfWeek(date);
-        from = formatDateISO(ws);
-        to = formatDateISO(addDays(ws, 7));
+        from = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate()).toISOString();
+        to = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + 7).toISOString();
       }
 
       const [eventsData, ticklersData] = await Promise.all([
