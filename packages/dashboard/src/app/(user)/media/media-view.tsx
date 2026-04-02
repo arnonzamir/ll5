@@ -124,7 +124,7 @@ function ThumbnailImage({
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={`/api/uploads/${item.url}`}
+        src={`/api${item.url}`}
         alt={item.filename}
         className={className}
         loading="lazy"
@@ -357,7 +357,7 @@ export function MediaView() {
                 <div className="flex justify-center bg-gray-50 rounded-lg p-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`/api/uploads/${selectedItem.url}`}
+                    src={`/api${selectedItem.url}`}
                     alt={selectedItem.filename}
                     className="max-h-96 rounded object-contain"
                   />
@@ -366,7 +366,7 @@ export function MediaView() {
               {isVideoMime(selectedItem.mime_type) && (
                 <div className="flex justify-center bg-gray-50 rounded-lg p-2">
                   <video
-                    src={`/api/uploads/${selectedItem.url}`}
+                    src={`/api${selectedItem.url}`}
                     controls
                     className="max-h-96 rounded"
                   />
@@ -375,7 +375,7 @@ export function MediaView() {
               {isAudioMime(selectedItem.mime_type) && (
                 <div className="bg-gray-50 rounded-lg p-4">
                   <audio
-                    src={`/api/uploads/${selectedItem.url}`}
+                    src={`/api${selectedItem.url}`}
                     controls
                     className="w-full"
                   />
@@ -457,7 +457,7 @@ export function MediaView() {
               {/* Open full size */}
               <div className="flex justify-end pt-2">
                 <a
-                  href={`/api/uploads/${selectedItem.url}`}
+                  href={`/api${selectedItem.url}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
