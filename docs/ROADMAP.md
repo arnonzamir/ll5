@@ -95,6 +95,45 @@ For email accounts where API access isn't available (e.g., work Exchange behind 
 
 ---
 
+## GTD Review Skill
+
+The agent should proactively drive the GTD review workflow — not just remind the user, but actually do the work.
+
+**Before building**: walk through the full GTD review workflow with the user to nail down the details. The agent needs to understand: what "processed" means for each item type, when to ask vs act, and what the user's personal rules are.
+
+### Inbox Processing
+- Agent regularly scans the inbox (not just when prompted)
+- For each item, determines: is it actionable? If yes → next action, project, calendar, or delegate. If no → trash, reference, or someday/maybe
+- Agent processes what it can autonomously (obvious categorizations, known patterns)
+- Asks the user only for items that need judgment (commitment level, priority, delegation)
+- Goal: inbox zero as a steady state, not an occasional event
+
+### Weekly Review (agent-driven)
+- Agent runs the full review: collect loose ends, process inbox, review actions/waiting/projects, review calendar (past + upcoming), review someday/maybe, update horizons
+- Generates a structured review report
+- Pushes via `push_to_user` when review surfaces actionable insights
+- Scheduled (Friday afternoon) but can also be triggered on demand
+
+### Inbox Items from Chats
+- Identify actionable items from WhatsApp/Slack/phone messages
+- "Mom asked if we're coming Friday" → inbox item or action
+- "Boss mentioned the Q3 deadline moved" → capture as fact + action
+- Agent scans batch review summaries and immediate messages for implicit commitments, requests, and todos
+- Requires understanding conversation context (bidirectional chat capture helps here)
+
+---
+
+## Someday/Maybe + Higher Horizons
+
+Verify and extend GTD horizon support:
+
+- **Someday/Maybe list**: already supported via `list_type: 'someday'` on actions — verify it works end-to-end (create, review, promote to active)
+- **Higher horizons** (h=2 areas, h=3 goals, h=4 vision, h=5 purpose): already in `gtd_horizons` table — ensure the agent actively uses them for context when making decisions
+- **Review integration**: weekly review should include someday/maybe scan ("anything here you want to activate?") and periodic horizon check ("are your projects aligned with your goals?")
+- **Dashboard UI**: ensure all horizon levels are visible and editable
+
+---
+
 ## Technical Debt & Infrastructure
 
 - **SSE for Android chat**: replace polling with OkHttp SSE (web already uses SSE)
