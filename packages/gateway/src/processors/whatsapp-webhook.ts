@@ -39,12 +39,7 @@ export async function processWhatsAppWebhook(
   }
 
   const data = payload.data;
-
-  // Skip messages sent by us
-  if (data.key.fromMe) {
-    logger.debug('[processWhatsAppWebhook] Skipping outbound message');
-    return;
-  }
+  const fromMe = data.key.fromMe;
 
   // Extract message text
   const text = data.message?.conversation
@@ -59,7 +54,7 @@ export async function processWhatsAppWebhook(
   // Extract sender info
   const remoteJid = data.key.remoteJid;
   const isGroup = remoteJid.endsWith('@g.us');
-  const sender = data.pushName ?? remoteJid.split('@')[0];
+  const sender = fromMe ? '(me)' : (data.pushName ?? remoteJid.split('@')[0]);
   const groupName = isGroup ? remoteJid : null; // TODO: resolve group name
   const timestamp = typeof data.messageTimestamp === 'number'
     ? new Date(data.messageTimestamp * 1000).toISOString()
@@ -74,9 +69,10 @@ export async function processWhatsAppWebhook(
     content: text,
     is_group: isGroup,
     group_name: groupName,
-    processed: false,
+    processed: fromMe, // outbound messages are immediately marked processed (no batch/notification)
+    from_me: fromMe,
     timestamp,
-    source: 'evolution', // distinguish from phone-pushed
+    source: 'evolution',
   };
 
   await es.index({
@@ -89,8 +85,12 @@ export async function processWhatsAppWebhook(
   logger.info('[processWhatsAppWebhook] WhatsApp message received', {
     sender,
     isGroup,
+    fromMe,
     bodyLength: text.length,
   });
+
+  // Outbound messages: stored in ES for context but no notifications or entity status updates
+  if (fromMe) return;
 
   // Update entity status
   try {

@@ -193,7 +193,9 @@ export class EvolutionClient {
       },
     );
 
+    // Evolution API v2 may return { messages: [...] } or a raw array or other shapes
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (result?.messages ?? result ?? []) as any;
+    const messages = result?.messages ?? (Array.isArray(result) ? result : []);
+    return messages as any;
   }
 }
