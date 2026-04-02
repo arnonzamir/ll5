@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 
 export interface LogEntry {
   timestamp: string;
+  // App log fields
   service: string;
   level: string;
   action: string;
@@ -14,6 +15,11 @@ export interface LogEntry {
   success?: boolean;
   error_message?: string;
   metadata?: Record<string, unknown>;
+  // Audit log fields (different schema)
+  source?: string;
+  summary?: string;
+  entity_type?: string;
+  entity_id?: string;
 }
 
 export interface LogQuery {
@@ -39,7 +45,12 @@ export async function fetchLogs(params: LogQuery): Promise<{
   const filters: Record<string, unknown>[] = [];
 
   if (params.service) {
-    filters.push({ term: { service: params.service } });
+    // Audit log uses 'source', app log uses 'service'
+    if (params.index === "audit") {
+      filters.push({ term: { source: params.service } });
+    } else {
+      filters.push({ term: { service: params.service } });
+    }
   }
   if (params.level) {
     filters.push({ term: { level: params.level } });
@@ -59,7 +70,7 @@ export async function fetchLogs(params: LogQuery): Promise<{
     must.push({
       multi_match: {
         query: params.query,
-        fields: ["message", "error_message", "tool_name"],
+        fields: ["message", "summary", "error_message", "tool_name", "entity_type"],
       },
     });
   }

@@ -48,8 +48,14 @@ function formatDate(ts: string): string {
 
 function LogRow({ log }: { log: LogEntry }) {
   const [expanded, setExpanded] = useState(false);
+  const isAudit = !!log.source && !log.level;
   const hasDetails =
-    log.error_message || log.tool_name || log.duration_ms || log.metadata;
+    log.error_message || log.tool_name || log.duration_ms || log.metadata || log.entity_id;
+
+  // Normalize fields across app/audit log schemas
+  const serviceName = log.service || log.source || "—";
+  const displayMessage = log.message || log.summary || "—";
+  const levelName = log.level || log.action || "—";
 
   return (
     <div className="border-b border-gray-100 last:border-0">
@@ -77,30 +83,42 @@ function LogRow({ log }: { log: LogEntry }) {
           {formatDate(log.timestamp)}
         </span>
 
-        <Badge
-          className={`text-[10px] px-1.5 py-0 font-medium ${
-            LEVEL_COLORS[log.level] ?? "bg-gray-100 text-gray-600"
-          }`}
-        >
-          {log.level}
-        </Badge>
+        {isAudit ? (
+          <Badge className="text-[10px] px-1.5 py-0 font-medium bg-indigo-50 text-indigo-700">
+            {log.action || "—"}
+          </Badge>
+        ) : (
+          <Badge
+            className={`text-[10px] px-1.5 py-0 font-medium ${
+              LEVEL_COLORS[levelName] ?? "bg-gray-100 text-gray-600"
+            }`}
+          >
+            {levelName}
+          </Badge>
+        )}
 
         <Badge
           className={`text-[10px] px-1.5 py-0 font-medium ${
-            SERVICE_COLORS[log.service] ?? "bg-gray-100 text-gray-600"
+            SERVICE_COLORS[serviceName] ?? "bg-gray-100 text-gray-600"
           }`}
         >
-          {log.service}
+          {serviceName}
         </Badge>
 
-        {log.tool_name && (
+        {isAudit && log.entity_type && (
+          <span className="text-xs text-gray-500 font-mono">
+            {log.entity_type}
+          </span>
+        )}
+
+        {!isAudit && log.tool_name && (
           <span className="text-xs text-gray-500 font-mono">
             {log.tool_name}
           </span>
         )}
 
         <span className="text-sm text-gray-700 truncate flex-1 min-w-0">
-          {log.message}
+          {displayMessage}
         </span>
 
         {log.duration_ms !== undefined && (
@@ -132,11 +150,12 @@ function LogRow({ log }: { log: LogEntry }) {
             </p>
           )}
           {log.user_id && (
-            <p className="text-[11px] text-gray-400">
-              user: {log.user_id}
-            </p>
+            <p className="text-[11px] text-gray-400">user: {log.user_id}</p>
           )}
-          {log.action && (
+          {log.entity_id && (
+            <p className="text-[11px] text-gray-400">entity: {log.entity_type}/{log.entity_id}</p>
+          )}
+          {log.action && !isAudit && (
             <p className="text-[11px] text-gray-400">action: {log.action}</p>
           )}
           {log.metadata && Object.keys(log.metadata).length > 0 && (
