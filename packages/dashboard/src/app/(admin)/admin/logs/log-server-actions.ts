@@ -95,7 +95,8 @@ export async function fetchLogs(params: LogQuery): Promise<{
       logs: data.hits.hits.map((h) => h._source),
       total: data.hits.total.value,
     };
-  } catch {
+  } catch (err) {
+    console.error("[logs] fetchLogs failed:", err instanceof Error ? err.message : String(err));
     return { logs: [], total: 0 };
   }
 }

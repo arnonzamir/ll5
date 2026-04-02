@@ -22,7 +22,7 @@ export function startSchedulers(
   // Get the first user ID from webhook tokens for scheduler context
   const userId = Object.values(config.webhookTokens)[0];
   if (!userId) {
-    logger.warn('Schedulers not started — no user ID in webhook tokens');
+    logger.warn('[startSchedulers][init] Schedulers not started — no user ID in webhook tokens');
     return;
   }
 
@@ -91,8 +91,8 @@ export function startSchedulers(
 
   const googleClient = createGoogleCalendarClient(config.googleMcpUrl, config.googleMcpApiKey);
   if (!googleClient) {
-    logger.info('Google-dependent schedulers not started — Google MCP not configured');
-    logger.info('Independent schedulers started (GTD health, weekly review, message batch)');
+    logger.info('[startSchedulers][init] Google-dependent schedulers not started — Google MCP not configured');
+    logger.info('[startSchedulers][init] Independent schedulers started (GTD health, weekly review, message batch)');
     return;
   }
 
@@ -128,5 +128,5 @@ export function startSchedulers(
   });
   ticklerAlertScheduler.start();
 
-  logger.info('All schedulers started');
+  logger.info('[startSchedulers][init] All schedulers started');
 }

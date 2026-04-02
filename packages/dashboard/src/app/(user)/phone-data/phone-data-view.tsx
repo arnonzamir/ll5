@@ -42,7 +42,8 @@ function formatTime(ts: string): string {
       second: "2-digit",
       hour12: false,
     });
-  } catch {
+  } catch (err) {
+    console.warn("[phone-data] Failed to format time:", err instanceof Error ? err.message : String(err));
     return ts;
   }
 }

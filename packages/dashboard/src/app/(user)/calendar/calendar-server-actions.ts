@@ -57,7 +57,8 @@ export async function fetchEvents(
       if (Array.isArray(val)) return val as CalendarEvent[];
     }
     return [];
-  } catch {
+  } catch (err) {
+    console.error("[calendar] fetchEvents failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }
@@ -79,7 +80,8 @@ export async function fetchCalendarConfigs(
       }
     }
     return [];
-  } catch {
+  } catch (err) {
+    console.error("[calendar] fetchCalendarConfigs failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }
@@ -95,7 +97,8 @@ export async function updateCalendarAccessMode(
       { calendar_id: calendarId, access_mode: accessMode }
     );
     return raw?.updated === true;
-  } catch {
+  } catch (err) {
+    console.error("[calendar] updateCalendarAccessMode failed:", err instanceof Error ? err.message : String(err));
     return false;
   }
 }
@@ -116,7 +119,8 @@ export async function fetchTicklers(
       if (Array.isArray(val)) return val as Tickler[];
     }
     return [];
-  } catch {
+  } catch (err) {
+    console.error("[calendar] fetchTicklers failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }

@@ -43,7 +43,7 @@ export class EvolutionClient {
       apikey: this.apiKey,
     };
 
-    logger.debug('Evolution API request', { method, url });
+    logger.debug('[EvolutionClient][request] Evolution API request', { method, url });
 
     const response = await fetch(url, {
       method,
@@ -53,7 +53,7 @@ export class EvolutionClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => 'unknown');
-      logger.error('Evolution API error', {
+      logger.error('[EvolutionClient][request] Evolution API error', {
         status: response.status,
         body: text,
       });
@@ -89,7 +89,7 @@ export class EvolutionClient {
       };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      logger.error('Evolution sendText failed', { error: errorMessage });
+      logger.error('[EvolutionClient][sendText] Evolution sendText failed', { error: errorMessage });
       return { success: false, message_id: null };
     }
   }
@@ -162,7 +162,8 @@ export class EvolutionClient {
         `/instance/connectionState/${this.instanceName}`,
       );
       return { state: result?.instance?.state ?? 'unknown' };
-    } catch {
+    } catch (err) {
+      logger.warn('[evolution] connectionState check failed', { error: err instanceof Error ? err.message : String(err) });
       return { state: 'disconnected' };
     }
   }

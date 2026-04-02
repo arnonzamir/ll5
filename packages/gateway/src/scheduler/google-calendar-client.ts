@@ -79,7 +79,8 @@ export class GoogleCalendarClient {
     try {
       const response = await globalThis.fetch(new URL('/health', this.baseUrl).toString());
       return response.ok;
-    } catch {
+    } catch (err) {
+      logger.debug('[GoogleCalendarClient][isAvailable] Health check failed', { error: err instanceof Error ? err.message : String(err) });
       return false;
     }
   }
@@ -90,7 +91,7 @@ export function createGoogleCalendarClient(
   apiKey: string | undefined,
 ): GoogleCalendarClient | null {
   if (!url || !apiKey) {
-    logger.info('Google MCP URL or API key not configured — calendar sync/review disabled');
+    logger.info('[GoogleCalendarClient][create] Google MCP URL or API key not configured — calendar sync/review disabled');
     return null;
   }
   return new GoogleCalendarClient(url, apiKey);

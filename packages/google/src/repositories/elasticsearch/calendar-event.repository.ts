@@ -1,4 +1,5 @@
 import type { Client } from '@elastic/elasticsearch';
+import { logger } from '../../utils/logger.js';
 
 const INDEX = 'll5_awareness_calendar_events';
 
@@ -175,8 +176,12 @@ export class ESCalendarEventRepository {
   async deleteByDocId(docId: string): Promise<void> {
     try {
       await this.es.delete({ index: INDEX, id: docId, refresh: false });
-    } catch {
-      // Ignore 404 — document may not exist in ES
+    } catch (err) {
+      // 404 is expected (document may not exist), log other errors
+      const statusCode = (err as { statusCode?: number })?.statusCode;
+      if (statusCode !== 404) {
+        logger.warn('[calendarEventRepo] deleteByDocId failed', { docId, error: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
 }

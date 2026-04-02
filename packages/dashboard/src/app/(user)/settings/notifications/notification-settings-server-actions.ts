@@ -63,7 +63,8 @@ export async function fetchRules(): Promise<NotificationRule[]> {
     if (!res.ok) return [];
     const data = (await res.json()) as { rules: NotificationRule[] };
     return data.rules ?? [];
-  } catch {
+  } catch (err) {
+    console.error("[notifications] fetchRules failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }
@@ -83,7 +84,8 @@ export async function createRule(
     });
     if (!res.ok) return null;
     return (await res.json()) as NotificationRule;
-  } catch {
+  } catch (err) {
+    console.error("[notifications] createRule failed:", err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -114,7 +116,8 @@ export async function deleteRule(id: string): Promise<boolean> {
       method: "DELETE",
     });
     return res.ok;
-  } catch {
+  } catch (err) {
+    console.error("[notifications] deleteRule failed:", err instanceof Error ? err.message : String(err));
     return false;
   }
 }
@@ -136,8 +139,8 @@ export async function fetchKnownSenders(): Promise<KnownSender[]> {
       ) as Record<string, unknown>;
       userId = payload.uid as string | undefined;
     }
-  } catch {
-    // ignore decode errors
+  } catch (err) {
+    console.error("[notifications] Token decode failed:", err instanceof Error ? err.message : String(err));
   }
 
   const filters: Record<string, unknown>[] = [];
@@ -255,7 +258,8 @@ export async function fetchKnownSenders(): Promise<KnownSender[]> {
     });
 
     return results;
-  } catch {
+  } catch (err) {
+    console.error("[notifications] fetchKnownSenders failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }

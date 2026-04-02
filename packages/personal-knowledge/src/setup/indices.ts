@@ -113,15 +113,15 @@ export async function ensureIndices(client: Client): Promise<void> {
   for (const def of INDICES) {
     const exists = await client.indices.exists({ index: def.index });
     if (!exists) {
-      logger.info(`Creating index: ${def.index}`);
+      logger.info(`[ensureIndices][ensureIndices] Creating index: ${def.index}`);
       await client.indices.create({
         index: def.index,
         settings: INDEX_SETTINGS,
         mappings: def.mappings,
       });
-      logger.info(`Index created: ${def.index}`);
+      logger.info(`[ensureIndices][ensureIndices] Index created: ${def.index}`);
     } else {
-      logger.debug(`Index already exists: ${def.index}`);
+      logger.debug(`[ensureIndices][ensureIndices] Index already exists: ${def.index}`);
     }
   }
 }

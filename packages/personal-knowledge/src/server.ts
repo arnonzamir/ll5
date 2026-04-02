@@ -27,7 +27,7 @@ export async function startServer(): Promise<void> {
   const env = loadEnv();
   setLogLevel(env.logLevel as LogLevel);
 
-  logger.info('Starting personal-knowledge MCP server', {
+  logger.info('[startServer][init] Starting personal-knowledge MCP server', {
     port: env.port,
     nodeEnv: env.nodeEnv,
   });
@@ -42,7 +42,7 @@ export async function startServer(): Promise<void> {
 
   // Ensure indices exist
   await ensureIndices(esClient);
-  logger.info('Elasticsearch indices verified');
+  logger.info('[startServer][init] Elasticsearch indices verified');
 
   // Create repositories
   const repos = {
@@ -53,7 +53,7 @@ export async function startServer(): Promise<void> {
     dataGap: new ElasticsearchDataGapRepository(esClient),
   };
 
-  logger.info('Repositories initialized');
+  logger.info('[startServer][init] Repositories initialized');
 
   // Create Express app
   const app = express();
@@ -64,7 +64,8 @@ export async function startServer(): Promise<void> {
     try {
       await esClient.ping();
       res.json({ status: 'healthy', elasticsearch: 'connected' });
-    } catch {
+    } catch (err) {
+      logger.error('[knowledge][health] Health check failed', { error: err instanceof Error ? err.message : String(err) });
       res.status(503).json({ status: 'unhealthy', elasticsearch: 'disconnected' });
     }
   });
@@ -94,7 +95,7 @@ export async function startServer(): Promise<void> {
 
       await transport.handleRequest(req, res, req.body);
     } catch (err) {
-      logger.error('MCP request failed', { error: String(err) });
+      logger.error('[startServer][mcp] MCP request failed', { error: String(err) });
       if (!res.headersSent) {
         res.status(500).json({ error: 'Internal server error' });
       }
@@ -103,15 +104,15 @@ export async function startServer(): Promise<void> {
 
   // Start HTTP server
   const server = app.listen(env.port, () => {
-    logger.info(`Server listening on port ${env.port}`);
+    logger.info(`[startServer][init] Server listening on port ${env.port}`);
   });
 
   // Graceful shutdown
   const shutdown = async () => {
-    logger.info('Shutting down...');
+    logger.info('[startServer][shutdown] Shutting down...');
     server.close();
     await esClient.close();
-    logger.info('Shutdown complete');
+    logger.info('[startServer][shutdown] Shutdown complete');
     process.exit(0);
   };
 

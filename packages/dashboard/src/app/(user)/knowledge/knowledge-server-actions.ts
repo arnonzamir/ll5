@@ -35,7 +35,8 @@ export async function searchKnowledge(
       limit: 20,
     });
     return raw.results ?? [];
-  } catch {
+  } catch (err) {
+    console.error("[knowledge] searchKnowledge failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }

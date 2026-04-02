@@ -84,7 +84,8 @@ async function fetchEventsFromGoogle(
           is_free_busy: false,
         });
       }
-    } catch {
+    } catch (err) {
+      logger.debug('[calendar] Calendar events fetch failed, falling back to freeBusy', { calId, error: err instanceof Error ? err.message : String(err) });
       freeBusyCalendars.push(calId);
     }
   }
@@ -238,7 +239,8 @@ export function registerCalendarTools(
       const userId = getUserId();
       try {
         Intl.DateTimeFormat('en-US', { timeZone: timezone });
-      } catch {
+      } catch (err) {
+        logger.debug('[calendar] Invalid timezone provided', { timezone, error: err instanceof Error ? err.message : String(err) });
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ error: `Invalid timezone: ${timezone}` }) }],
         };

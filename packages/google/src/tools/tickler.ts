@@ -203,8 +203,8 @@ export function registerTicklerTools(
               text: JSON.stringify({ ticklers, total: ticklers.length }),
             }],
           };
-        } catch {
-          logger.warn('[list_ticklers] ES read failed for ticklers, falling back to Google API');
+        } catch (err) {
+          logger.warn('[list_ticklers] ES read failed for ticklers, falling back to Google API', { error: err instanceof Error ? err.message : String(err) });
         }
       }
 

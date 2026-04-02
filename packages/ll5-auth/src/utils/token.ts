@@ -14,7 +14,11 @@ function ensureDir(): void {
 export function readToken(): string | null {
   try {
     return fs.readFileSync(TOKEN_PATH, 'utf-8').trim();
-  } catch {
+  } catch (err) {
+    // File not found is expected on first use; other errors are worth noting
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.error('[ll5-auth] Failed to read token:', (err as Error).message);
+    }
     return null;
   }
 }
@@ -28,7 +32,10 @@ export function deleteToken(): boolean {
   try {
     fs.unlinkSync(TOKEN_PATH);
     return true;
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.error('[ll5-auth] Failed to delete token:', (err as Error).message);
+    }
     return false;
   }
 }
@@ -45,7 +52,8 @@ export function decodeTokenPayload(token: string): DecodedPayload | null {
   try {
     const json = Buffer.from(parts[1], 'base64url').toString();
     return JSON.parse(json) as DecodedPayload;
-  } catch {
+  } catch (err) {
+    console.error('[ll5-auth] Failed to decode token payload:', (err as Error).message);
     return null;
   }
 }

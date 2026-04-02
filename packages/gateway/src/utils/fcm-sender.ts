@@ -33,7 +33,7 @@ function loadServiceAccount(): ServiceAccount | null {
       serviceAccount = data;
       return serviceAccount;
     } catch (err) {
-      logger.warn('[loadServiceAccount] Failed to load service account file', {
+      logger.warn('[FCMSender][loadServiceAccount] Failed to load service account file', {
         path,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -45,7 +45,7 @@ function loadServiceAccount(): ServiceAccount | null {
     serviceAccount = JSON.parse(json);
     return serviceAccount;
   } catch (err) {
-    logger.warn('[loadServiceAccount] Failed to parse FCM_SERVICE_ACCOUNT_JSON', {
+    logger.warn('[FCMSender][loadServiceAccount] Failed to parse FCM_SERVICE_ACCOUNT_JSON', {
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
@@ -112,7 +112,7 @@ export async function sendFCMNotification(
 ): Promise<void> {
   const sa = loadServiceAccount();
   if (!sa) {
-    logger.debug('[sendFCMNotification] No FCM service account configured');
+    logger.debug('[FCMSender][send] No FCM service account configured');
     return;
   }
 
@@ -122,7 +122,7 @@ export async function sendFCMNotification(
   );
 
   if (result.rows.length === 0) {
-    logger.debug('[sendFCMNotification] No FCM tokens for user');
+    logger.debug('[FCMSender][send] No FCM tokens for user');
     return;
   }
 
@@ -130,7 +130,7 @@ export async function sendFCMNotification(
   try {
     accessToken = await getAccessToken(sa);
   } catch (err) {
-    logger.warn('[sendFCMNotification] Failed to get access token', {
+    logger.warn('[FCMSender][send] Failed to get access token', {
       error: err instanceof Error ? err.message : String(err),
     });
     return;
@@ -166,12 +166,12 @@ export async function sendFCMNotification(
 
       if (!response.ok) {
         const text = await response.text();
-        logger.warn('[sendFCMNotification] FCM v1 send failed', { status: response.status, body: text });
+        logger.warn('[FCMSender][send] FCM v1 send failed', { status: response.status, body: text });
       } else {
-        logger.info('[sendFCMNotification] Push sent', { type: message.type, priority: message.priority });
+        logger.info('[FCMSender][send] Push sent', { type: message.type, priority: message.priority });
       }
     } catch (err) {
-      logger.warn('[sendFCMNotification] FCM send error', {
+      logger.warn('[FCMSender][send] FCM send error', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

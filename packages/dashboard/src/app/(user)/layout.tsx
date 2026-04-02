@@ -34,8 +34,8 @@ export default async function UserLayout({
     } else if (profile?.display_name) {
       displayName = profile.display_name;
     }
-  } catch {
-    // Fall back to short UUID
+  } catch (err) {
+    console.error("[layout] Failed to fetch display name:", err instanceof Error ? err.message : String(err));
   }
 
   return (

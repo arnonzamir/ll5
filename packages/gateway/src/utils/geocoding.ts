@@ -58,14 +58,14 @@ async function reverseGeocodeNominatim(lat: number, lon: number): Promise<Geocod
   });
 
   if (!response.ok) {
-    logger.warn('Nominatim returned non-OK status', { status: response.status, lat, lon });
+    logger.warn('[Geocoding][reverseGeocodeNominatim] Nominatim returned non-OK status', { status: response.status, lat, lon });
     return null;
   }
 
   const data = (await response.json()) as NominatimResponse;
 
   if (data.error) {
-    logger.warn('Nominatim returned error', { error: data.error, lat, lon });
+    logger.warn('[Geocoding][reverseGeocodeNominatim] Nominatim returned error', { error: data.error, lat, lon });
     return null;
   }
 
@@ -104,14 +104,14 @@ async function reverseGeocodeGoogle(lat: number, lon: number, apiKey: string): P
   });
 
   if (!response.ok) {
-    logger.warn('Google Geocoding returned non-OK status', { status: response.status, lat, lon });
+    logger.warn('[Geocoding][reverseGeocodeGoogle] Google Geocoding returned non-OK status', { status: response.status, lat, lon });
     return null;
   }
 
   const data = (await response.json()) as GoogleGeocodingResponse;
 
   if (data.status !== 'OK' || !data.results?.length) {
-    logger.warn('Google Geocoding returned no results', { status: data.status, lat, lon });
+    logger.warn('[Geocoding][reverseGeocodeGoogle] Google Geocoding returned no results', { status: data.status, lat, lon });
     return null;
   }
 
@@ -145,7 +145,7 @@ export async function reverseGeocode(
     }
     return await reverseGeocodeNominatim(lat, lon);
   } catch (err) {
-    logger.warn('Reverse geocoding failed', {
+    logger.warn('[Geocoding][reverseGeocode] Reverse geocoding failed', {
       lat,
       lon,
       error: err instanceof Error ? err.message : String(err),

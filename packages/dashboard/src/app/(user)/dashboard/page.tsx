@@ -120,8 +120,8 @@ export default async function DashboardPage() {
     if (weekEventsRaw) {
       weekEvents = (Array.isArray(weekEventsRaw) ? weekEventsRaw : []) as CalendarEvent[];
     }
-  } catch {
-    // Google MCP unavailable — no week events
+  } catch (err) {
+    console.error("[dashboard] Failed to fetch week events:", err instanceof Error ? err.message : String(err));
   }
 
   return (

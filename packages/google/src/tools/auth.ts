@@ -125,8 +125,8 @@ export function registerAuthTools(
           const oauth2 = (await import('googleapis')).google.oauth2({ version: 'v2', auth: oauth2Client });
           const userInfo = await oauth2.userinfo.get();
           email = userInfo.data.email ?? '';
-        } catch {
-          logger.warn('Could not fetch user email after OAuth');
+        } catch (err) {
+          logger.warn('[auth][handleOAuthCallback] Could not fetch user email after OAuth', { error: err instanceof Error ? err.message : String(err) });
         }
 
         return {
@@ -141,7 +141,7 @@ export function registerAuthTools(
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error('OAuth callback failed', { error: message });
+        logger.error('[auth][handleOAuthCallback] OAuth callback failed', { error: message });
         return {
           content: [{
             type: 'text' as const,
@@ -193,8 +193,9 @@ export function registerAuthTools(
         const oauth2 = (await import('googleapis')).google.oauth2({ version: 'v2', auth: oauth2Client });
         const userInfo = await oauth2.userinfo.get();
         email = userInfo.data.email ?? null;
-      } catch {
+      } catch (err) {
         // Token may be expired; that's ok, we still report status
+        logger.debug('[auth][connectionStatus] Could not fetch user email', { error: err instanceof Error ? err.message : String(err) });
       }
 
       return {
@@ -233,7 +234,7 @@ export function registerAuthTools(
           revoked = true;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          logger.warn('Token revocation failed (may already be expired)', { error: message });
+          logger.warn('[auth][disconnect] Token revocation failed (may already be expired)', { error: message });
         }
       }
 

@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
+import { logger } from './utils/logger.js';
 
 export interface AuthenticatedRequest extends Request {
   userId: string;
@@ -64,7 +65,9 @@ export function tokenAuthMiddleware(config: {
           res.status(401).json({ error: 'token_expired' });
           return;
         }
-      } catch { /* not a valid token at all */ }
+      } catch (err) {
+        logger.debug('[gtd][auth] Token decode failed', { error: err instanceof Error ? err.message : String(err) });
+      }
       res.status(401).json({ error: 'Invalid token' });
       return;
     }

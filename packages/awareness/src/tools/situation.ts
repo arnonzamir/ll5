@@ -4,6 +4,7 @@ import type { CalendarEventRepository } from '../repositories/interfaces/calenda
 import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
 import type { MessageRepository } from '../repositories/interfaces/message.repository.js';
 import { computeFreshness } from '../types/location.js';
+import { logger } from '../utils/logger.js';
 import {
   getTimePeriod,
   getDayType,
@@ -69,8 +70,8 @@ export function registerSituationTools(
             address: latest.address ?? null,
           };
         }
-      } catch {
-        // Location fetch failed, continue without it
+      } catch (err) {
+        logger.warn('[situation] Location fetch failed', { error: err instanceof Error ? err.message : String(err) });
       }
 
       // Fetch next event
@@ -86,8 +87,8 @@ export function registerSituationTools(
           };
           timeUntilNextEvent = formatTimeUntil(next.startTime);
         }
-      } catch {
-        // Calendar fetch failed, continue without it
+      } catch (err) {
+        logger.warn('[situation] Calendar fetch failed', { error: err instanceof Error ? err.message : String(err) });
       }
 
       // Fetch unacknowledged notable events
@@ -101,8 +102,8 @@ export function registerSituationTools(
           severity: (e.details as Record<string, unknown>)?.severity ?? 'low',
           created_at: e.timestamp,
         }));
-      } catch {
-        // Notable events fetch failed, continue without it
+      } catch (err) {
+        logger.warn('[situation] Notable events fetch failed', { error: err instanceof Error ? err.message : String(err) });
       }
 
       // Count active conversations (last hour)
@@ -110,8 +111,8 @@ export function registerSituationTools(
       try {
         const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
         activeConversations = await repos.message.countActiveConversations(userId, oneHourAgo);
-      } catch {
-        // Count failed, continue with 0
+      } catch (err) {
+        logger.warn('[situation] Active conversations count failed', { error: err instanceof Error ? err.message : String(err) });
       }
 
       const situation = {

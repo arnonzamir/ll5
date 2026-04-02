@@ -58,7 +58,8 @@ export async function mcpCallSafe(
 ): Promise<McpToolResult | null> {
   try {
     return await mcpCall(server, tool, args);
-  } catch {
+  } catch (err) {
+    console.error(`[mcpCallSafe] ${server}/${tool} failed:`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -73,7 +74,8 @@ export async function mcpCallJsonSafe<T = unknown>(
 ): Promise<T | null> {
   try {
     return await mcpCallJson<T>(server, tool, args);
-  } catch {
+  } catch (err) {
+    console.error(`[mcpCallJsonSafe] ${server}/${tool} failed:`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -96,7 +98,8 @@ export async function mcpCallList<T = unknown>(
       if (Array.isArray(val)) return val as T[];
     }
     return [];
-  } catch {
+  } catch (err) {
+    console.error(`[mcpCallList] ${server}/${tool} failed:`, err instanceof Error ? err.message : String(err));
     return [];
   }
 }
@@ -116,7 +119,8 @@ export async function checkHealth(
     });
     const responseTime = Date.now() - start;
     return { healthy: res.ok, responseTime };
-  } catch {
+  } catch (err) {
+    console.error(`[checkHealth] ${server} health check failed:`, err instanceof Error ? err.message : String(err));
     return { healthy: false, responseTime: Date.now() - start };
   }
 }

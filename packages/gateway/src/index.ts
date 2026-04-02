@@ -7,7 +7,7 @@ async function main(): Promise<void> {
   const config = loadEnv();
   setLogLevel(config.logLevel);
 
-  logger.info('Starting gateway service', {
+  logger.info('[startServer][init] Starting gateway service', {
     port: config.port,
     env: config.nodeEnv,
   });
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  logger.error('Fatal error starting gateway', {
+  logger.error('[startServer][init] Fatal error starting gateway', {
     error: err instanceof Error ? err.message : String(err),
     stack: err instanceof Error ? err.stack : undefined,
   });

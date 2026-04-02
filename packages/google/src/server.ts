@@ -139,7 +139,9 @@ export async function startServer(): Promise<void> {
               return;
             }
           }
-        } catch { /* fall through to legacy check */ }
+        } catch (err) {
+          logger.debug('[google][auth] Token validation failed', { error: err instanceof Error ? err.message : String(err) });
+        }
       }
     }
 
@@ -173,7 +175,8 @@ export async function startServer(): Promise<void> {
       } else {
         res.status(503).json({ status: 'unhealthy', service: 'll5-google' });
       }
-    } catch {
+    } catch (err) {
+      logger.error('[google][health] Health check failed', { error: err instanceof Error ? err.message : String(err) });
       res.status(503).json({ status: 'unhealthy', service: 'll5-google' });
     }
   });
@@ -228,8 +231,8 @@ export async function startServer(): Promise<void> {
         const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
         const userInfo = await oauth2.userinfo.get();
         email = userInfo.data.email ?? '';
-      } catch {
-        logger.warn('[startServer] Could not fetch user email after OAuth callback');
+      } catch (err) {
+        logger.warn('[startServer] Could not fetch user email after OAuth callback', { error: err instanceof Error ? err.message : String(err) });
       }
 
       logger.info('[startServer] OAuth callback successful', { userId: pending.userId, email });

@@ -100,9 +100,10 @@ export async function startServer(): Promise<void> {
       } else {
         res.status(503).json({ status: 'unhealthy', service: 'll5-gtd' });
       }
-    } catch {
+    } catch (err) {
       // Try to recover the pool by ending and recreating would be complex.
       // For now just report unhealthy — Docker will restart if needed.
+      logger.error('[gtd][health] Health check failed', { error: err instanceof Error ? err.message : String(err) });
       res.status(503).json({ status: 'unhealthy', service: 'll5-gtd' });
     }
   });

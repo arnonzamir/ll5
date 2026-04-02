@@ -26,7 +26,7 @@ export async function startServer(): Promise<void> {
   const env = loadEnv();
   setLogLevel(env.logLevel as LogLevel);
 
-  logger.info('Starting Messaging MCP server', { port: env.port });
+  logger.info('[startServer][init] Starting Messaging MCP server', { port: env.port });
 
   // ---------------------------------------------------------------------------
   // PostgreSQL connection pool
@@ -42,16 +42,16 @@ export async function startServer(): Promise<void> {
     try {
       const client = await pool.connect();
       client.release();
-      logger.info('PostgreSQL connection established');
+      logger.info('[startServer][init] PostgreSQL connection established');
       break;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (attempt === maxRetries) {
-        logger.error('Failed to connect to PostgreSQL after retries', { error: message, attempts: maxRetries });
+        logger.error('[startServer][init] Failed to connect to PostgreSQL after retries', { error: message, attempts: maxRetries });
         process.exit(1);
       }
       const code = (err as Record<string, unknown>).code;
-      logger.warn(`PostgreSQL not ready, retrying (${attempt}/${maxRetries})...`, { error: message || code || 'unknown' });
+      logger.warn(`[startServer][init] PostgreSQL not ready, retrying (${attempt}/${maxRetries})...`, { error: message || code || 'unknown' });
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
@@ -108,7 +108,9 @@ export async function startServer(): Promise<void> {
               return;
             }
           }
-        } catch { /* fall through to legacy check */ }
+        } catch (err) {
+          logger.debug('[messaging][auth] Token validation failed', { error: err instanceof Error ? err.message : String(err) });
+        }
       }
     }
 
@@ -131,7 +133,8 @@ export async function startServer(): Promise<void> {
       } else {
         res.status(503).json({ status: 'unhealthy', service: 'll5-messaging' });
       }
-    } catch {
+    } catch (err) {
+      logger.error('[messaging][health] Health check failed', { error: err instanceof Error ? err.message : String(err) });
       res.status(503).json({ status: 'unhealthy', service: 'll5-messaging' });
     }
   });
@@ -151,7 +154,7 @@ export async function startServer(): Promise<void> {
       await transport.handleRequest(req, res, req.body);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('MCP request failed', { error: message });
+      logger.error('[startServer][mcp] MCP request failed', { error: message });
       if (!res.headersSent) {
         res.status(500).json({ error: 'Internal server error' });
       }
@@ -162,19 +165,19 @@ export async function startServer(): Promise<void> {
   // Start listening
   // ---------------------------------------------------------------------------
   const server = app.listen(env.port, () => {
-    logger.info(`Messaging MCP server listening on port ${env.port}`);
+    logger.info(`[startServer][init] Messaging MCP server listening on port ${env.port}`);
   });
 
   // ---------------------------------------------------------------------------
   // Graceful shutdown
   // ---------------------------------------------------------------------------
   const shutdown = async (signal: string) => {
-    logger.info(`Received ${signal}, shutting down gracefully`);
+    logger.info(`[startServer][shutdown] Received ${signal}, shutting down gracefully`);
     server.close(() => {
-      logger.info('HTTP server closed');
+      logger.info('[startServer][shutdown] HTTP server closed');
     });
     await pool.end();
-    logger.info('PostgreSQL pool closed');
+    logger.info('[startServer][shutdown] PostgreSQL pool closed');
     process.exit(0);
   };
 

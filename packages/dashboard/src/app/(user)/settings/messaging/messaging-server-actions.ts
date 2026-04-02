@@ -70,7 +70,8 @@ export async function updatePermission(
       { platform, conversation_id: conversationId, permission }
     );
     return result !== null;
-  } catch {
+  } catch (err) {
+    console.error("[messaging] updatePermission failed:", err instanceof Error ? err.message : String(err));
     return false;
   }
 }
@@ -86,7 +87,8 @@ export async function syncConversations(
       account_id: accountId,
     });
     return result ?? { total: 0, new_conversations: 0 };
-  } catch {
+  } catch (err) {
+    console.error("[messaging] syncConversations failed:", err instanceof Error ? err.message : String(err));
     return { total: 0, new_conversations: 0 };
   }
 }

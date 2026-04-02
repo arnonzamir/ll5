@@ -62,7 +62,8 @@ export async function linkContactToPerson(
       { contact_id: contactId, person_id: personId }
     );
     return result !== null;
-  } catch {
+  } catch (err) {
+    console.error("[contacts] linkContactToPerson failed:", err instanceof Error ? err.message : String(err));
     return false;
   }
 }
@@ -75,7 +76,8 @@ export async function unlinkContact(contactId: string): Promise<boolean> {
       { contact_id: contactId }
     );
     return result !== null;
-  } catch {
+  } catch (err) {
+    console.error("[contacts] unlinkContact failed:", err instanceof Error ? err.message : String(err));
     return false;
   }
 }

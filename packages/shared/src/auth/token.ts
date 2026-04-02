@@ -60,7 +60,8 @@ export function validateToken(authHeader: string, authSecret: string): TokenPayl
   try {
     signatureBuffer = Buffer.from(signature, 'hex');
     expectedBuffer = Buffer.from(expected, 'hex');
-  } catch {
+  } catch (err) {
+    console.debug('[validateToken] Failed to decode signature hex:', (err as Error).message);
     return null;
   }
 
@@ -71,7 +72,8 @@ export function validateToken(authHeader: string, authSecret: string): TokenPayl
   let payload: TokenPayload;
   try {
     payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString()) as TokenPayload;
-  } catch {
+  } catch (err) {
+    console.debug('[validateToken] Failed to decode token payload:', (err as Error).message);
     return null;
   }
 

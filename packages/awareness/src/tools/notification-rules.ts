@@ -34,7 +34,7 @@ export function registerNotificationRuleTools(
 
         if (!res.ok) {
           const body = await res.text();
-          logger.error('[list_notification_rules] Failed to list notification rules', { status: res.status, body });
+          logger.error('[notification-rules][listRules] Failed to list notification rules', { status: res.status, body });
           return {
             content: [{ type: 'text' as const, text: `Error listing rules: ${res.status} ${body}` }],
             isError: true,
@@ -47,7 +47,7 @@ export function registerNotificationRuleTools(
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.error('[list_notification_rules] Request failed', { error: msg });
+        logger.error('[notification-rules][listRules] Request failed', { error: msg });
         return {
           content: [{ type: 'text' as const, text: `Error: ${msg}` }],
           isError: true,
@@ -88,7 +88,7 @@ export function registerNotificationRuleTools(
 
         if (!res.ok) {
           const body = await res.text();
-          logger.error('[create_notification_rule] Failed to create notification rule', { status: res.status, body });
+          logger.error('[notification-rules][createRule] Failed to create notification rule', { status: res.status, body });
           return {
             content: [{ type: 'text' as const, text: `Error creating rule: ${res.status} ${body}` }],
             isError: true,
@@ -101,7 +101,7 @@ export function registerNotificationRuleTools(
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.error('[create_notification_rule] Request failed', { error: msg });
+        logger.error('[notification-rules][createRule] Request failed', { error: msg });
         return {
           content: [{ type: 'text' as const, text: `Error: ${msg}` }],
           isError: true,
@@ -128,7 +128,7 @@ export function registerNotificationRuleTools(
 
         if (!res.ok) {
           const body = await res.text();
-          logger.error('[delete_notification_rule] Failed to delete notification rule', { status: res.status, body });
+          logger.error('[notification-rules][deleteRule] Failed to delete notification rule', { status: res.status, body });
           return {
             content: [{ type: 'text' as const, text: `Error deleting rule: ${res.status} ${body}` }],
             isError: true,
@@ -141,7 +141,7 @@ export function registerNotificationRuleTools(
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.error('[delete_notification_rule] Request failed', { error: msg });
+        logger.error('[notification-rules][deleteRule] Request failed', { error: msg });
         return {
           content: [{ type: 'text' as const, text: `Error: ${msg}` }],
           isError: true,

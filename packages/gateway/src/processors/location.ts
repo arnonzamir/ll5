@@ -88,7 +88,7 @@ async function matchKnownPlace(
 
     return null;
   } catch (err) {
-    logger.warn('[matchKnownPlace] Place matching failed', {
+    logger.warn('[location][matchKnownPlace] Place matching failed', {
       error: err instanceof Error ? err.message : String(err),
       lat,
       lon,
@@ -123,7 +123,7 @@ async function getPreviousLocation(
     }
     return null;
   } catch (err) {
-    logger.warn('[getPreviousLocation] Failed to query previous location', {
+    logger.warn('[location][getPreviousLocation] Failed to query previous location', {
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
@@ -165,7 +165,7 @@ function detectMovementAndNotify(
       const currentTime = new Date(item.timestamp).getTime();
       const hourMs = 60 * 60 * 1000;
       if (currentTime - prevTime > hourMs) {
-        logger.debug('[detectMovementAndNotify] Previous location too old for movement detection', {
+        logger.debug('[location][detectMovementAndNotify] Previous location too old for movement detection', {
           prevTimestamp: prev.timestamp,
           currentTimestamp: item.timestamp,
         });
@@ -208,13 +208,13 @@ function detectMovementAndNotify(
 
       await insertSystemMessage(pool, userId, content);
 
-      logger.info('[detectMovementAndNotify] Movement detected, system message sent', {
+      logger.info('[location][detectMovementAndNotify] Movement detected, system message sent', {
         distance: formatDistance(dist),
         from: prevLabel,
         to: newLabel,
       });
     } catch (err) {
-      logger.warn('[detectMovementAndNotify] Movement detection failed (non-blocking)', {
+      logger.warn('[location][detectMovementAndNotify] Movement detection failed (non-blocking)', {
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -287,7 +287,7 @@ export async function processLocation(
     refresh: false,
   });
 
-  logger.debug('[processLocation] Location stored', {
+  logger.debug('[location][processLocation] Location stored', {
     lat: item.lat,
     lon: item.lon,
     address: geocodeResult?.address,

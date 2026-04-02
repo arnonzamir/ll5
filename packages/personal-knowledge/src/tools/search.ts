@@ -42,7 +42,7 @@ export function registerSearchTools(
           factRepo
             .search(userId, params.query, limit)
             .catch((err) => {
-              logger.error('Fact search failed', { error: String(err) });
+              logger.error('[search][searchKnowledge] Fact search failed', { error: String(err) });
               return [] as SearchResult<Fact>[];
             }) as Promise<SearchResult<Fact | Person | Place>[]>,
         );
@@ -52,7 +52,7 @@ export function registerSearchTools(
           personRepo
             .search(userId, params.query, limit)
             .catch((err) => {
-              logger.error('Person search failed', { error: String(err) });
+              logger.error('[search][searchKnowledge] Person search failed', { error: String(err) });
               return [] as SearchResult<Person>[];
             }) as Promise<SearchResult<Fact | Person | Place>[]>,
         );
@@ -62,7 +62,7 @@ export function registerSearchTools(
           placeRepo
             .search(userId, params.query, limit)
             .catch((err) => {
-              logger.error('Place search failed', { error: String(err) });
+              logger.error('[search][searchKnowledge] Place search failed', { error: String(err) });
               return [] as SearchResult<Place>[];
             }) as Promise<SearchResult<Fact | Person | Place>[]>,
         );

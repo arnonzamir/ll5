@@ -41,7 +41,8 @@ export async function fetchSessions(
     );
     if (!res.ok) return { sessions: [], total: 0 };
     return (await res.json()) as { sessions: SessionSummary[]; total: number };
-  } catch {
+  } catch (err) {
+    console.error("[sessions] fetchSessions failed:", err instanceof Error ? err.message : String(err));
     return { sessions: [], total: 0 };
   }
 }
@@ -53,7 +54,8 @@ export async function fetchSession(
     const res = await gatewayFetch(`/sessions/${id}`);
     if (!res.ok) return null;
     return (await res.json()) as SessionDetail;
-  } catch {
+  } catch (err) {
+    console.error("[sessions] fetchSession failed:", err instanceof Error ? err.message : String(err));
     return null;
   }
 }

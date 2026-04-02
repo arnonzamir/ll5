@@ -45,7 +45,8 @@ export async function fetchJournalEntries(
     });
     if (!response.ok) return { entries: [], total: 0 };
     return (await response.json()) as { entries: JournalEntry[]; total: number };
-  } catch {
+  } catch (err) {
+    console.error("[journal] fetchJournalEntries failed:", err instanceof Error ? err.message : String(err));
     return { entries: [], total: 0 };
   }
 }
@@ -68,7 +69,8 @@ export async function fetchUserModel(): Promise<UserModelSection[]> {
     if (!response.ok) return [];
     const data = (await response.json()) as { sections: UserModelSection[] };
     return data.sections;
-  } catch {
+  } catch (err) {
+    console.error("[journal] fetchUserModel failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }
@@ -90,7 +92,8 @@ export async function resolveEntry(
     });
     if (!response.ok) return { updated: false };
     return (await response.json()) as { updated: boolean };
-  } catch {
+  } catch (err) {
+    console.error("[journal] resolveEntry failed:", err instanceof Error ? err.message : String(err));
     return { updated: false };
   }
 }

@@ -49,7 +49,8 @@ export function decodeTokenPayload(
     if (parts.length !== 3) return null;
     const payload = Buffer.from(parts[1], "base64url").toString("utf-8");
     return JSON.parse(payload) as Record<string, unknown>;
-  } catch {
+  } catch (err) {
+    console.error("[decodeTokenPayload] Failed to decode token:", err instanceof Error ? err.message : String(err));
     return null;
   }
 }

@@ -34,7 +34,7 @@ export async function processWhatsAppWebhook(
 ): Promise<void> {
   // Only process messages.upsert
   if (payload.event !== 'messages.upsert') {
-    logger.debug('[processWhatsAppWebhook] Skipping non-message event', { event: payload.event });
+    logger.debug('[processWhatsAppWebhook][handle] Skipping non-message event', { event: payload.event });
     return;
   }
 
@@ -47,7 +47,7 @@ export async function processWhatsAppWebhook(
     ?? '';
 
   if (!text) {
-    logger.debug('[processWhatsAppWebhook] Skipping message with no text content');
+    logger.debug('[processWhatsAppWebhook][handle] Skipping message with no text content');
     return;
   }
 
@@ -82,7 +82,7 @@ export async function processWhatsAppWebhook(
     refresh: false,
   });
 
-  logger.info('[processWhatsAppWebhook] WhatsApp message received', {
+  logger.info('[processWhatsAppWebhook][handle] WhatsApp message received', {
     sender,
     isGroup,
     fromMe,
@@ -118,7 +118,7 @@ export async function processWhatsAppWebhook(
         refresh: false,
       });
 
-      logger.info('[processWhatsAppWebhook] Outbound message notified to agent', { isGroup, priority });
+      logger.info('[processWhatsAppWebhook][handle] Outbound message notified to agent', { isGroup, priority });
     }
     return;
   }
@@ -142,7 +142,7 @@ export async function processWhatsAppWebhook(
       refresh: false,
     });
   } catch (err) {
-    logger.warn('[processWhatsAppWebhook] Failed to update entity status', {
+    logger.warn('[processWhatsAppWebhook][handle] Failed to update entity status', {
       error: err instanceof Error ? err.message : String(err),
     });
   }
@@ -158,7 +158,7 @@ export async function processWhatsAppWebhook(
     conversation_id: remoteJid,
   });
 
-  logger.info('[processWhatsAppWebhook] Notification rule match', {
+  logger.info('[processWhatsAppWebhook][handle] Notification rule match', {
     sender,
     priority: priority ?? 'no-match',
   });
@@ -171,7 +171,7 @@ export async function processWhatsAppWebhook(
       doc: { processed: true },
       refresh: false,
     });
-    logger.debug('[processWhatsAppWebhook] Ignored message marked processed', { sender });
+    logger.debug('[processWhatsAppWebhook][handle] Ignored message marked processed', { sender });
     return;
   }
 
@@ -193,6 +193,6 @@ export async function processWhatsAppWebhook(
       refresh: false,
     });
 
-    logger.info('[processWhatsAppWebhook] Immediate notification sent', { sender });
+    logger.info('[processWhatsAppWebhook][handle] Immediate notification sent', { sender });
   }
 }

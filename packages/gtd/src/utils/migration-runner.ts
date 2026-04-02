@@ -15,13 +15,13 @@ export async function runMigrations(pool: Pool): Promise<void> {
     files = readdirSync(migrationsDir)
       .filter((f) => f.endsWith('.sql'))
       .sort();
-  } catch {
-    logger.warn('No migrations directory found, skipping migrations');
+  } catch (err) {
+    logger.warn('[MigrationRunner][runMigrations] No migrations directory found, skipping migrations', { error: err instanceof Error ? err.message : String(err) });
     return;
   }
 
   if (files.length === 0) {
-    logger.info('No migration files found');
+    logger.info('[MigrationRunner][runMigrations] No migration files found');
     return;
   }
 
@@ -29,16 +29,16 @@ export async function runMigrations(pool: Pool): Promise<void> {
     const filePath = join(migrationsDir, file);
     const sql = readFileSync(filePath, 'utf-8');
 
-    logger.info(`Running migration: ${file}`);
+    logger.info(`[MigrationRunner][runMigrations] Running migration: ${file}`);
     try {
       await pool.query(sql);
-      logger.info(`Migration completed: ${file}`);
+      logger.info(`[MigrationRunner][runMigrations] Migration completed: ${file}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error(`Migration failed: ${file}`, { error: message });
+      logger.error(`[MigrationRunner][runMigrations] Migration failed: ${file}`, { error: message });
       throw err;
     }
   }
 
-  logger.info(`All migrations completed (${files.length} files)`);
+  logger.info(`[MigrationRunner][runMigrations] All migrations completed (${files.length} files)`);
 }

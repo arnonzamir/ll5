@@ -21,7 +21,8 @@ export async function fetchShoppingList(): Promise<ShoppingGroup[]> {
     const shoppingList = (raw?.shopping_list ?? raw) as Record<string, unknown>;
     const groups = (shoppingList?.groups ?? []) as ShoppingGroup[];
     return Array.isArray(groups) ? groups : [];
-  } catch {
+  } catch (err) {
+    console.error("[shopping] fetchShoppingList failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }

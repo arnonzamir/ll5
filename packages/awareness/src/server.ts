@@ -35,7 +35,7 @@ export async function startServer(): Promise<void> {
     level: (env.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   });
 
-  logger.info('[startServer] Starting awareness MCP server', {
+  logger.info('[startServer][init] Starting awareness MCP server', {
     port: env.port,
     nodeEnv: env.nodeEnv,
     timezone: env.timezone,
@@ -57,7 +57,7 @@ export async function startServer(): Promise<void> {
       connected = true;
       break;
     } catch (err) {
-      logger.warn(`[startServer] Elasticsearch connection attempt ${attempt}/10 failed`, {
+      logger.warn(`[startServer][connect] Elasticsearch connection attempt ${attempt}/10 failed`, {
         error: String(err),
       });
       if (attempt < 10) {
@@ -72,7 +72,7 @@ export async function startServer(): Promise<void> {
 
   // Ensure indices exist
   await ensureIndices(esClient);
-  logger.info('[startServer] Elasticsearch indices verified');
+  logger.info('[startServer][init] Elasticsearch indices verified');
 
   // Create repositories
   const repos = {
@@ -83,7 +83,7 @@ export async function startServer(): Promise<void> {
     notableEvent: new ElasticsearchNotableEventRepository(esClient),
   };
 
-  logger.info('[startServer] Repositories initialized');
+  logger.info('[startServer][init] Repositories initialized');
 
   // Create Express app
   const app = express();
@@ -94,7 +94,8 @@ export async function startServer(): Promise<void> {
     try {
       await esClient.ping();
       res.json({ status: 'healthy', elasticsearch: 'connected' });
-    } catch {
+    } catch (err) {
+      logger.error('[awareness][health] Health check failed', { error: err instanceof Error ? err.message : String(err) });
       res.status(503).json({ status: 'unhealthy', elasticsearch: 'disconnected' });
     }
   });
@@ -125,7 +126,7 @@ export async function startServer(): Promise<void> {
 
       await transport.handleRequest(req, res, req.body);
     } catch (err) {
-      logger.error('[startServer] MCP request failed', { error: String(err) });
+      logger.error('[startServer][mcp] MCP request failed', { error: String(err) });
       if (!res.headersSent) {
         res.status(500).json({ error: 'Internal server error' });
       }
@@ -134,15 +135,15 @@ export async function startServer(): Promise<void> {
 
   // Start HTTP server
   const server = app.listen(env.port, () => {
-    logger.info(`[startServer] Server listening on port ${env.port}`);
+    logger.info(`[startServer][listen] Server listening on port ${env.port}`);
   });
 
   // Graceful shutdown
   const shutdown = async () => {
-    logger.info('[startServer] Shutting down...');
+    logger.info('[startServer][shutdown] Shutting down...');
     server.close();
     await esClient.close();
-    logger.info('[startServer] Shutdown complete');
+    logger.info('[startServer][shutdown] Shutdown complete');
     process.exit(0);
   };
 

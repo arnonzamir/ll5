@@ -43,9 +43,9 @@ export async function queueDeviceCommand(
       [commandId],
     );
 
-    logger.info('[queueDeviceCommand] Command queued and sent', { commandId, commandType });
+    logger.info('[DeviceCommands][queue] Command queued and sent', { commandId, commandType });
   } catch (err) {
-    logger.warn('[queueDeviceCommand] FCM send failed, command remains pending', {
+    logger.warn('[DeviceCommands][queue] FCM send failed, command remains pending', {
       commandId,
       commandType,
       error: err instanceof Error ? err.message : String(err),

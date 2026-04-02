@@ -67,7 +67,8 @@ export async function fetchCurrentLocation(): Promise<LocationPoint | null> {
       accuracy: loc.accuracy,
       timestamp: loc.timestamp ?? new Date().toISOString(),
     };
-  } catch {
+  } catch (err) {
+    console.error("[locations] fetchCurrentLocation failed:", err instanceof Error ? err.message : String(err));
     return null;
   }
 }

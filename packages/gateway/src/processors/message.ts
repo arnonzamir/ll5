@@ -44,7 +44,7 @@ export async function processMessage(
     refresh: false,
   });
 
-  logger.info('[processMessage] IM message received', {
+  logger.info('[message][processMessage] IM message received', {
     sender: item.sender,
     app: item.app,
     is_group: item.is_group ?? false,
@@ -65,7 +65,7 @@ export async function processMessage(
       group_name: item.group_name,
     });
 
-    logger.info('[processMessage] Notification rule match', {
+    logger.info('[message][processMessage] Notification rule match', {
       sender: item.sender,
       app: item.app,
       priority: priority ?? 'no-match',
@@ -78,7 +78,7 @@ export async function processMessage(
         doc: { processed: true },
         refresh: false,
       });
-      logger.debug('[processMessage] Ignored message marked processed', { sender: item.sender, app: item.app });
+      logger.debug('[message][processMessage] Ignored message marked processed', { sender: item.sender, app: item.app });
       return;
     }
 
@@ -99,10 +99,10 @@ export async function processMessage(
         refresh: false,
       });
 
-      logger.info('[processMessage] Immediate notification sent', { sender: item.sender, app: item.app });
+      logger.info('[message][processMessage] Immediate notification sent', { sender: item.sender, app: item.app });
     }
   } else {
-    logger.warn('[processMessage] Notification rule matcher not available', { hasPgPool: !!pgPool, hasMatcher: !!matcher });
+    logger.warn('[message][processMessage] Notification rule matcher not available', { hasPgPool: !!pgPool, hasMatcher: !!matcher });
   }
 }
 
@@ -139,13 +139,13 @@ async function updateEntityStatus(
       refresh: false,
     });
 
-    logger.debug('[updateEntityStatus] Entity status updated', {
+    logger.debug('[message][updateEntityStatus] Entity status updated', {
       entity_name: item.sender,
       source: item.app,
     });
   } catch (err) {
     // Entity status update is non-critical — log and continue
-    logger.warn('[updateEntityStatus] Failed to update entity status', {
+    logger.warn('[message][updateEntityStatus] Failed to update entity status', {
       error: err instanceof Error ? err.message : String(err),
       sender: item.sender,
     });

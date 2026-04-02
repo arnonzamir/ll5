@@ -176,7 +176,7 @@ export function registerGmailTools(
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          logger.warn(`Failed to fetch message ${ref.id}`, { error: message });
+          logger.warn(`[gmail][listEmails] Failed to fetch message ${ref.id}`, { error: message });
         }
       }
 
@@ -233,7 +233,7 @@ export function registerGmailTools(
           threadId = originalMsg.data.threadId ?? undefined;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          logger.warn('Could not fetch original message for reply', { error: message });
+          logger.warn('[gmail][sendEmail] Could not fetch original message for reply', { error: message });
         }
       }
 

@@ -20,7 +20,10 @@ export function readConfig(): Ll5Config | null {
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
     return JSON.parse(raw) as Ll5Config;
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.error('[ll5-auth] Failed to read config:', (err as Error).message);
+    }
     return null;
   }
 }

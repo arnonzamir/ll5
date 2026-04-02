@@ -72,7 +72,9 @@ export function ChatWidget() {
             setConvId(latest.conversation_id);
           }
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        console.error("[chat] Failed to load conversations:", err instanceof Error ? err.message : String(err));
+      }
       setInitialized(true);
     })();
   }, []);
@@ -92,7 +94,9 @@ export function ChatWidget() {
           loaded.push(m);
         }
         setMessages(loaded);
-      } catch { /* ignore */ }
+      } catch (err) {
+        console.error("[chat] Failed to load message history:", err instanceof Error ? err.message : String(err));
+      }
     })();
   }, [convId]);
 
@@ -138,7 +142,9 @@ export function ChatWidget() {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ status: "delivered" }),
-              }).catch(() => {});
+              }).catch((err: unknown) => {
+                console.error("[chat] Failed to mark message as delivered:", err instanceof Error ? err.message : String(err));
+              });
             }
           } else {
             // Legacy format (from channel MCP SSE listener)
@@ -146,7 +152,9 @@ export function ChatWidget() {
               seenIds.current.add(data.id);
             }
           }
-        } catch { /* skip malformed */ }
+        } catch (err) {
+          console.error("[chat] Failed to parse SSE message:", err instanceof Error ? err.message : String(err));
+        }
       };
 
     es.onerror = () => {
@@ -189,7 +197,9 @@ export function ChatWidget() {
           }
           return updated;
         });
-      } catch { /* ignore */ }
+      } catch (err) {
+        console.error("[chat] Safety sweep poll failed:", err instanceof Error ? err.message : String(err));
+      }
     }, 30000);
     return () => clearInterval(interval);
   }, [convId]);
@@ -216,7 +226,9 @@ export function ChatWidget() {
           imageUrl = uploadData.url;
           imageFilename = uploadData.filename;
         }
-      } catch { /* ignore upload error */ }
+      } catch (err) {
+        console.error("[chat] Image upload failed:", err instanceof Error ? err.message : String(err));
+      }
       URL.revokeObjectURL(pendingImage.preview);
       setPendingImage(null);
     }
@@ -259,7 +271,9 @@ export function ChatWidget() {
           setConvId(data.conversation_id);
         }
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error("[chat] Failed to send message:", err instanceof Error ? err.message : String(err));
+    }
     setSending(false);
   };
 

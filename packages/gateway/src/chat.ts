@@ -91,7 +91,8 @@ export function chatAuthMiddleware(authSecret: string) {
 
       (req as AuthenticatedRequest).userId = payload.uid;
       next();
-    } catch {
+    } catch (err) {
+      logger.warn('[chat][authMiddleware] Token validation error', { error: err instanceof Error ? err.message : String(err) });
       res.status(401).json({ error: 'Invalid token' });
     }
   };
@@ -153,7 +154,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
       const row = result.rows[0];
       res.status(201).json({ id: row.id, conversation_id: row.conversation_id });
     } catch (err) {
-      logger.error('Failed to create chat message', {
+      logger.error('[chat][createMessage] Failed to create chat message', {
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Internal server error' });
@@ -216,7 +217,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
 
       res.json({ messages: messagesResult.rows, total });
     } catch (err) {
-      logger.error('Failed to fetch chat messages', {
+      logger.error('[chat][fetchMessages] Failed to fetch chat messages', {
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Internal server error' });
@@ -239,7 +240,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
       }
       res.json(result.rows[0]);
     } catch (err) {
-      logger.error('Failed to fetch message', { error: err instanceof Error ? err.message : String(err) });
+      logger.error('[chat][fetchMessage] Failed to fetch message', { error: err instanceof Error ? err.message : String(err) });
       res.status(500).json({ error: 'Internal server error' });
     }
   });
@@ -269,7 +270,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
 
       res.json({ messages: result.rows, total: result.rows.length });
     } catch (err) {
-      logger.error('Failed to fetch pending messages', {
+      logger.error('[chat][fetchPending] Failed to fetch pending messages', {
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Internal server error' });
@@ -305,7 +306,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
 
       res.json(result.rows[0]);
     } catch (err) {
-      logger.error('Failed to update chat message', {
+      logger.error('[chat][updateMessage] Failed to update chat message', {
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Internal server error' });
@@ -345,7 +346,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
 
       res.json({ conversations: result.rows, total: result.rows.length });
     } catch (err) {
-      logger.error('Failed to fetch conversations', {
+      logger.error('[chat][fetchConversations] Failed to fetch conversations', {
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Internal server error' });
@@ -390,7 +391,9 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
           // Strip user_id before sending to client
           delete data.user_id;
           res.write(`data: ${JSON.stringify(data)}\n\n`);
-        } catch { /* skip malformed */ }
+        } catch (err) {
+          logger.warn('[chat][listen] Malformed NOTIFY payload', { error: err instanceof Error ? err.message : String(err) });
+        }
       });
 
       listener.on('error', () => {
@@ -399,7 +402,9 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
 
       // Clean up on client disconnect
       req.on('close', () => {
-        listener.end().catch(() => {});
+        listener.end().catch((err: unknown) => {
+          logger.debug('[chat][listen] PG listener cleanup error', { error: err instanceof Error ? err.message : String(err) });
+        });
       });
 
       // Keep-alive ping every 30s
@@ -412,7 +417,7 @@ export function createChatRouter(pool: Pool, authSecret: string): Router {
       });
 
     } catch (err) {
-      logger.error('SSE listen failed', {
+      logger.error('[chat][listen] SSE listen failed', {
         error: err instanceof Error ? err.message : String(err),
       });
       res.write(`data: {"type":"error","message":"Connection failed"}\n\n`);

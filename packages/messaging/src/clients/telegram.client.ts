@@ -27,7 +27,7 @@ export class TelegramClient {
   private async request<T>(method: string, body?: Record<string, unknown>): Promise<T> {
     const url = `${this.baseUrl}/${method}`;
 
-    logger.debug('Telegram API request', { method });
+    logger.debug('[TelegramClient][request] Telegram API request', { method });
 
     const response = await fetch(url, {
       method: 'POST',
@@ -37,7 +37,7 @@ export class TelegramClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => 'unknown');
-      logger.error('Telegram API error', { status: response.status, body: text });
+      logger.error('[TelegramClient][request] Telegram API error', { status: response.status, body: text });
       throw new Error(`Telegram API error ${response.status}: ${text}`);
     }
 
@@ -74,7 +74,7 @@ export class TelegramClient {
       };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      logger.error('Telegram sendMessage failed', { error: errorMessage });
+      logger.error('[TelegramClient][sendMessage] Telegram sendMessage failed', { error: errorMessage });
       return { success: false, message_id: null };
     }
   }

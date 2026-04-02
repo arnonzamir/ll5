@@ -93,7 +93,8 @@ async function queryIndex<T>(
 
     const data = (await response.json()) as ESResponse<T>;
     return data.hits.hits;
-  } catch {
+  } catch (err) {
+    console.error("[phone-data] ES query failed:", err instanceof Error ? err.message : String(err));
     return [];
   }
 }

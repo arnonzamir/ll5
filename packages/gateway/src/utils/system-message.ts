@@ -26,7 +26,7 @@ export async function insertSystemMessage(
       [userId, content],
     );
   } catch (err) {
-    logger.warn('[insertSystemMessage] Failed to insert system message', { error: err instanceof Error ? err.message : String(err) });
+    logger.warn('[SystemMessage][insert] Failed to insert system message', { error: err instanceof Error ? err.message : String(err) });
   }
 
   // Send FCM notification if requested

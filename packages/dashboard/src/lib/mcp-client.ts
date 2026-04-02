@@ -42,8 +42,8 @@ function parseSseResponse(text: string): JsonRpcResponse | null {
       if (data === "[DONE]") continue;
       try {
         return JSON.parse(data) as JsonRpcResponse;
-      } catch {
-        // skip non-JSON data lines
+      } catch (err) {
+        console.error("[parseSseResponse] Failed to parse SSE data line:", data.slice(0, 200), err instanceof Error ? err.message : String(err));
       }
     }
   }

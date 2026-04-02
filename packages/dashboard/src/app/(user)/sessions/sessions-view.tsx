@@ -28,7 +28,8 @@ function formatDate(ts: string): string {
       hour: "2-digit",
       minute: "2-digit",
     });
-  } catch {
+  } catch (err) {
+    console.warn("[sessions] formatDate failed:", err instanceof Error ? err.message : String(err));
     return ts;
   }
 }
@@ -41,7 +42,8 @@ function formatDuration(first: string, last: string): string {
     if (mins < 60) return `${mins}m`;
     const hours = Math.floor(mins / 60);
     return `${hours}h ${mins % 60}m`;
-  } catch {
+  } catch (err) {
+    console.warn("[sessions] formatDuration failed:", err instanceof Error ? err.message : String(err));
     return "";
   }
 }

@@ -94,7 +94,9 @@ export function registerChatTools(
           await gatewayFetch(config, userId, `/chat/messages/${msg.id}`, {
             method: 'PATCH',
             body: { status: 'processing' },
-          }).catch(() => {});
+          }).catch((err: unknown) => {
+            logger.debug('[chat] Status update failed', { error: err instanceof Error ? err.message : String(err) });
+          });
         }
 
         return {
@@ -102,7 +104,7 @@ export function registerChatTools(
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error('check_messages failed', { error: message });
+        logger.error('[chat][checkMessages] check_messages failed', { error: message });
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
           isError: true,
@@ -150,7 +152,9 @@ export function registerChatTools(
           await gatewayFetch(config, userId, `/chat/messages/${params.reply_to_id}`, {
             method: 'PATCH',
             body: { status: 'delivered' },
-          }).catch(() => {});
+          }).catch((err: unknown) => {
+            logger.debug('[chat] Status update failed', { error: err instanceof Error ? err.message : String(err) });
+          });
         }
 
         return {
@@ -158,7 +162,7 @@ export function registerChatTools(
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error('send_message failed', { error: message });
+        logger.error('[chat][sendMessage] send_message failed', { error: message });
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
           isError: true,
@@ -194,7 +198,7 @@ export function registerChatTools(
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error('list_conversations failed', { error: message });
+        logger.error('[chat][listConversations] list_conversations failed', { error: message });
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
           isError: true,

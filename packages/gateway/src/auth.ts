@@ -42,7 +42,7 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
 
       const pinValid = await bcrypt.compare(pin, user.pin_hash);
       if (!pinValid) {
-        logger.warn('Invalid PIN attempt', { userId: user_id });
+        logger.warn('[auth][issueToken] Invalid PIN attempt', { userId: user_id });
         res.status(401).json({ error: 'Invalid PIN' });
         return;
       }
@@ -52,7 +52,7 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
         Date.now() + user.token_ttl_days * 86400 * 1000,
       ).toISOString();
 
-      logger.info('Token issued', { userId: user_id, ttlDays: user.token_ttl_days });
+      logger.info('[auth][issueToken] Token issued', { userId: user_id, ttlDays: user.token_ttl_days });
 
       res.json({
         token,
@@ -60,7 +60,7 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
         expires_at: expiresAt,
       });
     } catch (err) {
-      logger.error('Auth token error', {
+      logger.error('[auth][issueToken] Auth token error', {
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Internal server error' });

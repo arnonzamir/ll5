@@ -39,13 +39,13 @@ export async function writeNotableEvent(
       refresh: false,
     });
 
-    logger.info('Notable event created', {
+    logger.info('[writeNotableEvent][index] Notable event created', {
       event_type: data.event_type,
       place_name: data.place_name,
     });
   } catch (err) {
     // Notable events are non-critical — log and continue
-    logger.warn('Failed to write notable event', {
+    logger.warn('[writeNotableEvent][index] Failed to write notable event', {
       error: err instanceof Error ? err.message : String(err),
       event_type: data.event_type,
     });

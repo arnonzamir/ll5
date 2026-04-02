@@ -44,7 +44,8 @@ export async function getDisplayName(): Promise<string> {
       "get_profile"
     );
     return data?.profile?.name ?? "";
-  } catch {
+  } catch (err) {
+    console.error("[profile] getDisplayName failed:", err instanceof Error ? err.message : String(err));
     return "";
   }
 }
@@ -57,7 +58,8 @@ export async function updateDisplayName(name: string): Promise<{ success: boolea
       { name }
     );
     return { success: true, name: data?.profile?.name ?? name };
-  } catch {
+  } catch (err) {
+    console.error("[profile] updateDisplayName failed:", err instanceof Error ? err.message : String(err));
     return { success: false, name };
   }
 }

@@ -88,7 +88,8 @@ function parseJsonbArray(value: unknown): string[] {
     try {
       const parsed = JSON.parse(value);
       return Array.isArray(parsed) ? parsed : [];
-    } catch {
+    } catch (err) {
+      console.warn('[parseJsonbArray] Failed to parse JSONB value:', err instanceof Error ? err.message : String(err));
       return [];
     }
   }

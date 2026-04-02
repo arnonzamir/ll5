@@ -77,7 +77,8 @@ function formatTime(ts: string | null): string {
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  } catch {
+  } catch (err) {
+    console.warn("[messaging] formatTime failed:", err instanceof Error ? err.message : String(err));
     return "";
   }
 }
