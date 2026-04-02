@@ -31,18 +31,19 @@ import {
 interface Action {
   id: string;
   title: string;
-  contexts?: string[];
+  context?: string[];
   energy?: "low" | "medium" | "high";
-  due_date?: string | null;
-  project_name?: string | null;
+  dueDate?: string | null;
+  projectTitle?: string | null;
   status?: string;
-  list_type?: string | null;
-  waiting_for?: string | null;
+  listType?: string | null;
+  waitingFor?: string | null;
 }
 
 export function ActionsView() {
   const [actions, setActions] = useState<Action[]>([]);
   const [status, setStatus] = useState("active");
+  const [listType, setListType] = useState("todo");
   const [energy, setEnergy] = useState("all");
   const [context, setContext] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -57,6 +58,7 @@ export function ActionsView() {
     startTransition(async () => {
       const filters: Record<string, string> = {};
       if (status !== "all") filters.status = status;
+      if (listType !== "all") filters.list_type = listType;
       if (energy !== "all") filters.energy = energy;
       const result = await fetchActions(filters);
       setActions(result);
@@ -66,7 +68,7 @@ export function ActionsView() {
   useEffect(() => {
     loadActions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, energy]);
+  }, [status, listType, energy]);
 
   const isFiltered = status === "active" || status !== "all";
 
@@ -105,7 +107,7 @@ export function ActionsView() {
       return false;
     }
     if (context !== "all") {
-      if (!a.contexts || !a.contexts.includes(context)) return false;
+      if (!a.context || !a.context.includes(context)) return false;
     }
     return true;
   });
@@ -128,6 +130,7 @@ export function ActionsView() {
       // Reload inline instead of calling loadActions() to avoid nesting startTransition
       const filters: Record<string, string> = {};
       if (status !== "all") filters.status = status;
+      if (listType !== "all") filters.list_type = listType;
       if (energy !== "all") filters.energy = energy;
       const result = await fetchActions(filters);
       setActions(result);
@@ -163,6 +166,21 @@ export function ActionsView() {
             <SelectContent>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="all">All</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-gray-500">List</Label>
+          <Select value={listType} onValueChange={setListType}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todo">Todo</SelectItem>
+              <SelectItem value="waiting">Waiting</SelectItem>
+              <SelectItem value="someday">Someday</SelectItem>
               <SelectItem value="all">All</SelectItem>
             </SelectContent>
           </Select>
@@ -249,13 +267,28 @@ export function ActionsView() {
                     <Input id="due_date" name="due_date" type="date" />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="contexts">Contexts (comma-separated)</Label>
-                  <Input
-                    id="contexts"
-                    name="contexts"
-                    placeholder="@home, @phone"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="list_type">List Type</Label>
+                    <Select name="list_type" defaultValue="todo">
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="todo">Todo</SelectItem>
+                        <SelectItem value="waiting">Waiting</SelectItem>
+                        <SelectItem value="someday">Someday</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="contexts">Contexts</Label>
+                    <Input
+                      id="contexts"
+                      name="contexts"
+                      placeholder="@home, @phone"
+                    />
+                  </div>
                 </div>
                 <Button type="submit" className="w-full">
                   Create Action
@@ -295,6 +328,8 @@ export function ActionsView() {
                 energy={action.energy}
                 dueDate={action.due_date}
                 projectName={action.project_name}
+                listType={action.list_type}
+                waitingFor={action.waiting_for}
                 completed={action.status === "completed" || justCompleted.has(action.id)}
                 onToggle={handleToggle}
               />

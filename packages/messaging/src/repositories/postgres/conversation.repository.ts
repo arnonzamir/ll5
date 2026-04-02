@@ -3,13 +3,14 @@ import type {
   ConversationRepository,
   ConversationRecord,
   ConversationListParams,
+  ConversationListResult,
 } from '../interfaces/conversation.repository.js';
 
 export class PostgresConversationRepository
   extends BasePostgresRepository
   implements ConversationRepository
 {
-  async list(userId: string, params?: ConversationListParams): Promise<ConversationRecord[]> {
+  async list(userId: string, params?: ConversationListParams): Promise<ConversationListResult> {
     const conditions: string[] = ['user_id = $1'];
     const values: unknown[] = [userId];
     let paramIndex = 2;
@@ -30,19 +31,36 @@ export class PostgresConversationRepository
       conditions.push(`is_group = $${paramIndex++}`);
       values.push(params.is_group);
     }
+    if (params?.query) {
+      conditions.push(
+        `(name ILIKE $${paramIndex} OR conversation_id ILIKE $${paramIndex})`,
+      );
+      values.push(`%${params.query}%`);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    // Get total count
+    const countResult = await this.query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM messaging_conversations WHERE ${whereClause}`,
+      [...values],
+    );
+    const total = parseInt(countResult[0]?.count ?? '0', 10);
 
     const limit = params?.limit ?? 500;
-    conditions.push(`TRUE`); // ensure at least one condition after AND
+    const offset = params?.offset ?? 0;
 
     const sql = `
       SELECT * FROM messaging_conversations
-      WHERE ${conditions.join(' AND ')}
+      WHERE ${whereClause}
       ORDER BY last_message_at DESC NULLS LAST, created_at DESC
-      LIMIT $${paramIndex}
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
-    values.push(limit);
+    values.push(limit, offset);
 
-    return this.query<ConversationRecord>(sql, values);
+    const conversations = await this.query<ConversationRecord>(sql, values);
+    return { conversations, total };
   }
 
   async get(

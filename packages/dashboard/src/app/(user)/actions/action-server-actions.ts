@@ -10,6 +10,8 @@ interface Action {
   due_date?: string | null;
   project_name?: string | null;
   status?: string;
+  list_type?: string | null;
+  waiting_for?: string | null;
 }
 
 export async function fetchActions(
@@ -58,11 +60,13 @@ export async function createAction(formData: FormData): Promise<void> {
   const title = formData.get("title") as string;
   const energy = formData.get("energy") as string;
   const dueDate = formData.get("due_date") as string;
+  const listType = formData.get("list_type") as string;
   const contextsRaw = formData.get("contexts") as string;
 
   const args: Record<string, unknown> = { title };
   if (energy) args.energy = energy;
   if (dueDate) args.due_date = dueDate;
+  if (listType) args.list_type = listType;
   if (contextsRaw) {
     args.contexts = contextsRaw
       .split(",")

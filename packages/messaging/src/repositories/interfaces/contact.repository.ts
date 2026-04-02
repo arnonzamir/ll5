@@ -24,7 +24,14 @@ export interface ContactListParams {
   platform?: string;
   query?: string;
   hasPersonLink?: boolean;
+  is_group?: boolean;
   limit?: number;
+  offset?: number;
+}
+
+export interface ContactListResult {
+  contacts: ContactRecord[];
+  total: number;
 }
 
 export interface ContactRepository {
@@ -35,7 +42,7 @@ export interface ContactRepository {
   bulkUpsert(userId: string, contacts: ContactUpsertInput[]): Promise<number>;
 
   /** List contacts with optional filters (platform, name/phone search, person link). */
-  list(userId: string, params?: ContactListParams): Promise<ContactRecord[]>;
+  list(userId: string, params?: ContactListParams): Promise<ContactListResult>;
 
   /** Resolve a contact by platform and platform_id. */
   resolve(userId: string, platform: string, platformId: string): Promise<ContactRecord | null>;

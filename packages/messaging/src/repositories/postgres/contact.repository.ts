@@ -4,6 +4,7 @@ import type {
   ContactRecord,
   ContactUpsertInput,
   ContactListParams,
+  ContactListResult,
 } from '../interfaces/contact.repository.js';
 import { logger } from '../../utils/logger.js';
 
@@ -86,7 +87,7 @@ export class PostgresContactRepository
     return result.length;
   }
 
-  async list(userId: string, params?: ContactListParams): Promise<ContactRecord[]> {
+  async list(userId: string, params?: ContactListParams): Promise<ContactListResult> {
     const conditions: string[] = ['user_id = $1'];
     const values: unknown[] = [userId];
     let paramIndex = 2;
@@ -110,17 +111,33 @@ export class PostgresContactRepository
       conditions.push('person_id IS NULL');
     }
 
+    if (params?.is_group !== undefined) {
+      conditions.push(`is_group = $${paramIndex++}`);
+      values.push(params.is_group);
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    // Get total count
+    const countResult = await this.query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM messaging_contacts WHERE ${whereClause}`,
+      [...values],
+    );
+    const total = parseInt(countResult[0]?.count ?? '0', 10);
+
     const limit = params?.limit ?? 100;
+    const offset = params?.offset ?? 0;
 
     const sql = `
       SELECT * FROM messaging_contacts
-      WHERE ${conditions.join(' AND ')}
+      WHERE ${whereClause}
       ORDER BY display_name ASC NULLS LAST, last_seen_at DESC NULLS LAST
-      LIMIT $${paramIndex}
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
-    values.push(limit);
+    values.push(limit, offset);
 
-    return this.query<ContactRecord>(sql, values);
+    const contacts = await this.query<ContactRecord>(sql, values);
+    return { contacts, total };
   }
 
   async resolve(

@@ -11,6 +11,8 @@ interface ActionRowProps {
   energy?: "low" | "medium" | "high";
   dueDate?: string | null;
   projectName?: string | null;
+  listType?: string | null;
+  waitingFor?: string | null;
   completed?: boolean;
   onToggle?: (id: string, completed: boolean) => void;
 }
@@ -28,6 +30,8 @@ export function ActionRow({
   energy,
   dueDate,
   projectName,
+  listType,
+  waitingFor,
   completed = false,
   onToggle,
 }: ActionRowProps) {
@@ -52,6 +56,16 @@ export function ActionRow({
               {ctx}
             </Badge>
           ))}
+          {listType === "someday" && (
+            <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-purple-100 text-purple-700">
+              someday
+            </Badge>
+          )}
+          {listType === "waiting" && (
+            <Badge variant="secondary" className="text-xs px-1.5 py-0 bg-amber-100 text-amber-700">
+              {waitingFor ? `waiting: ${waitingFor}` : "waiting"}
+            </Badge>
+          )}
           {projectName && (
             <Badge variant="outline" className="text-xs px-1.5 py-0">
               {projectName}

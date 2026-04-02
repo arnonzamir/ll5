@@ -28,14 +28,23 @@ export async function fetchContacts(params?: {
   platform?: string;
   query?: string;
   linkedOnly?: boolean;
-}): Promise<Contact[]> {
-  const args: Record<string, unknown> = {};
+  offset?: number;
+}): Promise<{ contacts: Contact[]; total: number }> {
+  const args: Record<string, unknown> = { is_group: false, limit: 50 };
   if (params?.platform) args.platform = params.platform;
   if (params?.query) args.query = params.query;
   if (params?.linkedOnly !== undefined) args.linked_only = params.linkedOnly;
-  args.limit = 500;
+  if (params?.offset !== undefined) args.offset = params.offset;
 
-  return mcpCallList<Contact>("messaging", "list_contacts", args);
+  const raw = await mcpCallJsonSafe<Record<string, unknown>>(
+    "messaging",
+    "list_contacts",
+    args
+  );
+  if (!raw || typeof raw !== "object") return { contacts: [], total: 0 };
+  const contacts = Array.isArray(raw.contacts) ? (raw.contacts as Contact[]) : [];
+  const total = typeof raw.total === "number" ? raw.total : contacts.length;
+  return { contacts, total };
 }
 
 export async function fetchPeople(): Promise<Person[]> {

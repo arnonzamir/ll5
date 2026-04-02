@@ -154,6 +154,7 @@ export async function sendFCMNotification(
               title: message.title,
               body: message.body,
               priority: message.priority,
+              notification_level: message.priority === 'high' ? 'urgent' : 'info',
               ...(message.data ?? {}),
             },
             android: {

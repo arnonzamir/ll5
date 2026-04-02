@@ -14,16 +14,20 @@ export function registerListContactsTool(
       platform: z.enum(['whatsapp', 'telegram', 'sms']).optional().describe('Filter by platform'),
       query: z.string().optional().describe('Search by name or phone number (partial match)'),
       linked_only: z.boolean().optional().describe('If true, only show contacts linked to a Person; if false, only unlinked'),
+      is_group: z.boolean().optional().describe('Filter by group status (true = groups only, false = individuals only)'),
       limit: z.number().optional().describe('Max results (default: 100)'),
+      offset: z.number().optional().describe('Offset for pagination (default: 0)'),
     },
     async (params) => {
       const userId = getUserId();
 
-      const contacts = await contactRepo.list(userId, {
+      const { contacts, total } = await contactRepo.list(userId, {
         platform: params.platform,
         query: params.query,
         hasPersonLink: params.linked_only,
+        is_group: params.is_group,
         limit: params.limit,
+        offset: params.offset,
       });
 
       const result = contacts.map((c) => ({
@@ -38,7 +42,7 @@ export function registerListContactsTool(
       }));
 
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ contacts: result, count: result.length }, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ contacts: result, total, count: result.length }, null, 2) }],
       };
     },
   );

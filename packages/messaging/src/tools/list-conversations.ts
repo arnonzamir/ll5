@@ -15,17 +15,21 @@ export function registerListConversationsTool(
       permission: z.enum(['agent', 'input', 'ignore']).optional().describe('Filter by permission level'),
       account_id: z.string().optional().describe('Filter by specific account'),
       is_group: z.boolean().optional().describe('Filter to groups or 1:1 conversations only'),
+      query: z.string().optional().describe('Search by conversation name or ID (partial match)'),
       limit: z.number().optional().describe('Max results (default: 50)'),
+      offset: z.number().optional().describe('Offset for pagination (default: 0)'),
     },
     async (params) => {
       const userId = getUserId();
 
-      const conversations = await conversationRepo.list(userId, {
+      const { conversations, total } = await conversationRepo.list(userId, {
         platform: params.platform,
         permission: params.permission,
         account_id: params.account_id,
         is_group: params.is_group,
+        query: params.query,
         limit: params.limit,
+        offset: params.offset,
       });
 
       const result = conversations.map((c) => ({
@@ -39,7 +43,7 @@ export function registerListConversationsTool(
       }));
 
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ conversations: result }, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ conversations: result, total }, null, 2) }],
       };
     },
   );

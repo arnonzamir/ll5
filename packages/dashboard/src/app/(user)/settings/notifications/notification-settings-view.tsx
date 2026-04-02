@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect, useCallback } from "react";
+import { useState, useTransition, useEffect, useCallback, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +20,8 @@ import {
   Zap,
   Clock,
   Search,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   MessageSquare,
@@ -436,21 +438,64 @@ const PRIORITY_CONFIG = {
   agent: { label: "Agent", activeClass: "bg-green-100 text-green-800" },
 };
 
+const CONVO_PAGE_SIZE = 50;
+
 function ConversationsSection({
-  conversations,
   rules,
   onSetPriority,
-  isPending,
+  isPending: parentPending,
 }: {
-  conversations: ConversationInfo[];
   rules: NotificationRule[];
   onSetPriority: (platform: string, conversationId: string, priority: "ignore" | "batch" | "immediate" | "agent") => void;
   isPending: boolean;
 }) {
+  const [conversations, setConversations] = useState<ConversationInfo[]>([]);
+  const [totalConversations, setTotalConversations] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filter, setFilter] = useState<"all" | "direct" | "group">("all");
-  const [namedOnly, setNamedOnly] = useState(false);
-  const [sortBy, setSortBy] = useState<"priority" | "name">("priority");
+  const [page, setPage] = useState(1);
+  const [isLoading, startLoading] = useTransition();
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isPending = parentPending || isLoading;
+
+  const loadConversations = useCallback(
+    (opts?: { query?: string; p?: number }) => {
+      const q = opts?.query ?? searchQuery;
+      const pg = opts?.p ?? page;
+
+      startLoading(async () => {
+        const params: Parameters<typeof fetchConversations>[0] = {
+          limit: CONVO_PAGE_SIZE,
+          offset: (pg - 1) * CONVO_PAGE_SIZE,
+        };
+        if (q.trim()) params.query = q.trim();
+
+        const { conversations: data, total } = await fetchConversations(params);
+        setConversations(data);
+        setTotalConversations(total);
+      });
+    },
+    [searchQuery, page]
+  );
+
+  useEffect(() => {
+    loadConversations({ p: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setPage(1);
+      loadConversations({ query: value, p: 1 });
+    }, 300);
+  }
+
+  function handlePageChange(newPage: number) {
+    setPage(newPage);
+    loadConversations({ p: newPage });
+  }
 
   // Build a map of conversation rules
   const ruleMap = new Map<string, NotificationRule>();
@@ -460,32 +505,9 @@ function ConversationsSection({
     }
   }
 
-  const filtered = conversations
-    .filter((c) => {
-      if (filter === "direct" && c.is_group) return false;
-      if (filter === "group" && !c.is_group) return false;
-      if (namedOnly && (!c.name || /^\+?\d[\d\s\-()]+$/.test(c.name) || c.name.includes("@"))) return false;
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
-        const name = (c.name || c.conversation_id).toLowerCase();
-        return name.includes(query);
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === "name") {
-        const nameA = (a.name || a.conversation_id).toLowerCase();
-        const nameB = (b.name || b.conversation_id).toLowerCase();
-        return nameA.localeCompare(nameB);
-      }
-      // Sort by priority: agent > immediate > batch > ignore > no-rule
-      const order = { agent: 0, immediate: 1, batch: 2, ignore: 3 };
-      const prioA = ruleMap.get(`${a.platform}:${a.conversation_id}`)?.priority;
-      const prioB = ruleMap.get(`${b.platform}:${b.conversation_id}`)?.priority;
-      const oA = prioA ? order[prioA as keyof typeof order] ?? 4 : 4;
-      const oB = prioB ? order[prioB as keyof typeof order] ?? 4 : 4;
-      return oA - oB;
-    });
+  const totalPages = Math.max(1, Math.ceil(totalConversations / CONVO_PAGE_SIZE));
+  const from = totalConversations > 0 ? (page - 1) * CONVO_PAGE_SIZE + 1 : 0;
+  const to = Math.min(page * CONVO_PAGE_SIZE, totalConversations);
 
   return (
     <Card>
@@ -493,6 +515,7 @@ function ConversationsSection({
         <CardTitle className="text-base flex items-center gap-2">
           <MessageSquare className="h-4 w-4" />
           Conversations
+          <span className="text-xs font-normal text-gray-400">({totalConversations})</span>
         </CardTitle>
         <CardDescription>
           Set priority per conversation. Agent = can respond, Immediate = notify now, Batch = periodic summary, Ignore = drop.
@@ -505,103 +528,100 @@ function ConversationsSection({
             <Input
               placeholder="Search conversations..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="pl-9"
             />
           </div>
-          <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
-            {(["all", "direct", "group"] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
-                  filter === f ? "bg-gray-100 text-gray-800" : "text-gray-400 hover:text-gray-600"
-                }`}
-              >
-                {f === "all" ? `All (${conversations.length})`
-                  : f === "direct" ? `Direct (${conversations.filter((c) => !c.is_group).length})`
-                  : `Groups (${conversations.filter((c) => c.is_group).length})`}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setNamedOnly((v) => !v)}
-            className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors cursor-pointer shrink-0 ${
-              namedOnly ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200 hover:text-gray-700"
-            }`}
-          >
-            Named only
-          </button>
-          <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
-            {(["priority", "name"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setSortBy(s)}
-                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
-                  sortBy === s ? "bg-gray-100 text-gray-800" : "text-gray-400 hover:text-gray-600"
-                }`}
-              >
-                {s === "priority" ? "By priority" : "By name"}
-              </button>
-            ))}
-          </div>
         </div>
 
-        {filtered.length === 0 ? (
+        {conversations.length === 0 && !isLoading ? (
           <div className="flex flex-col items-center justify-center py-8 text-gray-400">
             <MessageSquare className="h-8 w-8 mb-2" />
-            <p className="text-sm">No conversations match your filters.</p>
+            <p className="text-sm">No conversations match your search.</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
-            {filtered.map((c) => {
-              const rule = ruleMap.get(`${c.platform}:${c.conversation_id}`);
-              const activePriority = rule?.priority ?? "batch";
-              return (
-                <div key={`${c.platform}:${c.conversation_id}`} className="flex items-center gap-3 py-2.5">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      {c.is_group ? (
-                        <Users className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                      ) : (
-                        <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                      )}
-                      <span className="text-sm font-medium truncate">
-                        {c.name || c.conversation_id}
-                      </span>
-                      <AppBadge app={c.platform} />
-                    </div>
-                    {c.last_message_at && (
-                      <div className="flex items-center gap-2 mt-0.5 pl-5.5">
-                        <span className="text-xs text-gray-400">{formatLastSeen(c.last_message_at)}</span>
+          <>
+            <div className="divide-y divide-gray-100">
+              {conversations.map((c) => {
+                const rule = ruleMap.get(`${c.platform}:${c.conversation_id}`);
+                const activePriority = rule?.priority ?? "batch";
+                return (
+                  <div key={`${c.platform}:${c.conversation_id}`} className="flex items-center gap-3 py-2.5">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        {c.is_group ? (
+                          <Users className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                        ) : (
+                          <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                        )}
+                        <span className="text-sm font-medium truncate">
+                          {c.name || c.conversation_id}
+                        </span>
+                        <AppBadge app={c.platform} />
                       </div>
-                    )}
+                      {c.last_message_at && (
+                        <div className="flex items-center gap-2 mt-0.5 pl-5.5">
+                          <span className="text-xs text-gray-400">{formatLastSeen(c.last_message_at)}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
+                      {PRIORITY_OPTIONS.map((p) => {
+                        const config = PRIORITY_CONFIG[p];
+                        const isActive = activePriority === p;
+                        return (
+                          <button
+                            key={p}
+                            onClick={() => {
+                              if (isActive) return;
+                              onSetPriority(c.platform, c.conversation_id, p);
+                            }}
+                            disabled={isPending}
+                            className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                              isActive ? config.activeClass : "text-gray-400 hover:text-gray-600"
+                            }`}
+                          >
+                            {config.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
-                    {PRIORITY_OPTIONS.map((p) => {
-                      const config = PRIORITY_CONFIG[p];
-                      const isActive = activePriority === p;
-                      return (
-                        <button
-                          key={p}
-                          onClick={() => {
-                            if (isActive) return;
-                            onSetPriority(c.platform, c.conversation_id, p);
-                          }}
-                          disabled={isPending}
-                          className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                            isActive ? config.activeClass : "text-gray-400 hover:text-gray-600"
-                          }`}
-                        >
-                          {config.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+                );
+              })}
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-3 border-t border-gray-100 mt-2">
+                <span className="text-xs text-gray-400">
+                  {from}–{to} of {totalConversations}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(page - 1)}
+                    disabled={page <= 1 || isPending}
+                    className="h-7 w-7 p-0"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs text-gray-500 px-2">
+                    Page {page} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handlePageChange(page + 1)}
+                    disabled={page >= totalPages || isPending}
+                    className="h-7 w-7 p-0"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
                 </div>
-              );
-            })}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
@@ -613,19 +633,16 @@ function ConversationsSection({
 export function NotificationSettingsView() {
   const [rules, setRules] = useState<NotificationRule[]>([]);
   const [senders, setSenders] = useState<KnownSender[]>([]);
-  const [conversations, setConversations] = useState<ConversationInfo[]>([]);
   const [isPending, startTransition] = useTransition();
 
   const loadData = useCallback(() => {
     startTransition(async () => {
-      const [rulesData, sendersData, convosData] = await Promise.all([
+      const [rulesData, sendersData] = await Promise.all([
         fetchRules(),
         fetchKnownSenders(),
-        fetchConversations(),
       ]);
       setRules(rulesData);
       setSenders(sendersData);
-      setConversations(convosData);
     });
   }, []);
 
@@ -748,7 +765,7 @@ export function NotificationSettingsView() {
       <div className="flex items-center gap-1 border-b border-gray-200 mb-4 shrink-0">
         {([
           { key: "people" as const, label: `People (${senders.length})` },
-          { key: "conversations" as const, label: `Conversations (${conversations.length})` },
+          { key: "conversations" as const, label: "Conversations" },
           { key: "keywords" as const, label: `Keywords (${rules.filter((r) => r.rule_type === "keyword").length})` },
         ]).map(({ key, label }) => (
           <button
@@ -781,7 +798,6 @@ export function NotificationSettingsView() {
         )}
         {tab === "conversations" && (
           <ConversationsSection
-            conversations={conversations}
             rules={rules}
             onSetPriority={handleSetConversationPriority}
             isPending={isPending}

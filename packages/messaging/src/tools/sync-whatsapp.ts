@@ -118,7 +118,7 @@ export function registerSyncWhatsAppTool(
       }
 
       // Get total count after sync
-      const allConversations = await conversationRepo.list(userId, {
+      const { total: totalConversations } = await conversationRepo.list(userId, {
         platform: 'whatsapp',
         account_id: params.account_id,
       });
@@ -127,7 +127,7 @@ export function registerSyncWhatsAppTool(
         content: [{
           type: 'text' as const,
           text: JSON.stringify({
-            total_conversations: allConversations.length,
+            total_conversations: totalConversations,
             new_conversations: newCount,
             updated_conversations: updatedCount,
             contacts_synced: contactCount,

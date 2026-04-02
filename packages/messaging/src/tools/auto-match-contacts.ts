@@ -26,7 +26,7 @@ export function registerAutoMatchContactsTool(
       const userId = getUserId();
 
       // Fetch all unlinked contacts that have a display name
-      const contacts = await contactRepo.list(userId, {
+      const { contacts } = await contactRepo.list(userId, {
         platform: params.platform,
         hasPersonLink: false,
         limit: params.limit ?? 200,

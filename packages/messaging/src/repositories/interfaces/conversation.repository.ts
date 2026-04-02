@@ -17,12 +17,19 @@ export interface ConversationListParams {
   permission?: string;
   account_id?: string;
   is_group?: boolean;
+  query?: string;
   limit?: number;
+  offset?: number;
+}
+
+export interface ConversationListResult {
+  conversations: ConversationRecord[];
+  total: number;
 }
 
 export interface ConversationRepository {
   /** List conversations with optional filters. */
-  list(userId: string, params?: ConversationListParams): Promise<ConversationRecord[]>;
+  list(userId: string, params?: ConversationListParams): Promise<ConversationListResult>;
 
   /** Get a specific conversation by platform and conversation_id. */
   get(userId: string, platform: string, conversationId: string): Promise<ConversationRecord | null>;

@@ -88,16 +88,24 @@ export async function createRule(
   }
 }
 
-export async function fetchConversations(): Promise<ConversationInfo[]> {
+export async function fetchConversations(params?: {
+  query?: string;
+  offset?: number;
+  limit?: number;
+}): Promise<{ conversations: ConversationInfo[]; total: number }> {
+  const args: Record<string, unknown> = { limit: params?.limit ?? 50 };
+  if (params?.query) args.query = params.query;
+  if (params?.offset !== undefined) args.offset = params.offset;
+
   const raw = await mcpCallJsonSafe<Record<string, unknown>>(
     "messaging",
     "list_conversations",
-    { limit: 500 }
+    args
   );
-  if (!raw || typeof raw !== "object") return [];
-  const list = Array.isArray(raw) ? raw : (raw as Record<string, unknown>).conversations;
-  if (!Array.isArray(list)) return [];
-  return list as ConversationInfo[];
+  if (!raw || typeof raw !== "object") return { conversations: [], total: 0 };
+  const conversations = Array.isArray(raw.conversations) ? (raw.conversations as ConversationInfo[]) : [];
+  const total = typeof raw.total === "number" ? raw.total : conversations.length;
+  return { conversations, total };
 }
 
 export async function deleteRule(id: string): Promise<boolean> {

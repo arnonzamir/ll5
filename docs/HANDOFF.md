@@ -106,6 +106,12 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `device_commands` — command queue for Android app (pending/sent/confirmed/failed/expired), result_data JSONB for return values
 - `fcm_tokens` — FCM registration tokens per user/device
 
+**Android Notification Channels** (created in LL5Application):
+- `urgent` — IMPORTANCE_HIGH, vibrate + sound + heads-up (maps to immediate/agent priority)
+- `info` — IMPORTANCE_LOW, silent badge only (maps to batch priority)
+- `notification_level=low` in FCM payload → no notification shown (maps to ignore priority)
+- Legacy channels (`ll5_morning`, `ll5_tickler`, `ll5_urgent`, `ll5_general`) kept for backward compat
+
 **Elasticsearch** (8.15.0, 10 indices):
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps
 - `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events

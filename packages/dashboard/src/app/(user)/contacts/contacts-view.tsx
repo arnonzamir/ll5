@@ -21,6 +21,8 @@ import {
   RefreshCw,
   BookUser,
   Phone,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   fetchContacts,
@@ -30,6 +32,10 @@ import {
   type Contact,
   type Person,
 } from "./contacts-server-actions";
+
+// --- Constants ---
+
+const PAGE_SIZE = 50;
 
 // --- Helpers ---
 
@@ -297,22 +303,13 @@ function ContactRow({
   return (
     <div className="flex items-center gap-3 py-2.5">
       {/* Icon */}
-      {contact.is_group ? (
-        <Users className="h-4 w-4 text-gray-400 shrink-0" />
-      ) : (
-        <User className="h-4 w-4 text-gray-400 shrink-0" />
-      )}
+      <User className="h-4 w-4 text-gray-400 shrink-0" />
 
       {/* Contact info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium truncate">{displayName}</span>
           <PlatformBadge platform={contact.platform} />
-          {contact.is_group && (
-            <Badge className="bg-purple-100 text-purple-700 border-transparent text-[10px] px-1.5 py-0">
-              group
-            </Badge>
-          )}
         </div>
         <div className="flex items-center gap-3 mt-0.5">
           {contact.phone_number && contact.display_name && (
@@ -398,6 +395,60 @@ function StatsBar({
   );
 }
 
+// --- Pagination ---
+
+function Pagination({
+  page,
+  totalPages,
+  total,
+  pageSize,
+  onPageChange,
+  isPending,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  isPending: boolean;
+}) {
+  if (totalPages <= 1) return null;
+
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+
+  return (
+    <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+      <span className="text-xs text-gray-400">
+        {from}–{to} of {total}
+      </span>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 1 || isPending}
+          className="h-7 w-7 p-0"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="text-xs text-gray-500 px-2">
+          Page {page} of {totalPages}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= totalPages || isPending}
+          className="h-7 w-7 p-0"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // --- Filter Types ---
 
 type PlatformFilter = "all" | "whatsapp" | "telegram" | "sms";
@@ -407,6 +458,7 @@ type LinkFilter = "all" | "linked" | "unlinked";
 
 export function ContactsView() {
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [totalContacts, setTotalContacts] = useState(0);
   const [people, setPeople] = useState<Person[]>([]);
   const [isPending, startTransition] = useTransition();
 
@@ -414,57 +466,92 @@ export function ContactsView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("all");
   const [linkFilter, setLinkFilter] = useState<LinkFilter>("all");
+  const [page, setPage] = useState(1);
 
   // Link modal state
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [linkingContact, setLinkingContact] = useState<Contact | null>(null);
 
-  const loadData = useCallback(() => {
+  // Debounce timer ref
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadContacts = useCallback(
+    (opts?: { query?: string; platform?: PlatformFilter; linked?: LinkFilter; p?: number }) => {
+      const q = opts?.query ?? searchQuery;
+      const plat = opts?.platform ?? platformFilter;
+      const link = opts?.linked ?? linkFilter;
+      const pg = opts?.p ?? page;
+
+      startTransition(async () => {
+        const params: Parameters<typeof fetchContacts>[0] = {
+          offset: (pg - 1) * PAGE_SIZE,
+        };
+        if (q.trim()) params.query = q.trim();
+        if (plat !== "all") params.platform = plat;
+        if (link === "linked") params.linkedOnly = true;
+        else if (link === "unlinked") params.linkedOnly = false;
+
+        const { contacts: data, total } = await fetchContacts(params);
+        setContacts(data);
+        setTotalContacts(total);
+      });
+    },
+    [searchQuery, platformFilter, linkFilter, page]
+  );
+
+  const loadPeople = useCallback(() => {
     startTransition(async () => {
-      const [contactsData, peopleData] = await Promise.all([
-        fetchContacts(),
-        fetchPeople(),
-      ]);
-      setContacts(contactsData);
+      const peopleData = await fetchPeople();
       setPeople(peopleData);
     });
   }, []);
 
+  // Initial load
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    loadContacts({ p: 1 });
+    loadPeople();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Filtering logic
-  const filtered = useMemo(() => {
-    return contacts.filter((c) => {
-      // Platform filter
-      if (platformFilter !== "all" && c.platform.toLowerCase() !== platformFilter)
-        return false;
+  // Debounced search
+  function handleSearchChange(value: string) {
+    setSearchQuery(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setPage(1);
+      loadContacts({ query: value, p: 1 });
+    }, 300);
+  }
 
-      // Link filter
-      if (linkFilter === "linked" && !c.person_id) return false;
-      if (linkFilter === "unlinked" && c.person_id) return false;
+  function handlePlatformChange(value: PlatformFilter) {
+    setPlatformFilter(value);
+    setPage(1);
+    loadContacts({ platform: value, p: 1 });
+  }
 
-      // Search filter
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const name = (c.display_name ?? "").toLowerCase();
-        const phone = (c.phone_number ?? "").toLowerCase();
-        const platformId = c.platform_id.toLowerCase();
-        if (!name.includes(q) && !phone.includes(q) && !platformId.includes(q))
-          return false;
-      }
+  function handleLinkFilterChange(value: LinkFilter) {
+    setLinkFilter(value);
+    setPage(1);
+    loadContacts({ linked: value, p: 1 });
+  }
 
-      return true;
-    });
-  }, [contacts, searchQuery, platformFilter, linkFilter]);
+  function handlePageChange(newPage: number) {
+    setPage(newPage);
+    loadContacts({ p: newPage });
+  }
 
-  // Stats
+  function handleRefresh() {
+    loadContacts();
+    loadPeople();
+  }
+
+  // Stats from current page data (linked/unlinked counts within current view)
   const stats = useMemo(() => {
-    const total = contacts.length;
     const linked = contacts.filter((c) => c.person_id).length;
-    return { total, linked, unlinked: total - linked };
-  }, [contacts]);
+    return { total: totalContacts, linked, unlinked: contacts.length - linked };
+  }, [contacts, totalContacts]);
+
+  const totalPages = Math.max(1, Math.ceil(totalContacts / PAGE_SIZE));
 
   // --- Actions ---
 
@@ -486,9 +573,8 @@ export function ContactsView() {
     startTransition(async () => {
       const success = await linkContactToPerson(contactId, personId);
       if (!success) {
-        // Revert on failure
-        const fresh = await fetchContacts();
-        setContacts(fresh);
+        // Revert on failure — reload current page
+        loadContacts();
       }
     });
   }
@@ -504,8 +590,7 @@ export function ContactsView() {
     startTransition(async () => {
       const success = await unlinkContact(contactId);
       if (!success) {
-        const fresh = await fetchContacts();
-        setContacts(fresh);
+        loadContacts();
       }
     });
   }
@@ -534,7 +619,7 @@ export function ContactsView() {
           </p>
         </div>
         <Button
-          onClick={loadData}
+          onClick={handleRefresh}
           disabled={isPending}
           variant="outline"
           size="sm"
@@ -553,7 +638,7 @@ export function ContactsView() {
           <Input
             placeholder="Search by name or phone..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-9"
           />
         </div>
@@ -563,7 +648,7 @@ export function ContactsView() {
           {platforms.map((p) => (
             <button
               key={p.value}
-              onClick={() => setPlatformFilter(p.value)}
+              onClick={() => handlePlatformChange(p.value)}
               className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
                 platformFilter === p.value
                   ? "bg-gray-100 text-gray-800"
@@ -580,7 +665,7 @@ export function ContactsView() {
           {linkFilters.map((f) => (
             <button
               key={f.value}
-              onClick={() => setLinkFilter(f.value)}
+              onClick={() => handleLinkFilterChange(f.value)}
               className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
                 linkFilter === f.value
                   ? "bg-gray-100 text-gray-800"
@@ -604,11 +689,11 @@ export function ContactsView() {
 
       {/* Contact list */}
       <div className="flex-1 overflow-y-auto min-h-0 pb-4">
-        {filtered.length === 0 ? (
+        {contacts.length === 0 && !isPending ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12 text-gray-400">
               <BookUser className="h-12 w-12 mb-3" />
-              {contacts.length === 0 ? (
+              {totalContacts === 0 && !searchQuery.trim() ? (
                 <>
                   <p className="text-sm">No contacts found.</p>
                   <p className="text-xs mt-1">
@@ -624,7 +709,7 @@ export function ContactsView() {
           <Card>
             <CardContent className="p-4">
               <div className="divide-y divide-gray-100">
-                {filtered.map((contact) => (
+                {contacts.map((contact) => (
                   <ContactRow
                     key={contact.id}
                     contact={contact}
@@ -636,12 +721,14 @@ export function ContactsView() {
                 ))}
               </div>
 
-              {/* Show filtered count */}
-              {filtered.length !== contacts.length && (
-                <div className="text-xs text-gray-400 text-center mt-3 pt-3 border-t border-gray-100">
-                  Showing {filtered.length} of {contacts.length} contacts
-                </div>
-              )}
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                total={totalContacts}
+                pageSize={PAGE_SIZE}
+                onPageChange={handlePageChange}
+                isPending={isPending}
+              />
             </CardContent>
           </Card>
         )}
