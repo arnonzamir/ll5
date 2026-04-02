@@ -501,11 +501,17 @@ function DayTimeline({
 
           {/* Timed events */}
           {dayEvents.map((ev) => {
-            const startHour =
-              ev.start.getHours() + ev.start.getMinutes() / 60;
-            const endHour = ev.end.getHours() + ev.end.getMinutes() / 60;
+            // Handle cross-day events: if end is on a different day, clamp to DAY_END_HOUR
+            const dayStart = startOfDay(date);
+            const startHour = isSameDay(ev.start, date)
+              ? ev.start.getHours() + ev.start.getMinutes() / 60
+              : DAY_START_HOUR;
+            const endHour = isSameDay(ev.end, date)
+              ? ev.end.getHours() + ev.end.getMinutes() / 60 || DAY_END_HOUR // 0:00 = midnight = end of day
+              : DAY_END_HOUR;
             const clampedStart = Math.max(startHour, DAY_START_HOUR);
             const clampedEnd = Math.min(endHour, DAY_END_HOUR);
+            if (clampedEnd <= clampedStart) return null; // skip if fully outside visible hours
             const top = (clampedStart - DAY_START_HOUR) * HOUR_HEIGHT;
             const height = Math.max(
               (clampedEnd - clampedStart) * HOUR_HEIGHT,
@@ -514,7 +520,7 @@ function DayTimeline({
 
             const color = ev.isTickler
               ? "bg-amber-50 border-amber-500 text-amber-900"
-              : "bg-primary/5 border-primary text-gray-900";
+              : "bg-blue-50 border-blue-500 text-gray-900";
 
             return (
               <HoverEvent key={ev.id} event={ev} onSelect={onSelect}>
