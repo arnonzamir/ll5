@@ -401,14 +401,30 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
 
     try {
-      // Deep merge: existing settings || patch
+      // Deep merge: read existing, merge in JS, write back
+      const existing = await pgPool.query(
+        'SELECT settings FROM user_settings WHERE user_id = $1',
+        [userId],
+      );
+      const current = existing.rows[0]?.settings ?? {};
+
+      // Merge top-level keys; for object values, merge nested keys
+      const merged = { ...current };
+      for (const [key, value] of Object.entries(patch)) {
+        if (value && typeof value === 'object' && !Array.isArray(value) && current[key] && typeof current[key] === 'object') {
+          merged[key] = { ...current[key], ...value };
+        } else {
+          merged[key] = value;
+        }
+      }
+
       await pgPool.query(
         `INSERT INTO user_settings (user_id, settings, updated_at)
          VALUES ($1, $2, now())
          ON CONFLICT (user_id) DO UPDATE SET
-           settings = user_settings.settings || $2::jsonb,
+           settings = $2::jsonb,
            updated_at = now()`,
-        [userId, JSON.stringify(patch)],
+        [userId, JSON.stringify(merged)],
       );
       logger.info('[server][putUserSettings] Updated', { userId, keys: Object.keys(patch) });
       res.json({ updated: true });
