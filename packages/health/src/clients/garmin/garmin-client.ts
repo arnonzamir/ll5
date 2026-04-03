@@ -76,29 +76,20 @@ export class GarminClient {
   }
 
   /**
-   * Fetches stress data via the generic GET endpoint.
-   * The garmin-connect package does not expose a named method for stress.
+   * Stress and daily summary data are not exposed via named methods.
+   * Return null for now — these can be added when the garmin-connect
+   * package exposes them or via direct HTTP with the session cookie.
    */
-  async getStressData(date: string): Promise<unknown> {
-    try {
-      return await this.ensureClient().get<unknown>(`/wellness-service/wellness/dailyStress/${date}`);
-    } catch (err) {
-      logger.warn('[GarminClient][getStressData] Failed', { error: String(err), date });
-      return null;
-    }
+  async getStressData(_date: string): Promise<unknown> {
+    // Not available via garmin-connect named methods
+    logger.debug('[GarminClient][getStressData] Stress data not available via current API');
+    return null;
   }
 
-  /**
-   * Fetches daily summary stats via the generic GET endpoint.
-   * Used for steps, distance, calories, active minutes, etc.
-   */
-  async getDailySummary(date: string): Promise<unknown> {
-    try {
-      return await this.ensureClient().get<unknown>(`/wellness-service/wellness/dailySummaryChart/${date}`);
-    } catch (err) {
-      logger.warn('[GarminClient][getDailySummary] Failed', { error: String(err), date });
-      return null;
-    }
+  async getDailySummary(_date: string): Promise<unknown> {
+    // Not available via garmin-connect named methods
+    logger.debug('[GarminClient][getDailySummary] Daily summary not available via current API');
+    return null;
   }
 
   isConnected(): boolean {
