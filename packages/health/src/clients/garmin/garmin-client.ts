@@ -80,16 +80,22 @@ export class GarminClient {
    * Return null for now — these can be added when the garmin-connect
    * package exposes them or via direct HTTP with the session cookie.
    */
-  async getStressData(_date: string): Promise<unknown> {
-    // Not available via garmin-connect named methods
-    logger.debug('[GarminClient][getStressData] Stress data not available via current API');
-    return null;
+  async getStressData(date: string): Promise<unknown> {
+    try {
+      return await this.ensureClient().get(`https://connectapi.garmin.com/wellness-service/wellness/dailyStress/${date}`);
+    } catch (err) {
+      logger.warn('[GarminClient][getStressData] Failed', { error: String(err), date });
+      return null;
+    }
   }
 
-  async getDailySummary(_date: string): Promise<unknown> {
-    // Not available via garmin-connect named methods
-    logger.debug('[GarminClient][getDailySummary] Daily summary not available via current API');
-    return null;
+  async getDailySummary(date: string): Promise<unknown> {
+    try {
+      return await this.ensureClient().get(`https://connectapi.garmin.com/usersummary-service/usersummary/daily/${date}`);
+    } catch (err) {
+      logger.warn('[GarminClient][getDailySummary] Failed', { error: String(err), date });
+      return null;
+    }
   }
 
   isConnected(): boolean {
