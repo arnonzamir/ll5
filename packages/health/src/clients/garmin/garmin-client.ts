@@ -82,7 +82,9 @@ export class GarminClient {
    */
   async getStressData(date: string): Promise<unknown> {
     try {
-      return await this.ensureClient().get(`https://connectapi.garmin.com/wellness-service/wellness/dailyStress/${date}`);
+      return await this.ensureClient().get(
+        `https://connect.garmin.com/modern/proxy/wellness-service/wellness/dailyStress/${date}`,
+      );
     } catch (err) {
       logger.warn('[GarminClient][getStressData] Failed', { error: String(err), date });
       return null;
@@ -91,7 +93,10 @@ export class GarminClient {
 
   async getDailySummary(date: string): Promise<unknown> {
     try {
-      return await this.ensureClient().get(`https://connectapi.garmin.com/usersummary-service/usersummary/daily/${date}`);
+      // Use the proxy endpoint that the Garmin Connect web UI uses
+      return await this.ensureClient().get(
+        `https://connect.garmin.com/modern/proxy/usersummary-service/usersummary/daily/${date}`,
+      );
     } catch (err) {
       logger.warn('[GarminClient][getDailySummary] Failed', { error: String(err), date });
       return null;
