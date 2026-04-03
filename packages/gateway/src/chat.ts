@@ -7,6 +7,8 @@ import multer from 'multer';
 import pg from 'pg';
 import type { Pool } from 'pg';
 import { logger } from './utils/logger.js';
+import { sendFCMNotification } from './utils/fcm-sender.js';
+import type { NotificationLevel } from './utils/fcm-sender.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 
@@ -111,13 +113,14 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
   // ---------------------------------------------------------------------------
   router.post('/messages', auth, async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
-    const { channel, content, conversation_id, metadata, direction, role } = req.body as {
+    const { channel, content, conversation_id, metadata, direction, role, notification_level } = req.body as {
       channel?: string;
       content?: string;
       conversation_id?: string;
       metadata?: Record<string, unknown>;
       direction?: string;
       role?: string;
+      notification_level?: NotificationLevel;
     };
 
     if (!channel || content == null) {
@@ -154,6 +157,19 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
 
       const row = result.rows[0];
       res.status(201).json({ id: row.id, conversation_id: row.conversation_id });
+
+      // Send FCM push if notification_level specified on outbound messages
+      if (notification_level && msgDirection === 'outbound') {
+        const truncBody = (content ?? '').length > 200 ? (content ?? '').slice(0, 200) + '...' : (content ?? '');
+        sendFCMNotification(pool, userId, {
+          title: 'LL5',
+          body: truncBody,
+          type: 'agent_push',
+          notification_level,
+        }).catch((err) => {
+          logger.warn('[chat][createMessage] FCM send failed', { error: err instanceof Error ? err.message : String(err) });
+        });
+      }
     } catch (err) {
       logger.error('[chat][createMessage] Failed to create chat message', {
         error: err instanceof Error ? err.message : String(err),

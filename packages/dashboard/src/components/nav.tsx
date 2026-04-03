@@ -294,6 +294,14 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                       Message Rules
                     </Link>
                     <Link
+                      href="/settings/notification-levels"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <Bell className="h-4 w-4" />
+                      Notification Levels
+                    </Link>
+                    <Link
                       href="/settings/health"
                       onClick={() => setProfileOpen(false)}
                       className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"

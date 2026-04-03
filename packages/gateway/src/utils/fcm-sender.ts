@@ -3,12 +3,17 @@ import { readFileSync } from 'node:fs';
 import type { Pool } from 'pg';
 import { logger } from './logger.js';
 
+export type NotificationLevel = 'silent' | 'notify' | 'alert' | 'critical';
+
 interface FCMMessage {
   title: string;
   body: string;
   type: string;
-  priority: 'normal' | 'high';
-  data?: Record<string, string>; // extra data fields merged into FCM data payload
+  /** Notification level chosen by the agent or system. */
+  notification_level?: NotificationLevel;
+  /** @deprecated Use notification_level instead. Maps high→alert, normal→silent. */
+  priority?: 'normal' | 'high';
+  data?: Record<string, string>;
 }
 
 interface ServiceAccount {
@@ -16,6 +21,13 @@ interface ServiceAccount {
   client_email: string;
   private_key: string;
 }
+
+const LEVEL_RANK: Record<NotificationLevel, number> = {
+  silent: 0,
+  notify: 1,
+  alert: 2,
+  critical: 3,
+};
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 let serviceAccount: ServiceAccount | null = null;
@@ -25,7 +37,6 @@ function loadServiceAccount(): ServiceAccount | null {
 
   const json = process.env.FCM_SERVICE_ACCOUNT_JSON;
   if (!json) {
-    // Try file path
     const path = process.env.FCM_SERVICE_ACCOUNT_PATH;
     if (!path) return null;
     try {
@@ -52,9 +63,6 @@ function loadServiceAccount(): ServiceAccount | null {
   }
 }
 
-/**
- * Create a JWT signed with the service account private key.
- */
 function createJWT(sa: ServiceAccount): string {
   const now = Math.floor(Date.now() / 1000);
   const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
@@ -74,9 +82,6 @@ function createJWT(sa: ServiceAccount): string {
   return `${signInput}.${signature}`;
 }
 
-/**
- * Get an OAuth2 access token for FCM v1 API.
- */
 async function getAccessToken(sa: ServiceAccount): Promise<string> {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
     return cachedToken.token;
@@ -99,6 +104,75 @@ async function getAccessToken(sa: ServiceAccount): Promise<string> {
     expiresAt: Date.now() + data.expires_in * 1000,
   };
   return cachedToken.token;
+}
+
+/**
+ * Resolve the effective notification level based on what was requested,
+ * the user's max level setting, and whether it's currently quiet hours.
+ */
+async function resolveLevel(
+  pool: Pool,
+  userId: string,
+  requested: NotificationLevel,
+): Promise<NotificationLevel> {
+  try {
+    const result = await pool.query(
+      'SELECT max_level, quiet_max_level, quiet_start, quiet_end, timezone FROM user_notification_settings WHERE user_id = $1',
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      // No settings → no cap
+      return requested;
+    }
+
+    const settings = result.rows[0];
+    const maxLevel = (settings.max_level as NotificationLevel) ?? 'critical';
+
+    // Check if currently in quiet hours
+    let effectiveMax = maxLevel;
+    try {
+      // Get current time in user's timezone
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: settings.timezone ?? 'Asia/Jerusalem',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      const currentTime = formatter.format(now); // "HH:MM"
+
+      const quietStart = (settings.quiet_start as string)?.slice(0, 5) ?? '23:00';
+      const quietEnd = (settings.quiet_end as string)?.slice(0, 5) ?? '07:00';
+
+      const inQuietHours = quietStart > quietEnd
+        ? currentTime >= quietStart || currentTime < quietEnd  // overnight (23:00-07:00)
+        : currentTime >= quietStart && currentTime < quietEnd; // same day
+
+      if (inQuietHours) {
+        effectiveMax = (settings.quiet_max_level as NotificationLevel) ?? 'silent';
+      }
+    } catch {
+      // Timezone parsing failed — use normal max
+    }
+
+    // Cap at effective max
+    if (LEVEL_RANK[requested] > LEVEL_RANK[effectiveMax]) {
+      logger.info('[FCMSender][resolveLevel] Capping notification level', {
+        requested,
+        effectiveMax,
+        userId,
+      });
+      return effectiveMax;
+    }
+
+    return requested;
+  } catch (err) {
+    logger.warn('[FCMSender][resolveLevel] Failed to check settings, using requested level', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return requested;
+  }
 }
 
 /**
@@ -125,6 +199,21 @@ export async function sendFCMNotification(
     logger.debug('[FCMSender][send] No FCM tokens for user');
     return;
   }
+
+  // Resolve notification level
+  let level: NotificationLevel;
+  if (message.notification_level) {
+    level = message.notification_level;
+  } else if (message.priority === 'high') {
+    level = 'alert';
+  } else {
+    level = 'silent';
+  }
+
+  level = await resolveLevel(pool, userId, level);
+
+  // Map level to Android priority
+  const androidPriority = level === 'alert' || level === 'critical' ? 'high' : 'normal';
 
   let accessToken: string;
   try {
@@ -153,12 +242,11 @@ export async function sendFCMNotification(
               type: message.type,
               title: message.title,
               body: message.body,
-              priority: message.priority,
-              notification_level: message.priority === 'high' ? 'urgent' : 'info',
+              notification_level: level,
               ...(message.data ?? {}),
             },
             android: {
-              priority: message.priority === 'high' ? 'high' : 'normal',
+              priority: androidPriority,
             },
           },
         }),
@@ -168,7 +256,7 @@ export async function sendFCMNotification(
         const text = await response.text();
         logger.warn('[FCMSender][send] FCM v1 send failed', { status: response.status, body: text });
       } else {
-        logger.info('[FCMSender][send] Push sent', { type: message.type, priority: message.priority });
+        logger.info('[FCMSender][send] Push sent', { type: message.type, level });
       }
     } catch (err) {
       logger.warn('[FCMSender][send] FCM send error', {

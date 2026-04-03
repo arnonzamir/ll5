@@ -111,11 +111,16 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `device_commands` — command queue for Android app (pending/sent/confirmed/failed/expired), result_data JSONB for return values
 - `fcm_tokens` — FCM registration tokens per user/device
 
-**Android Notification Channels** (created in LL5Application):
-- `urgent` — IMPORTANCE_HIGH, vibrate + sound + heads-up (maps to immediate/agent priority)
-- `info` — IMPORTANCE_LOW, silent badge only (maps to batch priority)
-- `notification_level=low` in FCM payload → no notification shown (maps to ignore priority)
-- Legacy channels (`ll5_morning`, `ll5_tickler`, `ll5_urgent`, `ll5_general`) kept for backward compat
+**User Notification Levels** (4-level phone attention system):
+- `silent` — IMPORTANCE_LOW, notification shade + badge, no sound (FYI items)
+- `notify` — IMPORTANCE_DEFAULT, sound or soft vibration (contextual on-the-go updates)
+- `alert` — IMPORTANCE_HIGH, sound + vibration + heads-up (urgent messages, escalations)
+- `critical` — IMPORTANCE_HIGH + bypass DND (emergencies only)
+- User sets max level for normal hours + quiet hours (stored in `user_notification_settings` table)
+- Agent chooses level per `push_to_user` call; gateway caps based on settings + time
+- `push_to_user` `level` param triggers FCM via POST /chat/messages `notification_level` field
+- Agent must journal every notification level decision
+- Legacy channels (`urgent`, `info`, `ll5_morning`, `ll5_tickler`, `ll5_urgent`, `ll5_general`) kept for backward compat
 
 **Elasticsearch** (8.15.0, 15 indices):
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps
