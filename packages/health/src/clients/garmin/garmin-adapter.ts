@@ -87,7 +87,7 @@ export class GarminAdapter implements HealthSourceAdapter {
       client.getDailySummary(date),
     ]);
 
-    return normalizeDailyStats(dailySummary, steps);
+    return normalizeDailyStats(dailySummary, steps, date);
   }
 
   async fetchActivities(userId: string, from: string, to: string): Promise<ActivityData[]> {

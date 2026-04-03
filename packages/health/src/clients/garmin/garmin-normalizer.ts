@@ -139,7 +139,7 @@ export function normalizeHeartRate(raw: unknown): HeartRateData | null {
  *
  * This combines data from the daily summary endpoint and/or step counts.
  */
-export function normalizeDailyStats(raw: unknown, stepsCount?: number | null): DailyStatsData | null {
+export function normalizeDailyStats(raw: unknown, stepsCount?: number | null, dateOverride?: string): DailyStatsData | null {
   if (!raw && stepsCount == null) return null;
 
   try {
@@ -150,7 +150,7 @@ export function normalizeDailyStats(raw: unknown, stepsCount?: number | null): D
     const summary = Array.isArray(data) ? data[0] : data;
 
     return {
-      date: summary?.calendarDate ?? '',
+      date: summary?.calendarDate ?? dateOverride ?? '',
       steps: stepsCount ?? summary?.totalSteps ?? 0,
       distanceMeters: summary?.totalDistanceMeters ?? summary?.totalDistance ?? 0,
       floorsClimbed: summary?.floorsAscended ?? summary?.floorsClimbed ?? undefined,
