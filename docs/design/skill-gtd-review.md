@@ -1,128 +1,154 @@
 # GTD Review Skill
 
-## Purpose
+## Overview
 
-Structured reviews that keep the GTD system healthy. Two modes: quick daily review and comprehensive weekly review. The agent drives the review conversationally — it's not a rigid checklist.
+Unified `/review` skill supporting two modes: **quick review** (daily, 3-5 min) and **weekly review** (comprehensive, 20-40 min). The key design choice: the agent *acts*, not just lists. It processes inbox items, creates actions, surfaces stalled projects — conversationally, not as a rigid checklist.
 
-## Quick Review (`/review`)
+## Mode Detection
 
-Triggered daily (morning briefing) or on-demand. Takes 5-10 minutes.
+1. `/review weekly` or `/review quick` — explicit override
+2. If today is the configured `weeklyReviewDay` (Friday) — default to weekly
+3. If weekly review was completed within last 5 days — default to quick even on Friday
+4. Fallback: quick
 
-### Flow
+When inferred, confirm briefly: "It's Friday — time for your weekly review. Ready, or just a quick check?"
 
-**Phase 1: Inbox Processing**
-```
-Agent: list_inbox → for each item:
-  - If actionable and obvious → create_action (auto-assign context, energy, project)
-  - If actionable but unclear → ask: "Is this a task? What's the next action?"
-  - If reference material → upsert_fact / upsert_person
-  - If trash → process_inbox_item(action: 'delete')
-  - If someday → create_action(list_type: 'someday')
-Agent tells user: "Processed 8 inbox items. Created 3 actions, filed 2 facts, 1 needs your input."
-```
+## Quick Review Phases
 
-**Phase 2: Today's Actions**
-```
-Agent: list_actions(due: 'today') + list_actions(due: 'overdue')
-  - Surface overdue items once, gently: "3 items from earlier this week"
-  - Show today's actions grouped by context
-  - If calendar has meetings: cross-reference for prep actions
-Agent: "You have 5 actions today. Your 2pm meeting with Saar — any prep needed?"
-```
+### Phase 1: Inbox Processing
 
-**Phase 3: Stalled Projects**
-```
-Agent: list_projects(status: 'active') → filter those with 0 next actions
-  - For each stalled project: "Project X has no next action. What's next?"
-  - If user doesn't know → suggest or defer
-```
+**Tools:** `list_inbox`, `process_inbox_item`, `create_action`, `create_project`
 
-**Phase 4: Waiting-For Check**
-```
-Agent: list_actions(list_type: 'waiting')
-  - For each: "Waiting on X for Y — has this come through?"
-  - If yes → complete it
-  - If no and it's been a while → suggest follow-up action
-```
+- If empty: "Inbox is clear. Moving on."
+- For each item: agent **proposes** its best interpretation and acts:
+  - "This looks like a @phone action — 'Call dentist to schedule cleaning.' I'll create it."
+  - User agrees or corrects. If ambiguous: "Taking this on, or someday?"
+  - Two-minute rule: "This one's quick — could you do it now?"
+  - Multi-step: "This sounds like a project. What's the first action?"
+- Quick review: process up to 5, then offer to continue or move on
+- Weekly review: process all, pause every 5
 
-## Weekly Review (`/weekly-review`)
+### Phase 2: Due/Overdue Actions
 
-Triggered Friday (via scheduler) or on-demand. Takes 20-30 minutes. Includes everything in quick review plus:
+**Tools:** `list_actions(overdue: true)`, `list_actions(due_before: today)`
+
+- If nothing: "Clean slate." (move on)
+- Overdue: mention count once, gently. If 5+: "Looks like some dates were aspirational. Want to reset them?"
+- If <3 overdue: walk through each — reschedule, do now, drop, or remove date
+- Due today: list briefly, flag calendar conflicts
+
+### Phase 3: Stalled Projects
+
+**Tools:** `list_projects(status: "active")`
+
+- Filter to projects with 0 next actions
+- For each: "Project X has no next action. What's next?"
+- Agent proposes if it can infer. If user doesn't know: suggest or defer
+- If project is done but not marked: "Can I close this out?"
+
+### Phase 4: Waiting-For Check
+
+**Tools:** `list_actions(list_type: "waiting")`
+
+- Show who, what, and age in days
+- If older than 7 days: propose follow-up action
+- If resolved: mark complete
+- If recent: list briefly, no pressure
+
+## Weekly Review — Additional Phases
 
 ### Phase 5: All Active Projects
-```
-Agent: list_projects(status: 'active')
-  For each project:
-  - "Kitchen Renovation (3 actions, 1 completed this week). Still active?"
-  - If no progress in 3+ weeks: "This hasn't moved. Keep, pause, or drop?"
-  - Ensure each has at least one next action
-```
+
+Walk through ALL active projects (not just stalled). Group by area if areas exist.
+
+- Healthy projects: brief acknowledgment. "Kitchen renovation: 3 actions. Looks good."
+- Stale projects (no progress in 3+ weeks): "Keep, pause, or drop?"
+- Ensure each has at least one next action
 
 ### Phase 6: Someday/Maybe
-```
-Agent: list_actions(list_type: 'someday')
-  - "Here are your someday items. Anything you want to activate?"
-  - Group by theme if possible
-  - Don't guilt — "These are here when you're ready"
-```
 
-### Phase 7: Horizons Check
-```
-Agent: list_horizons(level: 2) → areas of responsibility
-  - "Your areas: Health, Family, Work, Home, Finances"
-  - "Any area feeling neglected? Any new commitments?"
-  - Don't force — just surface for reflection
-```
+**Tools:** `list_actions(list_type: "someday")`
 
-### Phase 8: Calendar Forward Look
-```
-Agent: list_events(next 14 days)
-  - "Next two weeks: 3 meetings, 1 deadline, 2 ticklers"
-  - "Any prep needed for the board meeting on Tuesday?"
-  - Create prep actions if user says yes
-```
+- "Quick scan — N items. Anything you want to activate?"
+- User can activate (`update_action(list_type: "todo")`), drop, or leave as-is
+- Don't pressure. Most will stay. That's fine.
+- If 10+ items: "Want to scan them all, or just the oldest few?"
+
+### Phase 7: Areas of Responsibility
+
+**Tools:** `list_horizons(horizon: 2)`
+
+- For each area: check if projects cover it
+- "Your Health area has no active projects. Everything covered, or something falling through the cracks?"
+- Prompt by category: "Any new commitments at work? Health appointments? Household things?"
+- Capture anything untracked
+
+### Phase 8: Calendar Look-Ahead
+
+**Tools:** `list_events` (next 14 days), `list_ticklers` (next 14 days)
+
+- Synthesize into narrative: "Next two weeks: 3 meetings, 1 deadline, 2 ticklers."
+- Flag packed days, events needing prep, conflicts, related ticklers
+- Create prep actions if needed
 
 ### Phase 9: Journal Review
-```
-Agent: read_journal(status: 'open', limit: 20)
-  - Surface open commitments: "You committed to X — still on track?"
-  - Surface unresolved feedback: "You mentioned Y didn't work — has that been addressed?"
-  - Resolve entries that are done
-```
+
+**Tools:** `read_journal(status: "open")`, `resolve_journal`
+
+- Focus on open commitments and unresolved feedback
+- "You committed to X on [date]. Is this handled?"
+- If handled: resolve. If needs action: create and resolve.
+- Don't read every entry — summarize count, focus on actionable items
 
 ### Phase 10: Mind Sweep
-```
-Agent: "Anything else on your mind? Worries, ideas, things you've been meaning to capture?"
-  - Capture each to inbox or directly to actions
-  - This is the GTD "empty your head" step
-```
+
+**Tools:** `capture_inbox`
+
+- "Anything on your mind we haven't captured?"
+- If blank, prompt by category: Work? Home? Health? Money? People?
+- Capture everything to inbox
+- "Clean mind. That's the goal."
+
+## Adaptive Behavior
+
+### Compression
+If system is clean (inbox empty, all projects healthy, nothing overdue): compress dramatically.
+- Quick: one sentence summary
+- Weekly: compress phases 1-4 to one line each, focus on forward-looking phases 5-10
+
+### Fatigue Detection
+If user gives short answers, says "yeah" repeatedly, or "can we wrap up":
+- Offer to cut short: "We've covered the big items. Want to do someday and sweep another time?"
+- Journal the partial completion
+- A partial review is infinitely better than a skipped one
+
+### System Health Gating
+Call `get_gtd_health` at start. Use metrics to decide emphasis:
+- `inbox_count > 10`: more time on inbox
+- `projects_without_actions > 3`: emphasize stalled projects
+- `overdue_count > 5`: suggest date cleanup
+- `someday_count > 20`: batch the someday scan
 
 ## Agent Behavior Principles
 
-- **Act, don't list.** Process inbox items, don't just show them. Create actions, don't just suggest them.
-- **Ask when uncertain.** Commitment level, priority, delegation — these need user input.
-- **Never guilt.** "3 overdue items" not "You still haven't done X."
-- **Match energy.** Morning review: crisp, action-oriented. Evening: lighter, reflective.
-- **Journal the review.** Write a journal entry summarizing what was reviewed and any patterns noticed.
-- **Respect time.** Quick review shouldn't take more than 10 minutes. If inbox is huge, batch it: "42 items in inbox. Let's process the top 10 now?"
+- **Act, don't list.** Process items, don't just show them.
+- **Ask when uncertain.** Commitment, priority, delegation need user input.
+- **Never guilt.** Mention overdue once, gently. Normalize.
+- **Match energy.** Morning: crisp. Evening: lighter. If user is tired: compress.
+- **Journal the review.** Write a journal entry summarizing what was reviewed and patterns noticed.
+- **Respect time.** Quick review <10 min. If inbox is huge, batch: "42 items. Let's process the top 10 now?"
 
-## Skill File Structure
+## Skill Files
 
 ```
 ll5-run/.claude/skills/
-  review.md          — quick review (/review)
-  weekly-review.md   — weekly review (/weekly-review)
+  review.md          — unified quick/weekly review (/review)
 ```
 
-Each skill file contains:
-1. Description of when to use it
-2. The phased workflow
-3. MCP tools to use at each phase
-4. Behavioral guidelines
-5. Journaling rule (must journal the review outcome)
+The existing `/daily` skill remains separate — it's a read-only morning snapshot (30 seconds), not an interactive review.
 
 ## Scheduler Integration
 
-- **Daily**: `DailyReviewScheduler` sends system message at configured hour → agent runs `/review`
-- **Weekly**: `WeeklyReviewReminder` sends system message on configured day/hour → agent runs `/weekly-review`
-- Both already exist in the gateway — they just need the agent to have the skill files to respond to them properly.
+- `DailyReviewScheduler`: morning briefing → agent runs `/daily` (read-only snapshot)
+- `WeeklyReviewReminder`: Friday → agent runs `/review` (enters weekly mode)
+- Both already exist. The skill files just need to respond properly to the system messages.

@@ -53,7 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
-- 2026-04-03: Design docs for roadmap items: geo-search (add to awareness MCP), health polling scheduler, data source config, GTD review skill, agent routing rename
+- 2026-04-03: Design docs for roadmap items: geo-search MCP (separate service), health polling scheduler, data source config, GTD review skill (quick+weekly), agent routing rename
 - 2026-04-03: Fix user_settings PUT deep merge (PG || is shallow, replaced with JS read-merge-write)
 - 2026-04-03: Unified user_settings table (JSONB) — consolidates timezone (was in google_user_settings, user_notification_settings, env vars) and notification levels into one table. Gateway GET/PUT /user-settings endpoints. Calendar MCP and schedulers read timezone from user_settings. Profile page has timezone selector.
 - 2026-04-03: Fix gateway Dockerfile: copy SQL migrations to dist (were never included in container)

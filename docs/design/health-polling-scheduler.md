@@ -2,101 +2,124 @@
 
 ## Purpose
 
-Periodically poll the Health MCP for new data and notify the agent when something notable happens — sleep ended, activity completed, unusual heart rate, weight change. Bridges the gap between on-demand sync and real-time awareness.
+The agent currently has no awareness of health events as they happen. This scheduler polls ES for newly synced health data every 15-20 minutes, detects notable changes, and pushes system messages so the agent can react contextually.
+
+The scheduler does **not** perform syncing — it assumes the Health MCP's `sync_health_data` has already written data to ES (triggered by agent or a future sync scheduler). Its sole job is detection and notification.
 
 ## Architecture
 
-Runs in the gateway as a scheduler (same pattern as CalendarSyncScheduler, GTDHealthScheduler, etc.).
+Runs in the gateway as a scheduler, alongside calendar sync, GTD health, etc.
 
 ```
-Gateway Scheduler (every 15 min)
-  ├── Call Health MCP: sync_health_data (pulls from Garmin etc.)
-  ├── Call Health MCP: get_sleep_summary, get_daily_stats, get_activities
+Gateway Scheduler (every 20 min, during active hours)
+  ├── Query ES for new data (synced_at > last check)
   ├── Compare with last-known state
-  ├── If notable change → insertSystemMessage() to agent
-  └── Update last-known state in PG
+  ├── If notable → insertSystemMessage() with notification level
+  └── Update last-seen timestamps (in-memory)
 ```
 
-## State Tracking
+### State: In-Memory Only
 
-New table in gateway PG:
-
-```sql
-CREATE TABLE IF NOT EXISTS health_poll_state (
-  user_id     UUID NOT NULL,
-  metric      VARCHAR(50) NOT NULL,  -- 'sleep', 'activity', 'daily_stats', 'weight'
-  last_value  JSONB NOT NULL DEFAULT '{}',
-  checked_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, metric)
-);
+```typescript
+interface HealthPollingState {
+  lastSeen: {
+    sleep: string | null;      // last synced_at processed
+    heartRate: string | null;
+    dailyStats: string | null;
+    activities: string | null;
+    bodyComposition: string | null;
+  };
+  reportedToday: Set<string>;  // dedup: "sleep:2026-04-03", "activity:12345"
+  currentDate: string | null;
+}
 ```
 
-`last_value` stores the last-seen state per metric:
-- sleep: `{ date, wake_time, duration_seconds }`
-- activity: `{ last_activity_id }`
-- daily_stats: `{ date, steps, stress_average }`
-- weight: `{ date, weight_kg }`
+- On restart: initialize `lastSeen` from max `synced_at` per index (no re-firing old events)
+- `reportedToday` resets on date rollover
+- No PG table needed — this is essentially a cache
 
 ## Event Detection
 
-### Sleep Events
-- **Sleep ended**: New sleep record appeared for today (wasn't there last check)
-- Notify: `[Health] You slept 7.2h last night (quality: 82). Deep: 1.5h, REM: 1.8h`
-- Level: `silent`
+Each tick queries ES for documents where `synced_at > lastSeen[metric]`.
 
-### Activity Events
-- **Activity completed**: New activity ID not in last_value
-- Notify: `[Health] Running completed — 5.2km in 32min, avg HR 145`
-- Level: `silent` (unless it's a notable achievement)
+### What's Notable
 
-### Daily Stats
-- **Unusual stress**: stress_average > 50 (high) when last check was normal
-- Notify: `[Health] Stress level elevated today (avg: 58). Consider a break.`
-- Level: `notify` (actionable context)
+| Event | Always Notify | Conditional | Never |
+|-------|--------------|-------------|-------|
+| Sleep ended | Yes (daily) | | |
+| Activity completed | If >10 min | | <10 min |
+| Weight logged | Yes (rare) | | |
+| Unusual resting HR | | If >15% above 7-day avg | Normal range |
+| High stress | | If avg >70 for day | Normal |
+| Low energy | | If battery <20 | Normal |
+| Steps milestone | | If >12k at evening | Intra-day |
 
-### Weight
-- **Weight logged**: New weight record different from last
-- Notify: `[Health] Weight: 78.2kg (down 0.3kg from last reading)`
-- Level: `silent`
+### Baseline Comparisons
 
-## What NOT to Notify
+For conditional events (unusual HR, high stress), query a 7-day rolling average from ES. Skip conditional notifications if fewer than 3 baseline data points exist (prevents false alerts during first week).
 
-- Steps increasing throughout the day (normal)
-- Heart rate within normal range
-- Same data as last poll (no change)
-- Data older than 24 hours (backfill, not real-time)
+### Notification Levels
+
+| Event | Level | Rationale |
+|-------|-------|-----------|
+| Sleep ended (normal) | `silent` | Informational |
+| Sleep ended (<5h or quality <40) | `notify` | Agent should check in |
+| Activity completed | `silent` | Routine |
+| Weight logged | `silent` | Routine |
+| Unusual resting HR | `alert` | Could indicate illness |
+| High stress day | `notify` | Agent adjusts approach |
+| Low energy | `notify` | Agent adjusts expectations |
+
+## System Message Format
+
+```
+[Health] You woke up at 07:15 after 6.8 hours of sleep (quality: 72). Deep: 1.2h, REM: 1.5h.
+```
+
+```
+[Health] Running completed — 42 min, 5.3 km, avg HR 148.
+```
+
+```
+[Health Alert] Resting HR today is 78 bpm — 22% above your 7-day average of 64.
+```
+
+### Batching
+
+If multiple events in one tick (sleep + daily stats + activity all synced at once), combine into one message:
+
+```
+[Health] Morning update:
+- Slept 6.8h (quality: 72)
+- Yesterday: 9,847 steps, 2,340 cal, body battery 65
+```
 
 ## Configuration
 
 ```typescript
 interface HealthPollConfig {
-  intervalMinutes: number;  // Default: 15
-  startHour: number;        // Default: 6
-  endHour: number;          // Default: 23
+  intervalMinutes: number;  // Default: 20
+  startHour: number;        // Reuse calendarReviewStartHour
+  endHour: number;          // Reuse calendarReviewEndHour
   timezone: string;         // From user_settings
   userId: string;
 }
 ```
 
-Environment variables:
-- `HEALTH_POLL_INTERVAL_MINUTES` (default: 15)
-- Health MCP URL already configured as `MCP_HEALTH_URL`
+Env: `HEALTH_POLLING_INTERVAL_MINUTES` (default: 20)
 
-## Implementation
+### Tunable Constants (in-code)
 
-```typescript
-class HealthPollScheduler {
-  // On each tick:
-  // 1. Trigger sync: call sync_health_data on Health MCP
-  // 2. Fetch latest data for each metric
-  // 3. Compare with health_poll_state
-  // 4. If changed and notable: insertSystemMessage()
-  // 5. Update health_poll_state
-}
-```
-
-The scheduler calls the Health MCP tools via HTTP (same as how gateway calls Google MCP for calendar sync). It uses the same `callMcpTool` pattern.
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MIN_ACTIVITY_DURATION_SEC` | 600 | Activities <10min not reported |
+| `HR_ANOMALY_PCT` | 15 | Resting HR >15% above avg triggers alert |
+| `SLEEP_SHORT_HOURS` | 5 | Sleep below this → notify |
+| `SLEEP_QUALITY_LOW` | 40 | Quality below this → notify |
+| `STRESS_HIGH` | 70 | Daily avg above this → notify |
+| `ENERGY_LOW` | 20 | Body battery below this → notify |
+| `BASELINE_MIN_POINTS` | 3 | Min data points for comparisons |
 
 ## Long-Term: Android Health Connect
 
-This scheduler is the near-term solution. The long-term approach is the Android app listening to Health Connect API for real-time events and pushing them to the gateway webhook (same pattern as GPS and calendar push). That would replace polling with push — but requires Health Connect integration on Android.
+This scheduler is the near-term solution. Long-term: Android app listens to Health Connect API for real-time events from any fitness app (Garmin, Samsung, Fitbit) and pushes to gateway webhook. That replaces polling with push but requires Android integration.
