@@ -107,8 +107,9 @@ function PeopleSection({
   isPending: boolean;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"category" | "name" | "messages">("category");
+  const [namedOnly, setNamedOnly] = useState(false);
 
-  // Find the rule for a given sender
   function findSenderRule(
     senderName: string
   ): NotificationRule | undefined {
@@ -117,13 +118,20 @@ function PeopleSection({
     );
   }
 
-  const filteredSenders = searchQuery
-    ? senders.filter(
-        (s) =>
-          s.sender.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.app.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : senders;
+  const filteredSenders = senders
+    .filter((s) => {
+      if (namedOnly && (/^\+?\d[\d\s\-()]+$/.test(s.sender) || s.sender.includes("@"))) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return s.sender.toLowerCase().includes(q) || s.app.toLowerCase().includes(q);
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "name") return a.sender.localeCompare(b.sender);
+      if (sortBy === "messages") return b.messageCount - a.messageCount;
+      return 0; // category — keep original grouping
+    });
 
   return (
     <Card>
@@ -138,14 +146,37 @@ function PeopleSection({
       </CardHeader>
       <CardContent>
         {senders.length > 10 && (
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Filter senders..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Filter senders..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <button
+              onClick={() => setNamedOnly((v) => !v)}
+              className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors cursor-pointer shrink-0 ${
+                namedOnly ? "bg-gray-800 text-white border-gray-800" : "bg-white text-gray-500 border-gray-200 hover:text-gray-700"
+              }`}
+            >
+              Named only
+            </button>
+            <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
+              {(["category", "name", "messages"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSortBy(s)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+                    sortBy === s ? "bg-gray-100 text-gray-800" : "text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  {s === "category" ? "By group" : s === "name" ? "By name" : "By count"}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

@@ -165,7 +165,7 @@ export async function fetchKnownSenders(): Promise<KnownSender[]> {
               : { match_all: {} },
           aggs: {
             senders: {
-              terms: { field: "sender.keyword", size: 100 },
+              terms: { field: "sender.keyword", size: 1000 },
               aggs: {
                 apps: { terms: { field: "app", size: 10 } },
                 last_message: { max: { field: "timestamp" } },
