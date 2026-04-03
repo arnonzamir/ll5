@@ -11,6 +11,11 @@ RUN npm ci --workspace=packages/shared --workspace=packages/gateway
 RUN npm run build --workspace=packages/shared
 RUN npm run build --workspace=packages/gateway
 
+# Copy SQL migrations to dist (they're not compiled by tsc)
+RUN if [ -d packages/gateway/src/migrations ]; then \
+      cp -r packages/gateway/src/migrations packages/gateway/dist/migrations; \
+    fi
+
 # -- Runtime stage --
 FROM node:20-alpine AS runtime
 

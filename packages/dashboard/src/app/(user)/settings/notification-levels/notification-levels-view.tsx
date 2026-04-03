@@ -11,13 +11,6 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   RefreshCw,
   Bell,
   BellRing,
@@ -118,11 +111,17 @@ export function NotificationLevelsView() {
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [isPending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
+    setError(null);
     startTransition(async () => {
-      const data = await fetchNotificationSettings();
-      setSettings(data);
+      const result = await fetchNotificationSettings();
+      if (result.error) {
+        setError(result.error);
+      } else {
+        setSettings(result.settings);
+      }
     });
   }, []);
 
@@ -131,9 +130,14 @@ export function NotificationLevelsView() {
   function handleSave() {
     if (!settings) return;
     setSaved(false);
+    setError(null);
     startTransition(async () => {
-      const ok = await updateNotificationSettings(settings);
-      if (ok) setSaved(true);
+      const result = await updateNotificationSettings(settings);
+      if (result.ok) {
+        setSaved(true);
+      } else {
+        setError(result.error ?? "Failed to save");
+      }
     });
   }
 
@@ -247,28 +251,18 @@ export function NotificationLevelsView() {
                   />
                 </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-xs text-gray-500">Timezone</label>
-                <Select
-                  value={settings.timezone}
-                  onValueChange={(v) => setSettings({ ...settings, timezone: v })}
-                >
-                  <SelectTrigger className="w-56 h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Asia/Jerusalem">Asia/Jerusalem</SelectItem>
-                    <SelectItem value="Europe/London">Europe/London</SelectItem>
-                    <SelectItem value="America/New_York">America/New_York</SelectItem>
-                    <SelectItem value="America/Los_Angeles">America/Los_Angeles</SelectItem>
-                    <SelectItem value="Europe/Berlin">Europe/Berlin</SelectItem>
-                    <SelectItem value="Asia/Tokyo">Asia/Tokyo</SelectItem>
-                    <SelectItem value="UTC">UTC</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <p className="text-xs text-gray-400">
+                Timezone is set in your profile settings.
+              </p>
             </CardContent>
           </Card>
+
+          {/* Error display */}
+          {error && (
+            <div className="flex items-center gap-2 text-sm px-3 py-2 rounded-md bg-red-50 text-red-700">
+              {error}
+            </div>
+          )}
 
           {/* Save button */}
           <div className="flex items-center gap-3">

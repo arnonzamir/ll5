@@ -11,25 +11,30 @@ export interface NotificationSettings {
   timezone: string;
 }
 
-export async function fetchNotificationSettings(): Promise<NotificationSettings> {
+export async function fetchNotificationSettings(): Promise<{ settings: NotificationSettings | null; error: string | null }> {
   const token = await getToken();
-  if (!token) return { max_level: "critical", quiet_max_level: "silent", quiet_start: "23:00", quiet_end: "07:00", timezone: "Asia/Jerusalem" };
+  if (!token) return { settings: null, error: "Not authenticated" };
 
   try {
     const res = await fetch(`${env.GATEWAY_URL}/user-notification-settings`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) return { max_level: "critical", quiet_max_level: "silent", quiet_start: "23:00", quiet_end: "07:00", timezone: "Asia/Jerusalem" };
-    return (await res.json()) as NotificationSettings;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error("[notification-levels] fetch failed:", res.status, body);
+      return { settings: null, error: `Server error (${res.status})` };
+    }
+    return { settings: (await res.json()) as NotificationSettings, error: null };
   } catch (err) {
-    console.error("[notification-levels] fetch failed:", err instanceof Error ? err.message : String(err));
-    return { max_level: "critical", quiet_max_level: "silent", quiet_start: "23:00", quiet_end: "07:00", timezone: "Asia/Jerusalem" };
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[notification-levels] fetch failed:", msg);
+    return { settings: null, error: msg };
   }
 }
 
-export async function updateNotificationSettings(settings: Partial<NotificationSettings>): Promise<boolean> {
+export async function updateNotificationSettings(settings: Partial<NotificationSettings>): Promise<{ ok: boolean; error: string | null }> {
   const token = await getToken();
-  if (!token) return false;
+  if (!token) return { ok: false, error: "Not authenticated" };
 
   try {
     const res = await fetch(`${env.GATEWAY_URL}/user-notification-settings`, {
@@ -37,9 +42,15 @@ export async function updateNotificationSettings(settings: Partial<NotificationS
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     });
-    return res.ok;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error("[notification-levels] update failed:", res.status, body);
+      return { ok: false, error: `Server error (${res.status}): ${body}` };
+    }
+    return { ok: true, error: null };
   } catch (err) {
-    console.error("[notification-levels] update failed:", err instanceof Error ? err.message : String(err));
-    return false;
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[notification-levels] update failed:", msg);
+    return { ok: false, error: msg };
   }
 }

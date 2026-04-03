@@ -16,7 +16,7 @@ ll5/
 │
 ├── docker/
 │   ├── Dockerfile.mcp                # Shared Dockerfile for all MCP servers (PACKAGE_NAME build arg)
-│   ├── Dockerfile.gateway            # Gateway-specific Dockerfile
+│   ├── Dockerfile.gateway            # Gateway-specific Dockerfile (copies src/migrations to dist)
 │   ├── Dockerfile.dashboard          # Next.js standalone Dockerfile
 │   ├── docker-compose.yml            # Local dev: ES + PG
 │   └── docker-compose.prod.yml       # Production reference (Coolify uses its own)

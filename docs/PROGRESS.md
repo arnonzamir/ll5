@@ -53,6 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-03: Fix gateway Dockerfile: copy SQL migrations to dist (were never included in container)
 - 2026-04-03: User notification levels — 4 levels (silent/notify/alert/critical), agent chooses level per push, user sets max ceiling + quiet hours. push_to_user gets level param, gateway caps + sends FCM, Android 4 notification channels, dashboard settings page, agent instructions with guidelines
 - 2026-04-03: WhatsApp archived groups — grayed out + auto-ignore in notification/messaging settings, is_archived column in messaging_conversations
 - 2026-04-03: Places auto-geocoding — upsert_place forward-geocodes address→lat/lon via Nominatim when coordinates not provided
