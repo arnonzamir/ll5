@@ -133,8 +133,7 @@ function PeopleSection({
           People
         </CardTitle>
         <CardDescription>
-          Set notification priority per sender. Senders without a rule use the
-          default batch review.
+          Rules by sender name — applies across all apps and conversations. A sender rule for "Mom" matches WhatsApp, Slack, SMS, etc.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -236,7 +235,7 @@ function SenderRow({
   const activePriority = rule?.priority ?? "batch";
 
   return (
-    <div className="flex items-center gap-3 py-2.5">
+    <div className="flex items-center gap-3 py-2.5 hover:bg-gray-50 px-2 -mx-2 rounded transition-colors">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium truncate">{sender.sender}</span>
@@ -523,7 +522,7 @@ function ConversationsSection({
           <span className="text-xs font-normal text-gray-400">({totalConversations})</span>
         </CardTitle>
         <CardDescription>
-          Set priority per conversation. Agent = can respond, Immediate = notify now, Batch = periodic summary, Ignore = drop.
+          Rules by specific WhatsApp/Telegram chat. Overrides sender rules for messages in this conversation.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -563,7 +562,7 @@ function ConversationsSection({
                 const hasRealName = c.name && !/^\+?\d[\d\s\-()]+$/.test(c.name) && !c.name.includes("@");
                 const activePriority = rule?.priority ?? (hasRealName ? "batch" : "ignore");
                 return (
-                  <div key={`${c.platform}:${c.conversation_id}`} className="flex items-center gap-3 py-2.5">
+                  <div key={`${c.platform}:${c.conversation_id}`} className="flex items-center gap-3 py-2.5 hover:bg-gray-50 px-2 -mx-2 rounded transition-colors">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         {c.is_group ? (
