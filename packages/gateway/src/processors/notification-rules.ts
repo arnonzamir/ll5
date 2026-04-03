@@ -9,6 +9,7 @@ interface Rule {
   match_value: string;
   priority: Priority;
   platform: string | null;
+  download_images: boolean;
 }
 
 export class NotificationRuleMatcher {
@@ -22,7 +23,7 @@ export class NotificationRuleMatcher {
     if (Date.now() - this.lastRefresh < this.refreshInterval) return;
     try {
       const result = await this.pool.query<{ user_id: string } & Rule>(
-        'SELECT id, user_id, rule_type, match_value, priority, platform FROM notification_rules',
+        'SELECT id, user_id, rule_type, match_value, priority, platform, download_images FROM notification_rules',
       );
       this.rules.clear();
       for (const row of result.rows) {
@@ -33,6 +34,7 @@ export class NotificationRuleMatcher {
           match_value: row.match_value,
           priority: row.priority as Priority,
           platform: row.platform ?? null,
+          download_images: row.download_images ?? false,
         });
         this.rules.set(row.user_id, list);
       }
@@ -109,5 +111,25 @@ export class NotificationRuleMatcher {
 
     // 3. Wildcard — lowest priority
     return wildcardResult;
+  }
+
+  /** Check if a conversation has image download enabled. */
+  async shouldDownloadImages(
+    userId: string,
+    platform: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    await this.refresh();
+    const userRules = this.rules.get(userId);
+    if (!userRules) return false;
+
+    for (const rule of userRules) {
+      if (rule.rule_type === 'conversation' &&
+          rule.platform === platform &&
+          rule.match_value === conversationId) {
+        return rule.download_images;
+      }
+    }
+    return false;
   }
 }

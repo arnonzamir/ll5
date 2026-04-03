@@ -292,7 +292,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   app.post('/notification-rules', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
-    const { rule_type, match_value, priority, platform } = req.body;
+    const { rule_type, match_value, priority, platform, download_images } = req.body;
     if (!rule_type || !match_value) {
       res.status(400).json({ error: 'rule_type and match_value required' });
       return;
@@ -301,12 +301,12 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     // Conversation rules use upsert (one rule per conversation)
     if (rule_type === 'conversation' && platform) {
       const result = await pgPool.query(
-        `INSERT INTO notification_rules (user_id, rule_type, match_value, priority, platform)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO notification_rules (user_id, rule_type, match_value, priority, platform, download_images)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (user_id, platform, match_value) WHERE rule_type = 'conversation'
-         DO UPDATE SET priority = EXCLUDED.priority
+         DO UPDATE SET priority = EXCLUDED.priority, download_images = COALESCE(EXCLUDED.download_images, notification_rules.download_images)
          RETURNING *`,
-        [userId, rule_type, match_value, priority || 'batch', platform],
+        [userId, rule_type, match_value, priority || 'batch', platform, download_images ?? false],
       );
       res.status(201).json(result.rows[0]);
       return;

@@ -27,6 +27,7 @@ import {
   MessageSquare,
   Users,
   User,
+  Image as ImageIcon,
 } from "lucide-react";
 import {
   fetchRules,
@@ -444,10 +445,12 @@ const CONVO_PAGE_SIZE = 50;
 function ConversationsSection({
   rules,
   onSetPriority,
+  onToggleImages,
   isPending: parentPending,
 }: {
   rules: NotificationRule[];
   onSetPriority: (platform: string, conversationId: string, priority: "ignore" | "batch" | "immediate" | "agent") => void;
+  onToggleImages: (platform: string, conversationId: string, enabled: boolean) => void;
   isPending: boolean;
 }) {
   const [conversations, setConversations] = useState<ConversationInfo[]>([]);
@@ -579,6 +582,16 @@ function ConversationsSection({
                         </div>
                       )}
                     </div>
+                    <button
+                      onClick={() => onToggleImages(c.platform, c.conversation_id, !(rule?.download_images))}
+                      disabled={isPending}
+                      title={rule?.download_images ? "Images: downloading" : "Images: not downloading"}
+                      className={`p-1 rounded transition-colors cursor-pointer shrink-0 ${
+                        rule?.download_images ? "text-blue-500 bg-blue-50" : "text-gray-300 hover:text-gray-500"
+                      }`}
+                    >
+                      <ImageIcon className="h-3.5 w-3.5" />
+                    </button>
                     <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
                       {PRIORITY_OPTIONS.map((p) => {
                         const config = PRIORITY_CONFIG[p];
@@ -742,7 +755,35 @@ export function NotificationSettingsView() {
     priority: "ignore" | "batch" | "immediate" | "agent"
   ) {
     startTransition(async () => {
-      const created = await createRule("conversation", conversationId, priority, platform);
+      const existing = rules.find(
+        (r) => r.rule_type === "conversation" && r.match_value === conversationId && r.platform === platform
+      );
+      const created = await createRule("conversation", conversationId, priority, platform, existing?.download_images);
+      if (created) {
+        setRules((prev) => [
+          ...prev.filter(
+            (r) => !(r.rule_type === "conversation" && r.match_value === conversationId && r.platform === platform)
+          ),
+          created,
+        ]);
+      } else {
+        const fresh = await fetchRules();
+        setRules(fresh);
+      }
+    });
+  }
+
+  function handleToggleImages(
+    platform: string,
+    conversationId: string,
+    enabled: boolean
+  ) {
+    startTransition(async () => {
+      const existing = rules.find(
+        (r) => r.rule_type === "conversation" && r.match_value === conversationId && r.platform === platform
+      );
+      const priority = existing?.priority ?? "batch";
+      const created = await createRule("conversation", conversationId, priority, platform, enabled);
       if (created) {
         setRules((prev) => [
           ...prev.filter(
@@ -814,6 +855,7 @@ export function NotificationSettingsView() {
           <ConversationsSection
             rules={rules}
             onSetPriority={handleSetConversationPriority}
+            onToggleImages={handleToggleImages}
             isPending={isPending}
           />
         )}

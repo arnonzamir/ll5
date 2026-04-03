@@ -13,6 +13,7 @@ export interface NotificationRule {
   match_value: string;
   priority: "immediate" | "batch" | "ignore" | "agent";
   platform?: string;
+  download_images?: boolean;
   created_at: string;
 }
 
@@ -73,11 +74,13 @@ export async function createRule(
   rule_type: NotificationRule["rule_type"],
   match_value: string,
   priority: NotificationRule["priority"],
-  platform?: string
+  platform?: string,
+  download_images?: boolean
 ): Promise<NotificationRule | null> {
   try {
     const body: Record<string, unknown> = { rule_type, match_value, priority };
     if (platform) body.platform = platform;
+    if (download_images !== undefined) body.download_images = download_images;
     const res = await gatewayFetch("/notification-rules", {
       method: "POST",
       body: JSON.stringify(body),

@@ -82,8 +82,9 @@ export async function processWhatsAppWebhook(
       platform: 'whatsapp', conversation_id: remoteJid,
     });
 
-    // Only download images for immediate/agent conversations (not batch — too much storage)
-    if (imgPriority === 'immediate' || imgPriority === 'agent') {
+    // Download images only if conversation has download_images enabled
+    const shouldDownload = await matcher.shouldDownloadImages(userId, 'whatsapp', remoteJid);
+    if (shouldDownload) {
       try {
         // Download image from WhatsApp CDN
         const imgRes = await fetch(imageMessage.url);
@@ -118,7 +119,7 @@ export async function processWhatsAppWebhook(
         });
       }
     } else {
-      logger.debug('[processWhatsAppWebhook][handle] Skipping image download — only immediate/agent conversations download images');
+      logger.debug('[processWhatsAppWebhook][handle] Skipping image download — download_images not enabled for this conversation');
     }
   }
   const timestamp = typeof data.messageTimestamp === 'number'
