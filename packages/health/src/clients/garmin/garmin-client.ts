@@ -7,27 +7,31 @@ type IActivity = any;
 import { logger } from '../../utils/logger.js';
 
 export class GarminClient {
-  private gc: InstanceType<typeof GarminConnect>;
+  private gc: InstanceType<typeof GarminConnect> | null = null;
   private _connected = false;
 
-  constructor() {
-    this.gc = new GarminConnect();
-  }
-
   async login(email: string, password: string): Promise<any> {
-    await this.gc.login(email, password);
+    this.gc = new GarminConnect({ username: email, password });
+    await this.gc.login();
     this._connected = true;
-    return this.gc.exportToken();
+    return this.ensureClient().exportToken();
   }
 
   async restoreSession(oauth1: any, oauth2: any): Promise<void> {
+    // Create a dummy instance and load tokens
+    this.gc = new GarminConnect({ username: 'restored', password: 'restored' });
     this.gc.loadToken(oauth1, oauth2);
     this._connected = true;
   }
 
+  private ensureClient(): InstanceType<typeof GarminConnect> {
+    if (!this.gc) throw new Error('GarminClient not initialized — call login() or restoreSession() first');
+    return this.gc;
+  }
+
   async getSleepData(date: string): Promise<GarminSleepData | null> {
     try {
-      return await this.gc.getSleepData(new Date(date));
+      return await this.ensureClient().getSleepData(new Date(date));
     } catch (err) {
       logger.warn('[GarminClient][getSleepData] Failed', { error: String(err), date });
       return null;
@@ -37,7 +41,7 @@ export class GarminClient {
   async getHeartRate(date: string): Promise<unknown> {
     try {
       // getHeartRate returns HeartRate type (not exported, so we use unknown)
-      return await this.gc.getHeartRate(new Date(date));
+      return await this.ensureClient().getHeartRate(new Date(date));
     } catch (err) {
       logger.warn('[GarminClient][getHeartRate] Failed', { error: String(err), date });
       return null;
@@ -46,7 +50,7 @@ export class GarminClient {
 
   async getSteps(date: string): Promise<number | null> {
     try {
-      return await this.gc.getSteps(new Date(date));
+      return await this.ensureClient().getSteps(new Date(date));
     } catch (err) {
       logger.warn('[GarminClient][getSteps] Failed', { error: String(err), date });
       return null;
@@ -55,7 +59,7 @@ export class GarminClient {
 
   async getActivities(start: number, limit: number): Promise<IActivity[]> {
     try {
-      return await this.gc.getActivities(start, limit);
+      return await this.ensureClient().getActivities(start, limit);
     } catch (err) {
       logger.warn('[GarminClient][getActivities] Failed', { error: String(err), start, limit });
       return [];
@@ -64,7 +68,7 @@ export class GarminClient {
 
   async getDailyWeight(date: string): Promise<unknown> {
     try {
-      return await this.gc.getDailyWeightData(new Date(date));
+      return await this.ensureClient().getDailyWeightData(new Date(date));
     } catch (err) {
       logger.warn('[GarminClient][getDailyWeight] Failed', { error: String(err), date });
       return null;
@@ -77,7 +81,7 @@ export class GarminClient {
    */
   async getStressData(date: string): Promise<unknown> {
     try {
-      return await this.gc.get<unknown>(`/wellness-service/wellness/dailyStress/${date}`);
+      return await this.ensureClient().get<unknown>(`/wellness-service/wellness/dailyStress/${date}`);
     } catch (err) {
       logger.warn('[GarminClient][getStressData] Failed', { error: String(err), date });
       return null;
@@ -90,7 +94,7 @@ export class GarminClient {
    */
   async getDailySummary(date: string): Promise<unknown> {
     try {
-      return await this.gc.get<unknown>(`/wellness-service/wellness/dailySummaryChart/${date}`);
+      return await this.ensureClient().get<unknown>(`/wellness-service/wellness/dailySummaryChart/${date}`);
     } catch (err) {
       logger.warn('[GarminClient][getDailySummary] Failed', { error: String(err), date });
       return null;
@@ -102,6 +106,6 @@ export class GarminClient {
   }
 
   getTokens(): any {
-    return this.gc.exportToken();
+    return this.ensureClient().exportToken();
   }
 }
