@@ -126,18 +126,25 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 ## CI/CD
 
 - GitHub Actions: `.github/workflows/build-and-push.yml`
-- Builds all packages on push to main, pushes to GHCR
-- Deploy step: SSH to server, `docker compose pull && up -d`
-- Deploy needs `DEPLOY_SSH_KEY` + `COOLIFY_SERVICE_UUID` in GitHub secrets + `SERVER_HOST` variable
+- Builds changed packages on push to main, pushes to GHCR
+- Auto-deploy: `appleboy/ssh-action@v1` SSHs to server, runs `docker compose pull && up -d --remove-orphans`
+- Health check: curls mcp-knowledge.noninoni.click/health (4 retries, non-blocking)
+- Deploy only runs on main branch (skipped for workflow_dispatch)
+- Secrets configured: `DEPLOY_SSH_KEY`, `COOLIFY_SERVICE_UUID` (GitHub secrets) + `SERVER_HOST` (GitHub variable)
 
 ## How to Deploy
 
 ```bash
-git push  # triggers CI build
-# Wait ~3 min for build
+git push  # triggers CI build + auto-deploy (~3-4 min total)
+```
+
+Deploy is fully automated: push to main triggers build, then SSH deploy with health check.
+
+Manual deploy (if needed):
+```bash
 ssh -i ~/.ssh/id_ed25519 root@95.216.23.208
 cd /data/coolify/services/xkkcc0g4o48kkcows8488so4
-docker compose pull && docker compose up -d
+docker compose pull && docker compose up -d --remove-orphans
 ```
 
 ## How to Run Locally

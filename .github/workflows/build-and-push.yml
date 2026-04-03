@@ -124,25 +124,19 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Setup SSH
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /data/coolify/services/${{ secrets.COOLIFY_SERVICE_UUID }}
+            docker compose pull
+            docker compose up -d --remove-orphans
+
+      - name: Health check
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ vars.SERVER_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Deploy to Coolify
-        env:
-          SERVER_HOST: ${{ vars.SERVER_HOST }}
-          SERVICE_UUID: ${{ secrets.COOLIFY_SERVICE_UUID }}
-        run: |
-          SSH="ssh -i ~/.ssh/deploy_key root@${SERVER_HOST}"
-          DIR="/data/coolify/services/${SERVICE_UUID}"
-
-          # Pull latest images and recreate changed containers
-          $SSH "cd ${DIR} && docker compose pull && docker compose up -d"
-
-          # Verify health (check first MCP)
           sleep 15
           for i in 1 2 3 4; do
             STATUS=$(curl -s -o /dev/null -w '%{http_code}' https://mcp-knowledge.noninoni.click/health 2>/dev/null || echo "000")
@@ -154,7 +148,3 @@ jobs:
             sleep 10
           done
           echo "Warning: health check did not return 200, but containers may still be starting"
-
-      - name: Cleanup
-        if: always()
-        run: rm -f ~/.ssh/deploy_key

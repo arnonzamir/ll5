@@ -97,7 +97,6 @@ Current state of the LL5 personal assistant system.
 - Dashboard MCP client sometimes gets stale responses (needs cache-busting)
 - FileChanged hook replaced by Channel MCP (channel approach works reliably)
 - Gateway SSE listener needs reconnect-on-error improvement
-- No automated deploy step with SSH keys in GitHub secrets (manual deploy works)
 
 ## Tech Debt
 
