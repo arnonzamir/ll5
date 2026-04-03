@@ -117,46 +117,45 @@ async function resolveLevel(
 ): Promise<NotificationLevel> {
   try {
     const result = await pool.query(
-      'SELECT max_level, quiet_max_level, quiet_start, quiet_end, timezone FROM user_notification_settings WHERE user_id = $1',
+      'SELECT settings FROM user_settings WHERE user_id = $1',
       [userId],
     );
 
     if (result.rows.length === 0) {
-      // No settings → no cap
       return requested;
     }
 
-    const settings = result.rows[0];
-    const maxLevel = (settings.max_level as NotificationLevel) ?? 'critical';
+    const allSettings = result.rows[0].settings ?? {};
+    const notif = allSettings.notification ?? {};
+    const maxLevel = (notif.max_level as NotificationLevel) ?? 'critical';
+    const tz = allSettings.timezone ?? 'Asia/Jerusalem';
 
     // Check if currently in quiet hours
     let effectiveMax = maxLevel;
     try {
-      // Get current time in user's timezone
       const now = new Date();
       const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: settings.timezone ?? 'Asia/Jerusalem',
+        timeZone: tz,
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
       });
-      const currentTime = formatter.format(now); // "HH:MM"
+      const currentTime = formatter.format(now);
 
-      const quietStart = (settings.quiet_start as string)?.slice(0, 5) ?? '23:00';
-      const quietEnd = (settings.quiet_end as string)?.slice(0, 5) ?? '07:00';
+      const quietStart = (notif.quiet_start as string) ?? '23:00';
+      const quietEnd = (notif.quiet_end as string) ?? '07:00';
 
       const inQuietHours = quietStart > quietEnd
-        ? currentTime >= quietStart || currentTime < quietEnd  // overnight (23:00-07:00)
-        : currentTime >= quietStart && currentTime < quietEnd; // same day
+        ? currentTime >= quietStart || currentTime < quietEnd
+        : currentTime >= quietStart && currentTime < quietEnd;
 
       if (inQuietHours) {
-        effectiveMax = (settings.quiet_max_level as NotificationLevel) ?? 'silent';
+        effectiveMax = (notif.quiet_max_level as NotificationLevel) ?? 'silent';
       }
     } catch {
       // Timezone parsing failed — use normal max
     }
 
-    // Cap at effective max
     if (LEVEL_RANK[requested] > LEVEL_RANK[effectiveMax]) {
       logger.info('[FCMSender][resolveLevel] Capping notification level', {
         requested,

@@ -174,6 +174,7 @@ See docs/implementation/deployment-log.md for full details:
 - FileChanged hook doesn't reliably wake Claude — Channel MCP is the working solution
 - Gateway is ESM — never use `require()` for node builtins; use static `import` instead
 - Gateway Dockerfile must copy `src/migrations` to `dist/migrations` (SQL files aren't compiled by tsc)
+- **Unified user settings**: `user_settings` table with JSONB `settings` column. Gateway `GET/PUT /user-settings`. Structure: `{ timezone, notification: { max_level, quiet_max_level, quiet_start, quiet_end } }`. Replaces `user_notification_settings` and `google_user_settings` (legacy tables kept for backward compat during transition). All services read timezone from here.
 - WhatsApp webhook resolves group names from messaging_conversations table (shared PG) — no longer stores raw JIDs as group_name
 - Places upsert auto-geocodes address→coordinates via Nominatim when lat/lon not provided (1 req/sec rate limit)
 - People relationship field is free-text; UI groups them into family/friend/colleague/acquaintance/other for filtering

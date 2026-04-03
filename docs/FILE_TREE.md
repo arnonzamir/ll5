@@ -94,7 +94,7 @@ ll5/
 │       ├── utils/system-message.ts    # Shared system message writer with dedup
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message
 │       ├── utils/fcm-sender.ts       # FCM v1 API sender (service account JWT + OAuth2, includes notification_level in data payload)
-│       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, notification_rules (unified 4-level), device_commands
+│       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, notification_rules, device_commands, user_settings (JSONB)
 │       └── server.ts                  # Express app: webhooks, auth, chat, media, commands, availability check, health, schedulers
 │
 ├── packages/google/                   # calendar MCP — unified calendar layer (PG+ES)

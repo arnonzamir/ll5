@@ -374,81 +374,47 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
-  // --- User notification settings ---
+  // --- User settings (unified JSONB) ---
 
-  const VALID_LEVELS = ['silent', 'notify', 'alert', 'critical'];
-
-  app.get('/user-notification-settings', authMw, async (req: Request, res: Response) => {
+  app.get('/user-settings', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     try {
       const result = await pgPool.query(
-        'SELECT * FROM user_notification_settings WHERE user_id = $1',
+        'SELECT settings FROM user_settings WHERE user_id = $1',
         [userId],
       );
-      if (result.rows.length === 0) {
-        // Return defaults
-        res.json({
-          max_level: 'critical',
-          quiet_max_level: 'silent',
-          quiet_start: '23:00',
-          quiet_end: '07:00',
-          timezone: 'Asia/Jerusalem',
-        });
-        return;
-      }
-      const row = result.rows[0];
-      res.json({
-        max_level: row.max_level,
-        quiet_max_level: row.quiet_max_level,
-        quiet_start: row.quiet_start?.slice(0, 5) ?? '23:00',
-        quiet_end: row.quiet_end?.slice(0, 5) ?? '07:00',
-        timezone: row.timezone,
-      });
+      res.json(result.rows[0]?.settings ?? {});
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('[server][getNotificationSettings] Failed', { error: message });
+      logger.error('[server][getUserSettings] Failed', { error: message });
       res.status(500).json({ error: message });
     }
   });
 
-  app.put('/user-notification-settings', authMw, async (req: Request, res: Response) => {
+  app.put('/user-settings', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
-    const { max_level, quiet_max_level, quiet_start, quiet_end, timezone } = req.body;
+    const patch = req.body;
 
-    if (max_level && !VALID_LEVELS.includes(max_level)) {
-      res.status(400).json({ error: `max_level must be one of: ${VALID_LEVELS.join(', ')}` });
-      return;
-    }
-    if (quiet_max_level && !VALID_LEVELS.includes(quiet_max_level)) {
-      res.status(400).json({ error: `quiet_max_level must be one of: ${VALID_LEVELS.join(', ')}` });
+    if (!patch || typeof patch !== 'object') {
+      res.status(400).json({ error: 'Body must be a JSON object with settings to merge' });
       return;
     }
 
     try {
+      // Deep merge: existing settings || patch
       await pgPool.query(
-        `INSERT INTO user_notification_settings (user_id, max_level, quiet_max_level, quiet_start, quiet_end, timezone)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO user_settings (user_id, settings, updated_at)
+         VALUES ($1, $2, now())
          ON CONFLICT (user_id) DO UPDATE SET
-           max_level = COALESCE($2, user_notification_settings.max_level),
-           quiet_max_level = COALESCE($3, user_notification_settings.quiet_max_level),
-           quiet_start = COALESCE($4, user_notification_settings.quiet_start),
-           quiet_end = COALESCE($5, user_notification_settings.quiet_end),
-           timezone = COALESCE($6, user_notification_settings.timezone),
+           settings = user_settings.settings || $2::jsonb,
            updated_at = now()`,
-        [
-          userId,
-          max_level ?? 'critical',
-          quiet_max_level ?? 'silent',
-          quiet_start ?? '23:00',
-          quiet_end ?? '07:00',
-          timezone ?? 'Asia/Jerusalem',
-        ],
+        [userId, JSON.stringify(patch)],
       );
-      logger.info('[server][putNotificationSettings] Updated', { userId, max_level, quiet_max_level });
+      logger.info('[server][putUserSettings] Updated', { userId, keys: Object.keys(patch) });
       res.json({ updated: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error('[server][putNotificationSettings] Failed', { error: message });
+      logger.error('[server][putUserSettings] Failed', { error: message });
       res.status(500).json({ error: message });
     }
   });
@@ -1032,7 +998,7 @@ export async function startServer(config: EnvConfig): Promise<void> {
   logger.info('[startServer][init] Elasticsearch indices ready');
 
   // Start calendar sync and review schedulers
-  startSchedulers(config, esClient, pgPool);
+  await startSchedulers(config, esClient, pgPool);
 
   app.listen(config.port, () => {
     logger.info(`[startServer][listen] Gateway listening on port ${config.port}`, {

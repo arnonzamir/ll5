@@ -7,8 +7,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Shield, LogOut, Check } from "lucide-react";
-import { getUserInfo, getDisplayName, updateDisplayName, logout } from "./profile-server-actions";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Shield, LogOut, Check, Globe } from "lucide-react";
+import { getUserInfo, getDisplayName, updateDisplayName, getTimezone, updateTimezone, logout } from "./profile-server-actions";
 
 interface UserInfo {
   userId: string;
@@ -21,13 +28,18 @@ export default function ProfilePage() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [displayNameSaved, setDisplayNameSaved] = useState(false);
+  const [timezone, setTimezone] = useState("Asia/Jerusalem");
+  const [timezoneSaved, setTimezoneSaved] = useState(false);
+  const [timezoneError, setTimezoneError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     startTransition(async () => {
-      const [info, name] = await Promise.all([getUserInfo(), getDisplayName()]);
+      const [info, name, tz] = await Promise.all([getUserInfo(), getDisplayName(), getTimezone()]);
       setUser(info);
       setDisplayName(name);
+      if (tz.error) setTimezoneError(tz.error);
+      else setTimezone(tz.timezone);
     });
   }, []);
 
@@ -137,32 +149,72 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Settings */}
+      {/* Timezone */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-gray-500">
-            Settings
+          <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
+            <Globe className="h-4 w-4" /> Timezone
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-sm text-gray-600">Theme</Label>
-              <p className="text-xs text-gray-400">Light / Dark mode</p>
-            </div>
-            <Button variant="outline" size="sm" disabled>
-              Light
+          <div className="flex items-center gap-2">
+            <Select
+              value={timezone}
+              onValueChange={(v) => {
+                setTimezone(v);
+                setTimezoneSaved(false);
+                setTimezoneError(null);
+              }}
+            >
+              <SelectTrigger className="flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Asia/Jerusalem">Asia/Jerusalem</SelectItem>
+                <SelectItem value="Europe/London">Europe/London</SelectItem>
+                <SelectItem value="Europe/Berlin">Europe/Berlin</SelectItem>
+                <SelectItem value="Europe/Paris">Europe/Paris</SelectItem>
+                <SelectItem value="America/New_York">America/New_York</SelectItem>
+                <SelectItem value="America/Chicago">America/Chicago</SelectItem>
+                <SelectItem value="America/Los_Angeles">America/Los_Angeles</SelectItem>
+                <SelectItem value="Asia/Tokyo">Asia/Tokyo</SelectItem>
+                <SelectItem value="Asia/Shanghai">Asia/Shanghai</SelectItem>
+                <SelectItem value="Australia/Sydney">Australia/Sydney</SelectItem>
+                <SelectItem value="UTC">UTC</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              onClick={() => {
+                setTimezoneError(null);
+                startTransition(async () => {
+                  const result = await updateTimezone(timezone);
+                  if (result.ok) {
+                    setTimezoneSaved(true);
+                    setTimeout(() => setTimezoneSaved(false), 2000);
+                  } else {
+                    setTimezoneError(result.error ?? "Failed to save");
+                  }
+                });
+              }}
+              disabled={isPending}
+            >
+              {timezoneSaved ? (
+                <>
+                  <Check className="h-4 w-4 mr-1" />
+                  Saved
+                </>
+              ) : (
+                "Save"
+              )}
             </Button>
           </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-sm text-gray-600">Notifications</Label>
-              <p className="text-xs text-gray-400">Push notification preferences</p>
-            </div>
-            <Button variant="outline" size="sm" disabled>
-              Configure
-            </Button>
-          </div>
+          {timezoneError && (
+            <p className="text-xs text-red-600">{timezoneError}</p>
+          )}
+          <p className="text-xs text-gray-400">
+            Used for calendar, notifications, quiet hours, and all time-based features.
+          </p>
         </CardContent>
       </Card>
 

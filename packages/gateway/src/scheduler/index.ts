@@ -14,11 +14,11 @@ import { JournalHealthScheduler } from './journal-health.js';
 import { JournalConsolidationScheduler } from './journal-consolidation.js';
 import { logger } from '../utils/logger.js';
 
-export function startSchedulers(
+export async function startSchedulers(
   config: EnvConfig,
   es: Client,
   pgPool: Pool,
-): void {
+): Promise<void> {
   // Get the first user ID from webhook tokens for scheduler context
   const userId = Object.values(config.webhookTokens)[0];
   if (!userId) {
@@ -26,7 +26,20 @@ export function startSchedulers(
     return;
   }
 
-  const timezone = config.calendarReviewTimezone;
+  // Read timezone from user_settings (unified), fall back to env var
+  let timezone = config.calendarReviewTimezone;
+  try {
+    const result = await pgPool.query(
+      "SELECT settings->>'timezone' as tz FROM user_settings WHERE user_id = $1",
+      [userId],
+    );
+    if (result.rows[0]?.tz) {
+      timezone = result.rows[0].tz;
+      logger.info('[startSchedulers][init] Using timezone from user_settings', { timezone });
+    }
+  } catch {
+    // Table may not exist yet on first deploy — use env var
+  }
 
   // --- Independent schedulers (always start) ---
 
