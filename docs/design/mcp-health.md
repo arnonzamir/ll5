@@ -10,7 +10,7 @@ Health data is fundamentally time-series data. All the main data categories (sle
 - Schema flexibility for adding new device sources without migrations
 - Consistent pattern with `ll5_awareness_*` indices
 
-PG is needed only for OAuth 1.0a tokens (Garmin consumer key/secret and user's access token/secret), following the exact same pattern as `google_oauth_tokens`.
+PG is needed only for Garmin session tokens (OAuth1 + OAuth2 tokens from the `garmin-connect` npm package), following the same pattern as `google_oauth_tokens`.
 
 **ES indices for health data, PG table for Garmin OAuth tokens.**
 
@@ -175,75 +175,51 @@ The `activity_type` uses a normalized enum: `running`, `cycling`, `swimming`, `w
 
 ---
 
-## 3. PostgreSQL Tables (OAuth 1.0a Tokens)
+## 3. Authentication — `garmin-connect` npm package
 
-### Migration: `001_create_tables.sql`
+**No Garmin Developer Program needed.** Uses the unofficial `garmin-connect` npm package which logs in with email/password (same as the Garmin Connect website), then caches OAuth1+OAuth2 tokens for subsequent requests.
 
-```sql
-CREATE TABLE IF NOT EXISTS health_oauth_tokens (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         VARCHAR(255) NOT NULL,
-  provider        VARCHAR(50) NOT NULL,
-  access_token    TEXT NOT NULL,
-  token_secret    TEXT NOT NULL,
-  consumer_key    TEXT,
-  scopes          TEXT[] DEFAULT '{}',
-  user_access_id  TEXT,
-  expires_at      TIMESTAMPTZ,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE(user_id, provider)
-);
-
-CREATE INDEX IF NOT EXISTS idx_health_oauth_tokens_user_provider
-  ON health_oauth_tokens(user_id, provider);
-```
-
-This table stores OAuth 1.0a tokens (Garmin) as well as OAuth 2.0 tokens (future Fitbit). The `provider` field distinguishes them. The `token_secret` field is the OAuth 1.0a token secret (encrypted with AES-256-GCM, reusing the encryption utility from `packages/google`). For OAuth 2.0 providers, `token_secret` stores the refresh token. The `consumer_key` is stored per-user to support multiple Garmin developer accounts if needed, though typically it comes from env vars.
-
----
-
-## 4. Garmin OAuth 1.0a Flow
-
-Garmin uses OAuth 1.0a, which is a three-legged flow:
-
-1. **Request Token**: Server calls `https://connectapi.garmin.com/oauth-service/oauth/request_token` with consumer key/secret. Gets a temporary request token + secret.
-2. **Authorization**: User is redirected to `https://connect.garmin.com/oauthConfirm?oauth_token=<request_token>`. User logs into Garmin and approves.
-3. **Access Token**: After approval, Garmin redirects to our callback URL with `oauth_token` and `oauth_verifier`. Server exchanges these for a permanent access token + secret.
-
-### Implementation approach
-
-Use the `oauth-1.0a` npm package (lightweight, well-maintained) combined with Node's native `fetch` for HTTP calls. Do NOT use a full Garmin SDK -- none exists officially; the API is plain REST.
-
-**Server endpoints in `packages/health/src/server.ts`:**
-
-- `GET /oauth/garmin/callback` -- public endpoint, no auth. Garmin redirects here after user approves. Exchanges verifier for access token and stores it encrypted in PG.
-
-**MCP tools for the flow:**
-
-- `get_garmin_auth_url` -- Generates the Garmin authorization URL. Internally calls Garmin's request_token endpoint, stores the temporary token in memory (same pattern as `pendingStates` Map in the Google MCP), returns the URL for the user to visit.
-- `get_garmin_connection_status` -- Checks if Garmin tokens exist and tests them against the Garmin API.
-- `disconnect_garmin` -- Deletes stored tokens.
-
-**Key differences from Google OAuth 2.0:**
-
-- OAuth 1.0a has no token refresh. Access tokens are permanent until revoked.
-- Every API request must be signed with HMAC-SHA1 using the consumer secret + token secret.
-- The `oauth-1.0a` library handles request signing.
-
-### In-memory state for OAuth flow
-
-Same pattern as `/Users/arnon/workspace/ll5/packages/google/src/tools/auth.ts` lines 15-16:
+### How it works:
 
 ```typescript
-export const pendingOAuthRequests = new Map<string, {
-  requestToken: string;
-  requestTokenSecret: string;
-  userId: string;
-}>();
+import { GarminConnect } from 'garmin-connect';
+const client = new GarminConnect({ username: email, password: pass });
+await client.login();
+
+// Tokens auto-refresh. Persist them:
+const oauth1 = client.oauth1Token;
+const oauth2 = client.oauth2Token;
+
+// Restore later without re-login:
+client.loadToken(oauth1, oauth2);
 ```
 
-Cleaned up after 10 minutes with `setTimeout`, identical to the Google MCP.
+### PG table for token persistence
+
+```sql
+CREATE TABLE IF NOT EXISTS health_garmin_tokens (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     VARCHAR(255) NOT NULL UNIQUE,
+  oauth1      TEXT NOT NULL,  -- encrypted JSON
+  oauth2      TEXT NOT NULL,  -- encrypted JSON
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+Tokens encrypted with AES-256-GCM (same `ENCRYPTION_KEY` as Google MCP).
+
+### Auth flow:
+1. User provides Garmin email + password via MCP tool `connect_garmin`
+2. Server calls `client.login()`, gets tokens
+3. Tokens encrypted and stored in PG
+4. Subsequent syncs load tokens — no password stored
+5. If tokens expire, re-login with stored credentials (or prompt user)
+
+### MCP auth tools:
+- `connect_garmin` — login with email/password, store tokens. One-time setup.
+- `get_garmin_status` — check if connected, test tokens
+- `disconnect_garmin` — delete stored tokens
 
 ---
 
@@ -337,25 +313,26 @@ Parameters:
 
 ### Module: `packages/health/src/clients/garmin.ts`
 
-This is the core integration layer. It encapsulates:
+Uses the `garmin-connect` npm package which wraps Garmin Connect's internal API.
 
-1. OAuth 1.0a request signing (using `oauth-1.0a` + `crypto`)
-2. API endpoint calls with rate-limit awareness
-3. Response parsing into generic health data types
+**Available methods:**
 
-**Garmin Connect API endpoints (documented at developer.garmin.com):**
+| Method | Returns |
+|--------|---------|
+| `getSteps(date)` | Daily step count |
+| `getSleepData(date)` | Sleep session with stages |
+| `getHeartRate(date)` | HR summary + continuous readings |
+| `getActivities(start, limit)` | Activity list |
+| `getActivity(id)` | Activity detail |
+| `getUserProfile()` | User info |
 
-| Endpoint | Method | Returns |
-|----------|--------|---------|
-| `/wellness-api/rest/dailies` | GET | Steps, calories, distance, floors, stress, body battery |
-| `/wellness-api/rest/epochs` | GET | 15-minute activity summaries |
-| `/wellness-api/rest/sleeps` | GET | Sleep sessions with stages |
-| `/wellness-api/rest/heartRates` | GET | Daily HR summary + zones |
-| `/wellness-api/rest/bodyComps` | GET | Weight, body fat, BMI |
-| `/wellness-api/rest/activities` | GET | Logged activities/workouts |
-| `/wellness-api/rest/stressDetails` | GET | Granular stress readings |
+**Note:** The package may not expose all Garmin data (stress, body battery, body composition) via named methods. For those, use the `get()` method with direct API paths — the library handles auth signing:
 
-**Note on Garmin's push API:** Garmin supports webhooks where they push new data to your server when it becomes available. This is the preferred approach for production but requires a registered callback URL. The health MCP should support both pull (for initial sync and manual refresh) and push (for real-time updates). Push support is Phase 2.
+```typescript
+const dailySummary = await client.get('/wellness-api/rest/dailies', { date });
+const bodyComp = await client.get('/wellness-api/rest/bodyComps', { date });
+const stress = await client.get('/wellness-api/rest/stressDetails', { date });
+```
 
 ### Data normalization
 
@@ -480,7 +457,7 @@ packages/health/
       encryption.ts                     # Symlink or re-export from google utils
     
     clients/
-      garmin.ts                         # Garmin API client (OAuth 1.0a signing, endpoints)
+      garmin.ts                         # Garmin client (garmin-connect npm, email/password auth)
       normalizer.ts                     # GarminNormalizer: Garmin → generic types
       types.ts                          # Garmin raw API response types
     
@@ -552,9 +529,7 @@ health:
     USER_ID: ${USER_ID}
     ELASTICSEARCH_URL: http://elasticsearch:9200
     DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
-    GARMIN_CONSUMER_KEY: ${GARMIN_CONSUMER_KEY}
-    GARMIN_CONSUMER_SECRET: ${GARMIN_CONSUMER_SECRET}
-    GARMIN_REDIRECT_URI: https://mcp-health.noninoni.click/oauth/garmin/callback
+    # No Garmin API keys needed — uses garmin-connect npm (email/password auth)
     ENCRYPTION_KEY: ${ENCRYPTION_KEY}
   networks:
     - ll5-net
@@ -674,8 +649,8 @@ These can be driven by a new gateway scheduler (`HealthInsightsScheduler`) or si
 
 ### Phase 2: Garmin integration
 
-1. Register at developer.garmin.com for API access
-2. Implement `clients/garmin.ts` with OAuth 1.0a signing
+1. Install `garmin-connect` npm package
+2. Implement `clients/garmin.ts` using garmin-connect library
 3. Implement `clients/normalizer.ts` for Garmin -> generic mapping
 4. Implement PG `oauth-token.repository.ts` with encryption
 5. Implement 3 auth tools (`get_garmin_auth_url`, `get_garmin_connection_status`, `disconnect_garmin`)
@@ -729,9 +704,9 @@ Update `docs/HANDOFF.md`:
 
 ## 15. Key Risks and Mitigations
 
-**Garmin Developer Program access**: Registration at developer.garmin.com requires approval. Lead time is unclear (could be days to weeks). Mitigation: Phase 1 builds the entire MCP without Garmin, using mock data. The Garmin client is a swappable integration.
+**Unofficial API stability**: The `garmin-connect` npm package uses reverse-engineered Garmin Connect APIs. Garmin could change their internal API at any time. Mitigation: The package is actively maintained and widely used. If it breaks, the generic health data model means we can swap to Health Connect (Android) or another source without changing tools or indices.
 
-**OAuth 1.0a complexity**: OAuth 1.0a request signing is more complex than OAuth 2.0. Every API request requires HMAC-SHA1 signature computation. Mitigation: Use the `oauth-1.0a` npm package which handles all signing logic. It's well-tested and lightweight.
+**Login persistence**: Garmin may invalidate sessions periodically or require MFA. Mitigation: Store tokens in PG, auto-retry login, surface "Garmin disconnected" to user via system message if tokens fail.
 
 **Rate limits**: Garmin's rate limits are not well-documented. Mitigation: The sync scheduler runs every 30 minutes (24 API calls/day per category), which is conservative. Add exponential backoff on 429 responses. Log rate limit headers for monitoring.
 
@@ -744,7 +719,7 @@ Update `docs/HANDOFF.md`:
 ### Critical Files for Implementation
 
 - `/Users/arnon/workspace/ll5/packages/awareness/src/setup/indices.ts` -- Reference for ES index creation pattern, directly replicable for health indices
-- `/Users/arnon/workspace/ll5/packages/google/src/tools/auth.ts` -- Reference for OAuth flow pattern (pending states, auth URL generation, callback handling, connection status), adaptable for OAuth 1.0a
+- `/Users/arnon/workspace/ll5/packages/google/src/tools/auth.ts` -- Reference for connection management pattern (status check, disconnect)
 - `/Users/arnon/workspace/ll5/packages/gateway/src/scheduler/index.ts` -- Where the new HealthSyncScheduler must be wired in, shows the dependency pattern for optional service schedulers
 - `/Users/arnon/workspace/ll5/packages/awareness/src/repositories/elasticsearch/base.repository.ts` -- Base ES repository class to copy/reuse for all health repositories
 - `/Users/arnon/workspace/ll5/packages/gateway/src/scheduler/daily-review.ts` -- Morning briefing scheduler that needs health data enhancement
