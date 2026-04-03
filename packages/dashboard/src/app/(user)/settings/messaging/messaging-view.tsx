@@ -195,7 +195,7 @@ function ConversationRow({
   };
 
   return (
-    <div className="flex items-center gap-3 py-2.5">
+    <div className={`flex items-center gap-3 py-2.5 ${conversation.is_archived ? "opacity-50" : ""}`}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           {conversation.is_group ? (
@@ -204,13 +204,16 @@ function ConversationRow({
             <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
           )}
           <span className="text-sm font-medium truncate">
-            {conversation.name || conversation.conversation_id}
+            {conversation.name && !conversation.name.includes('@') ? conversation.name : conversation.conversation_id.split('@')[0]}
           </span>
           <PlatformBadge platform={conversation.platform} />
           {conversation.is_group && (
             <Badge className="bg-purple-100 text-purple-700 border-transparent text-[10px] px-1.5 py-0">
               group
             </Badge>
+          )}
+          {conversation.is_archived && (
+            <span className="text-[10px] text-gray-400 italic">archived</span>
           )}
         </div>
         {conversation.last_message_at && (

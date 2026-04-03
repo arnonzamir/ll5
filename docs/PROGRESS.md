@@ -53,6 +53,9 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-03: WhatsApp archived groups — grayed out + auto-ignore in notification/messaging settings, is_archived column in messaging_conversations
+- 2026-04-03: Places auto-geocoding — upsert_place forward-geocodes address→lat/lon via Nominatim when coordinates not provided
+- 2026-04-03: WhatsApp JID→name fix — webhook resolves group names from messaging_conversations DB, UI strips @domain from raw JIDs
 - 2026-03-31: Health MCP dashboard UI — /health page with overview, sleep, heart rate, daily stats, activities, body composition tabs. /settings/health for source management (connect/disconnect/sync). Health link in nav only shows when a source is connected. Generic health concepts (not source-specific). Dashboard calls same MCP tools as agent.
 - 2026-03-31: Health MCP added to docker-compose.prod.yml with ES+PG deps, traefik routing, ENCRYPTION_KEY
 - 2026-03-31: Media gallery page in dashboard — gateway endpoints (GET /media, GET /media/:id/links) querying ES ll5_media + ll5_media_links, dashboard gallery/list views with search, source filter, detail dialog with preview, linked entities

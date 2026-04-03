@@ -168,6 +168,8 @@ See docs/implementation/deployment-log.md for full details:
 - MCP StreamableHTTP needs per-request server+transport pair
 - FileChanged hook doesn't reliably wake Claude — Channel MCP is the working solution
 - Gateway is ESM — never use `require()` for node builtins; use static `import` instead
+- WhatsApp webhook resolves group names from messaging_conversations table (shared PG) — no longer stores raw JIDs as group_name
+- Places upsert auto-geocodes address→coordinates via Nominatim when lat/lon not provided (1 req/sec rate limit)
 - People relationship field is free-text; UI groups them into family/friend/colleague/acquaintance/other for filtering
 - Migrations that DROP+ADD constraints must include ALL values (not just original), since later migrations may have already inserted new values
 - MCP-to-gateway calls need ll5 signed tokens (generateToken from @ll5/shared), not static API_KEY

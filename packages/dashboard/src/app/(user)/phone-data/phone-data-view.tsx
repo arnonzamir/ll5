@@ -92,7 +92,7 @@ function LocationSummary({ item }: { item: PhoneLocationItem }) {
 function MessageSummary({ item }: { item: PhoneMessageItem }) {
   const prefix =
     item.is_group && item.group_name
-      ? `${item.sender} @ ${item.group_name} (${item.app})`
+      ? `${item.sender} @ ${item.group_name.includes('@') ? item.group_name.split('@')[0] : item.group_name} (${item.app})`
       : `${item.sender} @ ${item.app}`;
   const truncated =
     item.content.length > 80
@@ -159,7 +159,7 @@ function MessageDetails({ item }: { item: PhoneMessageItem }) {
       </div>
       {item.is_group && item.group_name && (
         <div>
-          <span className="text-gray-400">Group:</span> {item.group_name}
+          <span className="text-gray-400">Group:</span> {item.group_name.includes('@') ? item.group_name.split('@')[0] : item.group_name}
         </div>
       )}
       <div>

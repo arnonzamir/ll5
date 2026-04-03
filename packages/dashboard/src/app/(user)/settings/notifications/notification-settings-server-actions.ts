@@ -22,6 +22,7 @@ export interface ConversationInfo {
   platform: string;
   name: string | null;
   is_group: boolean;
+  is_archived: boolean;
   last_message_at: string | null;
 }
 

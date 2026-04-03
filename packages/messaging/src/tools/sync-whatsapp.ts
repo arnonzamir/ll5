@@ -62,6 +62,7 @@ export function registerSyncWhatsAppTool(
           conversation_id: chat.id,
           name: chat.name,
           is_group: chat.isGroup,
+          is_archived: chat.isArchived,
         });
 
         if (result.created) {

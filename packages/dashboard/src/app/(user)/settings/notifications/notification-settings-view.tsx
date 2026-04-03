@@ -589,11 +589,11 @@ function ConversationsSection({
                 .filter((c) => !namedOnly || (c.name && !/^\+?\d[\d\s\-()]+$/.test(c.name) && !c.name.includes("@")))
                 .map((c) => {
                 const rule = ruleMap.get(`${c.platform}:${c.conversation_id}`);
-                // Default: no name → ignore, has name → batch
+                // Default: archived → ignore, no name → ignore, has name → batch
                 const hasRealName = c.name && !/^\+?\d[\d\s\-()]+$/.test(c.name) && !c.name.includes("@");
-                const activePriority = rule?.priority ?? (hasRealName ? "batch" : "ignore");
+                const activePriority = c.is_archived ? "ignore" : (rule?.priority ?? (hasRealName ? "batch" : "ignore"));
                 return (
-                  <div key={`${c.platform}:${c.conversation_id}`} className="flex items-center gap-3 py-2.5 hover:bg-gray-50 px-2 -mx-2 rounded transition-colors">
+                  <div key={`${c.platform}:${c.conversation_id}`} className={`flex items-center gap-3 py-2.5 hover:bg-gray-50 px-2 -mx-2 rounded transition-colors ${c.is_archived ? "opacity-50" : ""}`}>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         {c.is_group ? (
@@ -602,9 +602,12 @@ function ConversationsSection({
                           <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
                         )}
                         <span className="text-sm font-medium truncate">
-                          {c.name || c.conversation_id}
+                          {c.name && !c.name.includes('@') ? c.name : c.conversation_id.split('@')[0]}
                         </span>
                         <AppBadge app={c.platform} />
+                        {c.is_archived && (
+                          <span className="text-[10px] text-gray-400 italic">archived</span>
+                        )}
                       </div>
                       {c.last_message_at && (
                         <div className="flex items-center gap-2 mt-0.5 pl-5.5">

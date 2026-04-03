@@ -2,6 +2,45 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { PlaceRepository } from '../repositories/interfaces/place.repository.js';
 import { PLACE_TYPES } from '../types/place.js';
+import { logger } from '../utils/logger.js';
+
+/**
+ * Forward geocode an address using Nominatim (free, no API key).
+ * Returns lat/lon or null on failure.
+ */
+let lastNominatimRequest = 0;
+
+async function forwardGeocode(address: string): Promise<{ lat: number; lon: number } | null> {
+  try {
+    // Rate limit: 1 req/sec
+    const now = Date.now();
+    const elapsed = now - lastNominatimRequest;
+    if (elapsed < 1000) {
+      await new Promise((resolve) => setTimeout(resolve, 1000 - elapsed));
+    }
+    lastNominatimRequest = Date.now();
+
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'll5-knowledge/0.1.0', 'Accept-Language': 'en' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return null;
+
+    const results = (await res.json()) as Array<{ lat: string; lon: string }>;
+    if (results.length === 0) return null;
+
+    const lat = parseFloat(results[0].lat);
+    const lon = parseFloat(results[0].lon);
+    if (isNaN(lat) || isNaN(lon)) return null;
+
+    logger.info('[forwardGeocode] Geocoded address', { address, lat, lon });
+    return { lat, lon };
+  } catch (err) {
+    logger.warn('[forwardGeocode] Failed', { address, error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
 
 export function registerPlaceTools(
   server: McpServer,
@@ -85,10 +124,19 @@ export function registerPlaceTools(
     },
     async (params) => {
       const userId = getUserId();
-      const geo =
+      let geo =
         params.lat !== undefined && params.lon !== undefined
           ? { lat: params.lat, lon: params.lon }
           : undefined;
+
+      // Auto-geocode: if address provided but no coordinates, resolve via Nominatim
+      if (!geo && params.address) {
+        const resolved = await forwardGeocode(params.address);
+        if (resolved) {
+          geo = resolved;
+        }
+      }
+
       const result = await placeRepo.upsert(userId, {
         id: params.id,
         name: params.name,

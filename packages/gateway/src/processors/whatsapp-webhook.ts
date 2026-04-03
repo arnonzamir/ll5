@@ -69,7 +69,20 @@ export async function processWhatsAppWebhook(
   const remoteJid = data.key.remoteJid;
   const isGroup = remoteJid.endsWith('@g.us');
   const sender = fromMe ? '(me)' : (data.pushName ?? remoteJid.split('@')[0]);
-  const groupName = isGroup ? remoteJid : null;
+
+  // Resolve group/conversation name from messaging DB (shared PG)
+  let groupName: string | null = null;
+  if (isGroup) {
+    try {
+      const nameResult = await pgPool.query(
+        'SELECT name FROM messaging_conversations WHERE conversation_id = $1 AND name IS NOT NULL LIMIT 1',
+        [remoteJid],
+      );
+      groupName = nameResult.rows[0]?.name ?? remoteJid;
+    } catch {
+      groupName = remoteJid;
+    }
+  }
 
   // Check priority early for image handling — only download images for non-ignore conversations
   let imageUrl: string | null = null;

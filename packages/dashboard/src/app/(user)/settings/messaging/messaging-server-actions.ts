@@ -19,6 +19,7 @@ export interface Conversation {
   conversation_id: string;
   name: string | null;
   is_group: boolean;
+  is_archived: boolean;
   permission: "agent" | "input" | "ignore";
   last_message_at: string | null;
 }

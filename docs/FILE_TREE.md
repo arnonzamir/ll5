@@ -120,6 +120,7 @@ ll5/
 │       ├── clients/                   # Evolution API (WhatsApp), Telegram Bot API
 │       ├── repositories/postgres/     # Accounts, conversations
 │       ├── tools/                     # 8 tools (send, read, sync, permissions)
+│       ├── migrations/               # 001 tables, 002 contacts, 003 archived conversations
 │       └── server.ts
 │
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI

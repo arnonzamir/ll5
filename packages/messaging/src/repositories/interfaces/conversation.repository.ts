@@ -6,6 +6,7 @@ export interface ConversationRecord {
   conversation_id: string;
   name: string | null;
   is_group: boolean;
+  is_archived: boolean;
   permission: 'agent' | 'input' | 'ignore';
   last_message_at: Date | null;
   created_at: Date;
@@ -43,6 +44,7 @@ export interface ConversationRepository {
       conversation_id: string;
       name: string;
       is_group: boolean;
+      is_archived?: boolean;
     },
   ): Promise<{ created: boolean }>;
 

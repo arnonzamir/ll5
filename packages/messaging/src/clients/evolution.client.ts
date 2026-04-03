@@ -9,6 +9,7 @@ export interface EvolutionChat {
   id: string;
   name: string;
   isGroup: boolean;
+  isArchived: boolean;
   lastMessageTimestamp?: number;
 }
 
@@ -109,6 +110,8 @@ export class EvolutionClient {
           subject?: string | null;
           remoteJid?: string | null;
           isGroup?: boolean;
+          archive?: boolean;
+          archived?: boolean;
           lastMessageTimestamp?: number;
         }>
       >('POST', `/chat/findChats/${this.instanceName}`, {}),
@@ -137,6 +140,7 @@ export class EvolutionClient {
           id: jid,
           name: displayName,
           isGroup: chat.isGroup ?? jid.endsWith('@g.us'),
+          isArchived: chat.archive ?? chat.archived ?? false,
           lastMessageTimestamp: chat.lastMessageTimestamp,
         };
       });

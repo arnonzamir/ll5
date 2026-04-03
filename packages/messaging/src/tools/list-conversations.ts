@@ -38,6 +38,7 @@ export function registerListConversationsTool(
         platform: c.platform,
         name: c.name,
         is_group: c.is_group,
+        is_archived: c.is_archived,
         permission: c.permission,
         last_message_at: c.last_message_at?.toISOString() ?? null,
       }));
