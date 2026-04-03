@@ -25,6 +25,11 @@ export class GarminAdapter implements HealthSourceAdapter {
   /** In-memory cache of authenticated GarminClient instances, keyed by userId. */
   private clients = new Map<string, GarminClient>();
 
+  constructor(
+    private pool: import('pg').Pool,
+    private encryptionKey: string,
+  ) {}
+
   /**
    * Connect to Garmin using email/password credentials.
    *

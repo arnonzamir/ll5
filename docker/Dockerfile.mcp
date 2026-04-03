@@ -22,6 +22,11 @@ RUN npm ci --workspace=packages/shared --workspace=packages/${PACKAGE_NAME}
 RUN npm run build --workspace=packages/shared
 RUN npm run build --workspace=packages/${PACKAGE_NAME}
 
+# Copy SQL migrations to dist (if they exist)
+RUN if [ -d packages/${PACKAGE_NAME}/src/migrations ]; then \
+      cp -r packages/${PACKAGE_NAME}/src/migrations packages/${PACKAGE_NAME}/dist/migrations; \
+    fi
+
 # -- Runtime stage --
 FROM node:20-alpine AS runtime
 
@@ -34,6 +39,7 @@ WORKDIR /app
 # Copy built artifacts and production dependencies
 COPY --from=build /app/packages/${PACKAGE_NAME}/dist ./dist
 COPY --from=build /app/packages/${PACKAGE_NAME}/package.json ./
+
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/shared/dist ./node_modules/@ll5/shared/dist

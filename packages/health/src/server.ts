@@ -13,6 +13,8 @@ import type { LogLevel } from './utils/logger.js';
 import { ensureIndices } from './setup/indices.js';
 import { runMigrations } from './utils/migration-runner.js';
 import { registerAllTools } from './tools/index.js';
+import { registerAdapter } from './clients/registry.js';
+import { GarminAdapter } from './clients/garmin/index.js';
 
 const { Pool } = pg;
 
@@ -99,6 +101,10 @@ export async function startServer(): Promise<void> {
   // Run PG migrations
   await runMigrations(pool);
   logger.info('[startServer][init] PostgreSQL migrations completed');
+
+  // Register health source adapters
+  registerAdapter(new GarminAdapter(pool, env.encryptionKey));
+  logger.info('[startServer][init] Health source adapters registered');
 
   // Create Express app
   const app = express();
