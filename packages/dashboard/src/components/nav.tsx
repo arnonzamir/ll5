@@ -78,7 +78,7 @@ const navGroups: NavGroup[] = [
       { href: "/phone-data", label: "Phone", icon: Smartphone },
       { href: "/media", label: "Media", icon: ImageIcon },
       { href: "/sessions", label: "Sessions", icon: MessageSquare },
-      { href: "/admin/journal", label: "Journal", icon: BookOpen },
+      { href: "/journal", label: "Journal", icon: BookOpen },
     ],
   },
 ];
