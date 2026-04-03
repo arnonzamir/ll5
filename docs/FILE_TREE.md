@@ -40,7 +40,12 @@ ll5/
 │   │   ├── gateway.md                # Webhook receiver design
 │   │   ├── skills.md                 # Claude Code skill designs
 │   │   ├── claude-personality.md     # GTD coaching, autonomy, emotional contract
-│   │   └── ui-design.md             # Dashboard: user + admin pages
+│   │   ├── ui-design.md             # Dashboard: user + admin pages
+│   │   ├── mcp-geo-search.md       # Geo-search tools (add to awareness MCP)
+│   │   ├── health-polling-scheduler.md  # Health event detection scheduler
+│   │   ├── data-source-config.md   # Per-source enable/disable toggles
+│   │   ├── skill-gtd-review.md     # GTD daily + weekly review workflows
+│   │   └── agent-routing-rename.md # Rename notification rules → routing rules
 │   └── implementation/
 │       ├── mcp-implementation.md     # Phased build plan for all MCPs
 │       ├── deployment.md             # Docker, CI/CD, Coolify
