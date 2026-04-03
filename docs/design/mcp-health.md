@@ -1,18 +1,166 @@
 # LL5 Health MCP -- Implementation Plan
 
-## 1. Architecture Decision: Storage
+## 0. Configuration Model
 
-**Decision: Elasticsearch (primary) + PostgreSQL (OAuth tokens only)**
+Health monitoring is user-controlled at every level:
 
-Health data is fundamentally time-series data. All the main data categories (sleep, heart rate, steps, stress, activities, body composition) are timestamped records that get queried by date ranges. This maps directly to the pattern used by the awareness MCP. ES provides:
-- Native date range queries for "last night's sleep", "this week's trend"
-- Aggregation support for computing averages, min/max, percentiles over periods
-- Schema flexibility for adding new device sources without migrations
-- Consistent pattern with `ll5_awareness_*` indices
+```
+User Settings
+  └── health.enabled: boolean (master switch)
+       └── health.sources: { [sourceId]: SourceConfig }
+            ├── garmin: { enabled, credentials, metrics: { sleep, heart_rate, ... } }
+            ├── health_connect: { enabled, metrics: { ... } }  — future
+            └── manual: { enabled, metrics: { ... } }  — future
+```
 
-PG is needed only for Garmin session tokens (OAuth1 + OAuth2 tokens from the `garmin-connect` npm package), following the same pattern as `google_oauth_tokens`.
+**Per-user config** stored in `auth_users.settings` JSONB:
+```json
+{
+  "health": {
+    "enabled": true,
+    "sources": {
+      "garmin": {
+        "enabled": true,
+        "metrics": {
+          "sleep": true,
+          "heart_rate": true,
+          "daily_stats": true,
+          "activities": true,
+          "stress": true,
+          "body_composition": false
+        }
+      }
+    }
+  }
+}
+```
 
-**ES indices for health data, PG table for Garmin OAuth tokens.**
+**Sync respects config** — only pulls enabled metrics from enabled sources.
+**Tools respect config** — `get_sleep_summary` returns error if sleep tracking is off.
+**Dashboard** — `/settings/health` page for toggling sources + metrics.
+
+## 0.1 Generic Source Adapter Interface
+
+Every health source implements the same interface. Adding Apple Health or Fitbit = implement these methods + a normalizer.
+
+```typescript
+interface HealthSourceAdapter {
+  readonly sourceId: string;  // 'garmin', 'health_connect', 'fitbit'
+  readonly displayName: string;
+
+  // Connection
+  connect(userId: string, credentials: Record<string, string>): Promise<void>;
+  disconnect(userId: string): Promise<void>;
+  getStatus(userId: string): Promise<{ connected: boolean; lastSync?: string }>;
+
+  // Data fetching — each returns normalized generic types
+  // Returns null if the source doesn't support this metric
+  fetchSleep(userId: string, date: string): Promise<SleepData | null>;
+  fetchHeartRate(userId: string, date: string): Promise<HeartRateData | null>;
+  fetchDailyStats(userId: string, date: string): Promise<DailyStatsData | null>;
+  fetchActivities(userId: string, from: string, to: string): Promise<ActivityData[]>;
+  fetchBodyComposition(userId: string, date: string): Promise<BodyCompositionData | null>;
+  fetchStress(userId: string, date: string): Promise<StressData | null>;
+}
+```
+
+**Normalized types** (source-agnostic):
+```typescript
+interface SleepData {
+  date: string;
+  sleepTime: string;     // ISO
+  wakeTime: string;      // ISO
+  durationSeconds: number;
+  deepSeconds: number;
+  lightSeconds: number;
+  remSeconds: number;
+  awakeSeconds: number;
+  qualityScore: number;  // 0-100
+  averageHr?: number;
+  lowestHr?: number;
+}
+
+interface HeartRateData {
+  date: string;
+  restingHr: number;
+  minHr: number;
+  maxHr: number;
+  averageHr: number;
+  zones: { rest: number; z1: number; z2: number; z3: number; z4: number; z5: number }; // seconds
+  readings?: Array<{ timestamp: string; value: number }>;
+}
+
+interface DailyStatsData {
+  date: string;
+  steps: number;
+  distanceMeters: number;
+  floorsClimbed?: number;
+  activeCalories: number;
+  totalCalories: number;
+  activeSeconds: number;
+  energyLevel?: number;    // 0-100 (Garmin body battery, Whoop recovery, etc.)
+  energyMin?: number;
+  energyMax?: number;
+}
+
+interface StressData {
+  date: string;
+  average: number;
+  max: number;
+  readings?: Array<{ timestamp: string; value: number }>;
+}
+
+interface ActivityData {
+  sourceId: string;
+  activityType: string;    // normalized: running, cycling, swimming, etc.
+  name: string;
+  startTime: string;
+  endTime: string;
+  durationSeconds: number;
+  distanceMeters?: number;
+  calories?: number;
+  averageHr?: number;
+  maxHr?: number;
+  elevationGain?: number;
+}
+
+interface BodyCompositionData {
+  date: string;
+  weightKg?: number;
+  bodyFatPct?: number;
+  muscleMassKg?: number;
+  bmi?: number;
+}
+```
+
+**The sync engine** iterates enabled sources × enabled metrics:
+```typescript
+async function syncUserHealth(userId: string, config: HealthConfig, date: string) {
+  for (const [sourceId, sourceConfig] of Object.entries(config.sources)) {
+    if (!sourceConfig.enabled) continue;
+    const adapter = getAdapter(sourceId); // registry of HealthSourceAdapter instances
+
+    if (sourceConfig.metrics.sleep) {
+      const data = await adapter.fetchSleep(userId, date);
+      if (data) await writeSleepToES(userId, sourceId, data);
+    }
+    if (sourceConfig.metrics.heart_rate) {
+      const data = await adapter.fetchHeartRate(userId, date);
+      if (data) await writeHeartRateToES(userId, sourceId, data);
+    }
+    // ... etc for each metric
+  }
+}
+```
+
+---
+
+## 1. Storage
+
+**Elasticsearch** (time-series health data) + **PostgreSQL** (source credentials/tokens).
+
+ES provides native date range queries, aggregations for trends, and schema flexibility.
+PG stores encrypted credentials per source per user.
 
 ---
 
@@ -194,32 +342,37 @@ const oauth2 = client.oauth2Token;
 client.loadToken(oauth1, oauth2);
 ```
 
-### PG table for token persistence
+### PG table for source credentials (generic, not Garmin-specific)
 
 ```sql
-CREATE TABLE IF NOT EXISTS health_garmin_tokens (
+CREATE TABLE IF NOT EXISTS health_source_credentials (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     VARCHAR(255) NOT NULL UNIQUE,
-  oauth1      TEXT NOT NULL,  -- encrypted JSON
-  oauth2      TEXT NOT NULL,  -- encrypted JSON
+  user_id     VARCHAR(255) NOT NULL,
+  source_id   VARCHAR(50) NOT NULL,   -- 'garmin', 'fitbit', 'health_connect'
+  credentials TEXT NOT NULL,           -- encrypted JSON (tokens, keys, etc.)
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(user_id, source_id)
 );
 ```
 
-Tokens encrypted with AES-256-GCM (same `ENCRYPTION_KEY` as Google MCP).
+Each source stores whatever it needs in `credentials` (encrypted JSON):
+- Garmin: `{ oauth1: {...}, oauth2: {...} }`
+- Fitbit (future): `{ access_token, refresh_token, expires_at }`
+- Health Connect (future): `{ last_sync_timestamp }` (no auth needed)
 
-### Auth flow:
-1. User provides Garmin email + password via MCP tool `connect_garmin`
-2. Server calls `client.login()`, gets tokens
-3. Tokens encrypted and stored in PG
-4. Subsequent syncs load tokens — no password stored
-5. If tokens expire, re-login with stored credentials (or prompt user)
+### MCP auth tools (generic):
+- `connect_health_source` — connect a source (params: source_id, credentials). For Garmin: email + password → login → store tokens.
+- `get_health_source_status` — check if a source is connected and working
+- `disconnect_health_source` — remove stored credentials
+- `list_health_sources` — list available sources with connection status
 
-### MCP auth tools:
-- `connect_garmin` — login with email/password, store tokens. One-time setup.
-- `get_garmin_status` — check if connected, test tokens
-- `disconnect_garmin` — delete stored tokens
+### Garmin-specific auth flow:
+1. User calls `connect_health_source(source_id: "garmin", credentials: { email, password })`
+2. Server calls `GarminConnect.login()`, gets OAuth tokens
+3. Tokens encrypted and stored in `health_source_credentials`
+4. Subsequent syncs load tokens — password NOT stored
+5. If tokens expire, surface "Garmin disconnected" to user
 
 ---
 
@@ -457,9 +610,12 @@ packages/health/
       encryption.ts                     # Symlink or re-export from google utils
     
     clients/
-      garmin.ts                         # Garmin client (garmin-connect npm, email/password auth)
-      normalizer.ts                     # GarminNormalizer: Garmin → generic types
-      types.ts                          # Garmin raw API response types
+      adapter.ts                         # HealthSourceAdapter interface
+      registry.ts                       # Adapter registry: sourceId → adapter instance
+      garmin/
+        garmin-adapter.ts               # GarminAdapter implements HealthSourceAdapter
+        garmin-client.ts                # garmin-connect npm wrapper
+        garmin-normalizer.ts            # Garmin API → generic types
     
     repositories/
       interfaces/
@@ -483,7 +639,7 @@ packages/health/
     
     tools/
       index.ts                          # registerAllTools
-      auth.ts                           # get_garmin_auth_url, status, disconnect
+      sources.ts                        # connect/disconnect/status/list health sources
       sleep.ts                          # get_sleep_summary
       heart-rate.ts                     # get_heart_rate
       daily-stats.ts                    # get_daily_stats
