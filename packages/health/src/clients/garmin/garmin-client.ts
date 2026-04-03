@@ -1,24 +1,26 @@
-import { GarminConnect } from 'garmin-connect';
-import type { IOauth1Token, IOauth2Token, IGarminTokens } from 'garmin-connect/dist/garmin/types/index.js';
-import type { SleepData as GarminSleepData } from 'garmin-connect/dist/garmin/types/sleep.js';
-import type { IActivity } from 'garmin-connect/dist/garmin/types/activity.js';
+import pkg from 'garmin-connect';
+const { GarminConnect } = pkg;
+
+// Types - use any since the package's type exports may not work in ESM
+type GarminSleepData = any;
+type IActivity = any;
 import { logger } from '../../utils/logger.js';
 
 export class GarminClient {
-  private gc: GarminConnect;
+  private gc: InstanceType<typeof GarminConnect>;
   private _connected = false;
 
   constructor() {
     this.gc = new GarminConnect();
   }
 
-  async login(email: string, password: string): Promise<IGarminTokens> {
+  async login(email: string, password: string): Promise<any> {
     await this.gc.login(email, password);
     this._connected = true;
     return this.gc.exportToken();
   }
 
-  async restoreSession(oauth1: IOauth1Token, oauth2: IOauth2Token): Promise<void> {
+  async restoreSession(oauth1: any, oauth2: any): Promise<void> {
     this.gc.loadToken(oauth1, oauth2);
     this._connected = true;
   }
@@ -99,7 +101,7 @@ export class GarminClient {
     return this._connected;
   }
 
-  getTokens(): IGarminTokens {
+  getTokens(): any {
     return this.gc.exportToken();
   }
 }
