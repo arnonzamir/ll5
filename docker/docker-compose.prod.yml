@@ -146,3 +146,41 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  health:
+    image: ghcr.io/arnonzamir/ll5-health:${IMAGE_TAG:-latest}
+    container_name: ll5-health
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
+      API_KEY: ${API_KEY:?API_KEY is required}
+      USER_ID: ${USER_ID:?USER_ID is required}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+    networks:
+      - ll5-net
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ll5-health.rule=Host(`mcp-health.${DOMAIN}`)"
+      - "traefik.http.routers.ll5-health.tls=true"
+      - "traefik.http.routers.ll5-health.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ll5-health.loadbalancer.server.port=3000"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

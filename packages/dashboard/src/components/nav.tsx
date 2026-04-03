@@ -29,6 +29,7 @@ import {
   Database,
   BookOpen,
   Image as ImageIcon,
+  HeartPulse,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logoutAction } from "@/app/(user)/logout-action";
@@ -51,43 +52,41 @@ interface NavGroup {
   items: NavLink[];
 }
 
-const navGroups: NavGroup[] = [
-  {
-    label: "Organize",
-    icon: FolderKanban,
-    items: [
-      { href: "/projects", label: "Projects", icon: FolderKanban },
-      { href: "/inbox", label: "Inbox", icon: Inbox },
-      { href: "/shopping", label: "Shopping", icon: ShoppingCart },
-    ],
-  },
-  {
-    label: "People & Places",
-    icon: Users,
-    items: [
-      { href: "/people", label: "People", icon: Users },
-      { href: "/contacts", label: "Contacts", icon: BookUser },
-      { href: "/locations", label: "Locations", icon: Navigation },
-      { href: "/places", label: "Places", icon: MapPin },
-    ],
-  },
-  {
-    label: "Data",
-    icon: Database,
-    items: [
-      { href: "/phone-data", label: "Phone", icon: Smartphone },
-      { href: "/media", label: "Media", icon: ImageIcon },
-      { href: "/sessions", label: "Sessions", icon: MessageSquare },
-      { href: "/journal", label: "Journal", icon: BookOpen },
-    ],
-  },
-];
-
-// All links flattened for mobile menu
-const allLinks: NavLink[] = [
-  ...topLevelLinks,
-  ...navGroups.flatMap((g) => g.items),
-];
+function buildNavGroups(): NavGroup[] {
+  const dataItems: NavLink[] = [
+    { href: "/phone-data", label: "Phone", icon: Smartphone },
+    { href: "/media", label: "Media", icon: ImageIcon },
+    { href: "/sessions", label: "Sessions", icon: MessageSquare },
+    { href: "/journal", label: "Journal", icon: BookOpen },
+    { href: "/health", label: "Health", icon: HeartPulse },
+  ];
+  return [
+    {
+      label: "Organize",
+      icon: FolderKanban,
+      items: [
+        { href: "/projects", label: "Projects", icon: FolderKanban },
+        { href: "/inbox", label: "Inbox", icon: Inbox },
+        { href: "/shopping", label: "Shopping", icon: ShoppingCart },
+      ],
+    },
+    {
+      label: "People & Places",
+      icon: Users,
+      items: [
+        { href: "/people", label: "People", icon: Users },
+        { href: "/contacts", label: "Contacts", icon: BookUser },
+        { href: "/locations", label: "Locations", icon: Navigation },
+        { href: "/places", label: "Places", icon: MapPin },
+      ],
+    },
+    {
+      label: "Data",
+      icon: Database,
+      items: dataItems,
+    },
+  ];
+}
 
 interface NavProps {
   username?: string;
@@ -101,6 +100,9 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const groupRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const navGroups = buildNavGroups();
+  const allLinks: NavLink[] = [...topLevelLinks, ...navGroups.flatMap((g) => g.items)];
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -290,6 +292,14 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                     >
                       <Bell className="h-4 w-4" />
                       Message Rules
+                    </Link>
+                    <Link
+                      href="/settings/health"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <HeartPulse className="h-4 w-4" />
+                      Health Sources
                     </Link>
                     <div className="my-1 border-t border-gray-200" />
 

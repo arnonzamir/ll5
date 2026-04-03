@@ -6,7 +6,7 @@ Current state of the LL5 personal assistant system.
 
 ## Current Status
 
-**Phase:** Calendar integration complete, google MCP ready to deploy
+**Phase:** Health MCP with dashboard UI, all MCPs operational
 
 ### Deployed Services (Coolify @ 95.216.23.208)
 
@@ -15,6 +15,7 @@ Current state of the LL5 personal assistant system.
 | personal-knowledge MCP | Live | mcp-knowledge.noninoni.click |
 | gtd MCP | Live | mcp-gtd.noninoni.click |
 | awareness MCP | Live | mcp-awareness.noninoni.click |
+| health MCP | Live | mcp-health.noninoni.click |
 | gateway | Live | gateway.noninoni.click |
 | dashboard | Live | ll5.noninoni.click |
 | Elasticsearch 8.15.0 | Healthy | internal |
@@ -47,10 +48,13 @@ Current state of the LL5 personal assistant system.
 | awareness | 10 |
 | google | 13 (10 + 3 tickler) |
 | messaging | 8 |
-| **Total** | **65** |
+| health | 8 (sleep, HR, daily stats, activities, body comp, trends, sources, sync) |
+| **Total** | **73** |
 
 ## Recent Changes
 
+- 2026-03-31: Health MCP dashboard UI — /health page with overview, sleep, heart rate, daily stats, activities, body composition tabs. /settings/health for source management (connect/disconnect/sync). Health link in nav only shows when a source is connected. Generic health concepts (not source-specific). Dashboard calls same MCP tools as agent.
+- 2026-03-31: Health MCP added to docker-compose.prod.yml with ES+PG deps, traefik routing, ENCRYPTION_KEY
 - 2026-03-31: Media gallery page in dashboard — gateway endpoints (GET /media, GET /media/:id/links) querying ES ll5_media + ll5_media_links, dashboard gallery/list views with search, source filter, detail dialog with preview, linked entities
 - 2026-03-31: Tiered push notifications — 3 urgency levels (urgent/info/low). New Android channels ("urgent" with vibrate+sound+heads-up, "info" silent badge-only). FCM data payload includes `notification_level` field. Android skips notification for level "low". Legacy channels kept for backward compat.
 - 2026-03-31: Actions page: list_type filter (todo/waiting/someday/all), list_type in create dialog, fix camelCase field mapping (dueDate/context/listType/waitingFor/projectTitle), someday+waiting badges in ActionRow. CLAUDE.md updated with explicit someday/maybe guidance for agent.

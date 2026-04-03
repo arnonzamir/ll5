@@ -14,6 +14,7 @@ Claude Code (ll5-run workspace)
   ├── gtd MCP (PG) — actions, projects, horizons, inbox, shopping, chat tools
   ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation, journal, user model
   ├── calendar MCP (PG+ES) — Unified timeline (Google+phone+tickler), Gmail, OAuth
+  ├── health MCP (ES+PG) — sleep, heart rate, daily stats, activities, body comp, stress, trends
   └── messaging MCP (PG) — WhatsApp, Telegram [not deployed]
 
 Gateway (Express)
@@ -41,6 +42,8 @@ Dashboard (Next.js 15)
   ├── /settings/notifications — People + Conversations + Keywords tabs, 4 priority levels (ignore/batch/immediate/agent)
   ├── Chat: SSE real-time (PG NOTIFY on insert+update), status indicators, typing dots, 30s safety sweep
   ├── /media — media gallery (images, videos, files) with gallery/list views, source filter, search, detail dialog
+  ├── /health — health data browsing: overview, sleep, HR, daily stats, activities, body comp (only visible when source connected)
+  ├── /settings/health — connect/disconnect health sources, trigger sync
   ├── /locations — Leaflet map with clustering, timeline, trail
   ├── /people, /places, /knowledge, /horizons — personal knowledge pages
   ├── /profile — user settings
@@ -114,10 +117,11 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `notification_level=low` in FCM payload → no notification shown (maps to ignore priority)
 - Legacy channels (`ll5_morning`, `ll5_tickler`, `ll5_urgent`, `ll5_general`) kept for backward compat
 
-**Elasticsearch** (8.15.0, 10 indices):
+**Elasticsearch** (8.15.0, 15 indices):
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps
 - `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
 - `ll5_agent_*` — journal (micro-entries), user_model (consolidated sections keyed by userId_section)
+- `ll5_health_*` — sleep, heart_rate, daily_stats (incl. stress + energy/body battery), activities, body_composition
 - `ll5_app_log` — all tool calls, webhooks, errors (service, level, action, tool_name, duration_ms)
 - `ll5_audit_log` — all mutations across MCPs
 - Note: calendar index has text-mapped calendar_id (use .keyword subfield for term queries)

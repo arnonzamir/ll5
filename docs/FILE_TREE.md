@@ -105,6 +105,16 @@ ll5/
 │       ├── utils/encryption.ts        # AES-256-GCM for token storage
 │       └── server.ts                  # MCP server (dual auth) + OAuth callback + REST API
 │
+├── packages/health/                   # @ll5/health — health monitoring MCP (ES+PG)
+│   └── src/
+│       ├── clients/                     # HealthSourceAdapter interface + Garmin adapter (garmin-connect npm)
+│       ├── tools/                       # 8 tools: sources (connect/disconnect/list/status), sleep, heart rate, daily stats, activities, body comp, trends, sync
+│       ├── types/                       # Generic health types (SleepData, HeartRateData, DailyStatsData, StressData, ActivityData, BodyCompositionData)
+│       ├── setup/indices.ts             # 5 ES indices (ll5_health_sleep, heart_rate, daily_stats, activities, body_composition)
+│       ├── utils/                       # env, encryption (AES-256-GCM), logger, migration runner
+│       ├── migrations/                  # health_source_credentials table
+│       └── server.ts                    # MCP server with ES+PG, registers adapters
+│
 ├── packages/messaging/                # @ll5/messaging — PG-backed MCP [not deployed]
 │   └── src/
 │       ├── clients/                   # Evolution API (WhatsApp), Telegram Bot API
@@ -115,7 +125,7 @@ ll5/
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
 │   └── src/
 │       ├── app/(auth)/login/          # Login page + server action
-│       ├── app/(user)/                # dashboard, calendar, actions, projects, inbox, shopping, people (grouped filter), locations, places, media, phone-data, sessions, settings (notifications, messaging), profile
+│       ├── app/(user)/                # dashboard, calendar, actions, projects, inbox, shopping, people (grouped filter), locations, places, media, health (browsing+settings), phone-data, sessions, settings (notifications, messaging, health), profile
 │       ├── app/(admin)/               # Admin pages: health, users, tools
 │       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations
 │       ├── components/                # Nav (grouped menu, profile dropdown), cards, chat widget (SSE real-time + status + typing), shadcn/ui

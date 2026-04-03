@@ -10,7 +10,7 @@ import { callMcpTool, extractJson, type McpToolResult } from "./mcp-client";
 export type { McpToolResult };
 export { extractJson, extractText } from "./mcp-client";
 
-type McpServer = "gtd" | "knowledge" | "awareness" | "calendar" | "messaging";
+type McpServer = "gtd" | "knowledge" | "awareness" | "calendar" | "messaging" | "health";
 
 const MCP_URLS: Record<McpServer, string> = {
   gtd: env.MCP_GTD_URL,
@@ -18,6 +18,7 @@ const MCP_URLS: Record<McpServer, string> = {
   awareness: env.MCP_AWARENESS_URL,
   calendar: env.MCP_CALENDAR_URL,
   messaging: env.MCP_MESSAGING_URL,
+  health: env.MCP_HEALTH_URL,
 };
 
 /**
