@@ -10,7 +10,8 @@
     "build:shared": "npm run build --workspace=packages/shared",
     "dev": "npm run dev --workspaces --if-present",
     "clean": "rm -rf packages/*/dist",
-    "typecheck": "tsc --noEmit --project packages/shared/tsconfig.json"
+    "typecheck": "tsc --noEmit --project packages/shared/tsconfig.json",
+    "test": "npm run test --workspaces --if-present"
   },
   "engines": {
     "node": ">=20.0.0"

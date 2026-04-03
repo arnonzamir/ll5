@@ -7,7 +7,9 @@
   "scripts": {
     "build": "tsc && rm -rf dist/migrations && cp -r src/migrations dist/migrations 2>/dev/null || true",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.17.0",
