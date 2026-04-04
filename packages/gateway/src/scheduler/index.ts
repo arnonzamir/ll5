@@ -82,9 +82,9 @@ export async function startSchedulers(
   });
   heartbeatScheduler.start();
 
-  // Journal health: nudge agent if not journaling
+  // Journal health + proactivity nudge: remind agent if silent too long
   const journalHealthScheduler = new JournalHealthScheduler(es, pgPool, {
-    intervalHours: 2,
+    maxSilenceMinutes: 60,
     startHour: config.calendarReviewStartHour,
     endHour: config.calendarReviewEndHour,
     timezone,

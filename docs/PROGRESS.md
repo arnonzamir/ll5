@@ -53,6 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-04: Agent nudge scheduler: if no journal entry in 60min, send reminder with proactivity checklist (inbox, ticklers, escalations, push opportunities). Checks every 15min during active hours.
 - 2026-04-04: Fix WhatsApp image visibility: system messages now include image URL when image is attached, so agent can use inspect_image
 - 2026-04-04: Fix tickler: never create calendars, find existing by name. Searches Google Calendar list for "ll5" or "tickler" and registers in config.
 - 2026-04-04: Garmin: add body battery, HRV, VO2 Max, respiration, training readiness. Fix API calls to use internal HttpClient (connectapi.garmin.com) instead of broken proxy URLs.

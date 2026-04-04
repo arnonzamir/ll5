@@ -4,7 +4,7 @@ import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
 
 interface JournalHealthConfig {
-  intervalHours: number;
+  maxSilenceMinutes: number; // default 60 — nudge if no journal entry in this period
   startHour: number;
   endHour: number;
   timezone: string;
@@ -12,12 +12,14 @@ interface JournalHealthConfig {
 }
 
 /**
- * Periodic check that the agent is actively journaling.
- * If no journal entries have been written in the configured interval,
- * sends a system message reminding the agent to journal.
+ * Periodic check that the agent is actively journaling and staying proactive.
+ *
+ * If no journal entries have been written in maxSilenceMinutes, sends a system
+ * message reminding the agent to journal AND reinforcing its proactive role.
  */
 export class JournalHealthScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
+  private lastNudgeTime = 0;
 
   constructor(
     private es: Client,
@@ -27,12 +29,14 @@ export class JournalHealthScheduler {
 
   start(): void {
     logger.info('[JournalHealthScheduler][start] Journal health check started', {
-      intervalHours: this.config.intervalHours,
+      maxSilenceMinutes: this.config.maxSilenceMinutes,
       startHour: this.config.startHour,
       endHour: this.config.endHour,
     });
-    // Check every 30 minutes
-    this.timer = setInterval(() => void this.tick(), 30 * 60 * 1000);
+    // Check every 15 minutes
+    this.timer = setInterval(() => void this.tick(), 15 * 60 * 1000);
+    // First check after 5 minutes (let agent settle in)
+    setTimeout(() => void this.tick(), 5 * 60 * 1000);
   }
 
   stop(): void {
@@ -57,11 +61,15 @@ export class JournalHealthScheduler {
     const hour = this.getCurrentHour();
     if (hour < this.config.startHour || hour >= this.config.endHour) return;
 
-    try {
-      const since = new Date(Date.now() - this.config.intervalHours * 60 * 60 * 1000).toISOString();
+    // Don't nudge more than once per silence window
+    const now = Date.now();
+    if (now - this.lastNudgeTime < this.config.maxSilenceMinutes * 60 * 1000) return;
 
-      // Count journal entries in the last N hours
-      const result = await this.es.count({
+    try {
+      const since = new Date(now - this.config.maxSilenceMinutes * 60 * 1000).toISOString();
+
+      // Count journal entries in the silence window
+      const journalResult = await this.es.count({
         index: 'll5_agent_journal',
         query: {
           bool: {
@@ -73,29 +81,57 @@ export class JournalHealthScheduler {
         },
       });
 
-      const entryCount = result.count;
+      if (journalResult.count > 0) {
+        // Agent is journaling — no nudge needed
+        return;
+      }
 
-      // Also count how many messages were processed in the same period
+      // Count messages processed in the same window
       const msgResult = await this.pool.query(
         `SELECT COUNT(*) FROM chat_messages
-         WHERE user_id = $1 AND direction = 'inbound' AND created_at > $2`,
+         WHERE user_id = $1 AND created_at > $2`,
         [this.config.userId, since],
       );
       const messageCount = parseInt(msgResult.rows[0].count, 10);
 
-      // If messages were processed but no journal entries written, nudge
-      if (messageCount > 3 && entryCount === 0) {
-        await insertSystemMessage(
-          this.pool,
-          this.config.userId,
-          `[Journal Check] You've processed ${messageCount} messages in the last ${this.config.intervalHours}h but written 0 journal entries. Remember: after each interaction, either write_journal or consciously skip. Review recent conversations and journal any insights, corrections, or patterns you noticed.`,
+      // Build context-aware nudge
+      const parts: string[] = [];
+
+      if (messageCount > 0) {
+        parts.push(
+          `You've had ${messageCount} messages in the last ${this.config.maxSilenceMinutes} minutes but written 0 journal entries.`,
         );
-        logger.info('[JournalHealthScheduler][tick] Journal nudge sent', {
-          messageCount,
-          entryCount,
-          intervalHours: this.config.intervalHours,
-        });
+      } else {
+        parts.push(
+          `No journal entries in the last ${this.config.maxSilenceMinutes} minutes.`,
+        );
       }
+
+      parts.push(
+        'Reminder: journal observations, feedback, decisions, and patterns — even small ones.',
+        '',
+        'Also check:',
+        '- Any pending inbox items to process?',
+        '- Any system messages you haven\'t acted on?',
+        '- Any ticklers or calendar events coming up that need prep?',
+        '- Any conversations you\'re escalated on that need a decision?',
+        '- Anything worth pushing to the user proactively?',
+        '',
+        'Your role is to be proactively helpful — don\'t wait to be asked. If you notice something actionable, act on it or push it to the user.',
+      );
+
+      await insertSystemMessage(
+        this.pool,
+        this.config.userId,
+        `[Agent Nudge] ${parts.join('\n')}`,
+      );
+
+      this.lastNudgeTime = now;
+
+      logger.info('[JournalHealthScheduler][tick] Agent nudge sent', {
+        messageCount,
+        maxSilenceMinutes: this.config.maxSilenceMinutes,
+      });
     } catch (err) {
       logger.warn('[JournalHealthScheduler][tick] Failed', {
         error: err instanceof Error ? err.message : String(err),
