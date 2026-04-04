@@ -53,6 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-04: Garmin: add body battery, HRV, VO2 Max, respiration, training readiness. Fix API calls to use internal HttpClient (connectapi.garmin.com) instead of broken proxy URLs.
 - 2026-04-04: Nav: Calendar moved to dropdown group with Calendar, Ticklers, Settings entries
 - 2026-04-04: Profile: work week settings (start day, work hours). get_current_time includes work schedule context (cached 5min). Dashboard MCP refs renamed calendar→ll5-calendar, messaging→ll5-messaging.
 - 2026-04-04: Calendar page split: /calendar (display), /calendar/settings (Google account + calendar sources), /calendar/ticklers (tickler list grouped by date, 90 days)

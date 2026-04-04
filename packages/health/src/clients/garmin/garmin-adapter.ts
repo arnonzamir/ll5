@@ -81,13 +81,17 @@ export class GarminAdapter implements HealthSourceAdapter {
     const client = this.getClient(userId);
     if (!client) return null;
 
-    // Fetch both steps (named method) and daily summary (generic endpoint)
-    const [steps, dailySummary] = await Promise.all([
+    // Fetch all daily data sources in parallel
+    const [steps, dailySummary, bodyBattery, hrv, vo2Max, respiration] = await Promise.all([
       client.getSteps(date),
       client.getDailySummary(date),
+      client.getBodyBattery(),
+      client.getHRV(date),
+      client.getVO2Max(date),
+      client.getRespiration(date),
     ]);
 
-    return normalizeDailyStats(dailySummary, steps, date);
+    return normalizeDailyStats(dailySummary, steps, date, { bodyBattery, hrv, vo2Max, respiration });
   }
 
   async fetchActivities(userId: string, from: string, to: string): Promise<ActivityData[]> {

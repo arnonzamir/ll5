@@ -12,6 +12,8 @@ const METRIC_CONFIG: Record<string, { index: string; field: string }> = {
   energy: { index: 'll5_health_daily_stats', field: 'energy_level' },
   weight: { index: 'll5_health_body_composition', field: 'weight_kg' },
   active_calories: { index: 'll5_health_daily_stats', field: 'active_calories' },
+  hrv: { index: 'll5_health_daily_stats', field: 'hrv_last_night_avg' },
+  vo2_max: { index: 'll5_health_daily_stats', field: 'vo2_max' },
 };
 
 const PERIOD_DAYS: Record<string, number> = {
@@ -39,7 +41,7 @@ export function registerTrendTools(
     'get_health_trends',
     'Get weekly or monthly trends for any health metric. Returns averages, min/max, and trend direction.',
     {
-      metric: z.enum(['sleep_duration', 'sleep_quality', 'resting_hr', 'steps', 'stress', 'energy', 'weight', 'active_calories']).describe('Which metric to trend.'),
+      metric: z.enum(['sleep_duration', 'sleep_quality', 'resting_hr', 'steps', 'stress', 'energy', 'weight', 'active_calories', 'hrv', 'vo2_max']).describe('Which metric to trend.'),
       period: z.enum(['week', 'month', 'quarter']).optional().describe('Trend period. Default: week.'),
       compare: z.boolean().optional().describe('Compare to previous period. Default: true.'),
     },

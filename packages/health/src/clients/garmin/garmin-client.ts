@@ -6,6 +6,8 @@ type GarminSleepData = any;
 type IActivity = any;
 import { logger } from '../../utils/logger.js';
 
+const API_BASE = 'https://connectapi.garmin.com';
+
 export class GarminClient {
   private gc: InstanceType<typeof GarminConnect> | null = null;
   private _connected = false;
@@ -18,7 +20,6 @@ export class GarminClient {
   }
 
   async restoreSession(oauth1: any, oauth2: any): Promise<void> {
-    // Create a dummy instance and load tokens
     this.gc = new GarminConnect({ username: 'restored', password: 'restored' });
     this.gc.loadToken(oauth1, oauth2);
     this._connected = true;
@@ -28,6 +29,14 @@ export class GarminClient {
     if (!this.gc) throw new Error('GarminClient not initialized — call login() or restoreSession() first');
     return this.gc;
   }
+
+  /** Authenticated GET via the internal HttpClient (uses OAuth tokens). */
+  private async apiGet(path: string): Promise<unknown> {
+    const gc = this.ensureClient();
+    return (gc as any).client.get(`${API_BASE}${path}`);
+  }
+
+  // --- Named method wrappers (use package's built-in methods) ---
 
   async getSleepData(date: string): Promise<GarminSleepData | null> {
     try {
@@ -40,7 +49,6 @@ export class GarminClient {
 
   async getHeartRate(date: string): Promise<unknown> {
     try {
-      // getHeartRate returns HeartRate type (not exported, so we use unknown)
       return await this.ensureClient().getHeartRate(new Date(date));
     } catch (err) {
       logger.warn('[GarminClient][getHeartRate] Failed', { error: String(err), date });
@@ -75,16 +83,11 @@ export class GarminClient {
     }
   }
 
-  /**
-   * Stress and daily summary data are not exposed via named methods.
-   * Return null for now — these can be added when the garmin-connect
-   * package exposes them or via direct HTTP with the session cookie.
-   */
+  // --- Direct API endpoints (via authenticated HttpClient) ---
+
   async getStressData(date: string): Promise<unknown> {
     try {
-      return await this.ensureClient().get(
-        `https://connect.garmin.com/modern/proxy/wellness-service/wellness/dailyStress/${date}`,
-      );
+      return await this.apiGet(`/wellness-service/wellness/dailyStress/${date}`);
     } catch (err) {
       logger.warn('[GarminClient][getStressData] Failed', { error: String(err), date });
       return null;
@@ -93,12 +96,55 @@ export class GarminClient {
 
   async getDailySummary(date: string): Promise<unknown> {
     try {
-      // Use the proxy endpoint that the Garmin Connect web UI uses
-      return await this.ensureClient().get(
-        `https://connect.garmin.com/modern/proxy/usersummary-service/usersummary/daily/${date}`,
-      );
+      return await this.apiGet(`/usersummary-service/usersummary/daily/${date}`);
     } catch (err) {
+      // 403 is expected — this endpoint requires displayName, not date
       logger.warn('[GarminClient][getDailySummary] Failed', { error: String(err), date });
+      return null;
+    }
+  }
+
+  async getBodyBattery(): Promise<unknown> {
+    try {
+      return await this.apiGet('/wellness-service/wellness/bodyBattery/messagingToday');
+    } catch (err) {
+      logger.warn('[GarminClient][getBodyBattery] Failed', { error: String(err) });
+      return null;
+    }
+  }
+
+  async getHRV(date: string): Promise<unknown> {
+    try {
+      return await this.apiGet(`/hrv-service/hrv/${date}`);
+    } catch (err) {
+      logger.warn('[GarminClient][getHRV] Failed', { error: String(err), date });
+      return null;
+    }
+  }
+
+  async getVO2Max(date: string): Promise<unknown> {
+    try {
+      return await this.apiGet(`/metrics-service/metrics/maxmet/latest/${date}`);
+    } catch (err) {
+      logger.warn('[GarminClient][getVO2Max] Failed', { error: String(err), date });
+      return null;
+    }
+  }
+
+  async getTrainingReadiness(date: string): Promise<unknown> {
+    try {
+      return await this.apiGet(`/metrics-service/metrics/trainingreadiness/${date}`);
+    } catch (err) {
+      logger.warn('[GarminClient][getTrainingReadiness] Failed', { error: String(err), date });
+      return null;
+    }
+  }
+
+  async getRespiration(date: string): Promise<unknown> {
+    try {
+      return await this.apiGet(`/wellness-service/wellness/daily/respiration/${date}`);
+    } catch (err) {
+      logger.warn('[GarminClient][getRespiration] Failed', { error: String(err), date });
       return null;
     }
   }

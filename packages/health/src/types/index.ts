@@ -36,6 +36,13 @@ export interface DailyStatsData {
   energyLevel?: number;
   energyMin?: number;
   energyMax?: number;
+  hrvWeeklyAvg?: number;
+  hrvLastNightAvg?: number;
+  hrvStatus?: string;
+  vo2Max?: number;
+  respirationAvg?: number;
+  respirationMin?: number;
+  respirationMax?: number;
 }
 
 export interface StressData {

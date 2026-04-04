@@ -139,15 +139,39 @@ export function normalizeHeartRate(raw: unknown): HeartRateData | null {
  *
  * This combines data from the daily summary endpoint and/or step counts.
  */
-export function normalizeDailyStats(raw: unknown, stepsCount?: number | null, dateOverride?: string): DailyStatsData | null {
-  if (!raw && stepsCount == null) return null;
+export function normalizeDailyStats(
+  raw: unknown,
+  stepsCount?: number | null,
+  dateOverride?: string,
+  extras?: { bodyBattery?: unknown; hrv?: unknown; vo2Max?: unknown; respiration?: unknown },
+): DailyStatsData | null {
+  if (!raw && stepsCount == null && !extras?.bodyBattery && !extras?.hrv) return null;
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = (raw as any) ?? {};
-
-    // The daily summary response may be an array or a single object
     const summary = Array.isArray(data) ? data[0] : data;
+
+    // Extract body battery from dedicated endpoint
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bb = extras?.bodyBattery as any;
+    const energyLevel = bb?.confirmedTotalSleepInSeconds != null
+      ? (bb?.deltaValue ?? summary?.bodyBatteryChargedValue ?? undefined)
+      : (summary?.bodyBatteryChargedValue ?? undefined);
+    const energyMin = summary?.bodyBatteryDrainedValue ?? undefined;
+    const energyMax = summary?.bodyBatteryHighestValue ?? (bb?.startTimestampLocal ? undefined : undefined);
+
+    // Extract HRV from dedicated endpoint
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hrvData = (extras?.hrv as any)?.hrvSummary;
+
+    // Extract VO2 Max
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const vo2 = extras?.vo2Max as any;
+
+    // Extract respiration
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const resp = extras?.respiration as any;
 
     return {
       date: summary?.calendarDate ?? dateOverride ?? '',
@@ -162,9 +186,16 @@ export function normalizeDailyStats(raw: unknown, stepsCount?: number | null, da
           : 0,
       stressAverage: summary?.averageStressLevel ?? undefined,
       stressMax: summary?.maxStressLevel ?? undefined,
-      energyLevel: summary?.bodyBatteryChargedValue ?? undefined,
-      energyMin: summary?.bodyBatteryDrainedValue ?? undefined,
-      energyMax: summary?.bodyBatteryHighestValue ?? undefined,
+      energyLevel,
+      energyMin,
+      energyMax,
+      hrvWeeklyAvg: hrvData?.weeklyAvg ?? undefined,
+      hrvLastNightAvg: hrvData?.lastNightAvg ?? undefined,
+      hrvStatus: hrvData?.status ?? undefined,
+      vo2Max: vo2?.generic?.vo2MaxValue ?? undefined,
+      respirationAvg: resp?.avgWakingRespirationValue ?? undefined,
+      respirationMin: resp?.lowestRespirationValue ?? undefined,
+      respirationMax: resp?.highestRespirationValue ?? undefined,
     };
   } catch (err) {
     logger.warn('[GarminNormalizer][normalizeDailyStats] Failed to normalize', {

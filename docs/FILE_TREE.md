@@ -114,7 +114,7 @@ ll5/
 │
 ├── packages/health/                   # @ll5/health — health monitoring MCP (ES+PG)
 │   └── src/
-│       ├── clients/                     # HealthSourceAdapter interface + Garmin adapter (garmin-connect npm)
+│       ├── clients/                     # HealthSourceAdapter interface + Garmin adapter (garmin-connect npm + connectapi.garmin.com direct API)
 │       ├── tools/                       # 8 tools: sources (connect/disconnect/list/status), sleep, heart rate, daily stats, activities, body comp, trends, sync
 │       ├── types/                       # Generic health types (SleepData, HeartRateData, DailyStatsData, StressData, ActivityData, BodyCompositionData)
 │       ├── setup/indices.ts             # 5 ES indices (ll5_health_sleep, heart_rate, daily_stats, activities, body_composition)

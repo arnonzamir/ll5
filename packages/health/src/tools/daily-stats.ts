@@ -69,7 +69,17 @@ export function registerDailyStatsTools(
             max: doc.energy_max ?? null,
           },
           spo2Average: doc.spo2_average ?? null,
-          respirationAverage: doc.respiration_average ?? null,
+          respiration: {
+            average: doc.respiration_average ?? null,
+            min: doc.respiration_min ?? null,
+            max: doc.respiration_max ?? null,
+          },
+          hrv: {
+            weeklyAvg: doc.hrv_weekly_avg ?? null,
+            lastNightAvg: doc.hrv_last_night_avg ?? null,
+            status: doc.hrv_status ?? null,
+          },
+          vo2Max: doc.vo2_max ?? null,
           syncedAt: doc.synced_at,
         };
 

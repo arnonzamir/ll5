@@ -129,7 +129,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `ll5_knowledge_*` — facts, people, places, profile, data_gaps
 - `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
 - `ll5_agent_*` — journal (micro-entries), user_model (consolidated sections keyed by userId_section)
-- `ll5_health_*` — sleep, heart_rate, daily_stats (incl. stress + energy/body battery), activities, body_composition
+- `ll5_health_*` — sleep, heart_rate, daily_stats (stress, body battery, HRV, VO2 Max, respiration), activities, body_composition
 - `ll5_app_log` — all tool calls, webhooks, errors (service, level, action, tool_name, duration_ms)
 - `ll5_audit_log` — all mutations across MCPs
 - Note: calendar index has text-mapped calendar_id (use .keyword subfield for term queries)
