@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
+import { escalateConversation } from '../utils/escalation.js';
 import type { NotificationRuleMatcher } from './notification-rules.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
@@ -72,16 +73,18 @@ export async function processWhatsAppWebhook(
 
   // Resolve group/conversation name from messaging DB (shared PG)
   let groupName: string | null = null;
-  if (isGroup) {
-    try {
-      const nameResult = await pgPool.query(
-        'SELECT name FROM messaging_conversations WHERE conversation_id = $1 AND name IS NOT NULL LIMIT 1',
-        [remoteJid],
-      );
-      groupName = nameResult.rows[0]?.name ?? remoteJid;
-    } catch {
-      groupName = remoteJid;
+  let conversationName: string | null = null;
+  try {
+    const nameResult = await pgPool.query(
+      'SELECT name FROM messaging_conversations WHERE conversation_id = $1 AND name IS NOT NULL LIMIT 1',
+      [remoteJid],
+    );
+    conversationName = nameResult.rows[0]?.name ?? null;
+    if (isGroup) {
+      groupName = conversationName ?? remoteJid;
     }
+  } catch {
+    if (isGroup) groupName = remoteJid;
   }
 
   // Check priority early for image handling — only download images for non-ignore conversations
@@ -184,7 +187,23 @@ export async function processWhatsAppWebhook(
       conversation_id: remoteJid,
     });
 
-    // Only notify agent for conversations with immediate or agent priority
+    // Escalate if user is writing in an ignored/batched conversation
+    if (priority === 'ignore' || priority === 'batch') {
+      await escalateConversation(
+        pgPool, es, userId, 'whatsapp', remoteJid,
+        conversationName ?? groupName ?? remoteJid.split('@')[0],
+        priority,
+      );
+      await es.update({
+        index: 'll5_awareness_messages',
+        id: docId,
+        doc: { processed: true },
+        refresh: false,
+      });
+      return;
+    }
+
+    // Notify agent for conversations with immediate or agent priority
     if (priority === 'immediate' || priority === 'agent') {
       const truncBody = text.length > 2000 ? text.slice(0, 2000) + '...' : text;
       const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';

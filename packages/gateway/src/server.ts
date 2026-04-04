@@ -1016,6 +1016,11 @@ export async function startServer(config: EnvConfig): Promise<void> {
   // Start calendar sync and review schedulers
   await startSchedulers(config, esClient, pgPool);
 
+  // Start escalation expiration checker (every 60 seconds)
+  const { checkExpiredEscalations } = await import('./utils/escalation.js');
+  setInterval(() => void checkExpiredEscalations(pgPool), 60_000);
+  logger.info('[startServer][init] Escalation expiration checker started');
+
   app.listen(config.port, () => {
     logger.info(`[startServer][listen] Gateway listening on port ${config.port}`, {
       env: config.nodeEnv,

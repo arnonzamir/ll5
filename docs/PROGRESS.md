@@ -53,6 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-04: Conversation escalation — user sends message in ignored/batched chat → 30-min immediate window, agent notified with context, must journal decision on expiry. Persisted in user_settings for session survival. Repeated messages extend timer.
 - 2026-04-04: Recurring ticklers: create_tickler supports recurrence param (daily/weekly/weekdays/monthly/yearly/raw RRULE), complete_tickler handles instance vs series deletion
 - 2026-04-04: Fix phone calendar sync: use Instances API (expands recurring events), capture calendar name, attendees, description, status, availability, timezone offsets
 - 2026-04-03: Design docs for roadmap items: geo-search MCP (separate service), health polling scheduler, data source config, GTD review skill (quick+weekly), agent routing rename

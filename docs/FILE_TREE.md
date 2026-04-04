@@ -98,7 +98,8 @@ ll5/
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/system-message.ts    # Shared system message writer with dedup
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message
-│       ├── utils/fcm-sender.ts       # FCM v1 API sender (service account JWT + OAuth2, includes notification_level in data payload)
+│       ├── utils/fcm-sender.ts       # FCM v1 API sender (service account JWT + OAuth2, 4-level notification)
+│       ├── utils/escalation.ts      # Conversation escalation: detect user activity in low-priority chats, 30-min attention window
 │       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, notification_rules, device_commands, user_settings (unified JSONB)
 │       └── server.ts                  # Express app: webhooks, auth, chat, media, commands, availability check, health, schedulers
 │

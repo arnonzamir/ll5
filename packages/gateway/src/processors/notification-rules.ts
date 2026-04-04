@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
+import { isEscalated } from '../utils/escalation.js';
 
 export type Priority = 'immediate' | 'batch' | 'ignore' | 'agent';
 
@@ -65,6 +66,17 @@ export class NotificationRuleMatcher {
     const senderLower = message.sender.toLowerCase();
     const bodyLower = message.body.toLowerCase();
     const appLower = message.app.toLowerCase();
+
+    // 0. Check for active escalation — overrides all rules with 'immediate'
+    if (message.platform && message.conversation_id) {
+      const escalated = await isEscalated(this.pool, userId, message.platform, message.conversation_id);
+      if (escalated) {
+        logger.debug('[NotificationRuleMatcher][match] Escalation active, returning immediate', {
+          platform: message.platform, conversationId: message.conversation_id,
+        });
+        return 'immediate';
+      }
+    }
 
     // 1. Conversation-specific rules — highest priority
     if (message.platform && message.conversation_id) {

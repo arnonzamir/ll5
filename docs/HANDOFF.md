@@ -177,7 +177,8 @@ See docs/implementation/deployment-log.md for full details:
 - Gateway Dockerfile must copy `src/migrations` to `dist/migrations` (SQL files aren't compiled by tsc)
 - **Unified user settings**: `user_settings` table with JSONB `settings` column. Gateway `GET/PUT /user-settings`. Structure: `{ timezone, notification: { max_level, quiet_max_level, quiet_start, quiet_end } }`. PUT does deep merge (reads existing, merges in JS, writes back) to preserve sibling keys in nested objects. Replaces `user_notification_settings` and `google_user_settings` (legacy tables kept for backward compat during transition). All services read timezone from here.
 - **Design docs ready for review**: geo-search MCP (separate service with POI/distance/context tools), health polling scheduler (event detection + thresholds), data source config (per-source toggles), GTD review skill (quick+weekly with adaptive behavior), agent routing rename
-- WhatsApp webhook resolves group names from messaging_conversations table (shared PG) — no longer stores raw JIDs as group_name
+- **Conversation escalation**: user sends fromMe in ignored/batched WhatsApp conversation → 30-min immediate window. Stored in `user_settings.active_escalations` (survives restarts). Gateway checks `isEscalated()` in matcher, overrides priority to immediate. On expiry, agent must journal + decide priority. No reply permission — awareness only.
+- WhatsApp webhook resolves group/contact names from messaging_conversations table (shared PG) — no longer stores raw JIDs as group_name
 - Places upsert auto-geocodes address→coordinates via Nominatim when lat/lon not provided (1 req/sec rate limit)
 - People relationship field is free-text; UI groups them into family/friend/colleague/acquaintance/other for filtering
 - Migrations that DROP+ADD constraints must include ALL values (not just original), since later migrations may have already inserted new values
