@@ -131,6 +131,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `ll5_audit_log` — all mutations across MCPs
 - Note: calendar index has text-mapped calendar_id (use .keyword subfield for term queries)
 - Calendar push accepts date-only strings and null values (Android Moshi sends explicit null, not undefined)
+- Phone calendar sync uses Instances API (not Events API) — expands recurring events into individual occurrences. Captures calendar_name, attendees, description, status, availability per event.
 
 ## CI/CD
 

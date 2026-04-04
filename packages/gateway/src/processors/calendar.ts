@@ -132,6 +132,21 @@ export async function processCalendar(
   if (item.location) {
     doc.location = item.location;
   }
+  if (item.calendar_name) {
+    doc.calendar_name = item.calendar_name;
+  }
+  if (item.attendees && item.attendees.length > 0) {
+    doc.attendees = item.attendees;
+  }
+  if (item.description) {
+    doc.description = item.description;
+  }
+  if (item.status) {
+    doc.status = item.status;
+  }
+  if (item.availability) {
+    doc.availability = item.availability;
+  }
 
   await es.index({
     index: 'll5_awareness_calendar_events',

@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 const PushLocationItemSchema = z.object({
   type: z.literal('location'),
-  timestamp: z.string().datetime(),
+  timestamp: z.string().datetime({ offset: true }),
   lat: z.number().min(-90).max(90),
   lon: z.number().min(-180).max(180),
   accuracy_m: z.number().nonnegative().optional(),
@@ -13,7 +13,7 @@ const PushLocationItemSchema = z.object({
 
 const PushMessageItemSchema = z.object({
   type: z.literal('message'),
-  timestamp: z.string().datetime(),
+  timestamp: z.string().datetime({ offset: true }),
   sender: z.string().min(1),
   app: z.string().min(1),
   body: z.string(),
@@ -23,12 +23,17 @@ const PushMessageItemSchema = z.object({
 
 const PushCalendarItemSchema = z.object({
   type: z.literal('calendar_event'),
-  timestamp: z.string().datetime(),
+  timestamp: z.string().datetime({ offset: true }),
   title: z.string().min(1),
   start: z.string().min(1), // ISO datetime or date-only (YYYY-MM-DD) for all-day events
   end: z.string().min(1).nullish(), // Nullable — some all-day events have no end
   location: z.string().nullish(),
   all_day: z.boolean().nullish(),
+  calendar_name: z.string().nullish(),
+  attendees: z.array(z.string()).nullish(),
+  description: z.string().nullish(),
+  status: z.enum(['confirmed', 'tentative', 'cancelled']).nullish(),
+  availability: z.enum(['busy', 'free', 'tentative']).nullish(),
 });
 
 const PushItemSchema = z.discriminatedUnion('type', [
