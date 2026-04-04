@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
-import { insertSystemMessage } from '../utils/system-message.js';
+import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 
 interface JournalConsolidationConfig {
   consolidationHour: number;
@@ -68,10 +68,13 @@ export class JournalConsolidationScheduler {
 
       this.lastRunDate = currentDate;
 
+      const evt = createSchedulerEvent('journal_consolidation');
       await insertSystemMessage(
         this.pool,
         this.config.userId,
         '[Journal Consolidation] Time to consolidate. Review today\'s journal entries and session data. Update user model sections as needed. Run /consolidate.',
+        undefined,
+        evt,
       );
 
       logger.info('[JournalConsolidationScheduler][tick] Consolidation trigger sent');

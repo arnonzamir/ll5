@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
-import { insertSystemMessage } from '../utils/system-message.js';
+import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 
 interface GTDHealthConfig {
   intervalHours: number;
@@ -65,10 +65,13 @@ export class GTDHealthScheduler {
     try {
       this.lastCheckTime = now;
 
+      const evt = createSchedulerEvent('gtd_health');
       await insertSystemMessage(
         this.pool,
         this.config.userId,
         '[GTD Health Check] Time for a periodic GTD health check. Please run get_gtd_health to review the state of actions, projects, and identify any items needing attention.',
+        undefined,
+        evt,
       );
 
       logger.info('[GTDHealthScheduler][tick] GTD health check reminder sent');

@@ -26,77 +26,75 @@ export async function startSchedulers(
     return;
   }
 
-  // Read timezone from user_settings (unified), fall back to env var
+  // Read settings from user_settings (unified), fall back to env vars
   let timezone = config.calendarReviewTimezone;
+  const sched: Record<string, number> = {};
   try {
     const result = await pgPool.query(
-      "SELECT settings->>'timezone' as tz FROM user_settings WHERE user_id = $1",
+      "SELECT settings->>'timezone' as tz, settings->'scheduler' as sched FROM user_settings WHERE user_id = $1",
       [userId],
     );
     if (result.rows[0]?.tz) {
       timezone = result.rows[0].tz;
-      logger.info('[startSchedulers][init] Using timezone from user_settings', { timezone });
     }
+    if (result.rows[0]?.sched) {
+      Object.assign(sched, result.rows[0].sched);
+    }
+    logger.info('[startSchedulers][init] Using settings from user_settings', { timezone, schedulerKeys: Object.keys(sched) });
   } catch {
-    // Table may not exist yet on first deploy — use env var
+    // Table may not exist yet on first deploy — use env vars
   }
+
+  // Helper: read scheduler setting with env var fallback
+  const s = (key: string, envFallback: number) => (sched[key] as number) ?? envFallback;
 
   // --- Independent schedulers (always start) ---
 
+  const startHour = s('active_hours_start', config.calendarReviewStartHour);
+  const endHour = s('active_hours_end', config.calendarReviewEndHour);
+
   // GTD health check: periodic reminder
   const gtdHealthScheduler = new GTDHealthScheduler(pgPool, {
-    intervalHours: config.gtdHealthIntervalHours,
-    startHour: config.calendarReviewStartHour,
-    endHour: config.calendarReviewEndHour,
-    timezone,
-    userId,
+    intervalHours: s('gtd_health_hours', config.gtdHealthIntervalHours),
+    startHour, endHour, timezone, userId,
   });
   gtdHealthScheduler.start();
 
   // Weekly review reminder
   const weeklyReviewScheduler = new WeeklyReviewReminder(pgPool, {
-    reviewDay: config.weeklyReviewDay,
-    reviewHour: config.weeklyReviewHour,
-    timezone,
-    userId,
+    reviewDay: s('weekly_review_day', config.weeklyReviewDay),
+    reviewHour: s('weekly_review_hour', config.weeklyReviewHour),
+    timezone, userId,
   });
   weeklyReviewScheduler.start();
 
   // Message batch review
   const messageBatchScheduler = new MessageBatchReviewScheduler(es, pgPool, {
-    intervalMinutes: config.messageBatchIntervalMinutes,
-    startHour: config.calendarReviewStartHour,
-    endHour: config.calendarReviewEndHour,
-    timezone,
-    userId,
+    intervalMinutes: s('message_batch_minutes', config.messageBatchIntervalMinutes),
+    startHour, endHour, timezone, userId,
   });
   messageBatchScheduler.start();
 
-  // Heartbeat: nudge agent with current time after silence
-  const heartbeatScheduler = new HeartbeatScheduler(pgPool, {
-    silenceMinutes: 60,
-    startHour: config.calendarReviewStartHour,
-    endHour: config.calendarReviewEndHour,
-    timezone,
-    userId,
+  // Heartbeat: nudge agent with time + schedule context after silence
+  const heartbeatScheduler = new HeartbeatScheduler(pgPool, es, {
+    silenceMinutes: s('heartbeat_silence_minutes', 60),
+    startHour, endHour, timezone, userId,
+    lookbackHours: s('schedule_lookback_hours', 1),
+    lookaheadHours: s('schedule_lookahead_hours', 3),
   });
   heartbeatScheduler.start();
 
   // Journal health + proactivity nudge: remind agent if silent too long
   const journalHealthScheduler = new JournalHealthScheduler(es, pgPool, {
-    maxSilenceMinutes: 60,
-    startHour: config.calendarReviewStartHour,
-    endHour: config.calendarReviewEndHour,
-    timezone,
-    userId,
+    maxSilenceMinutes: s('journal_nudge_minutes', 60),
+    startHour, endHour, timezone, userId,
   });
   journalHealthScheduler.start();
 
-  // Journal consolidation: nightly trigger to consolidate journal → user model
+  // Journal consolidation: nightly trigger
   const journalConsolidationScheduler = new JournalConsolidationScheduler(pgPool, {
-    consolidationHour: config.journalConsolidationHour,
-    timezone,
-    userId,
+    consolidationHour: s('consolidation_hour', config.journalConsolidationHour),
+    timezone, userId,
   });
   journalConsolidationScheduler.start();
 
@@ -115,29 +113,23 @@ export async function startSchedulers(
 
   // Calendar review: configurable interval during active hours
   const reviewScheduler = new CalendarReviewScheduler(pgPool, googleClient, {
-    startHour: config.calendarReviewStartHour,
-    endHour: config.calendarReviewEndHour,
-    intervalMinutes: config.calendarReviewIntervalMinutes,
-    timezone,
-    userId,
+    startHour, endHour,
+    intervalMinutes: s('calendar_review_minutes', config.calendarReviewIntervalMinutes),
+    timezone, userId,
   });
   reviewScheduler.start();
 
   // Daily review (morning briefing)
   const dailyReviewScheduler = new DailyReviewScheduler(pgPool, googleClient, {
-    reviewHour: config.dailyReviewHour,
-    timezone,
-    userId,
+    reviewHour: s('morning_briefing_hour', config.dailyReviewHour),
+    timezone, userId,
   });
   dailyReviewScheduler.start();
 
   // Tickler alerts
   const ticklerAlertScheduler = new TicklerAlertScheduler(pgPool, googleClient, {
-    intervalMinutes: config.ticklerAlertIntervalMinutes,
-    startHour: config.calendarReviewStartHour,
-    endHour: config.calendarReviewEndHour,
-    timezone,
-    userId,
+    intervalMinutes: s('tickler_alert_minutes', config.ticklerAlertIntervalMinutes),
+    startHour, endHour, timezone, userId,
   });
   ticklerAlertScheduler.start();
 

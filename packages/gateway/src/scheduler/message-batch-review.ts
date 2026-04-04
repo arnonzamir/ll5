@@ -1,7 +1,7 @@
 import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
-import { insertSystemMessage } from '../utils/system-message.js';
+import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 
 interface MessageBatchConfig {
   intervalMinutes: number;
@@ -129,7 +129,8 @@ export class MessageBatchReviewScheduler {
         lines.push(`- ${group.sender} (${group.app}): ${group.count} message${group.count > 1 ? 's' : ''}`);
       }
 
-      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'));
+      const evt = createSchedulerEvent('message_batch');
+      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), undefined, evt);
 
       // Bulk update ES to mark messages as processed
       if (docIds.length > 0) {

@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
-import { insertSystemMessage } from '../utils/system-message.js';
+import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 
 interface TicklerAlertConfig {
   intervalMinutes: number;
@@ -103,11 +103,12 @@ export class TicklerAlertScheduler {
         this.alertedIds.add(tickler.event_id);
       }
 
+      const evt = createSchedulerEvent('tickler_alert');
       await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), {
         title: 'Tickler Alert',
         type: 'tickler_alert',
         priority: 'high',
-      });
+      }, evt);
       logger.info('[TicklerAlertScheduler][tick] Tickler alert sent', { count: newTicklers.length });
     } catch (err) {
       logger.warn('[TicklerAlertScheduler][tick] Tickler alert tick failed', {

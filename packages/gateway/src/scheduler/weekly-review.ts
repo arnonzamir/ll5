@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
-import { insertSystemMessage } from '../utils/system-message.js';
+import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 
 interface WeeklyReviewConfig {
   reviewDay: number; // 0=Sunday, 5=Friday, etc.
@@ -81,10 +81,13 @@ export class WeeklyReviewReminder {
 
       this.lastReviewWeek = currentWeek;
 
+      const evt = createSchedulerEvent('weekly_review');
       await insertSystemMessage(
         this.pool,
         this.config.userId,
         '[Weekly Review] Time for your weekly GTD review. Review all projects, process inbox to zero, review next actions, update waiting-for items, and scan the horizons of focus. Run the weekly review skill or get_gtd_health to start.',
+        undefined,
+        evt,
       );
 
       logger.info('[WeeklyReviewReminder][tick] Weekly review reminder sent', { week: currentWeek });

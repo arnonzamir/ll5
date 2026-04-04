@@ -312,6 +312,14 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                       Notification Levels
                     </Link>
                     <Link
+                      href="/settings/scheduler"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <Clock className="h-4 w-4" />
+                      Scheduler
+                    </Link>
+                    <Link
                       href="/settings/health"
                       onClick={() => setProfileOpen(false)}
                       className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"

@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
-import { insertSystemMessage } from '../utils/system-message.js';
+import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 
 interface ReviewConfig {
   startHour: number;
@@ -226,6 +226,7 @@ export class CalendarReviewScheduler {
   }
 
   private async sendSystemMessage(content: string): Promise<void> {
-    await insertSystemMessage(this.pool, this.config.userId, content);
+    const evt = createSchedulerEvent('calendar_review');
+    await insertSystemMessage(this.pool, this.config.userId, content, undefined, evt);
   }
 }

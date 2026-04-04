@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
-import { insertSystemMessage } from '../utils/system-message.js';
+import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 
 interface DailyReviewConfig {
   reviewHour: number;
@@ -115,11 +115,12 @@ export class DailyReviewScheduler {
         }
       }
 
+      const evt = createSchedulerEvent('morning_briefing');
       await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), {
         title: 'Morning Briefing',
         type: 'morning_briefing',
         priority: 'normal',
-      });
+      }, evt);
       logger.info('[DailyReviewScheduler][tick] Morning briefing sent', { events: todayEvents.length, ticklers: ticklers.length });
     } catch (err) {
       logger.warn('[DailyReviewScheduler][tick] Daily review tick failed', {

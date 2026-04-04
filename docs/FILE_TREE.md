@@ -133,7 +133,7 @@ ll5/
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
 │   └── src/
 │       ├── app/(auth)/login/          # Login page + server action
-│       ├── app/(user)/                # dashboard, calendar (+settings, +ticklers), actions, projects, inbox, shopping, people, locations, places, media, health, phone-data, sessions, settings (notifications, messaging, health, notification-levels), profile
+│       ├── app/(user)/                # dashboard, calendar (+settings, +ticklers), actions, projects, inbox, shopping, people, locations, places, media, health, phone-data, sessions, settings (notifications, messaging, health, notification-levels, scheduler), profile
 │       ├── app/(admin)/               # Admin pages: health, users, tools
 │       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations
 │       ├── components/                # Nav (Calendar/Organize/People/Data dropdowns, profile menu), cards, chat widget, shadcn/ui

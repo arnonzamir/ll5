@@ -1,7 +1,7 @@
 import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
-import { insertSystemMessage } from '../utils/system-message.js';
+import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 
 interface JournalHealthConfig {
   maxSilenceMinutes: number; // default 60 — nudge if no journal entry in this period
@@ -109,21 +109,61 @@ export class JournalHealthScheduler {
 
       parts.push(
         'Reminder: journal observations, feedback, decisions, and patterns — even small ones.',
+      );
+
+      // Include upcoming events from ES
+      try {
+        const lookaheadMs = 3 * 60 * 60 * 1000;
+        const windowEnd = new Date(now + lookaheadMs).toISOString();
+        const eventsResult = await this.es.search({
+          index: 'll5_awareness_calendar_events',
+          query: {
+            bool: {
+              filter: [
+                { term: { user_id: this.config.userId } },
+                { range: { start_time: { gte: new Date().toISOString(), lte: windowEnd } } },
+              ],
+              must_not: [{ term: { all_day: true } }],
+            },
+          },
+          size: 5,
+          sort: [{ start_time: 'asc' }],
+          _source: ['title', 'start_time'],
+        });
+
+        const upcoming = eventsResult.hits.hits.map((h) => {
+          const s = h._source as Record<string, unknown>;
+          const t = new Date(s.start_time as string).toLocaleTimeString('en-GB', {
+            timeZone: this.config.timezone, hour: '2-digit', minute: '2-digit', hour12: false,
+          });
+          return `- ${t} ${s.title}`;
+        });
+
+        if (upcoming.length > 0) {
+          parts.push('', 'Upcoming:', ...upcoming);
+        }
+      } catch {
+        // non-critical
+      }
+
+      parts.push(
         '',
-        'Also check:',
+        'Check:',
         '- Any pending inbox items to process?',
         '- Any system messages you haven\'t acted on?',
-        '- Any ticklers or calendar events coming up that need prep?',
         '- Any conversations you\'re escalated on that need a decision?',
         '- Anything worth pushing to the user proactively?',
         '',
-        'Your role is to be proactively helpful — don\'t wait to be asked. If you notice something actionable, act on it or push it to the user.',
+        'Your role is to be proactively helpful — don\'t wait to be asked.',
       );
 
+      const evt = createSchedulerEvent('agent_nudge');
       await insertSystemMessage(
         this.pool,
         this.config.userId,
         `[Agent Nudge] ${parts.join('\n')}`,
+        undefined,
+        evt,
       );
 
       this.lastNudgeTime = now;
