@@ -32,48 +32,48 @@ function resolveRecurrence(input: string | undefined): string[] | undefined {
 }
 
 /**
- * Get or create the tickler calendar.
- * On first call, creates a new Google Calendar and stores config with role='tickler'.
+ * Find the tickler calendar. Checks config first, then searches Google Calendar
+ * list by name and registers it. Never creates a new calendar.
  */
-async function getOrCreateTicklerCalendar(
+async function findTicklerCalendar(
   config: GoogleClientConfig,
   tokenRepo: OAuthTokenRepository,
   calendarConfigRepo: CalendarConfigRepository,
   userId: string,
 ): Promise<string> {
-  // Check if we already have a tickler calendar
+  // 1. Check config DB
   const existing = await calendarConfigRepo.getByRole(userId, 'tickler');
   if (existing) {
     return existing.calendar_id;
   }
 
-  // Create the calendar via Google API
+  // 2. Search Google Calendar list for a calendar named "LL5 System" (or similar)
   const auth = await getAuthenticatedClient(config, tokenRepo, userId);
   const calendarApi = google.calendar({ version: 'v3', auth });
 
-  const response = await calendarApi.calendars.insert({
-    requestBody: {
-      summary: TICKLER_CALENDAR_NAME,
-      description: 'Managed by LL5 — temporal nudges and tickler reminders',
-      timeZone: 'Asia/Jerusalem',
-    },
-  });
+  const listResponse = await calendarApi.calendarList.list({ maxResults: 100 });
+  const calendars = listResponse.data.items ?? [];
 
-  const calendarId = response.data.id;
-  if (!calendarId) {
-    throw new Error('Failed to create tickler calendar — no ID returned');
+  const match = calendars.find((c) =>
+    c.summary?.toLowerCase().includes('ll5') ||
+    c.summary?.toLowerCase().includes('tickler'),
+  );
+
+  if (match?.id) {
+    // Found it — register in config
+    await calendarConfigRepo.upsert(userId, {
+      calendar_id: match.id,
+      calendar_name: match.summary ?? TICKLER_CALENDAR_NAME,
+      color: TICKLER_COLOR,
+      role: 'tickler',
+    });
+    logger.info('[findTicklerCalendar] Found and registered tickler calendar', { calendarId: match.id, name: match.summary });
+    return match.id;
   }
 
-  // Store in config with role='tickler'
-  await calendarConfigRepo.upsert(userId, {
-    calendar_id: calendarId,
-    calendar_name: TICKLER_CALENDAR_NAME,
-    color: TICKLER_COLOR,
-    role: 'tickler',
-  });
-
-  logger.info('[getOrCreateTicklerCalendar] Created tickler calendar', { calendarId, userId });
-  return calendarId;
+  throw new Error(
+    `No tickler calendar found. Create a Google Calendar named "${TICKLER_CALENDAR_NAME}" manually, then retry.`,
+  );
 }
 
 export function registerTicklerTools(
@@ -101,7 +101,7 @@ export function registerTicklerTools(
     },
     async ({ title, due_date, due_time, description, category, recurrence }) => {
       const userId = getUserId();
-      const calendarId = await getOrCreateTicklerCalendar(config, tokenRepo, calendarConfigRepo, userId);
+      const calendarId = await findTicklerCalendar(config, tokenRepo, calendarConfigRepo, userId);
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
 
