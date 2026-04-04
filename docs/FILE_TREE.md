@@ -91,7 +91,7 @@ ll5/
 │
 ├── packages/gateway/                  # @ll5/gateway — Express HTTP service
 │   └── src/
-│       ├── auth.ts                    # POST /auth/token (PIN login)
+│       ├── auth.ts                    # POST /auth/token (PIN login), POST /auth/refresh (token refresh)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
 │       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich with phone data), WhatsApp webhook, unified rule matcher
 │       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, journal consolidation
