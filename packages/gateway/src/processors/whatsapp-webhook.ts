@@ -207,10 +207,11 @@ export async function processWhatsAppWebhook(
     if (priority === 'immediate' || priority === 'agent') {
       const truncBody = text.length > 2000 ? text.slice(0, 2000) + '...' : text;
       const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
+      const imageInfo = hasImage && imageUrl ? ` [image attached: ${imageUrl}]` : hasImage ? ' [image attached]' : '';
       await insertSystemMessage(
         pgPool,
         userId,
-        `[WhatsApp] You sent${groupInfo}: "${truncBody}"`,
+        `[WhatsApp] You sent${groupInfo}: "${truncBody}"${imageInfo}`,
       );
 
       await es.update({
@@ -280,11 +281,12 @@ export async function processWhatsAppWebhook(
   if (priority === 'immediate' || priority === 'agent') {
     const truncBody = text.length > 200 ? text.slice(0, 200) + '...' : text;
     const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
+    const imageInfo = hasImage && imageUrl ? ` [image attached: ${imageUrl}]` : hasImage ? ' [image attached]' : '';
     // No FCM notify — immediate WhatsApp goes to agent via system message → SSE only
     await insertSystemMessage(
       pgPool,
       userId,
-      `[WhatsApp] ${sender}${groupInfo}: "${truncBody}"`,
+      `[WhatsApp] ${sender}${groupInfo}: "${truncBody}"${imageInfo}`,
     );
 
     // Mark as processed so batch review doesn't re-report it

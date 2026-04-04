@@ -182,7 +182,7 @@ See docs/implementation/deployment-log.md for full details:
 - **Unified user settings**: `user_settings` table with JSONB `settings` column. Gateway `GET/PUT /user-settings`. Structure: `{ timezone, work_week: { start_day, start_hour, end_hour }, notification: { max_level, quiet_max_level, quiet_start, quiet_end } }`. PUT does deep merge. `get_current_time` tool includes work schedule context (cached 5 min in channel MCP).
 - **Design docs ready for review**: geo-search MCP (separate service with POI/distance/context tools), health polling scheduler (event detection + thresholds), data source config (per-source toggles), GTD review skill (quick+weekly with adaptive behavior), agent routing rename
 - **Conversation escalation**: user sends fromMe in ignored/batched WhatsApp conversation → 30-min immediate window. Stored in `user_settings.active_escalations` (survives restarts). Gateway checks `isEscalated()` in matcher, overrides priority to immediate. On expiry, agent must journal + decide priority. No reply permission — awareness only.
-- WhatsApp webhook resolves group/contact names from messaging_conversations table (shared PG) — no longer stores raw JIDs as group_name
+- WhatsApp webhook resolves group/contact names from messaging_conversations table. System messages include `[image attached: URL]` for image messages. (shared PG) — no longer stores raw JIDs as group_name
 - Places upsert auto-geocodes address→coordinates via Nominatim when lat/lon not provided (1 req/sec rate limit)
 - People relationship field is free-text; UI groups them into family/friend/colleague/acquaintance/other for filtering
 - Migrations that DROP+ADD constraints must include ALL values (not just original), since later migrations may have already inserted new values
