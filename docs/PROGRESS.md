@@ -53,6 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-04: Calendar page split: /calendar (display), /calendar/settings (Google account + calendar sources), /calendar/ticklers (tickler list grouped by date, 90 days)
 - 2026-04-04: Fix MCP naming collision: "calendar" and "messaging" collide with Claude Code first-party plugins, renamed to ll5-calendar/ll5-messaging. headersHelper works with script-based auth.
 - 2026-04-04: Fix calendar MCP auth: remove OAuth discovery route handlers that confused Claude Code's MCP SDK
 - 2026-04-04: Auto token refresh: POST /auth/refresh endpoint (accepts expired tokens within 7-day grace), channel MCP auto-refreshes on startup + every 12h

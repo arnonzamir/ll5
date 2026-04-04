@@ -37,7 +37,9 @@ Dashboard (Next.js 15)
   ├── Dashboard + calendar use local timezone (not UTC) for all date calculations
   ├── /dashboard — GTD status + chat panel (50/50)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
-  ├── /calendar — day/week view, hover tooltips, click details with source, holiday banner, settings
+  ├── /calendar — day/week view, hover tooltips, click details with source, holiday banner
+  ├── /calendar/settings — Google account connection + calendar source access modes
+  ├── /calendar/ticklers — tickler list grouped by date (90 days), recurring badges
   ├── /phone-data — review phone-pushed data (locations, messages, calendar) with type/time filters
   ├── /settings/notifications — People + Conversations + Keywords tabs, 4 priority levels (ignore/batch/immediate/agent)
   ├── Chat: SSE real-time (PG NOTIFY on insert+update), status indicators, typing dots, 30s safety sweep

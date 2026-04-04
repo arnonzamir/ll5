@@ -15,16 +15,12 @@ import {
   Settings,
   Database,
 } from "lucide-react";
+import Link from "next/link";
 import {
   fetchEvents,
   fetchTicklers,
-  fetchCalendarConfigs,
-  updateCalendarAccessMode,
-  fetchGoogleConnectionStatus,
-  getGoogleAuthUrl,
   type CalendarEvent,
   type Tickler,
-  type CalendarConfig,
 } from "./calendar-server-actions";
 
 // --- Date helpers ---
@@ -655,270 +651,6 @@ function WeekGrid({
   );
 }
 
-// --- Calendar Settings ---
-
-function getSourceLabel(cal: CalendarConfig): { label: string; className: string } {
-  if (cal.role === "tickler") {
-    return { label: "Tickler", className: "bg-amber-50 text-amber-700 border-amber-200" };
-  }
-  if (cal.source === "phone") {
-    return { label: "Phone", className: "bg-purple-50 text-purple-700 border-purple-200" };
-  }
-  return { label: "Google", className: "bg-blue-50 text-blue-700 border-blue-200" };
-}
-
-function getAccessRoleLabel(role?: string): string | null {
-  if (!role) return null;
-  const map: Record<string, string> = {
-    owner: "owner",
-    writer: "writer",
-    reader: "reader",
-    freeBusyReader: "free/busy",
-  };
-  return map[role] ?? role;
-}
-
-function CalendarSettings({
-  configs,
-  onUpdate,
-  onRefresh,
-  isRefreshing,
-}: {
-  configs: CalendarConfig[];
-  onUpdate: (
-    calendarId: string,
-    mode: "ignore" | "read" | "readwrite"
-  ) => void;
-  onRefresh: () => void;
-  isRefreshing: boolean;
-}) {
-  const modes = ["ignore", "read", "readwrite"] as const;
-  const modeLabels = {
-    ignore: "Ignore",
-    read: "Read",
-    readwrite: "R/W",
-  };
-  const modeColors = {
-    ignore: "text-gray-400",
-    read: "text-blue-600",
-    readwrite: "text-green-600",
-  };
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium text-gray-500">
-            Calendar Sources
-          </CardTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onRefresh}
-            disabled={isRefreshing}
-            className="h-7 px-2 text-xs text-gray-500"
-          >
-            <RefreshCw
-              className={`h-3 w-3 mr-1 ${isRefreshing ? "animate-spin" : ""}`}
-            />
-            Sync
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-1">
-          {configs.map((cal) => {
-            const source = getSourceLabel(cal);
-            const accessRole = getAccessRoleLabel(cal.google_access_role);
-
-            return (
-              <div
-                key={cal.calendar_id}
-                className="flex items-center justify-between gap-2 py-2 border-b border-gray-50 last:border-0"
-              >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <div
-                    className="h-3 w-3 rounded-full shrink-0"
-                    style={{ backgroundColor: cal.color || "#4285f4" }}
-                  />
-                  <span className="text-sm truncate" title={cal.name}>
-                    {cal.name}
-                  </span>
-                  {cal.primary && (
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] px-1 py-0 border-gray-300 text-gray-500 shrink-0"
-                    >
-                      primary
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] px-1.5 py-0 ${source.className}`}
-                  >
-                    {source.label}
-                  </Badge>
-                  {accessRole && source.label === "Google" && (
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] px-1 py-0 border-gray-200 text-gray-400"
-                    >
-                      {accessRole}
-                    </Badge>
-                  )}
-                  <div className="flex items-center rounded-md border border-gray-200 p-0.5">
-                    {modes.map((mode) => (
-                      <button
-                        key={mode}
-                        onClick={() => onUpdate(cal.calendar_id, mode)}
-                        className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
-                          cal.access_mode === mode
-                            ? `bg-gray-100 ${modeColors[mode]}`
-                            : "text-gray-400 hover:text-gray-600"
-                        }`}
-                      >
-                        {modeLabels[mode]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {configs.length === 0 && (
-          <p className="text-sm text-gray-400">
-            No calendars configured. Click Sync to load from Google.
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function GoogleConnection({
-  onRefresh,
-}: {
-  onRefresh: () => void;
-}) {
-  const [status, setStatus] = useState<{ connected: boolean; expires_at?: string } | null>(null);
-  const [connecting, startConnect] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    startConnect(async () => {
-      const s = await fetchGoogleConnectionStatus();
-      setStatus(s);
-    });
-  }, []);
-
-  async function handleReconnect() {
-    setError(null);
-    startConnect(async () => {
-      const result = await getGoogleAuthUrl();
-      if (result.auth_url) {
-        window.open(result.auth_url, '_blank');
-        // Wait a bit then refresh status
-        setTimeout(() => {
-          startConnect(async () => {
-            const s = await fetchGoogleConnectionStatus();
-            setStatus(s);
-            onRefresh();
-          });
-        }, 10000);
-      } else {
-        setError(result.error ?? "Failed to get auth URL");
-      }
-    });
-  }
-
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-gray-500">Google Account</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className={`h-2 w-2 rounded-full ${status?.connected ? 'bg-green-500' : 'bg-red-400'}`} />
-            <span className="text-sm">{status?.connected ? 'Connected' : 'Not connected'}</span>
-            {status?.expires_at && (
-              <span className="text-xs text-gray-400">
-                expires {new Date(status.expires_at).toLocaleDateString()}
-              </span>
-            )}
-          </div>
-          <Button variant="outline" size="sm" onClick={handleReconnect} disabled={connecting}>
-            {connecting ? 'Connecting...' : status?.connected ? 'Reconnect' : 'Connect'}
-          </Button>
-        </div>
-        {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
-      </CardContent>
-    </Card>
-  );
-}
-
-function TicklerList() {
-  const [ticklers, setTicklers] = useState<Tickler[]>([]);
-  const [loading, startLoad] = useTransition();
-
-  const load = useCallback(() => {
-    startLoad(async () => {
-      const now = new Date();
-      const from = now.toISOString().slice(0, 10);
-      const to = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const data = await fetchTicklers(from, to);
-      setTicklers(data);
-    });
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium text-gray-500">
-            Ticklers (next 30 days)
-          </CardTitle>
-          <Button variant="ghost" size="sm" onClick={load} disabled={loading} className="h-7 px-2 text-xs text-gray-500">
-            <RefreshCw className={`h-3 w-3 mr-1 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {loading && ticklers.length === 0 ? (
-          <p className="text-sm text-gray-400">Loading...</p>
-        ) : ticklers.length === 0 ? (
-          <p className="text-sm text-gray-400">No ticklers in the next 30 days</p>
-        ) : (
-          <div className="space-y-1">
-            {ticklers.map((t, i) => {
-              const dateStr = t.all_day
-                ? new Date(t.start).toLocaleDateString()
-                : new Date(t.start).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-              return (
-                <div key={`${t.event_id}-${i}`} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm truncate">{t.title}</span>
-                    {t.recurring && (
-                      <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">recurring</Badge>
-                    )}
-                  </div>
-                  <span className="text-xs text-gray-400 shrink-0 ml-2">{dateStr}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 // --- Main View ---
 
 type ViewMode = "day" | "week";
@@ -930,49 +662,13 @@ export function CalendarView() {
   const [selectedEvent, setSelectedEvent] = useState<NormalizedEvent | null>(
     null
   );
-  const [showSettings, setShowSettings] = useState(false);
-  const [calConfigs, setCalConfigs] = useState<CalendarConfig[]>([]);
   const [isPending, startTransition] = useTransition();
-  const [isRefreshingConfigs, setIsRefreshingConfigs] = useState(false);
-  const hasRefreshedConfigs = useRef(false);
-
-  const refreshCalendarConfigs = useCallback(async () => {
-    setIsRefreshingConfigs(true);
-    try {
-      const configs = await fetchCalendarConfigs(true);
-      setCalConfigs(configs);
-    } finally {
-      setIsRefreshingConfigs(false);
-    }
-  }, []);
 
   useEffect(() => {
-    void fetchCalendarConfigs().then(setCalConfigs);
-    // Initial data load with small delay to ensure auth cookie is available
     const timer = setTimeout(() => loadData(currentDate, viewMode), 100);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Auto-refresh configs on first settings open
-  useEffect(() => {
-    if (showSettings && !hasRefreshedConfigs.current) {
-      hasRefreshedConfigs.current = true;
-      void refreshCalendarConfigs();
-    }
-  }, [showSettings, refreshCalendarConfigs]);
-
-  const handleAccessModeUpdate = useCallback(
-    (calendarId: string, mode: "ignore" | "read" | "readwrite") => {
-      setCalConfigs((prev) =>
-        prev.map((c) =>
-          c.calendar_id === calendarId ? { ...c, access_mode: mode } : c
-        )
-      );
-      void updateCalendarAccessMode(calendarId, mode);
-    },
-    []
-  );
 
   const loadData = useCallback((date: Date, mode: ViewMode) => {
     startTransition(async () => {
@@ -1057,16 +753,16 @@ export function CalendarView() {
           {headerLabel}
         </span>
         <div className="ml-auto flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowSettings((s) => !s)}
-            aria-label="Calendar settings"
-          >
-            <Settings
-              className={`h-4 w-4 ${showSettings ? "text-primary" : ""}`}
-            />
-          </Button>
+          <Link href="/calendar/ticklers">
+            <Button variant="ghost" size="icon" aria-label="Ticklers" title="Ticklers">
+              <Clock className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Link href="/calendar/settings">
+            <Button variant="ghost" size="icon" aria-label="Calendar settings" title="Settings">
+              <Settings className="h-4 w-4" />
+            </Button>
+          </Link>
           <Button
             variant="ghost"
             size="icon"
@@ -1102,20 +798,6 @@ export function CalendarView() {
           </div>
         </div>
       </div>
-
-      {/* Settings */}
-      {showSettings && (
-        <div className="mb-4 space-y-3">
-          <GoogleConnection onRefresh={refreshCalendarConfigs} />
-          <CalendarSettings
-            configs={calConfigs}
-            onUpdate={handleAccessModeUpdate}
-            onRefresh={refreshCalendarConfigs}
-            isRefreshing={isRefreshingConfigs}
-          />
-          <TicklerList />
-        </div>
-      )}
 
       {/* Calendar content */}
       {isPending && events.length === 0 ? (
