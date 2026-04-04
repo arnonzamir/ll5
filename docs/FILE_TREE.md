@@ -136,7 +136,7 @@ ll5/
 │       ├── app/(user)/                # dashboard, calendar (+settings, +ticklers), actions, projects, inbox, shopping, people, locations, places, media, health, phone-data, sessions, settings (notifications, messaging, health, notification-levels), profile
 │       ├── app/(admin)/               # Admin pages: health, users, tools
 │       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations
-│       ├── components/                # Nav (grouped menu, profile dropdown), cards, chat widget (SSE real-time + status + typing), shadcn/ui
+│       ├── components/                # Nav (Calendar/Organize/People/Data dropdowns, profile menu), cards, chat widget, shadcn/ui
 │       ├── lib/                       # MCP client, auth helpers, env
 │       └── providers/                 # React Query
 │

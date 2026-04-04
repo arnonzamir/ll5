@@ -30,6 +30,7 @@ import {
   BookOpen,
   Image as ImageIcon,
   HeartPulse,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logoutAction } from "@/app/(user)/logout-action";
@@ -42,7 +43,6 @@ interface NavLink {
 
 const topLevelLinks: NavLink[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/actions", label: "Actions", icon: CheckSquare },
 ];
 
@@ -53,6 +53,11 @@ interface NavGroup {
 }
 
 function buildNavGroups(): NavGroup[] {
+  const calendarItems: NavLink[] = [
+    { href: "/calendar", label: "Calendar", icon: CalendarDays },
+    { href: "/calendar/ticklers", label: "Ticklers", icon: Clock },
+    { href: "/calendar/settings", label: "Settings", icon: Settings },
+  ];
   const dataItems: NavLink[] = [
     { href: "/phone-data", label: "Phone", icon: Smartphone },
     { href: "/media", label: "Media", icon: ImageIcon },
@@ -61,6 +66,11 @@ function buildNavGroups(): NavGroup[] {
     { href: "/health", label: "Health", icon: HeartPulse },
   ];
   return [
+    {
+      label: "Calendar",
+      icon: CalendarDays,
+      items: calendarItems,
+    },
     {
       label: "Organize",
       icon: FolderKanban,
@@ -130,7 +140,7 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
   }, [profileOpen, openGroup]);
 
   function isGroupActive(group: NavGroup): boolean {
-    return group.items.some((item) => pathname === item.href);
+    return group.items.some((item) => pathname === item.href || pathname.startsWith(item.href + '/'));
   }
 
   function toggleGroup(label: string) {
