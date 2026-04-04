@@ -1,6 +1,6 @@
 # LL5 File Tree
 
-Annotated source tree of the ll5 monorepo.
+Annotated source tree of the ll5 monorepo. MCP server names in .mcp.json use ll5- prefix to avoid Claude Code SDK collisions.
 
 ---
 

@@ -168,6 +168,7 @@ cd ~/workspace/ll5-run
 ## Key Lessons Learned
 
 See docs/implementation/deployment-log.md for full details:
+- MCP server names in `.mcp.json` must NOT be "calendar" or "messaging" — Claude Code SDK collides with first-party plugins and forces OAuth. Use `ll5-calendar`, `ll5-messaging` prefix.
 - Coolify API unreliable for start/restart — use SSH
 - Docker DNS shadows service names when on multiple networks — use full container names
 - PG POSTGRES_PASSWORD only used at first init — ALTER ROLE for changes
