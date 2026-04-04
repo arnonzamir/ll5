@@ -53,6 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-04: Profile: work week settings (start day, work hours). get_current_time includes work schedule context (cached 5min). Dashboard MCP refs renamed calendar→ll5-calendar, messaging→ll5-messaging.
 - 2026-04-04: Calendar page split: /calendar (display), /calendar/settings (Google account + calendar sources), /calendar/ticklers (tickler list grouped by date, 90 days)
 - 2026-04-04: Fix MCP naming collision: "calendar" and "messaging" collide with Claude Code first-party plugins, renamed to ll5-calendar/ll5-messaging. headersHelper works with script-based auth.
 - 2026-04-04: Fix calendar MCP auth: remove OAuth discovery route handlers that confused Claude Code's MCP SDK

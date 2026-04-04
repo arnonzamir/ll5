@@ -67,8 +67,8 @@ export default async function DashboardPage() {
       overdue: true,
       limit: 5,
     }),
-    mcpCallJsonSafe<Record<string, unknown>>("calendar", "list_events"),
-    mcpCallJsonSafe<Record<string, unknown>>("calendar", "list_ticklers", {
+    mcpCallJsonSafe<Record<string, unknown>>("ll5-calendar", "list_events"),
+    mcpCallJsonSafe<Record<string, unknown>>("ll5-calendar", "list_ticklers", {
       to: threeDaysStr,
     }),
   ]);
@@ -113,7 +113,7 @@ export default async function DashboardPage() {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = fmt.format(tomorrow);
-    const weekEventsRaw = await mcpCallJsonSafe<Record<string, unknown>>("calendar", "list_events", {
+    const weekEventsRaw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-calendar", "list_events", {
       from: tomorrowStr,
       to: threeDaysStr,
     });

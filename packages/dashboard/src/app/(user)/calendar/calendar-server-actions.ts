@@ -57,7 +57,7 @@ export async function fetchEvents(
 ): Promise<CalendarEvent[]> {
   try {
     const raw = await mcpCallJsonSafe<Record<string, unknown>>(
-      "calendar",
+      "ll5-calendar",
       "list_events",
       { from, to, include_all_day: true }
     );
@@ -78,7 +78,7 @@ export async function fetchCalendarConfigs(
 ): Promise<CalendarConfig[]> {
   try {
     const raw = await mcpCallJsonSafe<unknown>(
-      "calendar",
+      "ll5-calendar",
       "list_calendars",
       { refresh }
     );
@@ -102,7 +102,7 @@ export async function updateCalendarAccessMode(
 ): Promise<boolean> {
   try {
     const raw = await mcpCallJsonSafe<Record<string, unknown>>(
-      "calendar",
+      "ll5-calendar",
       "configure_calendar",
       { calendar_id: calendarId, access_mode: accessMode }
     );
@@ -119,7 +119,7 @@ export async function fetchTicklers(
 ): Promise<Tickler[]> {
   try {
     const raw = await mcpCallJsonSafe<Record<string, unknown>>(
-      "calendar",
+      "ll5-calendar",
       "list_ticklers",
       { from, to }
     );

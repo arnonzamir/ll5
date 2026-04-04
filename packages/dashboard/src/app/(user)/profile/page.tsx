@@ -14,8 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Shield, LogOut, Check, Globe } from "lucide-react";
-import { getUserInfo, getDisplayName, updateDisplayName, getTimezone, updateTimezone, logout } from "./profile-server-actions";
+import { Shield, LogOut, Check, Globe, Clock } from "lucide-react";
+import { getUserInfo, getDisplayName, updateDisplayName, getUserSettings, updateUserSettings, logout, type UserSettings } from "./profile-server-actions";
 
 interface UserInfo {
   userId: string;
@@ -28,18 +28,21 @@ export default function ProfilePage() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [displayNameSaved, setDisplayNameSaved] = useState(false);
-  const [timezone, setTimezone] = useState("Asia/Jerusalem");
-  const [timezoneSaved, setTimezoneSaved] = useState(false);
-  const [timezoneError, setTimezoneError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<UserSettings>({
+    timezone: "Asia/Jerusalem",
+    work_week: { start_day: 0, start_hour: "09:00", end_hour: "17:00" },
+  });
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     startTransition(async () => {
-      const [info, name, tz] = await Promise.all([getUserInfo(), getDisplayName(), getTimezone()]);
+      const [info, name, us] = await Promise.all([getUserInfo(), getDisplayName(), getUserSettings()]);
       setUser(info);
       setDisplayName(name);
-      if (tz.error) setTimezoneError(tz.error);
-      else setTimezone(tz.timezone);
+      if (us.error) setSettingsError(us.error);
+      else setSettings(us.settings);
     });
   }, []);
 
@@ -149,24 +152,25 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Timezone */}
+      {/* Time & Schedule */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
-            <Globe className="h-4 w-4" /> Timezone
+            <Globe className="h-4 w-4" /> Time & Schedule
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center gap-2">
+        <CardContent className="space-y-4">
+          <div className="space-y-1">
+            <Label className="text-xs text-gray-500">Timezone</Label>
             <Select
-              value={timezone}
+              value={settings.timezone}
               onValueChange={(v) => {
-                setTimezone(v);
-                setTimezoneSaved(false);
-                setTimezoneError(null);
+                setSettings({ ...settings, timezone: v });
+                setSettingsSaved(false);
+                setSettingsError(null);
               }}
             >
-              <SelectTrigger className="flex-1">
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -183,23 +187,78 @@ export default function ProfilePage() {
                 <SelectItem value="UTC">UTC</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs text-gray-500">Week starts on</Label>
+            <Select
+              value={String(settings.work_week.start_day)}
+              onValueChange={(v) => {
+                setSettings({ ...settings, work_week: { ...settings.work_week, start_day: parseInt(v) } });
+                setSettingsSaved(false);
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="0">Sunday</SelectItem>
+                <SelectItem value="1">Monday</SelectItem>
+                <SelectItem value="6">Saturday</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-end gap-3">
+            <div className="space-y-1 flex-1">
+              <Label className="text-xs text-gray-500">Work hours start</Label>
+              <Input
+                type="time"
+                value={settings.work_week.start_hour}
+                onChange={(e) => {
+                  setSettings({ ...settings, work_week: { ...settings.work_week, start_hour: e.target.value } });
+                  setSettingsSaved(false);
+                }}
+                className="h-9"
+              />
+            </div>
+            <span className="text-sm text-gray-400 pb-2">to</span>
+            <div className="space-y-1 flex-1">
+              <Label className="text-xs text-gray-500">End</Label>
+              <Input
+                type="time"
+                value={settings.work_week.end_hour}
+                onChange={(e) => {
+                  setSettings({ ...settings, work_week: { ...settings.work_week, end_hour: e.target.value } });
+                  setSettingsSaved(false);
+                }}
+                className="h-9"
+              />
+            </div>
+          </div>
+
+          {settingsError && (
+            <p className="text-xs text-red-600">{settingsError}</p>
+          )}
+
+          <div className="flex items-center gap-2">
             <Button
               size="sm"
               onClick={() => {
-                setTimezoneError(null);
+                setSettingsError(null);
                 startTransition(async () => {
-                  const result = await updateTimezone(timezone);
+                  const result = await updateUserSettings(settings);
                   if (result.ok) {
-                    setTimezoneSaved(true);
-                    setTimeout(() => setTimezoneSaved(false), 2000);
+                    setSettingsSaved(true);
+                    setTimeout(() => setSettingsSaved(false), 2000);
                   } else {
-                    setTimezoneError(result.error ?? "Failed to save");
+                    setSettingsError(result.error ?? "Failed to save");
                   }
                 });
               }}
               disabled={isPending}
             >
-              {timezoneSaved ? (
+              {settingsSaved ? (
                 <>
                   <Check className="h-4 w-4 mr-1" />
                   Saved
@@ -208,13 +267,10 @@ export default function ProfilePage() {
                 "Save"
               )}
             </Button>
+            <p className="text-xs text-gray-400">
+              Used for calendar, notifications, and agent context.
+            </p>
           </div>
-          {timezoneError && (
-            <p className="text-xs text-red-600">{timezoneError}</p>
-          )}
-          <p className="text-xs text-gray-400">
-            Used for calendar, notifications, quiet hours, and all time-based features.
-          </p>
         </CardContent>
       </Card>
 

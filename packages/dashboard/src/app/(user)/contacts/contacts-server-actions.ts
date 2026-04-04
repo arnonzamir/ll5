@@ -37,7 +37,7 @@ export async function fetchContacts(params?: {
   if (params?.offset !== undefined) args.offset = params.offset;
 
   const raw = await mcpCallJsonSafe<Record<string, unknown>>(
-    "messaging",
+    "ll5-messaging",
     "list_contacts",
     args
   );
@@ -57,7 +57,7 @@ export async function linkContactToPerson(
 ): Promise<boolean> {
   try {
     const result = await mcpCallJsonSafe<Record<string, unknown>>(
-      "messaging",
+      "ll5-messaging",
       "link_contact_to_person",
       { contact_id: contactId, person_id: personId }
     );
@@ -71,7 +71,7 @@ export async function linkContactToPerson(
 export async function unlinkContact(contactId: string): Promise<boolean> {
   try {
     const result = await mcpCallJsonSafe<Record<string, unknown>>(
-      "messaging",
+      "ll5-messaging",
       "unlink_contact_from_person",
       { contact_id: contactId }
     );

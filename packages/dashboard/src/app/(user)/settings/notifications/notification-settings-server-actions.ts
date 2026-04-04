@@ -104,7 +104,7 @@ export async function fetchConversations(params?: {
   if (params?.offset !== undefined) args.offset = params.offset;
 
   const raw = await mcpCallJsonSafe<Record<string, unknown>>(
-    "messaging",
+    "ll5-messaging",
     "list_conversations",
     args
   );

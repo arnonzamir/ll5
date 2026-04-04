@@ -28,7 +28,7 @@ export interface Conversation {
 
 export async function fetchAccounts(): Promise<Account[]> {
   const raw = await mcpCallJsonSafe<Record<string, unknown>>(
-    "messaging",
+    "ll5-messaging",
     "list_accounts"
   );
   if (!raw || typeof raw !== "object") return [];
@@ -47,7 +47,7 @@ export async function fetchConversations(
   if (accountId) args.account_id = accountId;
 
   const raw = await mcpCallJsonSafe<Record<string, unknown>>(
-    "messaging",
+    "ll5-messaging",
     "list_conversations",
     args
   );
@@ -66,7 +66,7 @@ export async function updatePermission(
 ): Promise<boolean> {
   try {
     const result = await mcpCallJsonSafe<Record<string, unknown>>(
-      "messaging",
+      "ll5-messaging",
       "update_conversation_permissions",
       { platform, conversation_id: conversationId, permission }
     );
@@ -84,7 +84,7 @@ export async function syncConversations(
     const result = await mcpCallJsonSafe<{
       total: number;
       new_conversations: number;
-    }>("messaging", "sync_whatsapp_conversations", {
+    }>("ll5-messaging", "sync_whatsapp_conversations", {
       account_id: accountId,
     });
     return result ?? { total: 0, new_conversations: 0 };
