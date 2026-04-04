@@ -102,10 +102,50 @@ export async function processWhatsAppWebhook(
     const shouldDownload = await matcher.shouldDownloadImages(userId, 'whatsapp', remoteJid);
     if (shouldDownload) {
       try {
-        // Download image from WhatsApp CDN
-        const imgRes = await fetch(imageMessage.url);
-        if (imgRes.ok) {
-          const buf = Buffer.from(await imgRes.arrayBuffer());
+        // Download decrypted image via Evolution API's getBase64FromMediaMessage
+        const evoAccount = await pgPool.query(
+          'SELECT api_url, api_key, instance_name FROM messaging_whatsapp_accounts LIMIT 1',
+        );
+        const evo = evoAccount.rows[0];
+        let buf: Buffer | null = null;
+
+        if (evo) {
+          try {
+            const mediaRes = await fetch(
+              `${evo.api_url}/chat/getBase64FromMediaMessage/${evo.instance_name}`,
+              {
+                method: 'POST',
+                headers: {
+                  'apikey': evo.api_key,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message: { key: data.key } }),
+              },
+            );
+            if (mediaRes.ok) {
+              const mediaData = await mediaRes.json() as { base64?: string };
+              if (mediaData.base64) {
+                buf = Buffer.from(mediaData.base64, 'base64');
+              }
+            } else {
+              logger.warn('[processWhatsAppWebhook][handle] Evolution getBase64 failed', { status: mediaRes.status });
+            }
+          } catch (evoErr) {
+            logger.warn('[processWhatsAppWebhook][handle] Evolution media download failed', {
+              error: evoErr instanceof Error ? evoErr.message : String(evoErr),
+            });
+          }
+        }
+
+        // Fallback: try direct URL (may be encrypted/unusable)
+        if (!buf && imageMessage.url) {
+          const imgRes = await fetch(imageMessage.url);
+          if (imgRes.ok) {
+            buf = Buffer.from(await imgRes.arrayBuffer());
+          }
+        }
+
+        if (buf && buf.length > 0) {
           const ext = imageMessage.mimetype?.split('/')[1] ?? 'jpg';
           const filename = `wa_${userId.slice(0, 8)}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
           const filePath = path.join(UPLOAD_DIR, filename);
