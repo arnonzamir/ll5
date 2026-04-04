@@ -11,6 +11,26 @@ import { logger } from '../utils/logger.js';
 const TICKLER_CALENDAR_NAME = 'LL5 System';
 const TICKLER_COLOR = '#e67c73'; // flamingo
 
+/** Map friendly recurrence names to RRULE strings. */
+const RECURRENCE_MAP: Record<string, string> = {
+  daily: 'RRULE:FREQ=DAILY',
+  weekly: 'RRULE:FREQ=WEEKLY',
+  weekdays: 'RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+  monthly: 'RRULE:FREQ=MONTHLY',
+  yearly: 'RRULE:FREQ=YEARLY',
+};
+
+/** Resolve a recurrence input (friendly name or raw RRULE) to an RRULE string array for Google Calendar. */
+function resolveRecurrence(input: string | undefined): string[] | undefined {
+  if (!input) return undefined;
+  const mapped = RECURRENCE_MAP[input.toLowerCase()];
+  if (mapped) return [mapped];
+  // Accept raw RRULE strings directly
+  if (input.toUpperCase().startsWith('RRULE:')) return [input];
+  // Unknown — treat as raw just in case
+  return [`RRULE:${input}`];
+}
+
 /**
  * Get or create the tickler calendar.
  * On first call, creates a new Google Calendar and stores config with role='tickler'.
@@ -77,8 +97,9 @@ export function registerTicklerTools(
       due_time: z.string().optional().describe('Specific time (HH:MM, 24h format). Default: 08:00. Pass "all_day" to create an all-day event.'),
       description: z.string().optional().describe('Additional context or notes'),
       category: z.string().optional().describe('Category: health, admin, planning, financial, social, errands'),
+      recurrence: z.string().optional().describe('Recurrence pattern. Friendly names: "daily", "weekly", "weekdays", "monthly", "yearly". Or a raw RRULE string like "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR". Omit for one-off ticklers.'),
     },
-    async ({ title, due_date, due_time, description, category }) => {
+    async ({ title, due_date, due_time, description, category, recurrence }) => {
       const userId = getUserId();
       const calendarId = await getOrCreateTicklerCalendar(config, tokenRepo, calendarConfigRepo, userId);
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
@@ -118,6 +139,12 @@ export function registerTicklerTools(
         ],
       };
 
+      // Add recurrence rule if specified
+      const rrule = resolveRecurrence(recurrence);
+      if (rrule) {
+        eventBody.recurrence = rrule;
+      }
+
       const response = await calendarApi.events.insert({
         calendarId,
         requestBody: eventBody as Parameters<typeof calendarApi.events.insert>[0] extends { requestBody?: infer R } ? R : never,
@@ -150,6 +177,8 @@ export function registerTicklerTools(
             title: fullTitle,
             due_date,
             due_time: due_time ?? 'all-day',
+            recurring: !!rrule,
+            recurrence: recurrence ?? null,
             calendar: TICKLER_CALENDAR_NAME,
           }, null, 2),
         }],
@@ -238,6 +267,8 @@ export function registerTicklerTools(
         all_day: !event.start?.dateTime,
         description: event.description ?? null,
         status: event.status ?? 'confirmed',
+        recurring: !!event.recurringEventId,
+        recurring_event_id: event.recurringEventId ?? null,
       }));
 
       return {
@@ -254,11 +285,12 @@ export function registerTicklerTools(
   // ---------------------------------------------------------------------------
   server.tool(
     'complete_tickler',
-    'Mark a tickler as done by deleting it from the LL5 System calendar.',
+    'Mark a tickler as done. For one-off ticklers, deletes the event. For recurring ticklers, deletes only the specific instance (the series continues). Pass delete_series=true to stop the entire recurring series.',
     {
-      event_id: z.string().describe('The event ID of the tickler to complete'),
+      event_id: z.string().describe('The event ID of the tickler to complete. For recurring tickler instances, use the instance ID (e.g. "abc123_20260403T050000Z") from list_ticklers.'),
+      delete_series: z.boolean().optional().describe('If true and this is a recurring tickler instance, delete the entire series instead of just this instance. Default: false.'),
     },
-    async ({ event_id }) => {
+    async ({ event_id, delete_series }) => {
       const userId = getUserId();
       const existing = await calendarConfigRepo.getByRole(userId, 'tickler');
       if (!existing) {
@@ -273,22 +305,49 @@ export function registerTicklerTools(
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
 
+      // Check if this is a recurring event instance
+      let targetEventId = event_id;
+      let deletedSeries = false;
+
+      if (delete_series) {
+        // Fetch the event to find the recurring event ID (the parent series)
+        try {
+          const event = await calendarApi.events.get({
+            calendarId: existing.calendar_id,
+            eventId: event_id,
+          });
+          if (event.data.recurringEventId) {
+            targetEventId = event.data.recurringEventId;
+            deletedSeries = true;
+          }
+        } catch (err) {
+          logger.warn('[complete_tickler] Failed to look up recurring parent, deleting instance directly', { event_id, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
       await calendarApi.events.delete({
         calendarId: existing.calendar_id,
-        eventId: event_id,
+        eventId: targetEventId,
       });
 
-      logAudit({ user_id: userId, source: 'calendar', action: 'complete', entity_type: 'tickler', entity_id: event_id, summary: `Completed tickler: ${event_id}` });
+      logAudit({ user_id: userId, source: 'calendar', action: 'complete', entity_type: 'tickler', entity_id: targetEventId, summary: `Completed tickler: ${targetEventId}${deletedSeries ? ' (entire series)' : ''}` });
 
       // Remove from ES
       if (esRepo) {
-        await esRepo.deleteByDocId(`tickler-${event_id}`);
+        if (deletedSeries) {
+          // For series deletion, remove by the recurring event ID pattern
+          // Individual instances have doc IDs like tickler-eventId_timestamp
+          // The parent has doc ID tickler-eventId
+          await esRepo.deleteByDocId(`tickler-${targetEventId}`);
+        } else {
+          await esRepo.deleteByDocId(`tickler-${event_id}`);
+        }
       }
 
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({ success: true, event_id }),
+          text: JSON.stringify({ success: true, event_id: targetEventId, deleted_series: deletedSeries }),
         }],
       };
     },
