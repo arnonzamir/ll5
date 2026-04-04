@@ -110,7 +110,7 @@ ll5/
 │       ├── tools/                     # 18 tools — calendar (CRUD, sync, availability), tickler (RRULE recurring), Gmail, OAuth
 │       │                              # REST: /api/events, /api/ticklers, /api/auth-url, /api/connection-status
 │       ├── utils/encryption.ts        # AES-256-GCM for token storage
-│       └── server.ts                  # MCP server (dual auth) + OAuth callback + REST API
+│       └── server.ts                  # MCP server (dual auth) + OAuth callback + REST API (no OAuth discovery handlers)
 │
 ├── packages/health/                   # @ll5/health — health monitoring MCP (ES+PG)
 │   └── src/

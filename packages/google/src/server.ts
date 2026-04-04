@@ -155,16 +155,7 @@ export async function startServer(): Promise<void> {
     res.status(401).json({ error: 'Invalid credentials' });
   }
 
-  // Block MCP OAuth discovery — this server uses Bearer token auth, not OAuth
-  app.get('/.well-known/oauth-protected-resource', (_req: Request, res: Response) => {
-    res.status(404).json({ error: 'OAuth not supported. Use Bearer token auth.' });
-  });
-  app.get('/.well-known/oauth-authorization-server', (_req: Request, res: Response) => {
-    res.status(404).json({ error: 'OAuth not supported. Use Bearer token auth.' });
-  });
-  app.post('/register', (_req: Request, res: Response) => {
-    res.status(404).json({ error: 'Dynamic client registration not supported.' });
-  });
+
 
   // Health endpoint (no auth required)
   app.get('/health', async (_req: Request, res: Response) => {

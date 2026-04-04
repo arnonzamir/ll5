@@ -53,6 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-04: Fix calendar MCP auth: remove OAuth discovery route handlers that confused Claude Code's MCP SDK
 - 2026-04-04: Auto token refresh: POST /auth/refresh endpoint (accepts expired tokens within 7-day grace), channel MCP auto-refreshes on startup + every 12h
 - 2026-04-04: Calendar UI: Google connection status + reconnect button, tickler list (next 30 days) in settings panel. REST API endpoints for auth-url and connection-status on Google MCP.
 - 2026-04-04: Conversation escalation — user sends message in ignored/batched chat → 30-min immediate window, agent notified with context, must journal decision on expiry. Persisted in user_settings for session survival. Repeated messages extend timer.
