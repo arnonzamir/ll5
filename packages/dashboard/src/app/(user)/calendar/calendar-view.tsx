@@ -20,6 +20,8 @@ import {
   fetchTicklers,
   fetchCalendarConfigs,
   updateCalendarAccessMode,
+  fetchGoogleConnectionStatus,
+  getGoogleAuthUrl,
   type CalendarEvent,
   type Tickler,
   type CalendarConfig,
@@ -796,6 +798,127 @@ function CalendarSettings({
   );
 }
 
+function GoogleConnection({
+  onRefresh,
+}: {
+  onRefresh: () => void;
+}) {
+  const [status, setStatus] = useState<{ connected: boolean; expires_at?: string } | null>(null);
+  const [connecting, startConnect] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    startConnect(async () => {
+      const s = await fetchGoogleConnectionStatus();
+      setStatus(s);
+    });
+  }, []);
+
+  async function handleReconnect() {
+    setError(null);
+    startConnect(async () => {
+      const result = await getGoogleAuthUrl();
+      if (result.auth_url) {
+        window.open(result.auth_url, '_blank');
+        // Wait a bit then refresh status
+        setTimeout(() => {
+          startConnect(async () => {
+            const s = await fetchGoogleConnectionStatus();
+            setStatus(s);
+            onRefresh();
+          });
+        }, 10000);
+      } else {
+        setError(result.error ?? "Failed to get auth URL");
+      }
+    });
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-gray-500">Google Account</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className={`h-2 w-2 rounded-full ${status?.connected ? 'bg-green-500' : 'bg-red-400'}`} />
+            <span className="text-sm">{status?.connected ? 'Connected' : 'Not connected'}</span>
+            {status?.expires_at && (
+              <span className="text-xs text-gray-400">
+                expires {new Date(status.expires_at).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+          <Button variant="outline" size="sm" onClick={handleReconnect} disabled={connecting}>
+            {connecting ? 'Connecting...' : status?.connected ? 'Reconnect' : 'Connect'}
+          </Button>
+        </div>
+        {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TicklerList() {
+  const [ticklers, setTicklers] = useState<Tickler[]>([]);
+  const [loading, startLoad] = useTransition();
+
+  const load = useCallback(() => {
+    startLoad(async () => {
+      const now = new Date();
+      const from = now.toISOString().slice(0, 10);
+      const to = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const data = await fetchTicklers(from, to);
+      setTicklers(data);
+    });
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-medium text-gray-500">
+            Ticklers (next 30 days)
+          </CardTitle>
+          <Button variant="ghost" size="sm" onClick={load} disabled={loading} className="h-7 px-2 text-xs text-gray-500">
+            <RefreshCw className={`h-3 w-3 mr-1 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {loading && ticklers.length === 0 ? (
+          <p className="text-sm text-gray-400">Loading...</p>
+        ) : ticklers.length === 0 ? (
+          <p className="text-sm text-gray-400">No ticklers in the next 30 days</p>
+        ) : (
+          <div className="space-y-1">
+            {ticklers.map((t, i) => {
+              const dateStr = t.all_day
+                ? new Date(t.start).toLocaleDateString()
+                : new Date(t.start).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+              return (
+                <div key={`${t.event_id}-${i}`} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm truncate">{t.title}</span>
+                    {t.recurring && (
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">recurring</Badge>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-400 shrink-0 ml-2">{dateStr}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // --- Main View ---
 
 type ViewMode = "day" | "week";
@@ -982,13 +1105,15 @@ export function CalendarView() {
 
       {/* Settings */}
       {showSettings && (
-        <div className="mb-4">
+        <div className="mb-4 space-y-3">
+          <GoogleConnection onRefresh={refreshCalendarConfigs} />
           <CalendarSettings
             configs={calConfigs}
             onUpdate={handleAccessModeUpdate}
             onRefresh={refreshCalendarConfigs}
             isRefreshing={isRefreshingConfigs}
           />
+          <TicklerList />
         </div>
       )}
 

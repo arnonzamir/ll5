@@ -53,6 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-04: Calendar UI: Google connection status + reconnect button, tickler list (next 30 days) in settings panel. REST API endpoints for auth-url and connection-status on Google MCP.
 - 2026-04-04: Conversation escalation — user sends message in ignored/batched chat → 30-min immediate window, agent notified with context, must journal decision on expiry. Persisted in user_settings for session survival. Repeated messages extend timer.
 - 2026-04-04: Recurring ticklers: create_tickler supports recurrence param (daily/weekly/weekdays/monthly/yearly/raw RRULE), complete_tickler handles instance vs series deletion
 - 2026-04-04: Fix phone calendar sync: use Instances API (expands recurring events), capture calendar name, attendees, description, status, availability, timezone offsets

@@ -94,7 +94,7 @@ Dashboard (Next.js 15)
 | Calendar Access Modes | ignore, read, readwrite (CRUD enforced per mode) |
 | Availability Check | `check_availability` — 3 paths: google (server FreeBusy), device (phone CalendarProvider), device_freebusy (phone's Workspace OAuth → Google FreeBusy for same-domain coworkers) |
 
-OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically.
+OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically. Dashboard: Calendar settings → Google Account → Reconnect button (calls `/api/auth-url` REST endpoint).
 
 Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API key. Set `AUTH_SECRET` env var for token auth. Server blocks MCP OAuth discovery (returns 404 JSON for /.well-known/* and /register).
 

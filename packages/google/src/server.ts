@@ -17,7 +17,7 @@ import { PostgresUserSettingsRepository } from './repositories/postgres/user-set
 import { ESCalendarEventRepository } from './repositories/elasticsearch/calendar-event.repository.js';
 import { registerAllTools } from './tools/index.js';
 import { pendingStates } from './tools/auth.js';
-import { createOAuth2Client, getAuthenticatedClient } from './utils/google-client.js';
+import { createOAuth2Client, getAuthenticatedClient, expandScopes } from './utils/google-client.js';
 
 const { Pool } = pg;
 
@@ -255,6 +255,52 @@ export async function startServer(): Promise<void> {
   // ---------------------------------------------------------------------------
   // REST API endpoints (for gateway consumption — same auth as /mcp)
   // ---------------------------------------------------------------------------
+
+  // GET /api/connection-status — check if Google OAuth is connected
+  app.get('/api/connection-status', authMiddleware, async (_req: Request, res: Response) => {
+    const userId = env.userId;
+    try {
+      const tokens = await tokenRepo.get(userId);
+      if (!tokens) {
+        res.json({ connected: false });
+        return;
+      }
+      res.json({
+        connected: true,
+        scopes: tokens.scopes,
+        expires_at: tokens.expires_at,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[api][connectionStatus] Failed', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // GET /api/auth-url — generate Google OAuth URL for (re-)authorization
+  app.get('/api/auth-url', authMiddleware, async (_req: Request, res: Response) => {
+    const userId = env.userId;
+    try {
+      const state = crypto.randomBytes(32).toString('hex');
+      const scopes = expandScopes(undefined);
+      pendingStates.set(state, { userId, scopes });
+      setTimeout(() => pendingStates.delete(state), 10 * 60 * 1000);
+
+      const oauth2Client = createOAuth2Client(googleConfig);
+      const authUrl = oauth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: scopes,
+        state,
+        prompt: 'consent',
+      });
+
+      res.json({ auth_url: authUrl, state });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[api][authUrl] Failed', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
 
   // GET /api/events — returns calendar events across enabled calendars
   app.get('/api/events', authMiddleware, async (req: Request, res: Response) => {

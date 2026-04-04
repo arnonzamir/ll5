@@ -1,6 +1,8 @@
 "use server";
 
 import { mcpCallJsonSafe } from "@/lib/api";
+import { env } from "@/lib/env";
+import { getToken } from "@/lib/auth";
 
 export interface CalendarConfig {
   calendar_id: string;
@@ -39,6 +41,14 @@ export interface Tickler {
   all_day?: boolean;
   description?: string | null;
   status?: string;
+  recurring?: boolean;
+  recurring_event_id?: string | null;
+}
+
+export interface GoogleConnectionStatus {
+  connected: boolean;
+  scopes?: string[];
+  expires_at?: string;
 }
 
 export async function fetchEvents(
@@ -122,5 +132,42 @@ export async function fetchTicklers(
   } catch (err) {
     console.error("[calendar] fetchTicklers failed:", err instanceof Error ? err.message : String(err));
     return [];
+  }
+}
+
+export async function fetchGoogleConnectionStatus(): Promise<GoogleConnectionStatus> {
+  const token = await getToken();
+  if (!token) return { connected: false };
+
+  try {
+    const res = await fetch(`${env.MCP_CALENDAR_URL}/api/connection-status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return { connected: false };
+    return (await res.json()) as GoogleConnectionStatus;
+  } catch (err) {
+    console.error("[calendar] fetchGoogleConnectionStatus failed:", err instanceof Error ? err.message : String(err));
+    return { connected: false };
+  }
+}
+
+export async function getGoogleAuthUrl(): Promise<{ auth_url: string | null; error: string | null }> {
+  const token = await getToken();
+  if (!token) return { auth_url: null, error: "Not authenticated" };
+
+  try {
+    const res = await fetch(`${env.MCP_CALENDAR_URL}/api/auth-url`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { auth_url: null, error: `Server error (${res.status}): ${body}` };
+    }
+    const data = (await res.json()) as { auth_url: string };
+    return { auth_url: data.auth_url, error: null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[calendar] getGoogleAuthUrl failed:", msg);
+    return { auth_url: null, error: msg };
   }
 }
