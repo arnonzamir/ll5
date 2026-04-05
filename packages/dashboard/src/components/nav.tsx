@@ -327,6 +327,14 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                       <HeartPulse className="h-4 w-4" />
                       Health Sources
                     </Link>
+                    <Link
+                      href="/export"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <Database className="h-4 w-4" />
+                      Export Data
+                    </Link>
                     <div className="my-1 border-t border-gray-200" />
 
                     {isAdmin && (

@@ -603,8 +603,8 @@ export function LocationsView() {
         </div>
       </div>
 
-      {/* Map */}
-      <div className="flex-1 relative">
+      {/* Map — z-0 keeps it below nav dropdowns (z-50) */}
+      <div className="flex-1 relative z-0">
         {loading && (
           <div className="absolute inset-0 bg-white/80 z-20 flex items-center justify-center">
             <div className="flex items-center gap-2 text-gray-500">

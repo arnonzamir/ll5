@@ -29,7 +29,8 @@ export function registerLocationTools(
         };
       }
 
-      const result: LocationWithFreshness = {
+      const result: LocationWithFreshness & { id: string } = {
+        id: latest.id,
         lat: latest.location.lat,
         lon: latest.location.lon,
         accuracy: latest.accuracy,
@@ -71,6 +72,7 @@ export function registerLocationTools(
       });
 
       const results = locations.map((loc) => ({
+        id: loc.id,
         lat: loc.location.lat,
         lon: loc.location.lon,
         accuracy: loc.accuracy,

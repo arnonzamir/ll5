@@ -46,8 +46,10 @@ Dashboard (Next.js 15)
   ├── /media — media gallery (images, videos, files) with gallery/list views, source filter, search, detail dialog
   ├── /health — health data browsing: overview, sleep, HR, daily stats, activities, body comp (only visible when source connected)
   ├── /settings/health — connect/disconnect health sources, trigger sync
-  ├── /locations — Leaflet map with clustering, timeline, trail
-  ├── /people, /places, /knowledge, /horizons — personal knowledge pages
+  ├── /locations — Leaflet map with clustering, timeline, trail (z-0 to stay below nav)
+  ├── /places — list + map split view (Leaflet markers for places with coordinates)
+  ├── /people, /knowledge, /horizons — personal knowledge pages
+  ├── /export — full data backup download (JSON)
   ├── /profile — user settings
   └── /admin — system health, users, tools
 ```

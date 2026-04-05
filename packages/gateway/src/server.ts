@@ -800,6 +800,31 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Export / Backup ---
+  app.get('/export', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const { exportUserData } = await import('./utils/export.js');
+      const sections = await exportUserData(esClient, pgPool, userId);
+
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `ll5-export-${timestamp}.json`;
+
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.json({
+        exported_at: new Date().toISOString(),
+        user_id: userId,
+        sections: sections.map((s) => ({ name: s.name, count: s.data.length })),
+        data: Object.fromEntries(sections.map((s) => [s.name, s.data])),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][export] Export failed', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
   // --- Health endpoint ---
   app.get('/health', async (_req: Request, res: Response) => {
     try {
