@@ -85,7 +85,6 @@ function buildNavGroups(): NavGroup[] {
       icon: Users,
       items: [
         { href: "/people", label: "People", icon: Users },
-        { href: "/contacts", label: "Contacts", icon: BookUser },
         { href: "/locations", label: "Locations", icon: Navigation },
         { href: "/places", label: "Places", icon: MapPin },
       ],
