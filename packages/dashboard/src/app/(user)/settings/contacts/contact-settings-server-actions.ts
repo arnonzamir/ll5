@@ -2,7 +2,7 @@
 
 import { env } from "@/lib/env";
 import { getToken } from "@/lib/auth";
-import { mcpCallJsonSafe, mcpCallList } from "@/lib/api";
+import { mcpCallJsonSafe } from "@/lib/api";
 
 export interface ContactSetting {
   id: string;
@@ -97,15 +97,42 @@ export async function deleteContactSetting(id: string): Promise<boolean> {
 }
 
 export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]> {
-  // Get people from knowledge MCP
-  const people = await mcpCallList<{ id: string; name: string; relationship?: string }>(
-    "knowledge", "list_people", { limit: 500 },
-  );
+  const token = await getToken();
+  if (!token) return [];
+
+  let people: Array<{ id: string; name: string; relationship?: string }> = [];
+  let contacts: Array<{ platform_id: string; platform: string; display_name: string; person_id?: string }> = [];
+
+  // Get people from knowledge MCP — use mcpCallJsonSafe to avoid redirect throws
+  try {
+    const raw = await mcpCallJsonSafe<Record<string, unknown>>("knowledge", "list_people", { limit: 500 });
+    if (raw && typeof raw === "object") {
+      // Find the array in the response
+      for (const val of Object.values(raw)) {
+        if (Array.isArray(val)) {
+          people = val as typeof people;
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[contacts] Failed to fetch people:", err instanceof Error ? err.message : String(err));
+  }
 
   // Get contacts from messaging MCP
-  const contacts = await mcpCallList<{ platform_id: string; platform: string; display_name: string; person_id?: string }>(
-    "ll5-messaging", "list_contacts", { limit: 1000 },
-  );
+  try {
+    const raw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { limit: 1000 });
+    if (raw && typeof raw === "object") {
+      for (const val of Object.values(raw)) {
+        if (Array.isArray(val)) {
+          contacts = val as typeof contacts;
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[contacts] Failed to fetch contacts:", err instanceof Error ? err.message : String(err));
+  }
 
   // Get current contact settings
   const { settings } = await fetchContactSettings({ target_type: "person" });
@@ -126,9 +153,20 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
 
 export async function fetchGroupsWithSettings(): Promise<GroupWithSettings[]> {
   // Get conversations from messaging MCP
-  const conversations = await mcpCallList<{ conversation_id: string; name: string | null; platform: string; is_group: boolean; is_archived: boolean }>(
-    "ll5-messaging", "list_conversations", { is_group: true, limit: 500 },
-  );
+  let conversations: Array<{ conversation_id: string; name: string | null; platform: string; is_group: boolean; is_archived: boolean }> = [];
+  try {
+    const raw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_conversations", { is_group: true, limit: 500 });
+    if (raw && typeof raw === "object") {
+      for (const val of Object.values(raw)) {
+        if (Array.isArray(val)) {
+          conversations = val as typeof conversations;
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[contacts] Failed to fetch conversations:", err instanceof Error ? err.message : String(err));
+  }
 
   // Get current contact settings for groups
   const { settings } = await fetchContactSettings({ target_type: "group" });
