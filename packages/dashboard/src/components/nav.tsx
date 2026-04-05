@@ -85,6 +85,7 @@ function buildNavGroups(): NavGroup[] {
       icon: Users,
       items: [
         { href: "/people", label: "People", icon: Users },
+        { href: "/settings/contacts", label: "Contacts & Routing", icon: BookUser },
         { href: "/locations", label: "Locations", icon: Navigation },
         { href: "/places", label: "Places", icon: MapPin },
       ],
@@ -293,14 +294,6 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                     >
                       <Mail className="h-4 w-4" />
                       Email Settings
-                    </Link>
-                    <Link
-                      href="/settings/contacts"
-                      onClick={() => setProfileOpen(false)}
-                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    >
-                      <Users className="h-4 w-4" />
-                      Contacts & Routing
                     </Link>
                     <Link
                       href="/settings/notification-levels"
