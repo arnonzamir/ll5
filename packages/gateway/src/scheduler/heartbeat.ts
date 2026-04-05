@@ -190,6 +190,26 @@ export class HeartbeatScheduler {
         // non-critical
       }
 
+      // Phone health check — warn if no phone webhook received recently
+      try {
+        const lastPhoneResult = await this.es.search({
+          index: 'll5_awareness_locations',
+          query: { term: { user_id: this.config.userId } },
+          size: 1,
+          sort: [{ timestamp: 'desc' }],
+          _source: ['timestamp'],
+        });
+        const lastPhoneTimestamp = (lastPhoneResult.hits.hits[0]?._source as Record<string, unknown>)?.timestamp as string | undefined;
+        if (lastPhoneTimestamp) {
+          const phoneAgeMin = Math.round((Date.now() - new Date(lastPhoneTimestamp).getTime()) / 60000);
+          if (phoneAgeMin > 60) {
+            parts.push('', `WARNING: No phone data received in ${phoneAgeMin > 120 ? Math.round(phoneAgeMin / 60) + 'h' : phoneAgeMin + 'min'}. The phone notification/location service may be dead. Push the user to open the LL5 app.`);
+          }
+        }
+      } catch {
+        // non-critical
+      }
+
       parts.push('', 'Anything to push to the user?');
 
       const evt = createSchedulerEvent('heartbeat');

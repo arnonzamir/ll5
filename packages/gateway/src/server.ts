@@ -951,7 +951,8 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       const parsed = PushItemSchema.safeParse(payload.items[i]);
       if (!parsed.success) {
         const errors = parsed.error.errors.map((e: { path: (string | number)[]; message: string }) => `${e.path.join('.')}: ${e.message}`).join('; ');
-        logger.warn('[startServer][webhook] Skipping invalid webhook item', { index: i, errors });
+        const rawType = (payload.items[i] as Record<string, unknown>)?.type;
+        logger.warn('[startServer][webhook] Skipping invalid webhook item', { index: i, type: rawType, errors });
         results.push({ index: i, type: (payload.items[i] as Record<string, unknown>)?.type as string ?? 'unknown', status: 'error', error: errors });
         continue;
       }
