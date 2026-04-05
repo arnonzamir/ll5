@@ -435,6 +435,109 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Contact settings (unified routing/permission/media) ---
+
+  app.get('/contact-settings', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { target_type, search, limit: limitStr, offset: offsetStr } = req.query as Record<string, string | undefined>;
+    const limit = Math.min(parseInt(limitStr || '200', 10), 500);
+    const offset = parseInt(offsetStr || '0', 10);
+
+    try {
+      const conditions = ['user_id = $1'];
+      const params: unknown[] = [userId];
+      let idx = 2;
+
+      if (target_type) {
+        conditions.push(`target_type = $${idx++}`);
+        params.push(target_type);
+      }
+      if (search) {
+        conditions.push(`display_name ILIKE $${idx++}`);
+        params.push(`%${search}%`);
+      }
+
+      const countResult = await pgPool.query(
+        `SELECT COUNT(*) FROM contact_settings WHERE ${conditions.join(' AND ')}`,
+        params,
+      );
+      const total = parseInt(countResult.rows[0].count, 10);
+
+      params.push(limit, offset);
+      const result = await pgPool.query(
+        `SELECT * FROM contact_settings WHERE ${conditions.join(' AND ')}
+         ORDER BY display_name ASC NULLS LAST, created_at DESC
+         LIMIT $${idx++} OFFSET $${idx++}`,
+        params,
+      );
+
+      res.json({ settings: result.rows, total });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][getContactSettings] Failed', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.put('/contact-settings', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { target_type, target_id, routing, permission, download_media, display_name, platform } = req.body;
+
+    if (!target_type || !target_id) {
+      res.status(400).json({ error: 'target_type and target_id are required' });
+      return;
+    }
+
+    try {
+      await pgPool.query(
+        `INSERT INTO contact_settings (user_id, target_type, target_id, routing, permission, download_media, display_name, platform)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (user_id, target_type, target_id) DO UPDATE SET
+           routing = COALESCE($4, contact_settings.routing),
+           permission = COALESCE($5, contact_settings.permission),
+           download_media = COALESCE($6, contact_settings.download_media),
+           display_name = COALESCE($7, contact_settings.display_name),
+           platform = COALESCE($8, contact_settings.platform),
+           updated_at = now()`,
+        [userId, target_type, target_id, routing ?? 'batch', permission ?? 'input', download_media ?? false, display_name ?? null, platform ?? null],
+      );
+
+      logAudit({
+        user_id: userId,
+        source: 'gateway',
+        action: 'update',
+        entity_type: 'contact_settings',
+        entity_id: `${target_type}:${target_id}`,
+        summary: `Set ${target_type} ${display_name ?? target_id}: routing=${routing}, permission=${permission}, media=${download_media}`,
+      });
+
+      res.json({ updated: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][putContactSettings] Failed', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  app.delete('/contact-settings/:id', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const result = await pgPool.query(
+        'DELETE FROM contact_settings WHERE id = $1 AND user_id = $2 RETURNING target_type, target_id',
+        [req.params.id, userId],
+      );
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+      res.json({ deleted: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][deleteContactSettings] Failed', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
   // --- Device command queue ---
 
   app.post('/commands/queue', authMw, async (req: Request, res: Response) => {

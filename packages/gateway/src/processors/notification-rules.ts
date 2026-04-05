@@ -47,6 +47,26 @@ export class NotificationRuleMatcher {
     }
   }
 
+  /**
+   * Get contact settings for a person or group from the contact_settings table.
+   */
+  async getContactSettings(
+    userId: string,
+    targetType: 'person' | 'group',
+    targetId: string,
+  ): Promise<{ routing: Priority; permission: string; download_media: boolean } | null> {
+    try {
+      const result = await this.pool.query(
+        'SELECT routing, permission, download_media FROM contact_settings WHERE user_id = $1 AND target_type = $2 AND target_id = $3',
+        [userId, targetType, targetId],
+      );
+      if (result.rows.length === 0) return null;
+      return result.rows[0];
+    } catch {
+      return null;
+    }
+  }
+
   async match(
     userId: string,
     message: {
@@ -57,11 +77,10 @@ export class NotificationRuleMatcher {
       group_name?: string | null;
       platform?: string;
       conversation_id?: string;
+      person_id?: string;
     },
   ): Promise<Priority | null> {
     await this.refresh();
-    const userRules = this.rules.get(userId);
-    if (!userRules || userRules.length === 0) return null;
 
     const senderLower = message.sender.toLowerCase();
     const bodyLower = message.body.toLowerCase();
@@ -78,7 +97,25 @@ export class NotificationRuleMatcher {
       }
     }
 
-    // 1. Conversation-specific rules — highest priority
+    // 1. Contact settings — unified person/group rules (new system)
+    if (message.is_group && message.conversation_id) {
+      // Group message → check group contact_settings
+      const groupSettings = await this.getContactSettings(userId, 'group', message.conversation_id);
+      if (groupSettings) {
+        return groupSettings.routing as Priority;
+      }
+    } else if (!message.is_group && message.person_id) {
+      // 1:1 message → check person contact_settings
+      const personSettings = await this.getContactSettings(userId, 'person', message.person_id);
+      if (personSettings) {
+        return personSettings.routing as Priority;
+      }
+    }
+
+    // 2. Legacy conversation-specific rules (from notification_rules, backward compat)
+    const userRules = this.rules.get(userId);
+    if (!userRules || userRules.length === 0) return null;
+
     if (message.platform && message.conversation_id) {
       for (const rule of userRules) {
         if (rule.rule_type === 'conversation' &&
@@ -125,12 +162,24 @@ export class NotificationRuleMatcher {
     return wildcardResult;
   }
 
-  /** Check if a conversation has image download enabled. */
-  async shouldDownloadImages(
+  /** Check if a conversation/person has media download enabled. */
+  async shouldDownloadMedia(
     userId: string,
     platform: string,
     conversationId: string,
+    isGroup: boolean,
+    personId?: string | null,
   ): Promise<boolean> {
+    // Check contact_settings first (new system)
+    if (isGroup) {
+      const groupSettings = await this.getContactSettings(userId, 'group', conversationId);
+      if (groupSettings) return groupSettings.download_media;
+    } else if (personId) {
+      const personSettings = await this.getContactSettings(userId, 'person', personId);
+      if (personSettings) return personSettings.download_media;
+    }
+
+    // Legacy fallback: check notification_rules
     await this.refresh();
     const userRules = this.rules.get(userId);
     if (!userRules) return false;
@@ -143,5 +192,14 @@ export class NotificationRuleMatcher {
       }
     }
     return false;
+  }
+
+  /** @deprecated Use shouldDownloadMedia instead */
+  async shouldDownloadImages(
+    userId: string,
+    platform: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    return this.shouldDownloadMedia(userId, platform, conversationId, true);
   }
 }

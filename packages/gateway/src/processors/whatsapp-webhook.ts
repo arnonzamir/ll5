@@ -115,6 +115,20 @@ export async function processWhatsAppWebhook(
     if (isGroup) groupName = remoteJid;
   }
 
+  // Resolve sender to person_id via messaging_contacts
+  let personId: string | null = null;
+  if (!isGroup) {
+    try {
+      const contactResult = await pgPool.query(
+        "SELECT person_id FROM messaging_contacts WHERE platform = 'whatsapp' AND platform_id = $1 AND person_id IS NOT NULL LIMIT 1",
+        [remoteJid],
+      );
+      personId = contactResult.rows[0]?.person_id ?? null;
+    } catch {
+      // Non-critical — fall back to name-based matching
+    }
+  }
+
   // Determine media type and metadata
   const activeMedia = imageMessage ?? audioMessage ?? videoMessage ?? documentMessage;
   const mediaType = hasImage ? 'image' : hasAudio ? (audioMessage?.ptt ? 'voice_note' : 'audio') : hasVideo ? 'video' : hasDocument ? 'document' : null;
@@ -125,7 +139,7 @@ export async function processWhatsAppWebhook(
   let mediaUrl: string | null = null;
   let mediaId: string | null = null;
   if (hasMedia && activeMedia) {
-    const shouldDownload = await matcher.shouldDownloadImages(userId, 'whatsapp', remoteJid);
+    const shouldDownload = await matcher.shouldDownloadMedia(userId, 'whatsapp', remoteJid, isGroup, personId);
     if (shouldDownload) {
       try {
         const evoAccount = await pgPool.query(
@@ -219,6 +233,7 @@ export async function processWhatsAppWebhook(
     from_me: fromMe,
     timestamp,
     source: 'evolution',
+    ...(personId ? { person_id: personId } : {}),
   };
   if (mediaUrl) {
     messageDoc.media_url = mediaUrl;
@@ -251,6 +266,7 @@ export async function processWhatsAppWebhook(
       group_name: groupName,
       platform: 'whatsapp',
       conversation_id: remoteJid,
+      person_id: personId ?? undefined,
     });
 
     // Escalate if user is writing in an ignored/batched conversation
@@ -316,7 +332,7 @@ export async function processWhatsAppWebhook(
     });
   }
 
-  // Check notification rules (conversation-specific rules checked first)
+  // Check notification rules (contact_settings → conversation → pattern → wildcard)
   const priority = await matcher.match(userId, {
     sender,
     app: 'whatsapp',
@@ -325,6 +341,7 @@ export async function processWhatsAppWebhook(
     group_name: groupName,
     platform: 'whatsapp',
     conversation_id: remoteJid,
+    person_id: personId ?? undefined,
   });
 
   logger.info('[processWhatsAppWebhook][handle] Notification rule match', {
