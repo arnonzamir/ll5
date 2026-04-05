@@ -248,6 +248,46 @@ export async function processLocation(
     return;
   }
 
+  // Filter out GPS drift: if the previous point was at a known place and
+  // less than 10 minutes ago, and the new point is >500m away but speed
+  // would require >150km/h, it's likely a GPS glitch.
+  try {
+    const prev = await getPreviousLocation(es, userId);
+    if (prev?.location && prev.timestamp) {
+      const distKm = haversine(prev.location.lat, prev.location.lon, item.lat, item.lon);
+      const timeDiffMs = new Date(item.timestamp).getTime() - new Date(prev.timestamp).getTime();
+      const timeDiffMin = timeDiffMs / 60000;
+
+      // Only check for drift within a 10-minute window
+      if (timeDiffMin > 0 && timeDiffMin < 10) {
+        const speedKmh = distKm / (timeDiffMs / 3600000);
+
+        // Case 1: Physically impossible speed (>150 km/h in city)
+        if (speedKmh > 150) {
+          logger.info('[processLocation][handle] Skipping implausible GPS jump', {
+            distKm: Math.round(distKm * 10) / 10,
+            timeDiffMin: Math.round(timeDiffMin),
+            speedKmh: Math.round(speedKmh),
+          });
+          return;
+        }
+
+        // Case 2: Previous was at a known place, new point is >500m away
+        // but within 5 min — likely drift from a stationary position
+        if (prev.matched_place && distKm > 0.5 && timeDiffMin < 5) {
+          logger.info('[processLocation][handle] Skipping likely drift from known place', {
+            place: prev.matched_place,
+            distKm: Math.round(distKm * 10) / 10,
+            timeDiffMin: Math.round(timeDiffMin),
+          });
+          return;
+        }
+      }
+    }
+  } catch {
+    // Non-critical — continue processing if plausibility check fails
+  }
+
   // Run geocoding and place matching concurrently (both non-blocking)
   const [geocodeResult, placeMatch] = await Promise.all([
     reverseGeocode(item.lat, item.lon, geocodingApiKey),
