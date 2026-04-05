@@ -22,6 +22,7 @@ import {
   type CalendarEvent,
   type Tickler,
 } from "./calendar-server-actions";
+import { getUserSettings, type UserSettings } from "../profile/profile-server-actions";
 
 // --- Date helpers ---
 
@@ -37,11 +38,11 @@ function addDays(d: Date, n: number): Date {
   return r;
 }
 
-function startOfWeek(d: Date): Date {
+function startOfWeek(d: Date, weekStartDay = 0): Date {
   const r = startOfDay(d);
   const day = r.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  r.setDate(r.getDate() + diff);
+  const diff = (day - weekStartDay + 7) % 7;
+  r.setDate(r.getDate() - diff);
   return r;
 }
 
@@ -430,10 +431,14 @@ function DayTimeline({
   date,
   events,
   onSelect,
+  workStartHour,
+  workEndHour,
 }: {
   date: Date;
   events: NormalizedEvent[];
   onSelect: (e: NormalizedEvent) => void;
+  workStartHour?: number;
+  workEndHour?: number;
 }) {
   const dayEvents = events.filter(
     (e) => !e.allDay && spansDay(e, date)
@@ -459,16 +464,28 @@ function DayTimeline({
           className="relative"
           style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}
         >
+          {/* Work hours background */}
+          {workStartHour != null && workEndHour != null && (
+            <div
+              className="absolute left-0 right-0 bg-blue-50/30 pointer-events-none"
+              style={{
+                top: Math.max(workStartHour - DAY_START_HOUR, 0) * HOUR_HEIGHT,
+                height: (Math.min(workEndHour, DAY_END_HOUR) - Math.max(workStartHour, DAY_START_HOUR)) * HOUR_HEIGHT,
+              }}
+            />
+          )}
+
           {/* Hour grid */}
           {hours.map((hour) => {
             const top = (hour - DAY_START_HOUR) * HOUR_HEIGHT;
+            const isWorkHour = workStartHour != null && workEndHour != null && hour >= workStartHour && hour < workEndHour;
             return (
               <div
                 key={hour}
                 className="absolute left-0 right-0 border-t border-gray-100"
                 style={{ top }}
               >
-                <span className="absolute -top-2.5 left-2 text-xs text-gray-400 bg-white px-1">
+                <span className={`absolute -top-2.5 left-2 text-xs px-1 ${isWorkHour ? 'text-gray-500 bg-blue-50/30' : 'text-gray-300 bg-white'}`}>
                   {`${hour}:00`}
                 </span>
               </div>
@@ -549,103 +566,174 @@ function WeekGrid({
   weekStart,
   events,
   onSelect,
+  workStartHour,
+  workEndHour,
 }: {
   weekStart: Date;
   events: NormalizedEvent[];
   onSelect: (e: NormalizedEvent) => void;
+  workStartHour?: number;
+  workEndHour?: number;
 }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const hours = Array.from({ length: TOTAL_HOURS }, (_, i) => DAY_START_HOUR + i);
 
-  // Collect holidays spanning the week for a top banner
+  // Holidays banner
   const weekHolidays = events.filter(
-    (e) =>
-      e.isHoliday &&
-      e.allDay &&
-      days.some((d) => spansDay(e, d))
+    (e) => e.isHoliday && e.allDay && days.some((d) => spansDay(e, d))
   );
   const uniqueHolidays = weekHolidays.filter(
     (h, i, arr) => arr.findIndex((x) => x.id === h.id) === i
   );
 
+  // All-day events per day
+  const allDayByDay = days.map((day) =>
+    events.filter((e) => e.allDay && !e.isHoliday && spansDay(e, day))
+  );
+  const hasAllDay = allDayByDay.some((a) => a.length > 0);
+
   return (
     <div>
-      {/* Week holiday banner */}
       {uniqueHolidays.length > 0 && (
-        <div className="flex flex-wrap gap-2 rounded-t-lg bg-emerald-50 border border-emerald-200 px-3 py-1.5 mb-0">
+        <div className="flex flex-wrap gap-2 rounded-t-lg bg-emerald-50 border border-emerald-200 px-3 py-1.5">
           {uniqueHolidays.map((h) => (
-            <button
-              key={h.id}
-              onClick={() => onSelect(h)}
-              className="text-[11px] text-emerald-700 font-medium hover:underline cursor-pointer"
-            >
+            <button key={h.id} onClick={() => onSelect(h)}
+              className="text-[11px] text-emerald-700 font-medium hover:underline cursor-pointer">
               {h.title}
             </button>
           ))}
         </div>
       )}
 
-      <div
-        className={`grid grid-cols-7 gap-px ${
-          uniqueHolidays.length > 0
-            ? "rounded-b-lg border border-t-0"
-            : "rounded-lg border"
-        } border-gray-200 bg-gray-200 overflow-hidden`}
-      >
-        {days.map((day) => {
-          const dayStr = formatDateISO(day);
-          const dayEvents = events.filter(
-            (e) => !e.isHoliday && spansDay(e, day)
-          );
-          const today = isToday(day);
-
-          return (
-            <div
-              key={dayStr}
-              className={`bg-white min-h-[140px] p-1.5 ${
-                today ? "bg-primary/[0.02]" : ""
-              }`}
-            >
-              <div className="flex items-center gap-1 mb-1">
-                <span
-                  className={`text-xs font-medium ${
-                    today
-                      ? "bg-primary text-white rounded-full h-5 w-5 flex items-center justify-center"
-                      : "text-gray-500"
-                  }`}
-                >
-                  {day.getDate()}
-                </span>
-                <span className="text-[10px] text-gray-400 uppercase">
+      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+        {/* Day headers */}
+        <div className="grid grid-cols-[50px_repeat(7,1fr)] border-b border-gray-200">
+          <div />
+          {days.map((day) => {
+            const today = isToday(day);
+            return (
+              <div key={formatDateISO(day)} className={`text-center py-1.5 border-l border-gray-100 ${today ? 'bg-primary/5' : ''}`}>
+                <span className="text-[10px] text-gray-400 uppercase block">
                   {day.toLocaleDateString("en-US", { weekday: "short" })}
                 </span>
+                <span className={`text-xs font-medium ${today ? 'bg-primary text-white rounded-full inline-flex items-center justify-center h-5 w-5' : 'text-gray-600'}`}>
+                  {day.getDate()}
+                </span>
               </div>
-              <div className="space-y-0.5">
+            );
+          })}
+        </div>
+
+        {/* All-day row */}
+        {hasAllDay && (
+          <div className="grid grid-cols-[50px_repeat(7,1fr)] border-b border-gray-200">
+            <div className="text-[9px] text-gray-400 px-1 py-1">all day</div>
+            {allDayByDay.map((dayEvents, i) => (
+              <div key={i} className="border-l border-gray-100 px-0.5 py-0.5 space-y-0.5">
                 {dayEvents.map((ev) => (
-                  <button
-                    key={ev.id}
-                    onClick={() => onSelect(ev)}
-                    className={`w-full text-left text-[11px] leading-tight px-1 py-0.5 rounded truncate transition-opacity hover:opacity-80 cursor-pointer ${
-                      ev.allDay
-                        ? ev.isTickler
-                          ? "bg-amber-50 text-amber-800 border border-amber-200"
-                          : "bg-primary/10 text-primary border border-primary/20 font-medium"
-                        : ev.isTickler
-                        ? "bg-amber-50 text-amber-800 border border-amber-200"
-                        : "bg-primary/5 text-gray-800 border border-primary/20"
-                    }`}
-                  >
-                    {!ev.allDay && (
-                      <span className="text-gray-400 mr-0.5">
-                        {formatTime(ev.start)}
-                      </span>
-                    )}
+                  <button key={ev.id} onClick={() => onSelect(ev)}
+                    className="w-full text-left text-[10px] leading-tight px-1 py-0.5 rounded truncate bg-primary/10 text-primary border border-primary/20 cursor-pointer hover:opacity-80">
                     {ev.title}
                   </button>
                 ))}
               </div>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        )}
+
+        {/* Timeline grid */}
+        <div className="relative" style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}>
+          {/* Work hours background */}
+          {workStartHour != null && workEndHour != null && days.map((day, di) => (
+            <div key={`work-${di}`} className="absolute bg-blue-50/30 pointer-events-none"
+              style={{
+                left: `calc(50px + ${di} * ((100% - 50px) / 7))`,
+                width: `calc((100% - 50px) / 7)`,
+                top: Math.max(workStartHour - DAY_START_HOUR, 0) * HOUR_HEIGHT,
+                height: (Math.min(workEndHour, DAY_END_HOUR) - Math.max(workStartHour, DAY_START_HOUR)) * HOUR_HEIGHT,
+              }}
+            />
+          ))}
+
+          {/* Hour lines */}
+          {hours.map((hour) => {
+            const top = (hour - DAY_START_HOUR) * HOUR_HEIGHT;
+            return (
+              <div key={hour} className="absolute left-0 right-0 border-t border-gray-100" style={{ top }}>
+                <span className="absolute -top-2.5 left-1 text-[10px] text-gray-400 bg-white px-0.5">
+                  {`${hour}:00`}
+                </span>
+              </div>
+            );
+          })}
+
+          {/* Day column borders */}
+          {days.map((_, di) => (
+            <div key={`col-${di}`} className="absolute top-0 bottom-0 border-l border-gray-100"
+              style={{ left: `calc(50px + ${di} * ((100% - 50px) / 7))` }}
+            />
+          ))}
+
+          {/* Current time line */}
+          {(() => {
+            const now = new Date();
+            const nowHour = now.getHours() + now.getMinutes() / 60;
+            if (nowHour < DAY_START_HOUR || nowHour > DAY_END_HOUR) return null;
+            const todayIdx = days.findIndex((d) => isToday(d));
+            if (todayIdx < 0) return null;
+            const top = (nowHour - DAY_START_HOUR) * HOUR_HEIGHT;
+            return (
+              <div className="absolute z-10 pointer-events-none" style={{
+                top,
+                left: `calc(50px + ${todayIdx} * ((100% - 50px) / 7))`,
+                width: `calc((100% - 50px) / 7)`,
+              }}>
+                <div className="flex items-center">
+                  <div className="h-2 w-2 rounded-full bg-red-500 -ml-1" />
+                  <div className="flex-1 h-px bg-red-500" />
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Events */}
+          {days.map((day, di) => {
+            const dayEvents = events.filter((e) => !e.allDay && !e.isHoliday && spansDay(e, day));
+            return dayEvents.map((ev) => {
+              const startHour = isSameDay(ev.start, day)
+                ? ev.start.getHours() + ev.start.getMinutes() / 60
+                : DAY_START_HOUR;
+              const endHour = isSameDay(ev.end, day)
+                ? ev.end.getHours() + ev.end.getMinutes() / 60 || DAY_END_HOUR
+                : DAY_END_HOUR;
+              const clampedStart = Math.max(startHour, DAY_START_HOUR);
+              const clampedEnd = Math.min(endHour, DAY_END_HOUR);
+              if (clampedEnd <= clampedStart) return null;
+              const top = (clampedStart - DAY_START_HOUR) * HOUR_HEIGHT;
+              const height = Math.max((clampedEnd - clampedStart) * HOUR_HEIGHT, 18);
+              const color = ev.isTickler
+                ? "bg-amber-50 border-amber-500 text-amber-900"
+                : "bg-blue-50 border-blue-500 text-gray-900";
+
+              return (
+                <HoverEvent key={ev.id} event={ev} onSelect={onSelect}>
+                  <div className={`absolute rounded-sm border-l-2 px-1 py-0.5 text-left overflow-hidden cursor-pointer hover:opacity-80 ${color}`}
+                    style={{
+                      top,
+                      height,
+                      left: `calc(50px + ${di} * ((100% - 50px) / 7) + 2px)`,
+                      width: `calc((100% - 50px) / 7 - 4px)`,
+                    }}>
+                    <p className="text-[10px] font-medium truncate">{ev.title}</p>
+                    {height >= 30 && (
+                      <p className="text-[9px] text-gray-500 truncate">{formatTime(ev.start)}</p>
+                    )}
+                  </div>
+                </HoverEvent>
+              );
+            });
+          })}
+        </div>
       </div>
     </div>
   );
@@ -663,12 +751,21 @@ export function CalendarView() {
     null
   );
   const [isPending, startTransition] = useTransition();
+  const [workWeek, setWorkWeek] = useState<{ start_day: number; start_hour: string; end_hour: string }>({
+    start_day: 0, start_hour: "09:00", end_hour: "17:00",
+  });
 
   useEffect(() => {
+    getUserSettings().then((r) => {
+      if (!r.error) setWorkWeek(r.settings.work_week);
+    });
     const timer = setTimeout(() => loadData(currentDate, viewMode), 100);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const workStartHour = parseInt(workWeek.start_hour?.split(":")[0] ?? "9", 10);
+  const workEndHour = parseInt(workWeek.end_hour?.split(":")[0] ?? "17", 10);
 
   const loadData = useCallback((date: Date, mode: ViewMode) => {
     startTransition(async () => {
@@ -679,7 +776,7 @@ export function CalendarView() {
         from = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString();
         to = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).toISOString();
       } else {
-        const ws = startOfWeek(date);
+        const ws = startOfWeek(date, workWeek.start_day);
         from = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate()).toISOString();
         to = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + 7).toISOString();
       }
@@ -716,7 +813,7 @@ export function CalendarView() {
           year: "numeric",
         })
       : (() => {
-          const ws = startOfWeek(currentDate);
+          const ws = startOfWeek(currentDate, workWeek.start_day);
           const we = addDays(ws, 6);
           const sameMonth = ws.getMonth() === we.getMonth();
           if (sameMonth) {
@@ -815,13 +912,17 @@ export function CalendarView() {
               date={currentDate}
               events={events}
               onSelect={setSelectedEvent}
+              workStartHour={workStartHour}
+              workEndHour={workEndHour}
             />
           </div>
           <div className={viewMode === "week" ? "hidden sm:block" : "hidden"}>
             <WeekGrid
-              weekStart={startOfWeek(currentDate)}
+              weekStart={startOfWeek(currentDate, workWeek.start_day)}
               events={events}
               onSelect={setSelectedEvent}
+              workStartHour={workStartHour}
+              workEndHour={workEndHour}
             />
           </div>
           {viewMode === "week" && (
@@ -830,6 +931,8 @@ export function CalendarView() {
                 date={currentDate}
                 events={events}
                 onSelect={setSelectedEvent}
+                workStartHour={workStartHour}
+                workEndHour={workEndHour}
               />
             </div>
           )}

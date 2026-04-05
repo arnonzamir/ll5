@@ -53,6 +53,7 @@ Current state of the LL5 personal assistant system.
 
 ## Recent Changes
 
+- 2026-04-05: Calendar week view: timeline layout with hour grid, work hour coloring, current time line, respects week start day from profile settings
 - 2026-04-04: Proactive agent overhaul: audit trail (correlation IDs on all scheduler messages), data-rich heartbeat (events past+future + pending counts), configurable scheduler settings UI (/settings/scheduler), all intervals readable from user_settings JSONB
 - 2026-04-04: Fix WhatsApp image download: use Evolution API getBase64FromMediaMessage for decrypted images (was saving encrypted blobs)
 - 2026-04-04: Agent nudge scheduler: if no journal entry in 60min, send reminder with proactivity checklist (inbox, ticklers, escalations, push opportunities). Checks every 15min during active hours.
