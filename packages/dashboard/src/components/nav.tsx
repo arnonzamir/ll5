@@ -296,12 +296,12 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                       Email Settings
                     </Link>
                     <Link
-                      href="/settings/notifications"
+                      href="/settings/contacts"
                       onClick={() => setProfileOpen(false)}
                       className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     >
-                      <Bell className="h-4 w-4" />
-                      Message Rules
+                      <Users className="h-4 w-4" />
+                      Contacts & Routing
                     </Link>
                     <Link
                       href="/settings/notification-levels"
