@@ -119,16 +119,20 @@ export async function processWhatsAppWebhook(
                   'apikey': evo.api_key,
                   'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ message: { key: data.key } }),
+                body: JSON.stringify({ message: data }),
               },
             );
             if (mediaRes.ok) {
               const mediaData = await mediaRes.json() as { base64?: string };
               if (mediaData.base64) {
                 buf = Buffer.from(mediaData.base64, 'base64');
+                logger.info('[processWhatsAppWebhook][handle] Image downloaded via Evolution API', { size: buf.length });
+              } else {
+                logger.warn('[processWhatsAppWebhook][handle] Evolution getBase64 returned no base64 field', { keys: Object.keys(mediaData) });
               }
             } else {
-              logger.warn('[processWhatsAppWebhook][handle] Evolution getBase64 failed', { status: mediaRes.status });
+              const errBody = await mediaRes.text().catch(() => '');
+              logger.warn('[processWhatsAppWebhook][handle] Evolution getBase64 failed', { status: mediaRes.status, body: errBody.slice(0, 200) });
             }
           } catch (evoErr) {
             logger.warn('[processWhatsAppWebhook][handle] Evolution media download failed', {

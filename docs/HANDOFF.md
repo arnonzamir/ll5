@@ -189,7 +189,8 @@ See docs/implementation/deployment-log.md for full details:
 - **Agent nudge**: includes upcoming events + proactivity checklist. Fires when no journal entries in configured interval.
 - **Conversation escalation**: user sends fromMe in ignored/batched WhatsApp conversation → 30-min immediate window. Stored in `user_settings.active_escalations` (survives restarts). Gateway checks `isEscalated()` in matcher, overrides priority to immediate. On expiry, agent must journal + decide priority. No reply permission — awareness only.
 - WhatsApp webhook resolves group/contact names from messaging_conversations table. System messages include `[image attached: URL]` for image messages.
-- WhatsApp images downloaded via Evolution API `getBase64FromMediaMessage` (decrypted), not direct CDN URL (encrypted). Falls back to direct URL if Evolution API fails. (shared PG) — no longer stores raw JIDs as group_name
+- WhatsApp images: pass full message object (not just key) to Evolution API `getBase64FromMediaMessage`. Falls back to direct URL if Evolution API fails.
+- WhatsApp webhook resolves group/contact names from messaging_conversations table (shared PG)
 - Places upsert auto-geocodes address→coordinates via Nominatim when lat/lon not provided (1 req/sec rate limit)
 - People relationship field is free-text; UI groups them into family/friend/colleague/acquaintance/other for filtering
 - Migrations that DROP+ADD constraints must include ALL values (not just original), since later migrations may have already inserted new values
