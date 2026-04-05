@@ -12,6 +12,7 @@ import { PostgresAccountRepository } from './repositories/postgres/account.repos
 import { PostgresConversationRepository } from './repositories/postgres/conversation.repository.js';
 import { PostgresContactRepository } from './repositories/postgres/contact.repository.js';
 import { registerAllTools } from './tools/index.js';
+import { initAppLog, withToolLogging } from '@ll5/shared';
 
 const { Pool } = pg;
 
@@ -25,6 +26,12 @@ function getUserId(): string {
 export async function startServer(): Promise<void> {
   const env = loadEnv();
   setLogLevel(env.logLevel as LogLevel);
+
+  initAppLog({
+    elasticsearchUrl: process.env.ELASTICSEARCH_URL ?? '',
+    service: 'messaging',
+    level: (env.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
+  });
 
   logger.info('[startServer][init] Starting Messaging MCP server', { port: env.port });
 
@@ -149,6 +156,7 @@ export async function startServer(): Promise<void> {
         name: 'll5-messaging',
         version: '0.1.0',
       });
+      withToolLogging(mcpServer, getUserId);
       registerAllTools(mcpServer, deps, getUserId);
       await mcpServer.connect(transport);
       await transport.handleRequest(req, res, req.body);

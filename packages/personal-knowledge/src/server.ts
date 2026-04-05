@@ -15,6 +15,7 @@ import { ElasticsearchPersonRepository } from './repositories/elasticsearch/pers
 import { ElasticsearchPlaceRepository } from './repositories/elasticsearch/place.repository.js';
 import { ElasticsearchDataGapRepository } from './repositories/elasticsearch/data-gap.repository.js';
 import { registerAllTools } from './tools/index.js';
+import { initAppLog, withToolLogging } from '@ll5/shared';
 
 // Per-request userId set by auth middleware
 let currentUserId = '';
@@ -26,6 +27,12 @@ function getUserId(): string {
 export async function startServer(): Promise<void> {
   const env = loadEnv();
   setLogLevel(env.logLevel as LogLevel);
+
+  initAppLog({
+    elasticsearchUrl: env.elasticsearchUrl,
+    service: 'personal-knowledge',
+    level: (env.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
+  });
 
   logger.info('[startServer][init] Starting personal-knowledge MCP server', {
     port: env.port,
@@ -90,6 +97,7 @@ export async function startServer(): Promise<void> {
         name: 'll5-personal-knowledge',
         version: '0.1.0',
       });
+      withToolLogging(reqServer, getUserId);
       registerAllTools(reqServer, repos, getUserId);
       await reqServer.connect(transport);
 

@@ -68,7 +68,7 @@ ll5/
 │   └── src/
 │       ├── repositories/elasticsearch/  # 5 ES repositories (fact, person, place, profile, data-gap)
 │       ├── repositories/interfaces/     # Repository interfaces
-│       ├── tools/                       # 17 MCP tools
+│       ├── tools/                       # 17 MCP tools (all logged via withToolLogging)
 │       ├── setup/indices.ts             # ES index creation
 │       ├── auth-middleware.ts           # Token + legacy auth
 │       └── server.ts                    # MCP server with StreamableHTTP

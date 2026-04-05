@@ -132,7 +132,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
 - `ll5_agent_*` — journal (micro-entries), user_model (consolidated sections keyed by userId_section)
 - `ll5_health_*` — sleep, heart_rate, daily_stats (stress, body battery, HRV, VO2 Max, respiration), activities, body_composition
-- `ll5_app_log` — all tool calls, webhooks, errors (service, level, action, tool_name, duration_ms)
+- `ll5_app_log` — all tool calls from all 6 MCPs (service, level, action, tool_name, duration_ms, user_id)
 - `ll5_audit_log` — all mutations across MCPs
 - Note: calendar index has text-mapped calendar_id (use .keyword subfield for term queries)
 - Calendar push accepts date-only strings and null values (Android Moshi sends explicit null, not undefined)
