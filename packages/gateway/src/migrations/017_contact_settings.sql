@@ -37,4 +37,4 @@ SET permission = mc.permission,
 FROM messaging_conversations mc
 WHERE cs.target_type = 'group'
   AND cs.target_id = mc.conversation_id
-  AND cs.user_id = mc.user_id;
+  AND cs.user_id::text = mc.user_id;
