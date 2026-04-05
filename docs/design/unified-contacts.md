@@ -1,99 +1,203 @@
-# Unified Contact Identity
+# Unified Contact & Routing System
 
 ## Problem
 
-Routing rules match by display name substring ("אריאל" matches all Ariels across all conversations). A person can appear as "Ariel", "אריאל", "Ariel Z" across platforms. Need stable identity-based routing.
+Three separate systems control messaging behavior, spread across three UI pages:
+1. `notification_rules` — routing priority (ignore/batch/immediate/agent), matches by name substring (ambiguous)
+2. `messaging_conversations.permission` — reply permission (ignore/input/agent)
+3. `notification_rules.download_images` — per-conversation photo download toggle
 
-## Key Insight: Infrastructure Already Exists
+Name-based matching is broken: "אריאל" matches all Ariels. Need stable identity-based control.
 
-- `ll5_knowledge_people` (ES) — the Person record IS the unified contact ID
-- `messaging_contacts` (PG) — already has `person_id` FK linking platform IDs to people
-- Dashboard `/contacts` page — already has link/unlink UI
-- MCP tools: `link_contact_to_person`, `resolve_contact`, `auto_match_contacts`
+## Design: One System, Two Entity Types
 
-## Three Gaps to Fill
+### People (1:1 messages)
+A real person identified by their stable `ll5_knowledge_people` ES ID. Controls how the agent handles their **direct/1:1 messages only**. If they message in a group, the group's settings apply.
 
-### Gap 1: `person` Rule Type
+Settings per person:
+- **Routing**: ignore / batch / immediate / agent
+- **Permission**: ignore / input / agent (can the agent reply to their 1:1 messages)
+- **Photos**: download / skip
 
-Add `person` to `notification_rules.rule_type`. For person rules, `match_value` is the Person ES ID. Matches across all platforms.
+### Groups (group conversations)
+A group chat identified by its `messaging_conversations` conversation_id. Controls all messages in that group, regardless of sender.
 
-Priority order in matcher:
+Settings per group:
+- **Routing**: ignore / batch / immediate / agent
+- **Permission**: ignore / input / agent
+- **Photos**: download / skip
+
+### Keywords (cross-cutting)
+Keyword rules remain — they trigger across any message regardless of person or group. Keep existing behavior.
+
+## Resolution Logic
+
 ```
-0. Escalation check (existing)
-1. Conversation-specific rules (existing)
-2. Person rules — NEW: if person_id provided, match rule_type='person'
-3. Pattern-based rules (existing sender/app/keyword/group)
-4. Wildcard (existing)
+Is it a group message?
+  → Look up conversation rule for that group_id
+  → Use group's routing/permission/photos settings
+  → Fall through to keyword → wildcard if no group rule
+
+Is it a 1:1 message?
+  → Resolve sender to person_id via platform_id (messaging_contacts)
+  → Look up person rule for that person_id
+  → Use person's routing/permission/photos settings
+  → Fall through to keyword → wildcard if no person rule
+
+No match?
+  → Keyword rules → app rules → wildcard
 ```
 
-### Gap 2: Contact Resolution at Ingest
+**Key**: person rules NEVER apply in groups. Groups are self-contained.
 
-When a WhatsApp message arrives:
-1. Extract `remoteJid` (existing)
-2. **New**: `SELECT person_id FROM messaging_contacts WHERE platform='whatsapp' AND platform_id=$1`
-3. Pass `person_id` to `matcher.match()`
+## Data Model
 
-For phone-pushed IMs (no platform_id): best-effort name match against `messaging_contacts.display_name`.
+### Replace `notification_rules` + `messaging_conversations.permission` + `download_images`
 
-### Gap 3: `person_id` on Messages
+New table: `contact_settings`
 
-Add `person_id` and `contact_id` fields to `ll5_awareness_messages` and `ll5_awareness_entity_statuses`. Enables:
-- Message history by person (across name variations)
-- Entity status dedup by person (not by name string)
-
-## Implementation Steps
-
-### Step 1: Migration
 ```sql
--- Add 'person' to rule_type CHECK constraint
-ALTER TABLE notification_rules DROP CONSTRAINT IF EXISTS notification_rules_rule_type_check;
-ALTER TABLE notification_rules ADD CONSTRAINT notification_rules_rule_type_check
-  CHECK (rule_type IN ('sender','app','app_direct','app_group','keyword','group','wildcard','conversation','person'));
-```
+CREATE TABLE contact_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
 
-### Step 2: Gateway Contact Resolution
-In `whatsapp-webhook.ts`, after extracting remoteJid:
-```typescript
-let personId: string | null = null;
-const contactResult = await pgPool.query(
-  'SELECT person_id FROM messaging_contacts WHERE platform=$1 AND platform_id=$2 AND person_id IS NOT NULL LIMIT 1',
-  ['whatsapp', remoteJid],
+  -- What this rule targets
+  target_type VARCHAR(20) NOT NULL,  -- 'person' or 'group'
+  target_id VARCHAR(255) NOT NULL,   -- person ES ID or conversation_id
+
+  -- Settings
+  routing VARCHAR(20) NOT NULL DEFAULT 'batch',      -- ignore/batch/immediate/agent
+  permission VARCHAR(20) NOT NULL DEFAULT 'input',    -- ignore/input/agent
+  download_media BOOLEAN NOT NULL DEFAULT false,
+
+  -- Display (cached for UI)
+  display_name VARCHAR(255),
+  platform VARCHAR(20),              -- for groups: whatsapp/telegram/slack
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  UNIQUE(user_id, target_type, target_id)
 );
-personId = contactResult.rows[0]?.person_id ?? null;
 ```
-Pass `personId` to `matcher.match()`.
 
-### Step 3: Matcher Update
-In `NotificationRuleMatcher.match()`:
-- Add `person_id?: string` to message parameter
-- Between conversation and pattern rules: check `rule_type='person'` where `match_value === person_id`
+### Keep `notification_rules` for keywords/app/wildcard only
 
-### Step 4: ES Message Enrichment
-Add `person_id` to the ES document in `whatsapp-webhook.ts` and `message.ts`.
+Existing keyword, app, and wildcard rules stay in `notification_rules`. Only sender/group/conversation rules migrate to `contact_settings`.
 
-### Step 5: Entity Status Dedup
-When `person_id` is available, use it for the deterministic entity status ID instead of sender name.
+### `messaging_contacts` — unchanged
 
-### Step 6: Phone IM Resolution
-Best-effort: query `messaging_contacts` by `display_name ILIKE` for phone-pushed messages.
+Still links platform_id → person_id. The resolution layer.
 
-### Step 7: Update Tool Enums
-Add `person` to `create_notification_rule` tool's `rule_type` enum.
+## Matcher Changes
 
-### Step 8: Dashboard
-- Contacts page: "Create routing rule" button for linked contacts
-- Notification settings: show person name for `person` rules, warn when `sender` rules are ambiguous
+```typescript
+async match(userId, message): Priority {
+  // 0. Active escalation check
+  if (escalated) return 'immediate';
+
+  // 1. Group message → look up group settings
+  if (message.is_group && message.conversation_id) {
+    const groupSettings = await getContactSettings(userId, 'group', message.conversation_id);
+    if (groupSettings) return groupSettings.routing;
+  }
+
+  // 2. 1:1 message → resolve person, look up person settings
+  if (!message.is_group && message.person_id) {
+    const personSettings = await getContactSettings(userId, 'person', message.person_id);
+    if (personSettings) return personSettings.routing;
+  }
+
+  // 3. Keyword/app/wildcard (from notification_rules, unchanged)
+  return matchLegacyRules(userId, message);
+}
+```
+
+Permission and download_media are read from the same `contact_settings` row.
+
+## Contact Resolution at Ingest
+
+### WhatsApp webhook
+```typescript
+// Already have remoteJid
+// For groups: conversation_id = remoteJid → look up contact_settings(target_type='group', target_id=remoteJid)
+// For 1:1: look up messaging_contacts(platform='whatsapp', platform_id=remoteJid) → get person_id
+//          → look up contact_settings(target_type='person', target_id=person_id)
+```
+
+### Phone IM (notification capture)
+Best-effort name resolution against `messaging_contacts.display_name`. If ambiguous, skip person resolution.
+
+## Unified UI: `/settings/contacts`
+
+One page replacing `/settings/notifications`, `/settings/messaging`, and `/contacts`.
+
+### Layout
+
+**Tab: People**
+| Person | Platforms | Routing | Permission | Media | Actions |
+|--------|-----------|---------|------------|-------|---------|
+| Ariel Zamir | WhatsApp, Telegram | `immediate` | `agent` | download | Edit |
+| Mom | WhatsApp | `immediate` | `input` | download | Edit |
+| (unlinked contacts) | WhatsApp: +972... | `batch` | `input` | skip | Link |
+
+- Search + filter
+- People with linked platform identities show all platforms
+- Unlinked contacts appear at the bottom with a "Link to person" action
+- Click person to edit settings
+- Auto-match button to bulk-link contacts by phone/name
+
+**Tab: Groups**
+| Group | Platform | Routing | Permission | Media |
+|-------|----------|---------|------------|-------|
+| Family | WhatsApp | `immediate` | `agent` | download |
+| דיונים ROI | WhatsApp | `batch` | `input` | skip |
+| gtd_in | WhatsApp | `immediate` | `input` | download |
+
+- Search + filter by platform
+- Archived groups shown grayed out
+- Click group to edit settings
+
+**Tab: Keywords**
+Existing keyword rules UI — unchanged.
 
 ## Migration Path
 
-- Phase 1: Add `person` rule type. Existing `sender` rules unchanged.
-- Phase 2: Agent gradually replaces ambiguous `sender` rules with `person` rules.
-- Phase 3: Dashboard suggests converting ambiguous sender rules.
+### Phase 1: Create `contact_settings` table
+- Migrate existing `conversation` rules from `notification_rules` → `contact_settings(target_type='group')`
+- Migrate `sender` rules where a person_id can be resolved → `contact_settings(target_type='person')`
+- Migrate `messaging_conversations.permission` → `contact_settings.permission`
+- Migrate `download_images` → `contact_settings.download_media`
 
-## Group Handling
+### Phase 2: Update matcher
+- New matcher reads from `contact_settings` for person/group lookups
+- Legacy keyword/app/wildcard rules stay in `notification_rules`
+- Old `sender`/`conversation` rules in `notification_rules` deprecated
 
-Groups continue using `conversation` rules (already exact by conversation_id). Groups are not people — no change needed.
+### Phase 3: UI
+- Build unified `/settings/contacts` page
+- Remove `/settings/notifications` (redirect to new page)
+- Remove `/settings/messaging` (redirect to new page)
+- Remove `/contacts` (merge into new page)
 
-## No New Tables
+### Phase 4: Cleanup
+- Drop deprecated rule types from `notification_rules`
+- Remove old UI pages
 
-Everything builds on existing `ll5_knowledge_people` + `messaging_contacts` + `notification_rules`.
+## Implementation Files
+
+### New
+- `packages/gateway/src/migrations/017_contact_settings.sql`
+- `packages/dashboard/src/app/(user)/settings/contacts/` — unified page
+
+### Modified
+- `packages/gateway/src/processors/notification-rules.ts` — matcher reads `contact_settings`
+- `packages/gateway/src/processors/whatsapp-webhook.ts` — resolve person_id, pass to matcher
+- `packages/gateway/src/processors/message.ts` — resolve person_id for phone IMs
+- `packages/gateway/src/server.ts` — CRUD endpoints for `contact_settings`
+- `packages/awareness/src/setup/indices.ts` — add `person_id` to message index
+
+### Removed (after migration)
+- `packages/dashboard/src/app/(user)/settings/notifications/`
+- `packages/dashboard/src/app/(user)/settings/messaging/`
+- `packages/dashboard/src/app/(user)/contacts/`
