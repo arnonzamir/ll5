@@ -27,6 +27,26 @@ interface EvolutionMessageData {
       caption?: string;
       mediaKey?: string;
     };
+    audioMessage?: {
+      url?: string;
+      mimetype?: string;
+      seconds?: number;
+      ptt?: boolean; // true = voice note, false = audio file
+      mediaKey?: string;
+    };
+    videoMessage?: {
+      url?: string;
+      mimetype?: string;
+      seconds?: number;
+      caption?: string;
+      mediaKey?: string;
+    };
+    documentMessage?: {
+      url?: string;
+      mimetype?: string;
+      fileName?: string;
+      mediaKey?: string;
+    };
   };
   messageTimestamp?: number | string;
 }
@@ -53,16 +73,24 @@ export async function processWhatsAppWebhook(
   const data = payload.data;
   const fromMe = data.key.fromMe;
 
-  // Extract message text + detect image
+  // Extract message text + detect media
   const text = data.message?.conversation
     ?? data.message?.extendedTextMessage?.text
     ?? data.message?.imageMessage?.caption
+    ?? data.message?.videoMessage?.caption
     ?? '';
   const imageMessage = data.message?.imageMessage;
+  const audioMessage = data.message?.audioMessage;
+  const videoMessage = data.message?.videoMessage;
+  const documentMessage = data.message?.documentMessage;
   const hasImage = !!imageMessage;
+  const hasAudio = !!audioMessage;
+  const hasVideo = !!videoMessage;
+  const hasDocument = !!documentMessage;
+  const hasMedia = hasImage || hasAudio || hasVideo || hasDocument;
 
-  if (!text && !hasImage) {
-    logger.debug('[processWhatsAppWebhook][handle] Skipping message with no text or image content');
+  if (!text && !hasMedia) {
+    logger.debug('[processWhatsAppWebhook][handle] Skipping message with no text or media content');
     return;
   }
 
@@ -87,22 +115,19 @@ export async function processWhatsAppWebhook(
     if (isGroup) groupName = remoteJid;
   }
 
-  // Check priority early for image handling — only download images for non-ignore conversations
-  let imageUrl: string | null = null;
-  let mediaId: string | null = null;
-  if (hasImage && imageMessage?.url) {
-    // Check conversation priority before downloading
-    const imgPriority = await matcher.match(userId, {
-      sender, app: 'whatsapp', body: text || '[image]',
-      is_group: isGroup, group_name: groupName,
-      platform: 'whatsapp', conversation_id: remoteJid,
-    });
+  // Determine media type and metadata
+  const activeMedia = imageMessage ?? audioMessage ?? videoMessage ?? documentMessage;
+  const mediaType = hasImage ? 'image' : hasAudio ? (audioMessage?.ptt ? 'voice_note' : 'audio') : hasVideo ? 'video' : hasDocument ? 'document' : null;
+  const mediaMimetype = activeMedia?.mimetype ?? (hasImage ? 'image/jpeg' : hasAudio ? 'audio/ogg' : hasVideo ? 'video/mp4' : 'application/octet-stream');
+  const mediaDurationSec = (audioMessage?.seconds ?? videoMessage?.seconds) || undefined;
 
-    // Download images only if conversation has download_images enabled
+  // Download media if conversation has download_images enabled
+  let mediaUrl: string | null = null;
+  let mediaId: string | null = null;
+  if (hasMedia && activeMedia) {
     const shouldDownload = await matcher.shouldDownloadImages(userId, 'whatsapp', remoteJid);
     if (shouldDownload) {
       try {
-        // Download decrypted image via Evolution API's getBase64FromMediaMessage
         const evoAccount = await pgPool.query(
           'SELECT api_url, api_key, instance_name FROM messaging_whatsapp_accounts LIMIT 1',
         );
@@ -126,7 +151,7 @@ export async function processWhatsAppWebhook(
               const mediaData = await mediaRes.json() as { base64?: string };
               if (mediaData.base64) {
                 buf = Buffer.from(mediaData.base64, 'base64');
-                logger.info('[processWhatsAppWebhook][handle] Image downloaded via Evolution API', { size: buf.length });
+                logger.info('[processWhatsAppWebhook][handle] Media downloaded via Evolution API', { type: mediaType, size: buf.length });
               } else {
                 logger.warn('[processWhatsAppWebhook][handle] Evolution getBase64 returned no base64 field', { keys: Object.keys(mediaData) });
               }
@@ -141,45 +166,40 @@ export async function processWhatsAppWebhook(
           }
         }
 
-        // Fallback: try direct URL (may be encrypted/unusable)
-        if (!buf && imageMessage.url) {
-          const imgRes = await fetch(imageMessage.url);
-          if (imgRes.ok) {
-            buf = Buffer.from(await imgRes.arrayBuffer());
-          }
-        }
-
         if (buf && buf.length > 0) {
-          const ext = imageMessage.mimetype?.split('/')[1] ?? 'jpg';
-          const filename = `wa_${userId.slice(0, 8)}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          const ext = mediaMimetype.split('/')[1]?.replace('codecs', '').replace(/[^a-z0-9]/g, '') || 'bin';
+          const prefix = mediaType === 'voice_note' ? 'vn' : mediaType ?? 'media';
+          const filename = `wa_${prefix}_${userId.slice(0, 8)}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
           const filePath = path.join(UPLOAD_DIR, filename);
           fs.writeFileSync(filePath, buf);
-          imageUrl = `/uploads/${filename}`;
+          mediaUrl = `/uploads/${filename}`;
 
-          // Register in ll5_media
           const mediaResult = await es.index({
             index: 'll5_media',
             document: {
               user_id: userId,
-              url: imageUrl,
-              mime_type: imageMessage.mimetype ?? 'image/jpeg',
+              url: mediaUrl,
+              mime_type: mediaMimetype,
               filename,
               size_bytes: buf.length,
               source: 'whatsapp',
+              media_type: mediaType,
+              duration_seconds: mediaDurationSec,
               tags: isGroup && groupName ? [groupName] : [],
               created_at: new Date().toISOString(),
             },
           });
           mediaId = mediaResult._id;
-          logger.info('[processWhatsAppWebhook][handle] WhatsApp image saved', { filename, size: buf.length, priority: imgPriority });
+          logger.info('[processWhatsAppWebhook][handle] WhatsApp media saved', { type: mediaType, filename, size: buf.length });
         }
       } catch (err) {
-        logger.warn('[processWhatsAppWebhook][handle] Failed to download WhatsApp image', {
+        logger.warn('[processWhatsAppWebhook][handle] Failed to download WhatsApp media', {
           error: err instanceof Error ? err.message : String(err),
+          mediaType,
         });
       }
     } else {
-      logger.debug('[processWhatsAppWebhook][handle] Skipping image download — download_images not enabled for this conversation');
+      logger.debug('[processWhatsAppWebhook][handle] Skipping media download — download_images not enabled');
     }
   }
   const timestamp = typeof data.messageTimestamp === 'number'
@@ -200,9 +220,11 @@ export async function processWhatsAppWebhook(
     timestamp,
     source: 'evolution',
   };
-  if (imageUrl) {
-    messageDoc.image_url = imageUrl;
+  if (mediaUrl) {
+    messageDoc.media_url = mediaUrl;
     messageDoc.media_id = mediaId;
+    messageDoc.media_type = mediaType;
+    if (mediaDurationSec) messageDoc.media_duration_seconds = mediaDurationSec;
   }
 
   await es.index({
@@ -251,11 +273,11 @@ export async function processWhatsAppWebhook(
     if (priority === 'immediate' || priority === 'agent') {
       const truncBody = text.length > 2000 ? text.slice(0, 2000) + '...' : text;
       const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
-      const imageInfo = hasImage && imageUrl ? ` [image attached: ${imageUrl}]` : hasImage ? ' [image attached]' : '';
+      const mediaInfo = hasMedia && mediaUrl ? ` [${mediaType} attached: ${mediaUrl}${mediaDurationSec ? ` (${mediaDurationSec}s)` : ''}]` : hasMedia ? ` [${mediaType} attached]` : '';
       await insertSystemMessage(
         pgPool,
         userId,
-        `[WhatsApp] You sent${groupInfo}: "${truncBody}"${imageInfo}`,
+        `[WhatsApp] You sent${groupInfo}: "${truncBody}"${mediaInfo}`,
       );
 
       await es.update({
@@ -325,12 +347,12 @@ export async function processWhatsAppWebhook(
   if (priority === 'immediate' || priority === 'agent') {
     const truncBody = text.length > 200 ? text.slice(0, 200) + '...' : text;
     const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
-    const imageInfo = hasImage && imageUrl ? ` [image attached: ${imageUrl}]` : hasImage ? ' [image attached]' : '';
+    const mediaInfo = hasMedia && mediaUrl ? ` [${mediaType} attached: ${mediaUrl}${mediaDurationSec ? ` (${mediaDurationSec}s)` : ''}]` : hasMedia ? ` [${mediaType} attached]` : '';
     // No FCM notify — immediate WhatsApp goes to agent via system message → SSE only
     await insertSystemMessage(
       pgPool,
       userId,
-      `[WhatsApp] ${sender}${groupInfo}: "${truncBody}"${imageInfo}`,
+      `[WhatsApp] ${sender}${groupInfo}: "${truncBody}"${mediaInfo}`,
     );
 
     // Mark as processed so batch review doesn't re-report it
