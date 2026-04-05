@@ -60,7 +60,7 @@ ll5/
 │       ├── storage/                  # ES + PG client factories
 │       ├── auth/                     # Token generate/validate, Express middleware
 │       ├── mcp/                      # MCP server helpers
-│       ├── audit.ts                  # ES audit writer (mutations)
+│       ├── audit.ts                  # ES audit writer (100% mutation coverage across all MCPs)
 │       ├── app-log.ts               # ES app logger (all tool calls, errors, webhooks)
 │       └── utils/                    # env, logger, errors
 │

@@ -12,7 +12,47 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RefreshCw, Search, ChevronDown, ChevronRight } from "lucide-react";
-import { fetchLogs, type LogEntry, type LogQuery } from "./log-server-actions";
+import { fetchLogs, fetchEntityDetails, type LogEntry, type LogQuery } from "./log-server-actions";
+
+function EntityLink({ entityType, entityId }: { entityType: string; entityId: string }) {
+  const [details, setDetails] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  async function handleHover() {
+    setShowTooltip(true);
+    if (details || loading) return;
+    setLoading(true);
+    const result = await fetchEntityDetails(entityType, entityId);
+    setDetails(result);
+    setLoading(false);
+  }
+
+  return (
+    <div className="relative inline-block">
+      <p
+        className="text-[11px] text-blue-500 cursor-pointer underline decoration-dotted"
+        onMouseEnter={handleHover}
+        onMouseLeave={() => setShowTooltip(false)}
+      >
+        entity: {entityType}/{entityId.length > 20 ? entityId.slice(0, 20) + '...' : entityId}
+      </p>
+      {showTooltip && (
+        <div className="absolute left-0 top-5 z-50 bg-white border border-gray-200 rounded-md shadow-lg p-3 max-w-md max-h-48 overflow-auto text-xs">
+          {loading ? (
+            <p className="text-gray-400">Loading...</p>
+          ) : details ? (
+            <pre className="text-[11px] text-gray-600 whitespace-pre-wrap">
+              {JSON.stringify(details, null, 2).slice(0, 500)}
+            </pre>
+          ) : (
+            <p className="text-gray-400">No details found</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const LEVEL_COLORS: Record<string, string> = {
   debug: "bg-gray-100 text-gray-600",
@@ -153,7 +193,7 @@ function LogRow({ log }: { log: LogEntry }) {
             <p className="text-[11px] text-gray-400">user: {log.user_id}</p>
           )}
           {log.entity_id && (
-            <p className="text-[11px] text-gray-400">entity: {log.entity_type}/{log.entity_id}</p>
+            <EntityLink entityType={log.entity_type ?? ''} entityId={log.entity_id} />
           )}
           {log.action && !isAudit && (
             <p className="text-[11px] text-gray-400">action: {log.action}</p>

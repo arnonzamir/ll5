@@ -5,6 +5,7 @@ import type { AccountRepository } from '../repositories/interfaces/account.repos
 import type { ConversationRepository } from '../repositories/interfaces/conversation.repository.js';
 import { EvolutionClient } from '../clients/evolution.client.js';
 import { getConversationPriority } from '../utils/permission-checker.js';
+import { logAudit } from '@ll5/shared';
 
 export function registerSendWhatsAppTool(
   server: McpServer,
@@ -69,6 +70,16 @@ export function registerSendWhatsAppTool(
       if (conversation) {
         await conversationRepo.touchLastMessage(userId, 'whatsapp', conversationId, new Date());
       }
+
+      logAudit({
+        user_id: userId,
+        source: 'messaging',
+        action: 'send',
+        entity_type: 'whatsapp_message',
+        entity_id: result.message_id ?? 'unknown',
+        summary: `Sent WhatsApp message to ${params.to}`,
+        metadata: { account_id: params.account_id, to: params.to },
+      });
 
       return {
         content: [{

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { DataGapRepository } from '../repositories/interfaces/data-gap.repository.js';
 import { DATA_GAP_STATUSES } from '../types/data-gap.js';
+import { logAudit } from '@ll5/shared';
 
 export function registerDataGapTools(
   server: McpServer,
@@ -57,6 +58,17 @@ export function registerDataGapTools(
         context: params.context,
         answer: params.answer,
       });
+
+      logAudit({
+        user_id: userId,
+        source: 'knowledge',
+        action: result.created ? 'create' : 'update',
+        entity_type: 'data_gap',
+        entity_id: result.dataGap.id,
+        summary: `${result.created ? 'Created' : 'Updated'} data gap: ${params.question.slice(0, 100)}`,
+        metadata: { status: params.status, priority: params.priority },
+      });
+
       return {
         content: [
           {

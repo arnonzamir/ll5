@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
+import { logAudit } from '@ll5/shared';
 
 const MEDIA_INDEX = 'll5_media';
 const MEDIA_LINKS_INDEX = 'll5_media_links';
@@ -43,6 +44,16 @@ export function registerMediaTools(
         index: MEDIA_INDEX,
         document: doc,
         refresh: 'wait_for',
+      });
+
+      logAudit({
+        user_id: userId,
+        source: 'awareness',
+        action: 'create',
+        entity_type: 'media',
+        entity_id: result._id,
+        summary: `Uploaded media: ${params.filename ?? params.url}`,
+        metadata: { mime_type: params.mime_type, source: params.source },
       });
 
       return {
@@ -157,6 +168,16 @@ export function registerMediaTools(
         refresh: 'wait_for',
       });
 
+      logAudit({
+        user_id: userId,
+        source: 'awareness',
+        action: 'create',
+        entity_type: 'media_link',
+        entity_id: linkId,
+        summary: `Linked media ${params.media_id} to ${params.entity_type}:${params.entity_id}`,
+        metadata: { media_id: params.media_id, entity_type: params.entity_type, entity_id: params.entity_id },
+      });
+
       return {
         content: [
           {
@@ -177,12 +198,23 @@ export function registerMediaTools(
       entity_id: z.string().describe('ID of the entity'),
     },
     async (params) => {
+      const userId = getUserId();
       const linkId = `${params.media_id}_${params.entity_type}_${params.entity_id}`;
 
       await esClient.delete({
         index: MEDIA_LINKS_INDEX,
         id: linkId,
         refresh: 'wait_for',
+      });
+
+      logAudit({
+        user_id: userId,
+        source: 'awareness',
+        action: 'delete',
+        entity_type: 'media_link',
+        entity_id: linkId,
+        summary: `Unlinked media ${params.media_id} from ${params.entity_type}:${params.entity_id}`,
+        metadata: { media_id: params.media_id, entity_type: params.entity_type, entity_id: params.entity_id },
       });
 
       return {

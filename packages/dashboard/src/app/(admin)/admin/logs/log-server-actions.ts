@@ -1,6 +1,7 @@
 "use server";
 
 import { env } from "@/lib/env";
+import { mcpCallJsonSafe } from "@/lib/api";
 
 export interface LogEntry {
   timestamp: string;
@@ -110,4 +111,63 @@ export async function fetchLogs(params: LogQuery): Promise<{
     console.error("[logs] fetchLogs failed:", err instanceof Error ? err.message : String(err));
     return { logs: [], total: 0 };
   }
+}
+
+/**
+ * Fetch entity details by type and ID for the audit log tooltip.
+ */
+export async function fetchEntityDetails(
+  entityType: string,
+  entityId: string,
+): Promise<Record<string, unknown> | null> {
+  // Map entity types to MCP tools
+  const lookups: Record<string, { server: "knowledge" | "gtd" | "ll5-calendar" | "awareness"; tool: string; args: Record<string, string> }> = {
+    fact: { server: "knowledge", tool: "list_facts", args: { query: entityId } },
+    person: { server: "knowledge", tool: "list_people", args: { query: entityId } },
+    place: { server: "knowledge", tool: "get_place", args: { id: entityId } },
+    action: { server: "gtd", tool: "list_actions", args: { query: entityId } },
+    project: { server: "gtd", tool: "list_projects", args: { query: entityId } },
+    event: { server: "ll5-calendar", tool: "list_events", args: {} },
+    tickler: { server: "ll5-calendar", tool: "list_ticklers", args: {} },
+  };
+
+  // Direct ES lookup as fallback
+  const esLookup: Record<string, string> = {
+    fact: "ll5_knowledge_facts",
+    person: "ll5_knowledge_people",
+    place: "ll5_knowledge_places",
+    action: "ll5_knowledge_facts", // actions are in PG, not ES — skip
+    journal: "ll5_agent_journal",
+    shopping_item: "ll5_knowledge_facts",
+  };
+
+  // Try direct ES lookup first (fastest)
+  const index = esLookup[entityType];
+  if (index && entityType !== "action") {
+    try {
+      const baseUrl = env.ELASTICSEARCH_URL;
+      const res = await fetch(`${baseUrl}/${index}/_doc/${entityId}`, {
+        headers: { "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        const data = await res.json() as { _source: Record<string, unknown> };
+        return data._source ?? null;
+      }
+    } catch {
+      // Fall through to MCP lookup
+    }
+  }
+
+  // Try MCP lookup
+  const lookup = lookups[entityType];
+  if (lookup) {
+    try {
+      const result = await mcpCallJsonSafe<Record<string, unknown>>(lookup.server, lookup.tool, lookup.args);
+      return result;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }

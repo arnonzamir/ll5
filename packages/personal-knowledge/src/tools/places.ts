@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { PlaceRepository } from '../repositories/interfaces/place.repository.js';
 import { PLACE_TYPES } from '../types/place.js';
 import { logger } from '../utils/logger.js';
+import { logAudit } from '@ll5/shared';
 
 /**
  * Forward geocode an address using Nominatim (free, no API key).
@@ -146,6 +147,17 @@ export function registerPlaceTools(
         tags: params.tags,
         notes: params.notes,
       });
+
+      logAudit({
+        user_id: userId,
+        source: 'knowledge',
+        action: result.created ? 'create' : 'update',
+        entity_type: 'place',
+        entity_id: result.place.id,
+        summary: `${result.created ? 'Created' : 'Updated'} place: ${params.name}`,
+        metadata: { type: params.type, address: params.address },
+      });
+
       return {
         content: [
           {
@@ -172,6 +184,16 @@ export function registerPlaceTools(
           isError: true,
         };
       }
+
+      logAudit({
+        user_id: userId,
+        source: 'knowledge',
+        action: 'delete',
+        entity_type: 'place',
+        entity_id: params.id,
+        summary: `Deleted place ${params.id}`,
+      });
+
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ deleted: true }) }],
       };

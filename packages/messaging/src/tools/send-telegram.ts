@@ -5,6 +5,7 @@ import type { AccountRepository } from '../repositories/interfaces/account.repos
 import type { ConversationRepository } from '../repositories/interfaces/conversation.repository.js';
 import { TelegramClient } from '../clients/telegram.client.js';
 import { getConversationPriority } from '../utils/permission-checker.js';
+import { logAudit } from '@ll5/shared';
 
 export function registerSendTelegramTool(
   server: McpServer,
@@ -75,6 +76,16 @@ export function registerSendTelegramTool(
       if (conversation) {
         await conversationRepo.touchLastMessage(userId, 'telegram', params.chat_id, new Date());
       }
+
+      logAudit({
+        user_id: userId,
+        source: 'messaging',
+        action: 'send',
+        entity_type: 'telegram_message',
+        entity_id: result.message_id?.toString() ?? 'unknown',
+        summary: `Sent Telegram message to chat ${params.chat_id}`,
+        metadata: { account_id: params.account_id, chat_id: params.chat_id },
+      });
 
       return {
         content: [{

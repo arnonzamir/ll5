@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { getAdapter, listAdapters } from '../clients/registry.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import { logger } from '../utils/logger.js';
+import { logAudit } from '@ll5/shared';
 
 export function registerSourceTools(
   server: McpServer,
@@ -43,6 +44,16 @@ export function registerSourceTools(
         );
 
         logger.info('[connect_health_source] Source connected', { userId, sourceId: params.source_id });
+
+        logAudit({
+          user_id: userId,
+          source: 'health',
+          action: 'create',
+          entity_type: 'health_source',
+          entity_id: params.source_id,
+          summary: `Connected health source: ${adapter.displayName}`,
+          metadata: { source_id: params.source_id },
+        });
 
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ success: true, source: params.source_id, message: `${adapter.displayName} connected successfully` }) }],
@@ -84,6 +95,16 @@ export function registerSourceTools(
         );
 
         logger.info('[disconnect_health_source] Source disconnected', { userId, sourceId: params.source_id });
+
+        logAudit({
+          user_id: userId,
+          source: 'health',
+          action: 'delete',
+          entity_type: 'health_source',
+          entity_id: params.source_id,
+          summary: `Disconnected health source: ${adapter.displayName}`,
+          metadata: { source_id: params.source_id },
+        });
 
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ success: true, source: params.source_id, message: `${adapter.displayName} disconnected` }) }],

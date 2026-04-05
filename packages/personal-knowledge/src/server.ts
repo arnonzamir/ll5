@@ -15,7 +15,7 @@ import { ElasticsearchPersonRepository } from './repositories/elasticsearch/pers
 import { ElasticsearchPlaceRepository } from './repositories/elasticsearch/place.repository.js';
 import { ElasticsearchDataGapRepository } from './repositories/elasticsearch/data-gap.repository.js';
 import { registerAllTools } from './tools/index.js';
-import { initAppLog, withToolLogging } from '@ll5/shared';
+import { initAppLog, initAudit, withToolLogging } from '@ll5/shared';
 
 // Per-request userId set by auth middleware
 let currentUserId = '';
@@ -50,6 +50,9 @@ export async function startServer(): Promise<void> {
   // Ensure indices exist
   await ensureIndices(esClient);
   logger.info('[startServer][init] Elasticsearch indices verified');
+
+  // Initialize audit logging
+  initAudit(env.elasticsearchUrl);
 
   // Create repositories
   const repos = {

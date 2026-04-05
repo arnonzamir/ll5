@@ -12,7 +12,7 @@ import { PostgresAccountRepository } from './repositories/postgres/account.repos
 import { PostgresConversationRepository } from './repositories/postgres/conversation.repository.js';
 import { PostgresContactRepository } from './repositories/postgres/contact.repository.js';
 import { registerAllTools } from './tools/index.js';
-import { initAppLog, withToolLogging } from '@ll5/shared';
+import { initAppLog, initAudit, withToolLogging } from '@ll5/shared';
 
 const { Pool } = pg;
 
@@ -32,6 +32,9 @@ export async function startServer(): Promise<void> {
     service: 'messaging',
     level: (env.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   });
+
+  // Initialize audit logging
+  initAudit(process.env.ELASTICSEARCH_URL ?? '');
 
   logger.info('[startServer][init] Starting Messaging MCP server', { port: env.port });
 

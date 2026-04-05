@@ -5,6 +5,7 @@ import type { ConversationRepository } from '../repositories/interfaces/conversa
 import type { ContactRepository } from '../repositories/interfaces/contact.repository.js';
 import { EvolutionClient } from '../clients/evolution.client.js';
 import { logger } from '../utils/logger.js';
+import { logAudit } from '@ll5/shared';
 
 /**
  * Extract a phone number from a WhatsApp JID.
@@ -122,6 +123,16 @@ export function registerSyncWhatsAppTool(
       const { total: totalConversations } = await conversationRepo.list(userId, {
         platform: 'whatsapp',
         account_id: params.account_id,
+      });
+
+      logAudit({
+        user_id: userId,
+        source: 'messaging',
+        action: 'sync',
+        entity_type: 'whatsapp_conversations',
+        entity_id: params.account_id,
+        summary: `Synced WhatsApp conversations: ${newCount} new, ${updatedCount} updated, ${contactCount} contacts`,
+        metadata: { account_id: params.account_id, new: newCount, updated: updatedCount, contacts: contactCount },
       });
 
       return {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
+import { logAudit } from '@ll5/shared';
 
 const INDEX = 'll5_agent_journal';
 const USER_MODEL_INDEX = 'll5_agent_user_model';
@@ -41,6 +42,16 @@ export function registerJournalTools(
         index: INDEX,
         document: doc,
         refresh: 'wait_for',
+      });
+
+      logAudit({
+        user_id: userId,
+        source: 'awareness',
+        action: 'create',
+        entity_type: 'journal',
+        entity_id: result._id,
+        summary: `Created journal entry: ${params.topic}`,
+        metadata: { type: params.type, signal: params.signal },
       });
 
       return {
@@ -152,6 +163,16 @@ export function registerJournalTools(
         });
         resolvedCount = result.updated ?? 0;
       }
+
+      logAudit({
+        user_id: userId,
+        source: 'awareness',
+        action: 'update',
+        entity_type: 'journal',
+        entity_id: params.entry_id ?? `topic:${params.topic}`,
+        summary: `Resolved ${resolvedCount} journal entry(s)`,
+        metadata: { entry_id: params.entry_id, topic: params.topic, resolved_count: resolvedCount },
+      });
 
       return {
         content: [
@@ -278,6 +299,16 @@ export function registerJournalTools(
           created_at: now,
         },
         refresh: 'wait_for',
+      });
+
+      logAudit({
+        user_id: userId,
+        source: 'awareness',
+        action: 'update',
+        entity_type: 'user_model',
+        entity_id: docId,
+        summary: `Updated user model section: ${params.section}`,
+        metadata: { section: params.section },
       });
 
       return {

@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { LocationRepository } from '../repositories/interfaces/location.repository.js';
 import { computeFreshness } from '../types/location.js';
 import type { LocationWithFreshness } from '../types/location.js';
+import { logAudit } from '@ll5/shared';
 
 export function registerLocationTools(
   server: McpServer,
@@ -110,6 +111,17 @@ export function registerLocationTools(
           isError: true,
         };
       }
+
+      logAudit({
+        user_id: userId,
+        source: 'awareness',
+        action: 'delete',
+        entity_type: 'location',
+        entity_id: params.id,
+        summary: `Deleted location point ${params.id}`,
+        metadata: { reason: params.reason },
+      });
+
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ deleted: true, id: params.id, reason: params.reason ?? null }) }],
       };

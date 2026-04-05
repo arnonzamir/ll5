@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { FactRepository } from '../repositories/interfaces/fact.repository.js';
 import { FACT_TYPES, PROVENANCE_VALUES } from '../types/fact.js';
+import { logAudit } from '@ll5/shared';
 
 export function registerFactTools(
   server: McpServer,
@@ -94,6 +95,17 @@ export function registerFactTools(
         validFrom: params.valid_from,
         validUntil: params.valid_until,
       });
+
+      logAudit({
+        user_id: userId,
+        source: 'knowledge',
+        action: result.created ? 'create' : 'update',
+        entity_type: 'fact',
+        entity_id: result.fact.id,
+        summary: `${result.created ? 'Created' : 'Updated'} fact: ${params.content.slice(0, 100)}`,
+        metadata: { type: params.type, category: params.category },
+      });
+
       return {
         content: [
           {
@@ -120,6 +132,16 @@ export function registerFactTools(
           isError: true,
         };
       }
+
+      logAudit({
+        user_id: userId,
+        source: 'knowledge',
+        action: 'delete',
+        entity_type: 'fact',
+        entity_id: params.id,
+        summary: `Deleted fact ${params.id}`,
+      });
+
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ deleted: true }) }],
       };

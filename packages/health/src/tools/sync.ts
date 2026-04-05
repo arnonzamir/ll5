@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { getAdapter, listAdapters } from '../clients/registry.js';
 import { decrypt } from '../utils/encryption.js';
 import { logger } from '../utils/logger.js';
+import { logAudit } from '@ll5/shared';
 import type { SleepData, HeartRateData, DailyStatsData, ActivityData, BodyCompositionData, StressData } from '../types/index.js';
 
 function yesterdayDate(): string {
@@ -315,6 +316,16 @@ export function registerSyncTools(
       const totalErrors = Object.values(results).reduce((sum, r) => sum + r.errors.length, 0);
 
       logger.info('[sync_health_data] Sync completed', { userId, from, to, totalSynced, totalErrors });
+
+      logAudit({
+        user_id: userId,
+        source: 'health',
+        action: 'sync',
+        entity_type: 'health_data',
+        entity_id: `${from}_${to}`,
+        summary: `Synced health data: ${totalSynced} items, ${totalErrors} errors (${from} to ${to})`,
+        metadata: { from, to, categories, totalSynced, totalErrors },
+      });
 
       return {
         content: [{ type: 'text' as const, text: JSON.stringify({ from, to, categories, results, totalSynced, totalErrors }) }],

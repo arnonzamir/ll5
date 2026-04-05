@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { ZodError } from 'zod';
-import { initAppLog, appLog } from '@ll5/shared';
+import { initAppLog, initAudit, appLog, logAudit } from '@ll5/shared';
 import { createAuthRouter } from './auth.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { processCalendar } from './processors/calendar.js';
@@ -1025,6 +1025,8 @@ export async function startServer(config: EnvConfig): Promise<void> {
     service: 'gateway',
     level: (config.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   });
+
+  initAudit({ elasticsearchUrl: config.elasticsearchUrl });
 
   const { app, esClient, pgPool } = createApp(config);
 

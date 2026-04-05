@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Pool } from 'pg';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { logAudit } from '@ll5/shared';
 
 const LEGACY_MAP: Record<string, string> = { input: 'batch' };
 
@@ -30,6 +31,16 @@ export function registerUpdatePermissionsTool(
          RETURNING id`,
         [userId, params.conversation_id, priority, params.platform],
       );
+
+      logAudit({
+        user_id: userId,
+        source: 'messaging',
+        action: 'update',
+        entity_type: 'conversation_permission',
+        entity_id: result.rows[0]?.id?.toString() ?? params.conversation_id,
+        summary: `Updated ${params.platform} conversation permission to ${priority}: ${params.conversation_id}`,
+        metadata: { platform: params.platform, conversation_id: params.conversation_id, priority },
+      });
 
       return {
         content: [{

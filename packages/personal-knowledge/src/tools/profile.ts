@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ProfileRepository } from '../repositories/interfaces/profile.repository.js';
+import { logAudit } from '@ll5/shared';
 
 export function registerProfileTools(
   server: McpServer,
@@ -46,6 +47,17 @@ export function registerProfileTools(
         birthDate: params.birth_date,
         languages: params.languages,
       });
+
+      logAudit({
+        user_id: userId,
+        source: 'knowledge',
+        action: 'update',
+        entity_type: 'profile',
+        entity_id: userId,
+        summary: `Updated profile`,
+        metadata: { fields: Object.keys(params).filter((k) => params[k as keyof typeof params] !== undefined) },
+      });
+
       return {
         content: [
           {

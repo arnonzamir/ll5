@@ -3,7 +3,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { Client as ElasticsearchClient } from '@elastic/elasticsearch';
 import express from 'express';
 import type { Request, Response } from 'express';
-import { initAppLog, withToolLogging } from '@ll5/shared';
+import { initAppLog, initAudit, withToolLogging } from '@ll5/shared';
 import { tokenAuthMiddleware } from './auth-middleware.js';
 import type { AuthenticatedRequest } from './auth-middleware.js';
 import { loadEnv } from './utils/env.js';
@@ -73,6 +73,9 @@ export async function startServer(): Promise<void> {
   // Ensure indices exist
   await ensureIndices(esClient);
   logger.info('[startServer][init] Elasticsearch indices verified');
+
+  // Initialize audit logging
+  initAudit(env.elasticsearchUrl);
 
   // Create repositories
   const repos = {
