@@ -105,6 +105,15 @@ export class ElasticsearchLocationRepository
     };
   }
 
+  async delete(userId: string, id: string): Promise<boolean> {
+    try {
+      const result = await this.client.delete({ index: INDEX, id });
+      return result.result === 'deleted';
+    } catch {
+      return false;
+    }
+  }
+
   private mapToLocation(id: string, doc: LocationDoc, userId: string): Location {
     return {
       id,

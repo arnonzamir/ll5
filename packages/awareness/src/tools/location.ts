@@ -91,4 +91,26 @@ export function registerLocationTools(
       };
     },
   );
+
+  server.tool(
+    'delete_location_point',
+    'Delete a GPS location point by ID. Use when you identify erroneous GPS data (impossible jumps, indoor drift, etc.).',
+    {
+      id: z.string().describe('The location document ID to delete'),
+      reason: z.string().optional().describe('Why this point is being deleted (logged for audit)'),
+    },
+    async (params) => {
+      const userId = getUserId();
+      const deleted = await locationRepo.delete(userId, params.id);
+      if (!deleted) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Location point not found or already deleted' }) }],
+          isError: true,
+        };
+      }
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ deleted: true, id: params.id, reason: params.reason ?? null }) }],
+      };
+    },
+  );
 }

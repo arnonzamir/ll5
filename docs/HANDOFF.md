@@ -12,7 +12,7 @@ Claude Code is the agent. 5 MCP servers are the data layer. Gateway handles webh
 Claude Code (ll5-run workspace)
   ├── personal-knowledge MCP (ES) — facts, people, places, profile, data gaps
   ├── gtd MCP (PG) — actions, projects, horizons, inbox, shopping, chat tools
-  ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation, journal, user model
+  ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation, journal, user model, geo search (POI/distance/geocode)
   ├── calendar MCP (PG+ES) — Unified timeline (Google+phone+tickler), Gmail, OAuth
   ├── health MCP (ES+PG) — sleep, heart rate, daily stats, activities, body comp, stress, trends
   └── messaging MCP (PG) — WhatsApp, Telegram [not deployed]

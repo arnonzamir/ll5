@@ -13,6 +13,7 @@ import { registerSituationTools } from './situation.js';
 import { registerNotificationRuleTools } from './notification-rules.js';
 import { registerJournalTools } from './journal.js';
 import { registerMediaTools } from './media.js';
+import { registerGeoSearchTools } from './geo-search.js';
 
 export interface Repositories {
   location: LocationRepository;
@@ -54,4 +55,5 @@ export function registerAllTools(
     registerJournalTools(server, esClient, getUserId);
     registerMediaTools(server, esClient, getUserId);
   }
+  registerGeoSearchTools(server, getUserId);
 }

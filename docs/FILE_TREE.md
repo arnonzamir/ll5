@@ -85,7 +85,7 @@ ll5/
 ├── packages/awareness/                # @ll5/awareness — ES-backed MCP
 │   └── src/
 │       ├── repositories/elasticsearch/  # 5 ES repositories (location, message, entity-status, calendar, notable)
-│       ├── tools/                       # 10 MCP tools (situation, location, messages, journal, user model, etc.)
+│       ├── tools/                       # 15 MCP tools (situation, location, messages, journal, user model, geo search, media, etc.)
 │       ├── setup/indices.ts
 │       └── server.ts
 │
