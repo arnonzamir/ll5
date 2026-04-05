@@ -1026,7 +1026,7 @@ export async function startServer(config: EnvConfig): Promise<void> {
     level: (config.logLevel ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
   });
 
-  initAudit({ elasticsearchUrl: config.elasticsearchUrl });
+  initAudit(config.elasticsearchUrl);
 
   const { app, esClient, pgPool } = createApp(config);
 
