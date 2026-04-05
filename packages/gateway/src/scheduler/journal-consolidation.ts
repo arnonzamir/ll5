@@ -72,7 +72,7 @@ export class JournalConsolidationScheduler {
       await insertSystemMessage(
         this.pool,
         this.config.userId,
-        '[Journal Consolidation] Time to consolidate. Review today\'s journal entries and session data. Update user model sections as needed. Run /consolidate.',
+        '[Journal Consolidation] Time to consolidate. Review today\'s journal entries and session data. Update user model sections as needed. Run /consolidate.\n\nAfter consolidation: 1) call read_user_model() to reload the updated model, 2) push_to_user a brief summary of what changed (level: silent).',
         undefined,
         evt,
       );

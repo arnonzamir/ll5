@@ -4,6 +4,7 @@ import type { Client } from '@elastic/elasticsearch';
 
 const INDEX = 'll5_agent_journal';
 const USER_MODEL_INDEX = 'll5_agent_user_model';
+const USER_MODEL_HISTORY_INDEX = 'll5_agent_user_model_history';
 
 export function registerJournalTools(
   server: McpServer,
@@ -247,10 +248,28 @@ export function registerJournalTools(
     async (params) => {
       const userId = getUserId();
       const now = new Date().toISOString();
+      const docId = `${userId}_${params.section}`;
+
+      // Snapshot current version to history before overwriting
+      try {
+        const existing = await esClient.get({ index: USER_MODEL_INDEX, id: docId });
+        if (existing._source) {
+          await esClient.index({
+            index: USER_MODEL_HISTORY_INDEX,
+            document: {
+              ...(existing._source as Record<string, unknown>),
+              archived_at: now,
+              original_id: docId,
+            },
+          });
+        }
+      } catch {
+        // No existing version — first write, no snapshot needed
+      }
 
       await esClient.index({
         index: USER_MODEL_INDEX,
-        id: `${userId}_${params.section}`,
+        id: docId,
         document: {
           user_id: userId,
           section: params.section,
@@ -269,6 +288,72 @@ export function registerJournalTools(
           },
         ],
       };
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // list_user_model_versions
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'list_user_model_versions',
+    'List historical versions of a user model section. Shows when each version was archived.',
+    {
+      section: z.string().describe('Section name to list versions for'),
+      limit: z.number().optional().describe('Max results. Default: 10'),
+    },
+    async (params) => {
+      const userId = getUserId();
+
+      const result = await esClient.search({
+        index: USER_MODEL_HISTORY_INDEX,
+        query: {
+          bool: {
+            filter: [
+              { term: { user_id: userId } },
+              { term: { section: params.section } },
+            ],
+          },
+        },
+        size: params.limit ?? 10,
+        sort: [{ archived_at: 'desc' }],
+        _source: ['section', 'last_updated', 'archived_at'],
+      });
+
+      const versions = result.hits.hits.map((hit) => ({
+        id: hit._id,
+        ...(hit._source as Record<string, unknown>),
+      }));
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ versions, count: versions.length }) }],
+      };
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // get_user_model_version
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'get_user_model_version',
+    'Get a specific historical version of a user model section by its history ID.',
+    {
+      version_id: z.string().describe('The history document ID from list_user_model_versions'),
+    },
+    async (params) => {
+      const userId = getUserId();
+
+      try {
+        const doc = await esClient.get({ index: USER_MODEL_HISTORY_INDEX, id: params.version_id });
+        const source = doc._source as Record<string, unknown>;
+        if (source.user_id !== userId) {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Not found' }) }], isError: true };
+        }
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ section: source.section, content: source.content, last_updated: source.last_updated, archived_at: source.archived_at }) }],
+        };
+      } catch {
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Version not found' }) }], isError: true };
+      }
     },
   );
 }

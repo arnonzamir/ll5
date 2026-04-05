@@ -236,6 +236,18 @@ export async function processLocation(
   geocodingApiKey?: string,
   pgPool?: Pool,
 ): Promise<void> {
+  // Filter out low-accuracy GPS points (e.g. indoor drift, cell tower fallback)
+  const MIN_ACCURACY_METERS = 100;
+  if (item.accuracy != null && item.accuracy > MIN_ACCURACY_METERS) {
+    logger.debug('[processLocation][handle] Skipping low-accuracy GPS point', {
+      accuracy: item.accuracy,
+      threshold: MIN_ACCURACY_METERS,
+      lat: item.lat,
+      lon: item.lon,
+    });
+    return;
+  }
+
   // Run geocoding and place matching concurrently (both non-blocking)
   const [geocodeResult, placeMatch] = await Promise.all([
     reverseGeocode(item.lat, item.lon, geocodingApiKey),
