@@ -10,6 +10,8 @@ export interface MediaItem {
   filename: string;
   description?: string;
   source: string;
+  media_type?: string;
+  duration_seconds?: number;
   tags?: string[];
   size_bytes?: number;
   created_at: string;
@@ -35,6 +37,7 @@ async function gatewayFetch(path: string): Promise<Response> {
 export async function fetchMedia(params?: {
   query?: string;
   source?: string;
+  media_type?: string;
   limit?: number;
   offset?: number;
 }): Promise<{ media: MediaItem[]; total: number }> {
@@ -42,6 +45,7 @@ export async function fetchMedia(params?: {
     const searchParams = new URLSearchParams();
     if (params?.query) searchParams.set("query", params.query);
     if (params?.source) searchParams.set("source", params.source);
+    if (params?.media_type) searchParams.set("media_type", params.media_type);
     if (params?.limit) searchParams.set("limit", String(params.limit));
     if (params?.offset) searchParams.set("offset", String(params.offset));
 

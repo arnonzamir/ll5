@@ -570,13 +570,14 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   app.get('/media', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     try {
-      const { query, source, mime_type, since, limit: limitStr, offset: offsetStr } = req.query as Record<string, string | undefined>;
+      const { query, source, mime_type, media_type, since, limit: limitStr, offset: offsetStr } = req.query as Record<string, string | undefined>;
       const limit = Math.min(parseInt(limitStr || '30', 10), 200);
       const offset = parseInt(offsetStr || '0', 10);
 
       const filters: Record<string, unknown>[] = [{ term: { user_id: userId } }];
       if (source) filters.push({ term: { source } });
       if (mime_type) filters.push({ prefix: { mime_type } });
+      if (media_type) filters.push({ term: { media_type } });
       if (since) filters.push({ range: { created_at: { gte: since } } });
 
       const must: Record<string, unknown>[] = [];

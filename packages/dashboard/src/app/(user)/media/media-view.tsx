@@ -167,6 +167,7 @@ export function MediaView() {
   const [page, setPage] = useState(0);
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("all");
+  const [mediaType, setMediaType] = useState("all");
   const [viewMode, setViewMode] = useState<"gallery" | "list">("gallery");
   const [isPending, startTransition] = useTransition();
 
@@ -176,11 +177,12 @@ export function MediaView() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const load = useCallback(
-    (p: number, q: string, src: string) => {
+    (p: number, q: string, src: string, mtype: string) => {
       startTransition(async () => {
         const data = await fetchMedia({
           query: q || undefined,
           source: src === "all" ? undefined : src,
+          media_type: mtype === "all" ? undefined : mtype,
           limit: PAGE_SIZE,
           offset: p * PAGE_SIZE,
         });
@@ -192,23 +194,29 @@ export function MediaView() {
   );
 
   useEffect(() => {
-    load(0, "", "all");
+    load(0, "", "all", "all");
   }, [load]);
 
   function handleSearch() {
     setPage(0);
-    load(0, query, source);
+    load(0, query, source, mediaType);
   }
 
   function handleSourceChange(val: string) {
     setSource(val);
     setPage(0);
-    load(0, query, val);
+    load(0, query, val, mediaType);
+  }
+
+  function handleMediaTypeChange(val: string) {
+    setMediaType(val);
+    setPage(0);
+    load(0, query, source, val);
   }
 
   function handlePageChange(newPage: number) {
     setPage(newPage);
-    load(newPage, query, source);
+    load(newPage, query, source, mediaType);
   }
 
   function openDetail(item: MediaItem) {
@@ -249,7 +257,7 @@ export function MediaView() {
             <List className="h-4 w-4" />
           </Button>
           <Button
-            onClick={() => load(page, query, source)}
+            onClick={() => load(page, query, source, mediaType)}
             disabled={isPending}
             variant="outline"
             size="sm"
@@ -294,6 +302,19 @@ export function MediaView() {
                 {opt.label}
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+        <Select value={mediaType} onValueChange={handleMediaTypeChange}>
+          <SelectTrigger className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All types</SelectItem>
+            <SelectItem value="image">Images</SelectItem>
+            <SelectItem value="voice_note">Voice Notes</SelectItem>
+            <SelectItem value="audio">Audio</SelectItem>
+            <SelectItem value="video">Video</SelectItem>
+            <SelectItem value="document">Documents</SelectItem>
           </SelectContent>
         </Select>
       </div>

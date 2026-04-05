@@ -295,4 +295,52 @@ export function registerMediaTools(
       };
     },
   );
+
+  // ---------------------------------------------------------------------------
+  // delete_media
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'delete_media',
+    'Delete a media record and all its entity links. Does not delete the physical file.',
+    {
+      media_id: z.string().describe('The media document ID to delete'),
+    },
+    async (params) => {
+      const userId = getUserId();
+
+      // Verify ownership
+      try {
+        const doc = await esClient.get({ index: MEDIA_INDEX, id: params.media_id });
+        const source = doc._source as Record<string, unknown>;
+        if (source.user_id !== userId) {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Not found' }) }], isError: true };
+        }
+      } catch {
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Media not found' }) }], isError: true };
+      }
+
+      // Delete all links
+      await esClient.deleteByQuery({
+        index: MEDIA_LINKS_INDEX,
+        query: { term: { media_id: params.media_id } },
+        refresh: true,
+      });
+
+      // Delete the media record
+      await esClient.delete({ index: MEDIA_INDEX, id: params.media_id });
+
+      logAudit({
+        user_id: userId,
+        source: 'awareness',
+        action: 'delete',
+        entity_type: 'media',
+        entity_id: params.media_id,
+        summary: `Deleted media: ${params.media_id}`,
+      });
+
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ deleted: true, id: params.media_id }) }],
+      };
+    },
+  );
 }
