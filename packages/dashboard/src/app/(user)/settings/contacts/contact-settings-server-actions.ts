@@ -2,7 +2,7 @@
 
 import { env } from "@/lib/env";
 import { getToken } from "@/lib/auth";
-import { mcpCallJsonSafe } from "@/lib/api";
+import { mcpCallJsonSafe, mcpCallList } from "@/lib/api";
 
 export interface ContactSetting {
   id: string;
@@ -98,16 +98,14 @@ export async function deleteContactSetting(id: string): Promise<boolean> {
 
 export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]> {
   // Get people from knowledge MCP
-  const peopleRaw = await mcpCallJsonSafe<{ people: Array<{ id: string; name: string; relationship?: string; contactInfo?: Record<string, unknown> }> }>(
+  const people = await mcpCallList<{ id: string; name: string; relationship?: string }>(
     "knowledge", "list_people", { limit: 500 },
   );
-  const people = peopleRaw?.people ?? [];
 
   // Get contacts from messaging MCP
-  const contactsRaw = await mcpCallJsonSafe<{ contacts: Array<{ platform_id: string; platform: string; display_name: string; person_id?: string }> }>(
+  const contacts = await mcpCallList<{ platform_id: string; platform: string; display_name: string; person_id?: string }>(
     "ll5-messaging", "list_contacts", { limit: 1000 },
   );
-  const contacts = contactsRaw?.contacts ?? [];
 
   // Get current contact settings
   const { settings } = await fetchContactSettings({ target_type: "person" });
@@ -128,10 +126,9 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
 
 export async function fetchGroupsWithSettings(): Promise<GroupWithSettings[]> {
   // Get conversations from messaging MCP
-  const convsRaw = await mcpCallJsonSafe<{ conversations: Array<{ conversation_id: string; name: string | null; platform: string; is_group: boolean; is_archived: boolean }> }>(
+  const conversations = await mcpCallList<{ conversation_id: string; name: string | null; platform: string; is_group: boolean; is_archived: boolean }>(
     "ll5-messaging", "list_conversations", { is_group: true, limit: 500 },
   );
-  const conversations = convsRaw?.conversations ?? [];
 
   // Get current contact settings for groups
   const { settings } = await fetchContactSettings({ target_type: "group" });
