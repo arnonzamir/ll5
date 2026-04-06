@@ -3,6 +3,7 @@
 import { env } from "@/lib/env";
 import { getToken } from "@/lib/auth";
 import { mcpCallJsonSafe } from "@/lib/api";
+import { callMcpTool, extractJson } from "@/lib/mcp-client";
 
 export interface ContactSetting {
   id: string;
@@ -103,12 +104,13 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
   let people: Array<{ id: string; name: string; relationship?: string }> = [];
   let contacts: Array<{ platform_id: string; platform: string; display_name: string; person_id?: string }> = [];
 
-  // Get people from knowledge MCP — use mcpCallJsonSafe to avoid redirect throws
+  // Get people from knowledge MCP — call directly to avoid internal URL issues
   try {
-    const raw = await mcpCallJsonSafe<Record<string, unknown>>("knowledge", "list_people", { limit: 500 });
-    if (raw && typeof raw === "object") {
-      // Find the array in the response
-      for (const val of Object.values(raw)) {
+    const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
+    const result = await callMcpTool(knowledgeUrl, "list_people", { limit: 500 }, token);
+    const parsed = extractJson<Record<string, unknown>>(result);
+    if (parsed && typeof parsed === "object") {
+      for (const val of Object.values(parsed)) {
         if (Array.isArray(val)) {
           people = val as typeof people;
           break;
