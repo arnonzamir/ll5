@@ -40,26 +40,47 @@ const PERMISSION_COLORS: Record<string, string> = {
 
 type TabId = "people" | "contacts" | "groups";
 
+const CACHE_KEY = "ll5_contacts_cache";
+const CACHE_TTL = 5 * 60 * 1000; // 5 min — background refresh if stale
+
+interface CachedData {
+  people: PersonWithPlatforms[];
+  contacts: ContactEntry[];
+  groups: GroupWithSettings[];
+  ts: number;
+}
+
+function saveCache(data: Omit<CachedData, "ts">) {
+  try {
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ...data, ts: Date.now() }));
+  } catch { /* quota exceeded — ignore */ }
+}
+
+function loadCache(): CachedData | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as CachedData;
+  } catch { return null; }
+}
+
 function ToggleGroup({
   options,
   value,
   onChange,
   colors,
-  disabled,
 }: {
   options: readonly string[];
   value: string;
   onChange: (v: string) => void;
   colors: Record<string, string>;
-  disabled?: boolean;
 }) {
   return (
     <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
       {options.map((opt) => (
         <button
           key={opt}
-          onClick={() => { if (!disabled) onChange(opt); }}
-          disabled={disabled}
+          onClick={() => onChange(opt)}
           className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
             value === opt ? `bg-gray-100 ${colors[opt]}` : "text-gray-400 hover:text-gray-600"
           }`}
@@ -71,11 +92,10 @@ function ToggleGroup({
   );
 }
 
-function MediaButton({ active, disabled, onClick }: { active: boolean; disabled?: boolean; onClick: () => void }) {
+function MediaButton({ active, onClick }: { active: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      disabled={disabled}
       title={active ? "Media: downloading" : "Media: not downloading"}
       className={`p-1 rounded transition-colors cursor-pointer shrink-0 ${
         active ? "text-blue-500 bg-blue-50" : "text-gray-300 hover:text-gray-500"
@@ -361,12 +381,10 @@ function PersonRow({
   person,
   onUpdate,
   onUnlink,
-  isPending,
 }: {
   person: PersonWithPlatforms;
   onUpdate: (targetId: string, field: string, value: unknown) => void;
   onUnlink: (contactId: string) => void;
-  isPending: boolean;
 }) {
   const routing = person.settings?.routing ?? "batch";
   const permission = person.settings?.permission ?? "input";
@@ -389,7 +407,6 @@ function PersonRow({
                 {p.platform}: {p.display_name || p.platform_id.split("@")[0]}
                 <button
                   onClick={() => onUnlink(p.contactId)}
-                  disabled={isPending}
                   title="Unlink this contact"
                   className="p-0.5 rounded hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
                 >
@@ -401,14 +418,13 @@ function PersonRow({
         )}
       </div>
 
-      <MediaButton active={downloadMedia} disabled={isPending} onClick={() => onUpdate(person.id, "download_media", !downloadMedia)} />
+      <MediaButton active={downloadMedia} onClick={() => onUpdate(person.id, "download_media", !downloadMedia)} />
 
       <ToggleGroup
         options={PERMISSION_OPTIONS}
         value={permission}
         onChange={(v) => onUpdate(person.id, "permission", v)}
         colors={PERMISSION_COLORS}
-        disabled={isPending}
       />
 
       <ToggleGroup
@@ -416,7 +432,6 @@ function PersonRow({
         value={routing}
         onChange={(v) => onUpdate(person.id, "routing", v)}
         colors={ROUTING_COLORS}
-        disabled={isPending}
       />
     </div>
   );
@@ -427,13 +442,11 @@ function ContactRow({
   onUpdate,
   onPromote,
   onLinked,
-  isPending,
 }: {
   contact: ContactEntry;
   onUpdate: (contactId: string, field: string, value: unknown) => void;
   onPromote: (contactId: string) => void;
   onLinked: () => void;
-  isPending: boolean;
 }) {
   const routing = contact.settings?.routing ?? "batch";
   const permission = contact.settings?.permission ?? "input";
@@ -459,21 +472,19 @@ function ContactRow({
 
       <button
         onClick={() => onPromote(contact.contactId)}
-        disabled={isPending}
         title="Promote to full person"
         className="p-1 rounded text-gray-300 hover:text-green-600 hover:bg-green-50 transition-colors cursor-pointer shrink-0"
       >
         <ArrowUp className="h-3.5 w-3.5" />
       </button>
 
-      <MediaButton active={downloadMedia} disabled={isPending} onClick={() => onUpdate(contact.contactId, "download_media", !downloadMedia)} />
+      <MediaButton active={downloadMedia} onClick={() => onUpdate(contact.contactId, "download_media", !downloadMedia)} />
 
       <ToggleGroup
         options={PERMISSION_OPTIONS}
         value={permission}
         onChange={(v) => onUpdate(contact.contactId, "permission", v)}
         colors={PERMISSION_COLORS}
-        disabled={isPending}
       />
 
       <ToggleGroup
@@ -481,7 +492,6 @@ function ContactRow({
         value={routing}
         onChange={(v) => onUpdate(contact.contactId, "routing", v)}
         colors={ROUTING_COLORS}
-        disabled={isPending}
       />
     </div>
   );
@@ -490,11 +500,9 @@ function ContactRow({
 function GroupRow({
   group,
   onUpdate,
-  isPending,
 }: {
   group: GroupWithSettings;
   onUpdate: (targetId: string, field: string, value: unknown) => void;
-  isPending: boolean;
 }) {
   const routing = group.settings?.routing ?? "batch";
   const permission = group.settings?.permission ?? "input";
@@ -512,14 +520,13 @@ function GroupRow({
         </div>
       </div>
 
-      <MediaButton active={downloadMedia} disabled={isPending} onClick={() => onUpdate(group.conversation_id, "download_media", !downloadMedia)} />
+      <MediaButton active={downloadMedia} onClick={() => onUpdate(group.conversation_id, "download_media", !downloadMedia)} />
 
       <ToggleGroup
         options={PERMISSION_OPTIONS}
         value={permission}
         onChange={(v) => onUpdate(group.conversation_id, "permission", v)}
         colors={PERMISSION_COLORS}
-        disabled={isPending}
       />
 
       <ToggleGroup
@@ -527,7 +534,6 @@ function GroupRow({
         value={routing}
         onChange={(v) => onUpdate(group.conversation_id, "routing", v)}
         colors={ROUTING_COLORS}
-        disabled={isPending}
       />
     </div>
   );
@@ -539,85 +545,116 @@ export function ContactSettingsView() {
   const [contacts, setContacts] = useState<ContactEntry[]>([]);
   const [groups, setGroups] = useState<GroupWithSettings[]>([]);
   const [search, setSearch] = useState("");
-  const [isPending, startTransition] = useTransition();
+  const [loading, setLoading] = useState(true);
+  // Track if we've ever loaded from server (vs just cache)
+  const serverLoaded = useRef(false);
 
-  const load = useCallback(() => {
-    startTransition(async () => {
-      const [p, c, g] = await Promise.all([
-        fetchPeopleWithPlatforms(),
-        fetchContactsForTab(),
-        fetchGroupsWithSettings(),
-      ]);
-      setPeople(p);
-      setContacts(c);
-      setGroups(g);
-    });
+  // Persist to sessionStorage whenever data changes
+  useEffect(() => {
+    if (people.length > 0 || contacts.length > 0 || groups.length > 0) {
+      saveCache({ people, contacts, groups });
+    }
+  }, [people, contacts, groups]);
+
+  const refreshFromServer = useCallback(async () => {
+    const [p, c, g] = await Promise.all([
+      fetchPeopleWithPlatforms(),
+      fetchContactsForTab(),
+      fetchGroupsWithSettings(),
+    ]);
+    setPeople(p);
+    setContacts(c);
+    setGroups(g);
+    serverLoaded.current = true;
+    setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // On mount: load from cache instantly, then background refresh
+  useEffect(() => {
+    const cached = loadCache();
+    if (cached && cached.people.length + cached.contacts.length + cached.groups.length > 0) {
+      setPeople(cached.people);
+      setContacts(cached.contacts);
+      setGroups(cached.groups);
+      setLoading(false);
+      // Background refresh if stale
+      if (Date.now() - cached.ts > CACHE_TTL) {
+        refreshFromServer();
+      } else {
+        serverLoaded.current = true;
+      }
+    } else {
+      refreshFromServer();
+    }
+  }, [refreshFromServer]);
+
+  // Fire-and-forget: update server without blocking UI
+  function fireAndForget(fn: () => Promise<unknown>) {
+    fn().catch((err) => console.error("[contacts] background save failed:", err));
+  }
 
   function handlePersonUpdate(personId: string, field: string, value: unknown) {
+    // Instant optimistic update
     setPeople((prev) => prev.map((p) => {
       if (p.id !== personId) return p;
       const current = p.settings ?? { id: "", target_type: "person" as const, target_id: personId, routing: "batch", permission: "input", download_media: false, display_name: p.name, platform: null, created_at: "", updated_at: "" };
       return { ...p, settings: { ...current, [field]: value } };
     }));
 
-    startTransition(async () => {
-      const person = people.find((p) => p.id === personId);
-      await upsertContactSetting({
-        target_type: "person",
-        target_id: personId,
-        [field]: value,
-        display_name: person?.name,
-      });
-    });
+    // Fire and forget server update
+    const person = people.find((p) => p.id === personId);
+    fireAndForget(() => upsertContactSetting({
+      target_type: "person",
+      target_id: personId,
+      [field]: value,
+      display_name: person?.name,
+    }));
   }
 
   function handleContactUpdate(contactId: string, field: string, value: unknown) {
-    // Optimistic update
+    // Instant optimistic update
     setContacts((prev) => prev.map((c) => {
       if (c.contactId !== contactId) return c;
       const current = c.settings ?? { id: "", target_type: "person" as const, target_id: c.personId ?? "", routing: "batch", permission: "input", download_media: false, display_name: c.displayName, platform: c.platform, created_at: "", updated_at: "" };
       return { ...c, settings: { ...current, [field]: value } };
     }));
 
-    startTransition(async () => {
-      const contact = contacts.find((c) => c.contactId === contactId);
-      if (!contact) return;
+    const contact = contacts.find((c) => c.contactId === contactId);
+    if (!contact) return;
 
-      if (contact.personId) {
-        // Already has a stub person — just update the setting
-        await upsertContactSetting({
-          target_type: "person",
-          target_id: contact.personId,
-          [field]: value,
-          display_name: contact.displayName ?? undefined,
-          platform: contact.platform,
-        });
-      } else {
-        // No person yet — create stub, link, and save setting
-        const name = contact.displayName || contact.phoneNumber || contact.platformId.split("@")[0];
-        const newPersonId = await createStubAndSaveSetting(
-          contactId,
-          name,
-          contact.platform,
-          field,
-          value,
-        );
+    if (contact.personId) {
+      fireAndForget(() => upsertContactSetting({
+        target_type: "person",
+        target_id: contact.personId!,
+        [field]: value,
+        display_name: contact.displayName ?? undefined,
+        platform: contact.platform,
+      }));
+    } else {
+      // No person yet — create stub (this one we need to await for the personId)
+      const name = contact.displayName || contact.phoneNumber || contact.platformId.split("@")[0];
+      fireAndForget(async () => {
+        const newPersonId = await createStubAndSaveSetting(contactId, name, contact.platform, field, value);
         if (newPersonId) {
           setContacts((prev) => prev.map((c) =>
             c.contactId === contactId ? { ...c, personId: newPersonId } : c
           ));
         }
-      }
-    });
+      });
+    }
   }
 
   function handleUnlink(contactId: string) {
-    startTransition(async () => {
-      const ok = await unlinkContactFromPerson(contactId);
-      if (ok) load();
+    // Optimistic: remove the platform from the person
+    setPeople((prev) => prev.map((p) => ({
+      ...p,
+      platforms: p.platforms.filter((pl) => pl.contactId !== contactId),
+    })).filter((p) => p.platforms.length > 0));
+
+    fireAndForget(async () => {
+      await unlinkContactFromPerson(contactId);
+      // Background refresh to get the contact back in Contacts tab
+      refreshFromServer();
     });
   }
 
@@ -625,19 +662,20 @@ export function ContactSettingsView() {
     const contact = contacts.find((c) => c.contactId === contactId);
     if (!contact) return;
 
-    startTransition(async () => {
-      let personId = contact.personId;
+    // Optimistic: remove from contacts list immediately
+    setContacts((prev) => prev.filter((c) => c.contactId !== contactId));
 
-      // If no stub yet, create one first
+    fireAndForget(async () => {
+      let personId = contact.personId;
       if (!personId) {
         const name = contact.displayName || contact.phoneNumber || contact.platformId.split("@")[0];
         personId = await createStubAndSaveSetting(contactId, name, contact.platform, "routing", "batch");
       }
-
       if (personId) {
         const name = contact.displayName || contact.phoneNumber || contact.platformId.split("@")[0];
         await promoteContact(personId, name);
-        load(); // Refresh to move contact to People tab
+        // Background refresh to get the person in People tab
+        refreshFromServer();
       }
     });
   }
@@ -649,16 +687,19 @@ export function ContactSettingsView() {
       return { ...g, settings: { ...current, [field]: value } };
     }));
 
-    startTransition(async () => {
-      const group = groups.find((g) => g.conversation_id === conversationId);
-      await upsertContactSetting({
-        target_type: "group",
-        target_id: conversationId,
-        [field]: value,
-        display_name: group?.name ?? undefined,
-        platform: group?.platform,
-      });
-    });
+    const group = groups.find((g) => g.conversation_id === conversationId);
+    fireAndForget(() => upsertContactSetting({
+      target_type: "group",
+      target_id: conversationId,
+      [field]: value,
+      display_name: group?.name ?? undefined,
+      platform: group?.platform,
+    }));
+  }
+
+  function handleLinked() {
+    // After linking, refresh to move contact to People tab
+    refreshFromServer();
   }
 
   const searchLower = search.toLowerCase();
@@ -690,8 +731,8 @@ export function ContactSettingsView() {
           <h1 className="text-2xl font-bold">Contacts & Routing</h1>
           <p className="text-sm text-gray-500 mt-1">Control how messages are routed, who the agent can reply to, and media download</p>
         </div>
-        <Button variant="ghost" size="icon" onClick={load} disabled={isPending}>
-          <RefreshCw className={`h-4 w-4 ${isPending ? "animate-spin" : ""}`} />
+        <Button variant="ghost" size="icon" onClick={() => { setLoading(true); refreshFromServer(); }} disabled={loading}>
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
       </div>
 
@@ -733,7 +774,7 @@ export function ContactSettingsView() {
           />
         </div>
         {activeTab === "contacts" && (
-          <AutoMatchPanel onDone={load} />
+          <AutoMatchPanel onDone={refreshFromServer} />
         )}
       </div>
 
@@ -752,12 +793,12 @@ export function ContactSettingsView() {
         {activeTab === "people" && (
           filteredPeople.length === 0 ? (
             <p className="p-6 text-sm text-gray-400 text-center">
-              {isPending ? "Loading..." : people.length === 0 ? "No people with linked contacts" : "No matches"}
+              {loading ? "Loading..." : people.length === 0 ? "No people with linked contacts" : "No matches"}
             </p>
           ) : (
             <div className="divide-y divide-gray-50">
               {filteredPeople.map((p) => (
-                <PersonRow key={p.id} person={p} onUpdate={handlePersonUpdate} onUnlink={handleUnlink} isPending={isPending} />
+                <PersonRow key={p.id} person={p} onUpdate={handlePersonUpdate} onUnlink={handleUnlink} />
               ))}
             </div>
           )
@@ -766,12 +807,12 @@ export function ContactSettingsView() {
         {activeTab === "contacts" && (
           filteredContacts.length === 0 ? (
             <p className="p-6 text-sm text-gray-400 text-center">
-              {isPending ? "Loading..." : contacts.length === 0 ? "No unlinked contacts" : "No matches"}
+              {loading ? "Loading..." : contacts.length === 0 ? "No unlinked contacts" : "No matches"}
             </p>
           ) : (
             <div className="divide-y divide-gray-50">
               {filteredContacts.map((c) => (
-                <ContactRow key={c.contactId} contact={c} onUpdate={handleContactUpdate} onPromote={handlePromote} onLinked={load} isPending={isPending} />
+                <ContactRow key={c.contactId} contact={c} onUpdate={handleContactUpdate} onPromote={handlePromote} onLinked={handleLinked} />
               ))}
             </div>
           )
@@ -780,12 +821,12 @@ export function ContactSettingsView() {
         {activeTab === "groups" && (
           filteredGroups.length === 0 ? (
             <p className="p-6 text-sm text-gray-400 text-center">
-              {isPending ? "Loading..." : groups.length === 0 ? "No groups found" : "No matches"}
+              {loading ? "Loading..." : groups.length === 0 ? "No groups found" : "No matches"}
             </p>
           ) : (
             <div className="divide-y divide-gray-50">
               {filteredGroups.map((g) => (
-                <GroupRow key={g.conversation_id} group={g} onUpdate={handleGroupUpdate} isPending={isPending} />
+                <GroupRow key={g.conversation_id} group={g} onUpdate={handleGroupUpdate} />
               ))}
             </div>
           )
