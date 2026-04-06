@@ -188,11 +188,14 @@ export function ContactSettingsView() {
   const [isPending, startTransition] = useTransition();
 
   const load = useCallback(() => {
+    console.log("[ContactSettingsView] load() called");
     startTransition(async () => {
+      console.log("[ContactSettingsView] fetching people + groups...");
       const [p, g] = await Promise.all([
         fetchPeopleWithPlatforms(),
         fetchGroupsWithSettings(),
       ]);
+      console.log("[ContactSettingsView] got people:", p.length, "groups:", g.length);
       setPeople(p);
       setGroups(g);
     });
