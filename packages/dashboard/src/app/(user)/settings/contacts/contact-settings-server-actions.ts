@@ -109,7 +109,7 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
     console.log("[contacts] Fetching people with token:", token.slice(0, 10) + "...");
     const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
     const result = await callMcpTool(knowledgeUrl, "list_people", { limit: 500 }, token);
-    console.log("[contacts] callMcpTool returned, content length:", result?.content?.length);
+    console.log("[contacts] callMcpTool returned, content:", JSON.stringify(result?.content?.[0]).slice(0, 300));
     const parsed = extractJson<Record<string, unknown>>(result);
     console.log("[contacts] extractJson keys:", parsed ? Object.keys(parsed) : "null");
     if (parsed && typeof parsed === "object") {
