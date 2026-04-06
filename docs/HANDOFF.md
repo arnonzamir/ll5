@@ -142,7 +142,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 
 - GitHub Actions: `.github/workflows/build-and-push.yml`
 - Builds changed packages on push to main, pushes to GHCR
-- Auto-deploy: `appleboy/ssh-action@v1` SSHs to server, runs `docker compose pull && up -d --remove-orphans`
+- Auto-deploy: `appleboy/ssh-action@v1` SSHs to server, `docker login ghcr.io` using `GITHUB_TOKEN`, then `docker compose pull && up -d --remove-orphans`
 - Health check: curls mcp-knowledge.noninoni.click/health (4 retries, non-blocking)
 - Deploy only runs on main branch (skipped for workflow_dispatch)
 - Secrets configured: `DEPLOY_SSH_KEY`, `COOLIFY_SERVICE_UUID` (GitHub secrets) + `SERVER_HOST` (GitHub variable)
