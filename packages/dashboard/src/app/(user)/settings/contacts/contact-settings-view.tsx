@@ -292,10 +292,17 @@ function AutoMatchPanel({
                   {currentIndex + 1} of {suggestions.length}
                 </div>
 
-                <div className="flex items-center gap-2 mb-3 p-3 bg-gray-50 rounded-lg">
-                  <UserPlus className="h-4 w-4 text-gray-400 shrink-0" />
-                  <span className="text-sm font-medium">{current.contactName}</span>
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">{current.platform}</Badge>
+                <div className="p-3 bg-gray-50 rounded-lg mb-3">
+                  <div className="flex items-center gap-2">
+                    <UserPlus className="h-4 w-4 text-gray-400 shrink-0" />
+                    <span className="text-sm font-medium">{current.contactName}</span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{current.platform}</Badge>
+                  </div>
+                  {current.contactPlatformId && (
+                    <div className="text-[11px] text-gray-400 mt-1 pl-6">
+                      {current.contactPlatformId.split("@")[0]}
+                    </div>
+                  )}
                 </div>
 
                 <div className="text-xs text-gray-500 mb-2">Match with:</div>
@@ -303,23 +310,28 @@ function AutoMatchPanel({
                   {current.suggestions.map((s) => (
                     <div
                       key={s.personId}
-                      className="flex items-center gap-2 p-2 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors"
+                      className="p-2 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors"
                     >
-                      <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                      <span className="text-sm font-medium flex-1 truncate">{s.personName}</span>
-                      {s.relationship && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{s.relationship}</Badge>
+                      <div className="flex items-center gap-2">
+                        <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                        <span className="text-sm font-medium flex-1 truncate">{s.personName}</span>
+                        {s.relationship && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{s.relationship}</Badge>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleAccept(current.contactId, s.personId)}
+                          disabled={actionPending}
+                          className="h-7 px-2 gap-1 text-green-600 hover:text-green-700 hover:bg-green-50"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          Link
+                        </Button>
+                      </div>
+                      {s.notes && (
+                        <div className="text-[11px] text-gray-400 mt-1 pl-5.5 line-clamp-2">{s.notes}</div>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleAccept(current.contactId, s.personId)}
-                        disabled={actionPending}
-                        className="h-7 px-2 gap-1 text-green-600 hover:text-green-700 hover:bg-green-50"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        Link
-                      </Button>
                     </div>
                   ))}
                 </div>

@@ -372,8 +372,9 @@ export async function unlinkContactFromPerson(contactId: string): Promise<boolea
 export interface MatchSuggestion {
   contactId: string;
   contactName: string;
+  contactPlatformId: string;
   platform: string;
-  suggestions: Array<{ personId: string; personName: string; relationship?: string }>;
+  suggestions: Array<{ personId: string; personName: string; relationship?: string; notes?: string }>;
 }
 
 export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
@@ -406,7 +407,7 @@ export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
       try {
         const result = await callMcpTool(knowledgeUrl, "list_people", { query: contactName, limit: 3 }, token);
         const parsed = extractJson<Record<string, unknown>>(result);
-        let people: Array<{ id: string; name: string; relationship?: string }> = [];
+        let people: Array<{ id: string; name: string; relationship?: string; notes?: string }> = [];
         if (parsed && typeof parsed === "object") {
           for (const val of Object.values(parsed)) {
             if (Array.isArray(val)) {
@@ -420,11 +421,13 @@ export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
           results.push({
             contactId: contact.contact_id,
             contactName,
+            contactPlatformId: contact.contact_platform_id,
             platform: contact.contact_platform,
             suggestions: people.map((p) => ({
               personId: p.id,
               personName: p.name,
               relationship: p.relationship,
+              notes: p.notes,
             })),
           });
         }
