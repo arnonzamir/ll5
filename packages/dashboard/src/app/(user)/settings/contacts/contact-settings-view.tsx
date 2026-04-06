@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition, useEffect, useCallback } from "react";
+import { useState, useTransition, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, Search, Users, MessageSquare, User, Camera, CameraOff, ArrowUp, UserPlus } from "lucide-react";
+import { RefreshCw, Search, Users, MessageSquare, User, Camera, CameraOff, ArrowUp, UserPlus, Link, X, Wand2, Check, SkipForward, Loader2 } from "lucide-react";
 import {
   fetchPeopleWithPlatforms,
   fetchGroupsWithSettings,
@@ -12,9 +12,14 @@ import {
   upsertContactSetting,
   createStubAndSaveSetting,
   promoteContact,
+  searchPeopleForLink,
+  linkContactToPerson,
+  unlinkContactFromPerson,
+  fetchMatchSuggestions,
   type PersonWithPlatforms,
   type GroupWithSettings,
   type ContactEntry,
+  type MatchSuggestion,
 } from "./contact-settings-server-actions";
 
 const ROUTING_OPTIONS = ["ignore", "batch", "immediate", "agent"] as const;
@@ -81,13 +86,274 @@ function MediaButton({ active, disabled, onClick }: { active: boolean; disabled?
   );
 }
 
+function LinkPopover({
+  contactId,
+  onLinked,
+}: {
+  contactId: string;
+  onLinked: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Array<{ id: string; name: string; relationship?: string }>>([]);
+  const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  function handleSearch(value: string) {
+    setQuery(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const r = await searchPeopleForLink(value.trim());
+        setResults(r);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  }
+
+  async function handleLink(personId: string) {
+    setLinking(true);
+    try {
+      const ok = await linkContactToPerson(contactId, personId);
+      if (ok) {
+        setOpen(false);
+        onLinked();
+      }
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        title="Link to KB person"
+        className="p-1 rounded text-gray-300 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer shrink-0"
+      >
+        <Link className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <div
+          ref={popoverRef}
+          className="absolute right-0 top-8 z-50 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-3"
+        >
+          <div className="text-xs font-medium text-gray-500 mb-2">Link to KB person</div>
+          <Input
+            value={query}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search people..."
+            className="text-sm mb-2"
+            autoFocus
+          />
+          {searching && (
+            <div className="flex items-center gap-2 text-xs text-gray-400 py-2">
+              <Loader2 className="h-3 w-3 animate-spin" /> Searching...
+            </div>
+          )}
+          {!searching && results.length > 0 && (
+            <div className="max-h-48 overflow-y-auto divide-y divide-gray-50">
+              {results.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => handleLink(p.id)}
+                  disabled={linking}
+                  className="flex items-center gap-2 w-full text-left px-2 py-1.5 hover:bg-gray-50 rounded transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <span className="text-sm font-medium truncate">{p.name}</span>
+                  {p.relationship && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{p.relationship}</Badge>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+          {!searching && query.trim().length >= 2 && results.length === 0 && (
+            <p className="text-xs text-gray-400 py-2 text-center">No people found</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AutoMatchPanel({
+  onDone,
+}: {
+  onDone: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<MatchSuggestion[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [actionPending, setActionPending] = useState(false);
+
+  async function handleOpen() {
+    setOpen(true);
+    setLoading(true);
+    setCurrentIndex(0);
+    try {
+      const s = await fetchMatchSuggestions();
+      setSuggestions(s);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleClose() {
+    setOpen(false);
+    setSuggestions([]);
+    setCurrentIndex(0);
+    onDone();
+  }
+
+  async function handleAccept(contactId: string, personId: string) {
+    setActionPending(true);
+    try {
+      await linkContactToPerson(contactId, personId);
+      if (currentIndex < suggestions.length - 1) {
+        setCurrentIndex((i) => i + 1);
+      } else {
+        handleClose();
+      }
+    } finally {
+      setActionPending(false);
+    }
+  }
+
+  function handleSkip() {
+    if (currentIndex < suggestions.length - 1) {
+      setCurrentIndex((i) => i + 1);
+    } else {
+      handleClose();
+    }
+  }
+
+  const current = suggestions[currentIndex];
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={handleOpen} className="gap-1.5">
+        <Wand2 className="h-3.5 w-3.5" />
+        Auto-match
+      </Button>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 relative">
+            <button
+              onClick={handleClose}
+              className="absolute top-3 right-3 p-1 rounded text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <h3 className="text-lg font-semibold mb-1">Auto-match Contacts</h3>
+            <p className="text-sm text-gray-500 mb-4">Link unlinked contacts to existing KB people</p>
+
+            {loading && (
+              <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Finding matches...</span>
+              </div>
+            )}
+
+            {!loading && suggestions.length === 0 && (
+              <div className="py-8 text-center">
+                <p className="text-sm text-gray-400">No match suggestions found</p>
+                <Button variant="ghost" size="sm" onClick={handleClose} className="mt-3">
+                  Close
+                </Button>
+              </div>
+            )}
+
+            {!loading && current && (
+              <div>
+                <div className="text-xs text-gray-400 mb-3">
+                  {currentIndex + 1} of {suggestions.length}
+                </div>
+
+                <div className="flex items-center gap-2 mb-3 p-3 bg-gray-50 rounded-lg">
+                  <UserPlus className="h-4 w-4 text-gray-400 shrink-0" />
+                  <span className="text-sm font-medium">{current.contactName}</span>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">{current.platform}</Badge>
+                </div>
+
+                <div className="text-xs text-gray-500 mb-2">Match with:</div>
+                <div className="space-y-1.5 mb-4">
+                  {current.suggestions.map((s) => (
+                    <div
+                      key={s.personId}
+                      className="flex items-center gap-2 p-2 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors"
+                    >
+                      <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                      <span className="text-sm font-medium flex-1 truncate">{s.personName}</span>
+                      {s.relationship && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{s.relationship}</Badge>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleAccept(current.contactId, s.personId)}
+                        disabled={actionPending}
+                        className="h-7 px-2 gap-1 text-green-600 hover:text-green-700 hover:bg-green-50"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Link
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex justify-end">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleSkip}
+                    disabled={actionPending}
+                    className="gap-1.5 text-gray-500"
+                  >
+                    <SkipForward className="h-3.5 w-3.5" />
+                    Skip
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function PersonRow({
   person,
   onUpdate,
+  onUnlink,
   isPending,
 }: {
   person: PersonWithPlatforms;
   onUpdate: (targetId: string, field: string, value: unknown) => void;
+  onUnlink: (contactId: string) => void;
   isPending: boolean;
 }) {
   const routing = person.settings?.routing ?? "batch";
@@ -107,8 +373,16 @@ function PersonRow({
         {person.platforms.length > 0 && (
           <div className="flex gap-1.5 mt-0.5 pl-5.5">
             {person.platforms.map((p, i) => (
-              <span key={i} className="text-[10px] text-gray-400">
+              <span key={i} className="inline-flex items-center gap-0.5 text-[10px] text-gray-400">
                 {p.platform}: {p.display_name || p.platform_id.split("@")[0]}
+                <button
+                  onClick={() => onUnlink(p.contactId)}
+                  disabled={isPending}
+                  title="Unlink this contact"
+                  className="p-0.5 rounded hover:text-red-500 hover:bg-red-50 transition-colors cursor-pointer"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
               </span>
             ))}
           </div>
@@ -140,11 +414,13 @@ function ContactRow({
   contact,
   onUpdate,
   onPromote,
+  onLinked,
   isPending,
 }: {
   contact: ContactEntry;
   onUpdate: (contactId: string, field: string, value: unknown) => void;
   onPromote: (contactId: string) => void;
+  onLinked: () => void;
   isPending: boolean;
 }) {
   const routing = contact.settings?.routing ?? "batch";
@@ -166,6 +442,8 @@ function ContactRow({
           </div>
         )}
       </div>
+
+      <LinkPopover contactId={contact.contactId} onLinked={onLinked} />
 
       <button
         onClick={() => onPromote(contact.contactId)}
@@ -324,6 +602,13 @@ export function ContactSettingsView() {
     });
   }
 
+  function handleUnlink(contactId: string) {
+    startTransition(async () => {
+      const ok = await unlinkContactFromPerson(contactId);
+      if (ok) load();
+    });
+  }
+
   function handlePromote(contactId: string) {
     const contact = contacts.find((c) => c.contactId === contactId);
     if (!contact) return;
@@ -420,24 +705,30 @@ export function ContactSettingsView() {
         })}
       </div>
 
-      {/* Search */}
-      <div className="relative mb-4">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={
-            activeTab === "people" ? "Search people..." :
-            activeTab === "contacts" ? "Search contacts..." :
-            "Search groups..."
-          }
-          className="pl-9"
-        />
+      {/* Search + Auto-match */}
+      <div className="flex items-center gap-2 mb-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={
+              activeTab === "people" ? "Search people..." :
+              activeTab === "contacts" ? "Search contacts..." :
+              "Search groups..."
+            }
+            className="pl-9"
+          />
+        </div>
+        {activeTab === "contacts" && (
+          <AutoMatchPanel onDone={load} />
+        )}
       </div>
 
       {/* Column headers */}
       <div className="flex items-center gap-3 px-2 mb-1 text-[10px] text-gray-400 uppercase tracking-wide">
         <div className="flex-1">Name</div>
+        {activeTab === "contacts" && <div className="w-8 text-center" title="Link to KB person">Link</div>}
         {activeTab === "contacts" && <div className="w-8 text-center" title="Promote to full person">Up</div>}
         <div className="w-8 text-center">Media</div>
         <div className="w-[140px] text-center">Permission</div>
@@ -454,7 +745,7 @@ export function ContactSettingsView() {
           ) : (
             <div className="divide-y divide-gray-50">
               {filteredPeople.map((p) => (
-                <PersonRow key={p.id} person={p} onUpdate={handlePersonUpdate} isPending={isPending} />
+                <PersonRow key={p.id} person={p} onUpdate={handlePersonUpdate} onUnlink={handleUnlink} isPending={isPending} />
               ))}
             </div>
           )
@@ -468,7 +759,7 @@ export function ContactSettingsView() {
           ) : (
             <div className="divide-y divide-gray-50">
               {filteredContacts.map((c) => (
-                <ContactRow key={c.contactId} contact={c} onUpdate={handleContactUpdate} onPromote={handlePromote} isPending={isPending} />
+                <ContactRow key={c.contactId} contact={c} onUpdate={handleContactUpdate} onPromote={handlePromote} onLinked={load} isPending={isPending} />
               ))}
             </div>
           )

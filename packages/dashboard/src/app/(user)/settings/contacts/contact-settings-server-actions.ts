@@ -23,7 +23,7 @@ export interface PersonWithPlatforms {
   name: string;
   relationship?: string;
   status?: string;
-  platforms: Array<{ platform: string; platform_id: string; display_name: string }>;
+  platforms: Array<{ contactId: string; platform: string; platform_id: string; display_name: string }>;
   settings?: ContactSetting;
 }
 
@@ -113,7 +113,7 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
   if (!token) return [];
 
   let people: Array<{ id: string; name: string; relationship?: string; status?: string }> = [];
-  let contacts: Array<{ platform_id: string; platform: string; display_name: string; person_id?: string }> = [];
+  let contacts: Array<{ id: string; platform_id: string; platform: string; display_name: string; person_id?: string }> = [];
 
   // Get people from knowledge MCP — call directly to avoid internal URL issues
   try {
@@ -162,7 +162,7 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
         name: p.name,
         relationship: p.relationship,
         status: p.status,
-        platforms: linked.map((c) => ({ platform: c.platform, platform_id: c.platform_id, display_name: c.display_name })),
+        platforms: linked.map((c) => ({ contactId: c.id, platform: c.platform, platform_id: c.platform_id, display_name: c.display_name })),
         settings: settingsMap.get(p.id),
       };
     })
@@ -315,5 +315,127 @@ export async function promoteContact(personId: string, name: string): Promise<bo
   } catch (err) {
     console.error("[contacts] promoteContact failed:", err instanceof Error ? err.message : String(err));
     return false;
+  }
+}
+
+export async function searchPeopleForLink(query: string): Promise<Array<{ id: string; name: string; relationship?: string }>> {
+  const token = await getToken();
+  if (!token) return [];
+
+  try {
+    const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
+    const result = await callMcpTool(knowledgeUrl, "list_people", { query, status: "full", limit: 20 }, token);
+    const parsed = extractJson<Record<string, unknown>>(result);
+    if (parsed && typeof parsed === "object") {
+      for (const val of Object.values(parsed)) {
+        if (Array.isArray(val)) {
+          return (val as Array<{ id: string; name: string; relationship?: string }>).map((p) => ({
+            id: p.id,
+            name: p.name,
+            relationship: p.relationship,
+          }));
+        }
+      }
+    }
+    return [];
+  } catch (err) {
+    console.error("[contacts] searchPeopleForLink failed:", err instanceof Error ? err.message : String(err));
+    return [];
+  }
+}
+
+export async function linkContactToPerson(contactId: string, personId: string): Promise<boolean> {
+  try {
+    await mcpCallJsonSafe("ll5-messaging", "link_contact_to_person", {
+      contact_id: contactId,
+      person_id: personId,
+    });
+    return true;
+  } catch (err) {
+    console.error("[contacts] linkContactToPerson failed:", err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
+export async function unlinkContactFromPerson(contactId: string): Promise<boolean> {
+  try {
+    await mcpCallJsonSafe("ll5-messaging", "unlink_contact_from_person", {
+      contact_id: contactId,
+    });
+    return true;
+  } catch (err) {
+    console.error("[contacts] unlinkContactFromPerson failed:", err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
+export interface MatchSuggestion {
+  contactId: string;
+  contactName: string;
+  platform: string;
+  suggestions: Array<{ personId: string; personName: string; relationship?: string }>;
+}
+
+export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
+  const token = await getToken();
+  if (!token) return [];
+
+  try {
+    // Get unlinked contacts via auto_match_contacts
+    const raw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "auto_match_contacts", {});
+    // auto_match_contacts returns { unlinked_contacts: [{ contact_id, contact_name, contact_platform, contact_platform_id }] }
+    let unlinked: Array<{ contact_id: string; contact_name: string; contact_platform: string; contact_platform_id: string }> = [];
+    if (raw && typeof raw === "object") {
+      for (const val of Object.values(raw)) {
+        if (Array.isArray(val)) {
+          unlinked = val as typeof unlinked;
+          break;
+        }
+      }
+    }
+
+    // Limit to 20 contacts
+    const batch = unlinked.slice(0, 20);
+    const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
+
+    const results: MatchSuggestion[] = [];
+    for (const contact of batch) {
+      const contactName = contact.contact_name;
+      if (!contactName) continue;
+
+      try {
+        const result = await callMcpTool(knowledgeUrl, "list_people", { query: contactName, limit: 3 }, token);
+        const parsed = extractJson<Record<string, unknown>>(result);
+        let people: Array<{ id: string; name: string; relationship?: string }> = [];
+        if (parsed && typeof parsed === "object") {
+          for (const val of Object.values(parsed)) {
+            if (Array.isArray(val)) {
+              people = val as typeof people;
+              break;
+            }
+          }
+        }
+
+        if (people.length > 0) {
+          results.push({
+            contactId: contact.contact_id,
+            contactName,
+            platform: contact.contact_platform,
+            suggestions: people.map((p) => ({
+              personId: p.id,
+              personName: p.name,
+              relationship: p.relationship,
+            })),
+          });
+        }
+      } catch {
+        // Skip this contact if search fails
+      }
+    }
+
+    return results;
+  } catch (err) {
+    console.error("[contacts] fetchMatchSuggestions failed:", err instanceof Error ? err.message : String(err));
+    return [];
   }
 }

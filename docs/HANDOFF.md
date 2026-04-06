@@ -41,6 +41,7 @@ Dashboard (Next.js 15)
   ├── /calendar/settings — Google account connection + calendar source access modes
   ├── /calendar/ticklers — tickler list grouped by date (90 days), recurring badges
   ├── /phone-data — review phone-pushed data (locations, messages, calendar) with type/time filters
+  ├── /settings/contacts — 3 tabs: People (with unlink per platform), Contacts (with link popover + auto-match wizard), Groups. Routing/permission/media controls on all.
   ├── /settings/notifications — People + Conversations + Keywords tabs, 4 priority levels (ignore/batch/immediate/agent)
   ├── Chat: SSE real-time (PG NOTIFY on insert+update), status indicators, typing dots, 30s safety sweep
   ├── /media — media gallery (images, videos, files) with gallery/list views, source filter, search, detail dialog
@@ -195,4 +196,5 @@ See docs/implementation/deployment-log.md for full details:
 - People relationship field is free-text; UI groups them into family/friend/colleague/acquaintance/other for filtering
 - Migrations that DROP+ADD constraints must include ALL values (not just original), since later migrations may have already inserted new values
 - MCP-to-gateway calls need ll5 signed tokens (generateToken from @ll5/shared), not static API_KEY
+- **WhatsApp pushName enrichment**: webhook updates `messaging_contacts.display_name` from `pushName` on every 1:1 message, but only if current name is null/empty/phone-number-only. Won't overwrite good names.
 - **Contact-only persons**: Person records with `status: 'contact-only'` are lightweight stubs auto-created from messaging contacts. They enable per-contact routing without a full KB entry. The gateway matcher is unchanged — all routing resolves via person_id → contact_settings. Promote to `status: 'full'` to make a real KB person. Dashboard `/settings/contacts` has 3 tabs: People (full+contacts), Contacts (contact-only + unlinked), Groups. `ensureIndices` now calls `putMapping` on existing indices to add new fields.

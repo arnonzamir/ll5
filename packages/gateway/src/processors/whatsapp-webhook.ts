@@ -127,6 +127,25 @@ export async function processWhatsAppWebhook(
     } catch {
       // Non-critical — fall back to name-based matching
     }
+
+    // Enrich contact display_name from pushName if current name is missing or phone-number-only
+    const pushName = data.pushName;
+    if (pushName && pushName !== remoteJid.split('@')[0]) {
+      try {
+        await pgPool.query(
+          `UPDATE messaging_contacts
+           SET display_name = $1, updated_at = NOW()
+           WHERE platform = 'whatsapp' AND platform_id = $2 AND user_id = $3
+             AND (display_name IS NULL OR display_name = '' OR display_name ~ '^\\+?[0-9]+$')`,
+          [pushName, remoteJid, userId],
+        );
+      } catch (err) {
+        logger.warn('[processWhatsAppWebhook] Failed to update contact display_name from pushName', {
+          error: err instanceof Error ? err.message : String(err),
+          remoteJid,
+        });
+      }
+    }
   }
 
   // Determine media type and metadata
