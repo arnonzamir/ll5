@@ -13,6 +13,7 @@ interface PersonDoc {
   contact_info?: Record<string, string>;
   tags: string[];
   notes?: string;
+  status?: string;
   created_at: string;
   updated_at: string;
 }
@@ -27,6 +28,7 @@ function docToPerson(doc: PersonDoc, id: string): Person {
     contactInfo: doc.contact_info,
     tags: doc.tags ?? [],
     notes: doc.notes,
+    status: (doc.status as 'full' | 'contact-only') ?? 'full',
     createdAt: doc.created_at,
     updatedAt: doc.updated_at,
   };
@@ -47,6 +49,12 @@ export class ElasticsearchPersonRepository
     const filterClauses: EsQueryContainer[] = [];
     const mustClauses: EsQueryContainer[] = [];
 
+    if (filters.status === 'contact-only') {
+      filterClauses.push({ term: { status: 'contact-only' } });
+    } else if (filters.status === 'full') {
+      // Match 'full' or missing status (backward compat for existing records)
+      filterClauses.push({ bool: { must_not: [{ term: { status: 'contact-only' } }] } } as EsQueryContainer);
+    }
     if (filters.relationship) {
       filterClauses.push({ term: { relationship: filters.relationship } });
     }
@@ -109,6 +117,7 @@ export class ElasticsearchPersonRepository
       contact_info: data.contactInfo ?? existingDoc?.contact_info,
       tags: data.tags ?? existingDoc?.tags ?? [],
       notes: data.notes ?? existingDoc?.notes,
+      status: data.status ?? existingDoc?.status ?? 'full',
       created_at: existingDoc?.created_at ?? now,
       updated_at: now,
     };

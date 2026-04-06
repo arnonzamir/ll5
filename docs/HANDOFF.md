@@ -128,7 +128,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - Legacy channels (`urgent`, `info`, `ll5_morning`, `ll5_tickler`, `ll5_urgent`, `ll5_general`) kept for backward compat
 
 **Elasticsearch** (8.15.0, 15 indices):
-- `ll5_knowledge_*` — facts, people, places, profile, data_gaps
+- `ll5_knowledge_*` — facts, people (with `status`: full/contact-only), places, profile, data_gaps
 - `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
 - `ll5_agent_*` — journal (micro-entries), user_model (consolidated, versioned with history index), user_model_history (snapshots before overwrite)
 - `ll5_health_*` — sleep, heart_rate, daily_stats (stress, body battery, HRV, VO2 Max, respiration), activities, body_composition
@@ -195,3 +195,4 @@ See docs/implementation/deployment-log.md for full details:
 - People relationship field is free-text; UI groups them into family/friend/colleague/acquaintance/other for filtering
 - Migrations that DROP+ADD constraints must include ALL values (not just original), since later migrations may have already inserted new values
 - MCP-to-gateway calls need ll5 signed tokens (generateToken from @ll5/shared), not static API_KEY
+- **Contact-only persons**: Person records with `status: 'contact-only'` are lightweight stubs auto-created from messaging contacts. They enable per-contact routing without a full KB entry. The gateway matcher is unchanged — all routing resolves via person_id → contact_settings. Promote to `status: 'full'` to make a real KB person. Dashboard `/settings/contacts` has 3 tabs: People (full+contacts), Contacts (contact-only + unlinked), Groups. `ensureIndices` now calls `putMapping` on existing indices to add new fields.

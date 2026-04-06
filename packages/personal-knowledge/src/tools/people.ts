@@ -15,6 +15,7 @@ export function registerPeopleTools(
       relationship: z.string().optional().describe('Filter by relationship (e.g. friend, family, colleague)'),
       tags: z.array(z.string()).optional().describe('Filter by tags (AND logic)'),
       query: z.string().optional().describe('Free-text search across name, aliases, notes'),
+      status: z.enum(['full', 'contact-only']).optional().describe('Filter by status. full = KB persons, contact-only = auto-created from messaging contacts'),
       limit: z.number().min(1).max(200).optional().describe('Max results. Default: 50'),
       offset: z.number().min(0).optional().describe('Pagination offset. Default: 0'),
     },
@@ -24,6 +25,7 @@ export function registerPeopleTools(
         relationship: params.relationship,
         tags: params.tags,
         query: params.query,
+        status: params.status,
         limit: params.limit,
         offset: params.offset,
       });
@@ -70,6 +72,7 @@ export function registerPeopleTools(
       contact_info: z.record(z.string(), z.string()).optional().describe('Contact info key-value pairs'),
       tags: z.array(z.string()).optional().describe('Tags for categorization'),
       notes: z.string().optional().describe('Free-text notes about this person'),
+      status: z.enum(['full', 'contact-only']).optional().describe('Person status. full = KB person (default), contact-only = lightweight record from messaging contact'),
     },
     async (params) => {
       const userId = getUserId();
@@ -81,6 +84,7 @@ export function registerPeopleTools(
         contactInfo: params.contact_info,
         tags: params.tags,
         notes: params.notes,
+        status: params.status,
       });
 
       logAudit({

@@ -4,13 +4,17 @@ import { useState, useTransition, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, Search, Users, MessageSquare, User, Camera, CameraOff } from "lucide-react";
+import { RefreshCw, Search, Users, MessageSquare, User, Camera, CameraOff, ArrowUp, UserPlus } from "lucide-react";
 import {
   fetchPeopleWithPlatforms,
   fetchGroupsWithSettings,
+  fetchContactsForTab,
   upsertContactSetting,
+  createStubAndSaveSetting,
+  promoteContact,
   type PersonWithPlatforms,
   type GroupWithSettings,
+  type ContactEntry,
 } from "./contact-settings-server-actions";
 
 const ROUTING_OPTIONS = ["ignore", "batch", "immediate", "agent"] as const;
@@ -29,7 +33,7 @@ const PERMISSION_COLORS: Record<string, string> = {
   agent: "text-green-600",
 };
 
-type TabId = "people" | "groups";
+type TabId = "people" | "contacts" | "groups";
 
 function ToggleGroup({
   options,
@@ -59,6 +63,21 @@ function ToggleGroup({
         </button>
       ))}
     </div>
+  );
+}
+
+function MediaButton({ active, disabled, onClick }: { active: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={active ? "Media: downloading" : "Media: not downloading"}
+      className={`p-1 rounded transition-colors cursor-pointer shrink-0 ${
+        active ? "text-blue-500 bg-blue-50" : "text-gray-300 hover:text-gray-500"
+      }`}
+    >
+      {active ? <Camera className="h-3.5 w-3.5" /> : <CameraOff className="h-3.5 w-3.5" />}
+    </button>
   );
 }
 
@@ -96,16 +115,7 @@ function PersonRow({
         )}
       </div>
 
-      <button
-        onClick={() => onUpdate(person.id, "download_media", !downloadMedia)}
-        disabled={isPending}
-        title={downloadMedia ? "Media: downloading" : "Media: not downloading"}
-        className={`p-1 rounded transition-colors cursor-pointer shrink-0 ${
-          downloadMedia ? "text-blue-500 bg-blue-50" : "text-gray-300 hover:text-gray-500"
-        }`}
-      >
-        {downloadMedia ? <Camera className="h-3.5 w-3.5" /> : <CameraOff className="h-3.5 w-3.5" />}
-      </button>
+      <MediaButton active={downloadMedia} disabled={isPending} onClick={() => onUpdate(person.id, "download_media", !downloadMedia)} />
 
       <ToggleGroup
         options={PERMISSION_OPTIONS}
@@ -119,6 +129,67 @@ function PersonRow({
         options={ROUTING_OPTIONS}
         value={routing}
         onChange={(v) => onUpdate(person.id, "routing", v)}
+        colors={ROUTING_COLORS}
+        disabled={isPending}
+      />
+    </div>
+  );
+}
+
+function ContactRow({
+  contact,
+  onUpdate,
+  onPromote,
+  isPending,
+}: {
+  contact: ContactEntry;
+  onUpdate: (contactId: string, field: string, value: unknown) => void;
+  onPromote: (contactId: string) => void;
+  isPending: boolean;
+}) {
+  const routing = contact.settings?.routing ?? "batch";
+  const permission = contact.settings?.permission ?? "input";
+  const downloadMedia = contact.settings?.download_media ?? false;
+  const displayName = contact.displayName || contact.phoneNumber || contact.platformId.split("@")[0];
+
+  return (
+    <div className="flex items-center gap-3 py-2.5 hover:bg-gray-50 px-2 -mx-2 rounded transition-colors">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <UserPlus className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+          <span className="text-sm font-medium truncate">{displayName}</span>
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{contact.platform}</Badge>
+        </div>
+        {contact.displayName && contact.phoneNumber && (
+          <div className="flex gap-1.5 mt-0.5 pl-5.5">
+            <span className="text-[10px] text-gray-400">{contact.phoneNumber}</span>
+          </div>
+        )}
+      </div>
+
+      <button
+        onClick={() => onPromote(contact.contactId)}
+        disabled={isPending}
+        title="Promote to full person"
+        className="p-1 rounded text-gray-300 hover:text-green-600 hover:bg-green-50 transition-colors cursor-pointer shrink-0"
+      >
+        <ArrowUp className="h-3.5 w-3.5" />
+      </button>
+
+      <MediaButton active={downloadMedia} disabled={isPending} onClick={() => onUpdate(contact.contactId, "download_media", !downloadMedia)} />
+
+      <ToggleGroup
+        options={PERMISSION_OPTIONS}
+        value={permission}
+        onChange={(v) => onUpdate(contact.contactId, "permission", v)}
+        colors={PERMISSION_COLORS}
+        disabled={isPending}
+      />
+
+      <ToggleGroup
+        options={ROUTING_OPTIONS}
+        value={routing}
+        onChange={(v) => onUpdate(contact.contactId, "routing", v)}
         colors={ROUTING_COLORS}
         disabled={isPending}
       />
@@ -151,15 +222,7 @@ function GroupRow({
         </div>
       </div>
 
-      <button
-        onClick={() => onUpdate(group.conversation_id, "download_media", !downloadMedia)}
-        disabled={isPending}
-        className={`p-1 rounded transition-colors cursor-pointer shrink-0 ${
-          downloadMedia ? "text-blue-500 bg-blue-50" : "text-gray-300 hover:text-gray-500"
-        }`}
-      >
-        {downloadMedia ? <Camera className="h-3.5 w-3.5" /> : <CameraOff className="h-3.5 w-3.5" />}
-      </button>
+      <MediaButton active={downloadMedia} disabled={isPending} onClick={() => onUpdate(group.conversation_id, "download_media", !downloadMedia)} />
 
       <ToggleGroup
         options={PERMISSION_OPTIONS}
@@ -183,17 +246,20 @@ function GroupRow({
 export function ContactSettingsView() {
   const [activeTab, setActiveTab] = useState<TabId>("people");
   const [people, setPeople] = useState<PersonWithPlatforms[]>([]);
+  const [contacts, setContacts] = useState<ContactEntry[]>([]);
   const [groups, setGroups] = useState<GroupWithSettings[]>([]);
   const [search, setSearch] = useState("");
   const [isPending, startTransition] = useTransition();
 
   const load = useCallback(() => {
     startTransition(async () => {
-      const [p, g] = await Promise.all([
+      const [p, c, g] = await Promise.all([
         fetchPeopleWithPlatforms(),
+        fetchContactsForTab(),
         fetchGroupsWithSettings(),
       ]);
       setPeople(p);
+      setContacts(c);
       setGroups(g);
     });
   }, []);
@@ -201,7 +267,6 @@ export function ContactSettingsView() {
   useEffect(() => { load(); }, [load]);
 
   function handlePersonUpdate(personId: string, field: string, value: unknown) {
-    // Optimistic update
     setPeople((prev) => prev.map((p) => {
       if (p.id !== personId) return p;
       const current = p.settings ?? { id: "", target_type: "person" as const, target_id: personId, routing: "batch", permission: "input", download_media: false, display_name: p.name, platform: null, created_at: "", updated_at: "" };
@@ -216,6 +281,67 @@ export function ContactSettingsView() {
         [field]: value,
         display_name: person?.name,
       });
+    });
+  }
+
+  function handleContactUpdate(contactId: string, field: string, value: unknown) {
+    // Optimistic update
+    setContacts((prev) => prev.map((c) => {
+      if (c.contactId !== contactId) return c;
+      const current = c.settings ?? { id: "", target_type: "person" as const, target_id: c.personId ?? "", routing: "batch", permission: "input", download_media: false, display_name: c.displayName, platform: c.platform, created_at: "", updated_at: "" };
+      return { ...c, settings: { ...current, [field]: value } };
+    }));
+
+    startTransition(async () => {
+      const contact = contacts.find((c) => c.contactId === contactId);
+      if (!contact) return;
+
+      if (contact.personId) {
+        // Already has a stub person — just update the setting
+        await upsertContactSetting({
+          target_type: "person",
+          target_id: contact.personId,
+          [field]: value,
+          display_name: contact.displayName ?? undefined,
+          platform: contact.platform,
+        });
+      } else {
+        // No person yet — create stub, link, and save setting
+        const name = contact.displayName || contact.phoneNumber || contact.platformId.split("@")[0];
+        const newPersonId = await createStubAndSaveSetting(
+          contactId,
+          name,
+          contact.platform,
+          field,
+          value,
+        );
+        if (newPersonId) {
+          setContacts((prev) => prev.map((c) =>
+            c.contactId === contactId ? { ...c, personId: newPersonId } : c
+          ));
+        }
+      }
+    });
+  }
+
+  function handlePromote(contactId: string) {
+    const contact = contacts.find((c) => c.contactId === contactId);
+    if (!contact) return;
+
+    startTransition(async () => {
+      let personId = contact.personId;
+
+      // If no stub yet, create one first
+      if (!personId) {
+        const name = contact.displayName || contact.phoneNumber || contact.platformId.split("@")[0];
+        personId = await createStubAndSaveSetting(contactId, name, contact.platform, "routing", "batch");
+      }
+
+      if (personId) {
+        const name = contact.displayName || contact.phoneNumber || contact.platformId.split("@")[0];
+        await promoteContact(personId, name);
+        load(); // Refresh to move contact to People tab
+      }
     });
   }
 
@@ -243,6 +369,12 @@ export function ContactSettingsView() {
     !search || p.name.toLowerCase().includes(searchLower) ||
     p.platforms.some((pl) => pl.display_name?.toLowerCase().includes(searchLower))
   );
+  const filteredContacts = contacts.filter((c) =>
+    !search ||
+    c.displayName?.toLowerCase().includes(searchLower) ||
+    c.phoneNumber?.toLowerCase().includes(searchLower) ||
+    c.platformId.toLowerCase().includes(searchLower)
+  );
   const filteredGroups = groups.filter((g) =>
     !search || (g.name?.toLowerCase().includes(searchLower)) ||
     g.conversation_id.toLowerCase().includes(searchLower)
@@ -250,6 +382,7 @@ export function ContactSettingsView() {
 
   const tabs: { id: TabId; label: string; count: number; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: "people", label: "People", count: people.length, icon: User },
+    { id: "contacts", label: "Contacts", count: contacts.length, icon: UserPlus },
     { id: "groups", label: "Groups", count: groups.length, icon: MessageSquare },
   ];
 
@@ -293,7 +426,11 @@ export function ContactSettingsView() {
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder={activeTab === "people" ? "Search people..." : "Search groups..."}
+          placeholder={
+            activeTab === "people" ? "Search people..." :
+            activeTab === "contacts" ? "Search contacts..." :
+            "Search groups..."
+          }
           className="pl-9"
         />
       </div>
@@ -301,6 +438,7 @@ export function ContactSettingsView() {
       {/* Column headers */}
       <div className="flex items-center gap-3 px-2 mb-1 text-[10px] text-gray-400 uppercase tracking-wide">
         <div className="flex-1">Name</div>
+        {activeTab === "contacts" && <div className="w-8 text-center" title="Promote to full person">Up</div>}
         <div className="w-8 text-center">Media</div>
         <div className="w-[140px] text-center">Permission</div>
         <div className="w-[185px] text-center">Routing</div>
@@ -311,12 +449,26 @@ export function ContactSettingsView() {
         {activeTab === "people" && (
           filteredPeople.length === 0 ? (
             <p className="p-6 text-sm text-gray-400 text-center">
-              {isPending ? "Loading..." : people.length === 0 ? "No people in your knowledge base yet" : "No matches"}
+              {isPending ? "Loading..." : people.length === 0 ? "No people with linked contacts" : "No matches"}
             </p>
           ) : (
             <div className="divide-y divide-gray-50">
               {filteredPeople.map((p) => (
                 <PersonRow key={p.id} person={p} onUpdate={handlePersonUpdate} isPending={isPending} />
+              ))}
+            </div>
+          )
+        )}
+
+        {activeTab === "contacts" && (
+          filteredContacts.length === 0 ? (
+            <p className="p-6 text-sm text-gray-400 text-center">
+              {isPending ? "Loading..." : contacts.length === 0 ? "No unlinked contacts" : "No matches"}
+            </p>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {filteredContacts.map((c) => (
+                <ContactRow key={c.contactId} contact={c} onUpdate={handleContactUpdate} onPromote={handlePromote} isPending={isPending} />
               ))}
             </div>
           )

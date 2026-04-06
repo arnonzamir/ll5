@@ -71,6 +71,7 @@ const INDICES: IndexDefinition[] = [
         contact_info: { type: 'object', enabled: false },
         tags: { type: 'keyword' },
         notes: { type: 'text', analyzer: 'multilingual' },
+        status: { type: 'keyword' },
         created_at: { type: 'date' },
         updated_at: { type: 'date' },
       },
@@ -121,6 +122,12 @@ export async function ensureIndices(client: Client): Promise<void> {
       });
       logger.info(`[ensureIndices][ensureIndices] Index created: ${def.index}`);
     } else {
+      // Update mapping to add any new fields (idempotent, non-breaking)
+      try {
+        await client.indices.putMapping({ index: def.index, ...def.mappings });
+      } catch (e) {
+        logger.warn(`[ensureIndices] putMapping failed for ${def.index}: ${e instanceof Error ? e.message : String(e)}`);
+      }
       logger.debug(`[ensureIndices][ensureIndices] Index already exists: ${def.index}`);
     }
   }

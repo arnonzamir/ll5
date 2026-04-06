@@ -22,6 +22,7 @@ export interface PersonWithPlatforms {
   id: string;
   name: string;
   relationship?: string;
+  status?: string;
   platforms: Array<{ platform: string; platform_id: string; display_name: string }>;
   settings?: ContactSetting;
 }
@@ -31,6 +32,16 @@ export interface GroupWithSettings {
   name: string | null;
   platform: string;
   is_archived: boolean;
+  settings?: ContactSetting;
+}
+
+export interface ContactEntry {
+  contactId: string;
+  platform: string;
+  platformId: string;
+  displayName: string | null;
+  phoneNumber: string | null;
+  personId: string | null;
   settings?: ContactSetting;
 }
 
@@ -101,7 +112,7 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
   const token = await getToken();
   if (!token) return [];
 
-  let people: Array<{ id: string; name: string; relationship?: string }> = [];
+  let people: Array<{ id: string; name: string; relationship?: string; status?: string }> = [];
   let contacts: Array<{ platform_id: string; platform: string; display_name: string; person_id?: string }> = [];
 
   // Get people from knowledge MCP — call directly to avoid internal URL issues
@@ -141,17 +152,21 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
   const { settings } = await fetchContactSettings({ target_type: "person" });
   const settingsMap = new Map(settings.map((s) => [s.target_id, s]));
 
-  // Build people list with linked platforms
-  return people.map((p) => {
-    const linked = contacts.filter((c) => c.person_id === p.id);
-    return {
-      id: p.id,
-      name: p.name,
-      relationship: p.relationship,
-      platforms: linked.map((c) => ({ platform: c.platform, platform_id: c.platform_id, display_name: c.display_name })),
-      settings: settingsMap.get(p.id),
-    };
-  });
+  // Build people list with linked platforms — only full KB people with at least one contact
+  return people
+    .filter((p) => !p.status || p.status === 'full')
+    .map((p) => {
+      const linked = contacts.filter((c) => c.person_id === p.id);
+      return {
+        id: p.id,
+        name: p.name,
+        relationship: p.relationship,
+        status: p.status,
+        platforms: linked.map((c) => ({ platform: c.platform, platform_id: c.platform_id, display_name: c.display_name })),
+        settings: settingsMap.get(p.id),
+      };
+    })
+    .filter((p) => p.platforms.length > 0);
 }
 
 export async function fetchGroupsWithSettings(): Promise<GroupWithSettings[]> {
@@ -182,4 +197,123 @@ export async function fetchGroupsWithSettings(): Promise<GroupWithSettings[]> {
     is_archived: c.is_archived ?? false,
     settings: settingsMap.get(c.conversation_id),
   }));
+}
+
+export async function fetchContactsForTab(): Promise<ContactEntry[]> {
+  const token = await getToken();
+  if (!token) return [];
+
+  // Fetch all non-group contacts, full people IDs (to exclude), and contact settings — in parallel
+  let allContacts: Array<{ id: string; platform: string; platform_id: string; display_name: string | null; phone_number: string | null; person_id: string | null; is_group: boolean }> = [];
+  const fullPersonIds = new Set<string>();
+
+  const [contactsRaw, peopleRaw, { settings }] = await Promise.all([
+    mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { is_group: false, limit: 1000 }),
+    (async () => {
+      try {
+        const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
+        return await callMcpTool(knowledgeUrl, "list_people", { limit: 200 }, token);
+      } catch { return null; }
+    })(),
+    fetchContactSettings({ target_type: "person" }),
+  ]);
+
+  // Parse contacts
+  if (contactsRaw && typeof contactsRaw === "object") {
+    for (const val of Object.values(contactsRaw)) {
+      if (Array.isArray(val)) { allContacts = val as typeof allContacts; break; }
+    }
+  }
+
+  // Parse people to get full person IDs
+  if (peopleRaw) {
+    const parsed = extractJson<Record<string, unknown>>(peopleRaw);
+    if (parsed && typeof parsed === "object") {
+      for (const val of Object.values(parsed)) {
+        if (Array.isArray(val)) {
+          for (const p of val as Array<{ id: string; status?: string }>) {
+            if (!p.status || p.status === "full") fullPersonIds.add(p.id);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  const settingsMap = new Map(settings.map((s) => [s.target_id, s]));
+
+  // Contacts tab: contacts NOT linked to a full person
+  return allContacts
+    .filter((c) => !c.is_group && (!c.person_id || !fullPersonIds.has(c.person_id)))
+    .map((c) => ({
+      contactId: c.id,
+      platform: c.platform,
+      platformId: c.platform_id,
+      displayName: c.display_name,
+      phoneNumber: c.phone_number,
+      personId: c.person_id,
+      settings: c.person_id ? settingsMap.get(c.person_id) : undefined,
+    }))
+    .sort((a, b) => (a.displayName ?? a.platformId).localeCompare(b.displayName ?? b.platformId));
+}
+
+export async function createStubAndSaveSetting(
+  contactId: string,
+  displayName: string,
+  platform: string,
+  field: string,
+  value: unknown,
+): Promise<string | null> {
+  const token = await getToken();
+  if (!token) return null;
+
+  try {
+    // 1. Create contact-only person in knowledge MCP
+    const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
+    const result = await callMcpTool(knowledgeUrl, "upsert_person", {
+      name: displayName,
+      status: "contact-only",
+    }, token);
+    const parsed = extractJson<{ person: { id: string }; created: boolean }>(result);
+    if (!parsed?.person?.id) return null;
+    const personId = parsed.person.id;
+
+    // 2. Link the contact to the new person
+    await mcpCallJsonSafe("ll5-messaging", "link_contact_to_person", {
+      contact_id: contactId,
+      person_id: personId,
+    });
+
+    // 3. Save the contact setting
+    await upsertContactSetting({
+      target_type: "person",
+      target_id: personId,
+      [field]: value,
+      display_name: displayName,
+      platform,
+    });
+
+    return personId;
+  } catch (err) {
+    console.error("[contacts] createStubAndSaveSetting failed:", err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+export async function promoteContact(personId: string, name: string): Promise<boolean> {
+  const token = await getToken();
+  if (!token) return false;
+
+  try {
+    const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
+    await callMcpTool(knowledgeUrl, "upsert_person", {
+      id: personId,
+      name,
+      status: "full",
+    }, token);
+    return true;
+  } catch (err) {
+    console.error("[contacts] promoteContact failed:", err instanceof Error ? err.message : String(err));
+    return false;
+  }
 }
