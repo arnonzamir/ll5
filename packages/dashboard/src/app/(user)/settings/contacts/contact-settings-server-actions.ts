@@ -106,9 +106,12 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
 
   // Get people from knowledge MCP — call directly to avoid internal URL issues
   try {
+    console.log("[contacts] Fetching people with token:", token.slice(0, 10) + "...");
     const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
     const result = await callMcpTool(knowledgeUrl, "list_people", { limit: 500 }, token);
+    console.log("[contacts] callMcpTool returned, content length:", result?.content?.length);
     const parsed = extractJson<Record<string, unknown>>(result);
+    console.log("[contacts] extractJson keys:", parsed ? Object.keys(parsed) : "null");
     if (parsed && typeof parsed === "object") {
       for (const val of Object.values(parsed)) {
         if (Array.isArray(val)) {
@@ -117,6 +120,7 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
         }
       }
     }
+    console.log("[contacts] People found:", people.length);
   } catch (err) {
     console.error("[contacts] Failed to fetch people:", err instanceof Error ? err.message : String(err));
   }
