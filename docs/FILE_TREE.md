@@ -94,7 +94,7 @@ ll5/
 │       ├── auth.ts                    # POST /auth/token (PIN login), POST /auth/refresh (token refresh)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
 │       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich), WhatsApp webhook (images, fromMe capture, pushName enrichment, source routing), routing rule matcher
-│       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge (journal+proactivity), journal consolidation
+│       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge (journal+proactivity), journal consolidation, health polling
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/system-message.ts    # Shared system message writer with scheduler event correlation + source routing metadata
 │       ├── utils/export.ts            # Full user data export (ES + PG → JSON, no media binaries)

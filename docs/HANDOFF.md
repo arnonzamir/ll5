@@ -24,9 +24,10 @@ Gateway (Express)
   ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY)
   ├── /media, /media/:id/links — media file listing + linked entities (ES ll5_media, ll5_media_links)
   ├── /commands/* — device command queue (queue, pending, confirm)
-  ├── Schedulers (10) — heartbeat (5min), calendar sync (30min), calendar review (periodic),
+  ├── Schedulers (11) — heartbeat (5min), calendar sync (30min), calendar review (periodic),
       daily briefing (morning), tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00),
-      message batch (30min), journal consolidation (2am), journal health/agent nudge (15min)
+      message batch (30min), journal consolidation (2am), journal health/agent nudge (15min),
+      health polling (20min, detects sleep/activity/HR/stress/energy/weight, 7-day baseline)
   ├── System message dedup — checks PG for recent duplicate before inserting
   └── Immediate + ignored messages mark ES doc as processed (prevents double-report/leak in batch review)
 

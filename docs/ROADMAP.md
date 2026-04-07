@@ -6,7 +6,7 @@ Unprioritized feature ideas and future directions. See PROGRESS.md for what's al
 
 ## ~~Health MCP~~ (DONE — Mar 31)
 
-Built with Garmin integration: sleep, HR, body battery, HRV, VO2 Max, respiration, training readiness, activities, body composition. Dashboard UI. Generic repository pattern. **Remaining**: health polling scheduler (detect notable changes, push insights to agent).
+Built with Garmin integration: sleep, HR, body battery, HRV, VO2 Max, respiration, training readiness, activities, body composition. Dashboard UI. Generic repository pattern. Health polling scheduler: detects sleep/activity/HR anomaly/stress/energy/weight, 7-day baseline comparisons, batched system messages. **Remaining**: Android Health Connect API for real-time push.
 
 ---
 
@@ -100,16 +100,9 @@ For email accounts where API access isn't available (e.g., work Exchange behind 
 
 ---
 
-## Calendar Source Management UI
+## ~~Calendar Source Management UI~~ (DONE)
 
-Dashboard UI for selecting which calendars to sync, ignore, or configure. The `configure_calendar` tool already supports `ignore/read/readwrite` per calendar — this adds the visual interface.
-
-- **Calendar list**: show all discovered calendars (Google, phone-pushed, future sources) with current access mode
-- **Per-calendar toggle**: ignore / read / readwrite
-- **Color picker**: assign display colors per calendar
-- **Source badges**: Google, Phone, Tickler — so user knows where each calendar comes from
-- **Auto-discovery**: when new calendars appear (from Google sync or phone push), show them as "new" for user to configure
-- **Location**: calendar settings panel (gear icon on calendar page) — extend the existing settings UI
+Built at `/calendar/settings` — per-calendar ignore/read/readwrite toggles, Google account connection status, reconnect button. **Remaining ideas**: color picker, auto-discovery notification for new calendars.
 
 ---
 
@@ -141,14 +134,9 @@ The agent should proactively drive the GTD review workflow — not just remind t
 
 ---
 
-## Someday/Maybe + Higher Horizons
+## ~~Someday/Maybe + Higher Horizons~~ (DONE)
 
-Verify and extend GTD horizon support:
-
-- **Someday/Maybe list**: already supported via `list_type: 'someday'` on actions — verify it works end-to-end (create, review, promote to active)
-- **Higher horizons** (h=2 areas, h=3 goals, h=4 vision, h=5 purpose): already in `gtd_horizons` table — ensure the agent actively uses them for context when making decisions
-- **Review integration**: weekly review should include someday/maybe scan ("anything here you want to activate?") and periodic horizon check ("are your projects aligned with your goals?")
-- **Dashboard UI**: ensure all horizon levels are visible and editable
+Someday/maybe works end-to-end (list_type filter, create dialog, badges in UI). Horizons page with all levels (h=0-5). Weekly review skill covers both. Agent actively uses horizons for context.
 
 ---
 

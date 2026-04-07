@@ -12,6 +12,7 @@ import { MessageBatchReviewScheduler } from './message-batch-review.js';
 import { HeartbeatScheduler } from './heartbeat.js';
 import { JournalHealthScheduler } from './journal-health.js';
 import { JournalConsolidationScheduler } from './journal-consolidation.js';
+import { HealthPollingScheduler } from './health-polling.js';
 import { logger } from '../utils/logger.js';
 
 export async function startSchedulers(
@@ -90,6 +91,13 @@ export async function startSchedulers(
     startHour, endHour, timezone, userId,
   });
   journalHealthScheduler.start();
+
+  // Health polling: detect new health events and notify agent
+  const healthPollingScheduler = new HealthPollingScheduler(es, pgPool, {
+    intervalMinutes: s('health_polling_minutes', 20),
+    startHour, endHour, timezone, userId,
+  });
+  healthPollingScheduler.start();
 
   // Journal consolidation: nightly trigger
   const journalConsolidationScheduler = new JournalConsolidationScheduler(pgPool, {
