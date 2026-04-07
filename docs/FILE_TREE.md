@@ -34,7 +34,7 @@ ll5/
 │   │   ├── auth-token-system.md      # Signed tokens with PIN re-auth
 │   │   ├── mcp-personal-knowledge.md # 17 tools, ES indices
 │   │   ├── mcp-gtd.md               # 14 tools, PG tables
-│   │   ├── mcp-awareness.md          # 29 tools, ES indices (IM, location, calendar, journal, user model, geo search, media, notification rules)
+│   │   ├── mcp-awareness.md          # ES indices (IM, location, calendar, journal, user model, geo search, media, notification rules)
 │   │   ├── mcp-google.md             # 9 tools, OAuth
 │   │   ├── mcp-messaging.md          # 8 tools, WhatsApp/Telegram
 │   │   ├── gateway.md                # Webhook receiver design

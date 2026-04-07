@@ -28,24 +28,32 @@ Current state of the LL5 personal assistant system.
 | Component | Status |
 |-----------|--------|
 | MCP connections (6) | Working |
-| Skills (10) | review, daily, clarify, engage, sweep, plan, welcome, consolidate, catchup, calendar-review |
+| Skills | review, daily, clarify, engage, sweep, plan, welcome, consolidate, catchup, calendar-review, doc-audit |
 | Welcome launcher | Working |
 | Chat bridge (SSE listener) | Working |
 | Stop/FileChanged hooks | Configured |
 | Auth (signed tokens + PIN) | Working |
 
-## Tool Count
+## Tool & Page Counts
 
-| MCP | Tools | Notes |
-|-----|-------|-------|
-| personal-knowledge | 17 | facts, people (with status), places, profile, data gaps, search |
-| gtd | 17 | actions, projects, horizons, inbox, shopping, chat, health check, recommendations |
-| awareness | 29 | IM, entity status, situation, calendar, notable events, geo search (4), notification rules, location (3), media (6), journal (3), user model (4) |
-| calendar (google) | 18 | OAuth, calendars, events, availability, email, ticklers |
-| messaging | 14 | accounts, send (WA/TG), conversations, contacts, link/unlink, auto-match, sync |
-| health | 11 | sleep, HR, daily stats, activities, body comp, trends, sources (4), sync |
-| channel (ll5-run) | 5 | get_current_time, reply, push_to_user, inspect_image, save_image |
-| **Total** | **111** | |
+Counts go stale. To get current numbers:
+
+```bash
+# MCP tools per package
+for pkg in personal-knowledge gtd awareness google messaging health; do
+  echo "$pkg: $(grep -r 'server\.tool(' packages/$pkg/src/tools/ | wc -l | tr -d ' ')"
+done
+# Channel MCP tools
+grep "name: '" ll5-run/channel/ll5-channel.mjs | wc -l
+# Dashboard pages
+find packages/dashboard/src/app -name "page.tsx" | wc -l
+# Gateway schedulers
+ls packages/gateway/src/scheduler/*.ts | wc -l
+# Gateway REST endpoints
+grep -E 'app\.(get|post|put|patch|delete)\(' packages/gateway/src/server.ts packages/gateway/src/chat.ts | wc -l
+```
+
+Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoints.
 
 ## Roadmap Status
 
@@ -70,8 +78,6 @@ Current state of the LL5 personal assistant system.
 | Feature | Design Doc | Priority | Effort |
 |---------|-----------|----------|--------|
 | Health polling scheduler | health-polling-scheduler.md | Medium | Medium — gateway scheduler + threshold logic |
-| ~~Quick camera → agent~~ | DONE | — | Android share sheet deployed |
-| ~~Bidirectional chat capture~~ | DONE | — | fromMe captured in webhook, written to ES, escalation on ignored/batched chats |
 | WhatsApp history backfill | ROADMAP.md | Low | Medium — Evolution API findMessages or export parser |
 | Email sync from phone | ROADMAP.md | Low | Medium — Android ContentProvider for metadata |
 | Money tracking MCP | ROADMAP.md | Low | Large — bank APIs, categorization, projections |
