@@ -81,7 +81,7 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 | WhatsApp history backfill | ROADMAP.md | Low | Medium — Evolution API findMessages or export parser |
 | Email sync from phone | ROADMAP.md | Low | Medium — Android ContentProvider for metadata |
 | Money tracking MCP | ROADMAP.md | Low | Large — bank APIs, categorization, projections |
-| Data source config UI | data-source-config.md | Low | Small — settings page with toggles |
+| ~~Data source config~~ | DONE | — | Gateway enforcement + dashboard /settings/data-sources toggle UI |
 | User management | ROADMAP.md | Low | Medium — multi-user UI, onboarding wizard |
 | Agent routing rename | agent-routing-rename.md | Low | Small — cosmetic rename of notification_rules |
 
@@ -97,6 +97,7 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 ## Recent Changes
 
+- 2026-04-07: Data source config: per-source toggles (GPS, IM, calendar, health, WhatsApp) in user_settings JSONB. Gateway isSourceEnabled() helper with 60s cache. Enforcement in processItem + WhatsApp webhook. Dashboard /settings/data-sources page with toggle switches.
 - 2026-04-07: Health polling scheduler: polls ES every 20min during active hours, detects new sleep/activity/HR anomaly/stress/energy/weight events, batches into system messages with notification levels. 7-day baseline for conditional alerts. Dedup per day.
 - 2026-04-07: Source routing metadata on system messages: WhatsApp webhook includes platform/remote_jid/sender in metadata, PG NOTIFY passes it through, channel MCP exposes it in meta.source. Agent instructions updated: MUST reply on the same platform using send_whatsapp with remote_jid.
 - 2026-04-07: Contacts page: instant optimistic UI (fire-and-forget server updates, no blocking), sessionStorage cache (instant paint on revisit, background refresh if stale >5min)

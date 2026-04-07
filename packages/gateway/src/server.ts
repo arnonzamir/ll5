@@ -17,6 +17,7 @@ import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
+import { isSourceEnabled } from './utils/data-source-config.js';
 import type { EnvConfig } from './utils/env.js';
 import { logger } from './utils/logger.js';
 
@@ -217,6 +218,13 @@ async function processItem(
   matcher?: NotificationRuleMatcher,
 ): Promise<ItemResult> {
   try {
+    // Check data source toggles (user_settings.data_sources)
+    const sourceMap: Record<string, string> = { location: 'gps', message: 'im_capture', calendar_event: 'calendar' };
+    const sourceKey = sourceMap[item.type];
+    if (sourceKey && pgPool && !await isSourceEnabled(pgPool, userId, sourceKey)) {
+      return { index: itemIndex, type: item.type, status: 'ok' }; // silently skip
+    }
+
     switch (item.type) {
       case 'location':
         await processLocation(es, userId, item, config.geocodingApiKey, pgPool);
@@ -957,6 +965,11 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         return;
       }
 
+      // Check if WhatsApp data source is enabled
+      if (!await isSourceEnabled(pgPool, userId, 'whatsapp')) {
+        res.json({ status: 'ok' }); // 200 to Evolution API, but skip processing
+        return;
+      }
       await processWhatsAppWebhook(esClient, pgPool, notificationMatcher, userId, payload);
       res.json({ status: 'ok' });
     } catch (err) {

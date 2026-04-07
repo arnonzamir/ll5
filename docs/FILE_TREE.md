@@ -96,6 +96,7 @@ ll5/
 │       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich), WhatsApp webhook (images, fromMe capture, pushName enrichment, source routing), routing rule matcher
 │       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge (journal+proactivity), journal consolidation, health polling
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
+│       ├── utils/data-source-config.ts # Per-source enabled/disabled check with 60s cache (reads user_settings JSONB)
 │       ├── utils/system-message.ts    # Shared system message writer with scheduler event correlation + source routing metadata
 │       ├── utils/export.ts            # Full user data export (ES + PG → JSON, no media binaries)
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message

@@ -31,6 +31,7 @@ import {
   Image as ImageIcon,
   HeartPulse,
   Clock,
+  ToggleLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logoutAction } from "@/app/(user)/logout-action";
@@ -310,6 +311,14 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                     >
                       <Clock className="h-4 w-4" />
                       Scheduler
+                    </Link>
+                    <Link
+                      href="/settings/data-sources"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <ToggleLeft className="h-4 w-4" />
+                      Data Sources
                     </Link>
                     <Link
                       href="/settings/health"
