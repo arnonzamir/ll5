@@ -123,11 +123,11 @@ ll5/
 │       ├── migrations/                  # health_source_credentials table
 │       └── server.ts                    # MCP server with ES+PG, registers adapters
 │
-├── packages/messaging/                # @ll5/messaging — PG-backed MCP [not deployed]
+├── packages/messaging/                # @ll5/messaging — PG-backed MCP (live: mcp-messaging.noninoni.click)
 │   └── src/
 │       ├── clients/                   # Evolution API (WhatsApp), Telegram Bot API
-│       ├── repositories/postgres/     # Accounts, conversations
-│       ├── tools/                     # 8 tools (send, read, sync, permissions)
+│       ├── repositories/postgres/     # Accounts, conversations, contacts (with person linking)
+│       ├── tools/                     # 14 tools (send, read, sync, contacts, link, auto-match)
 │       ├── migrations/               # 001 tables, 002 contacts, 003 archived conversations
 │       └── server.ts
 │

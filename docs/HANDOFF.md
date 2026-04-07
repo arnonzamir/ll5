@@ -15,7 +15,7 @@ Claude Code (ll5-run workspace)
   ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation, journal, user model, geo search (POI/distance/geocode)
   ├── calendar MCP (PG+ES) — Unified timeline (Google+phone+tickler), Gmail, OAuth
   ├── health MCP (ES+PG) — sleep, heart rate, daily stats, activities, body comp, stress, trends
-  └── messaging MCP (PG) — WhatsApp, Telegram [not deployed]
+  └── messaging MCP (PG) — WhatsApp send/receive, contacts, auto-match
 
 Gateway (Express)
   ├── POST /webhook/:token — phone push data (GPS, IM, calendar)

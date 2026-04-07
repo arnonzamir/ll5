@@ -1,29 +1,24 @@
 # LL5 Roadmap
 
-Unprioritized feature ideas and future directions.
+Unprioritized feature ideas and future directions. See PROGRESS.md for what's already built.
 
 ---
 
-## Health MCP
+## ~~Health MCP~~ (DONE — Mar 31)
 
-A health & fitness data layer. Must be generic (not tied to one device/platform), but Garmin Connect is the first integration target.
-
-- **Data model**: heart rate, sleep, steps, stress, body battery, activities, body composition
-- **Garmin integration**: wrap Garmin Connect API (OAuth2, activity polling, daily summaries)
-- **Generic interface**: repository pattern so Fitbit/Apple Health/Whoop can plug in later
-- **Agent use**: "How did I sleep?" / "Am I recovered enough for a run?" / correlate stress with calendar load
-- **Proactive**: surface insights — "You've had 3 bad sleep nights, consider lighter schedule"
+Built with Garmin integration: sleep, HR, body battery, HRV, VO2 Max, respiration, training readiness, activities, body composition. Dashboard UI. Generic repository pattern. **Remaining**: health polling scheduler (detect notable changes, push insights to agent).
 
 ---
 
-## Push Notification Levels
+## ~~Push Notification Levels~~ (DONE — Apr 3)
 
-Currently FCM pushes are binary (send or don't). Need tiered urgency:
+4 levels: silent/notify/alert/critical. Agent chooses per push, user sets ceiling + quiet hours. Android channels. FCM routing.
 
-- **Notice now**: vibrate + sound + heads-up notification. For: immediate messages from family, urgent calendar alerts
-- **Look next time**: silent notification, badge only. For: batch summaries, FYI updates, non-urgent agent insights
-- **Background**: no notification at all, just available in the app. For: routine acks, system status
-- **Implementation**: Android notification channels per urgency level, FCM `priority` field, agent decides which level based on message priority rules
+---
+
+## ~~Geo Search~~ (DONE — Apr 5)
+
+Built into awareness MCP (not separate): search_nearby_pois (Overpass), geocode_address (Nominatim), get_area_context, get_distance (OSRM).
 
 ---
 
@@ -188,9 +183,10 @@ Adding and managing multiple users:
 ## Technical Debt & Infrastructure
 
 - **SSE for Android chat**: replace polling with OkHttp SSE (web already uses SSE)
-- **Nightly journal consolidation**: server-side Claude API call to distill daily journal entries
+- ~~**Nightly journal consolidation**~~: DONE — gateway 2am scheduler + awareness MCP tools
 - **Test coverage**: unit + integration tests for gateway, MCPs, channel MCP
-- **CI deploy**: automated SSH deploy in GitHub Actions (currently manual `docker compose pull && up`)
+- ~~**CI deploy**~~: DONE — GitHub Actions SSH deploy with GHCR docker login
 - **Session resume**: ensure `--resume` works with channel MCP, or document that `./ll5` is required
-- **UI list views audit**: review ALL list views (actions, projects, inbox, people, contacts, conversations, logs, audit logs) — ensure scrollable, filterable, correct titles/headers. Logs and audit logs currently show with no titles.
-- **Uniform logging format**: all services should use `[ClassName][methodName] message` format consistently. Audit existing logs across gateway, MCPs, and channel MCP.
+- ~~**UI list views audit**~~: DONE — all pages have headers, subtitles, search, edit/delete
+- **Uniform logging format**: all services should use `[ClassName][methodName] message` format consistently
+- **Duplicated auth-middleware**: personal-knowledge + gtd MCPs have identical copies, should use @ll5/shared
