@@ -69,8 +69,8 @@ Current state of the LL5 personal assistant system.
 | Feature | Design Doc | Priority | Effort |
 |---------|-----------|----------|--------|
 | Health polling scheduler | health-polling-scheduler.md | Medium | Medium — gateway scheduler + threshold logic |
-| Quick camera → agent | ROADMAP.md | Medium | Small — Android share sheet integration |
-| Bidirectional chat capture | ROADMAP.md | Medium | Small — enable fromMe in webhook + write to ES |
+| ~~Quick camera → agent~~ | DONE | — | Android share sheet deployed |
+| ~~Bidirectional chat capture~~ | DONE | — | fromMe captured in webhook, written to ES, escalation on ignored/batched chats |
 | WhatsApp history backfill | ROADMAP.md | Low | Medium — Evolution API findMessages or export parser |
 | Email sync from phone | ROADMAP.md | Low | Medium — Android ContentProvider for metadata |
 | Money tracking MCP | ROADMAP.md | Low | Large — bank APIs, categorization, projections |

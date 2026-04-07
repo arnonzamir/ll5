@@ -22,15 +22,9 @@ Built into awareness MCP (not separate): search_nearby_pois (Overpass), geocode_
 
 ---
 
-## Quick Camera → Agent
+## ~~Quick Camera → Agent~~ (DONE)
 
-Frictionless way to send a photo to the agent. Three approaches (in order of simplicity):
-
-1. **Share from Photos** (best): Android share sheet integration — user takes photo normally, shares to LL5 from gallery. LL5 receives the image, uploads to gateway, sends to agent. No custom camera needed.
-2. **Photo observer**: background hook that watches for new photos in the camera roll, auto-sends to agent with context (time, location)
-3. **Quick capture widget**: home screen widget that opens camera → takes photo → sends directly to LL5. One tap.
-
-All approaches: image goes to Google Photos normally AND to the agent via chat upload.
+Android share sheet deployed — user shares image from gallery to LL5, uploads to gateway, agent sees it. **Remaining ideas**: photo observer (auto-send new photos), quick capture widget (home screen one-tap).
 
 ---
 
@@ -57,23 +51,14 @@ Personal finance layer. Progressive build:
 
 ---
 
-## Bidirectional Chat Capture
+## ~~Bidirectional Chat Capture~~ (DONE for WhatsApp)
 
-Currently only captures messages the user RECEIVES. Need to also capture what the user SENDS:
+WhatsApp `fromMe` messages captured in webhook → written to ES with `from_me: true`, `processed: true`. Escalation triggers on user activity in ignored/batched chats. Agent sees "You sent" system messages for immediate/agent conversations.
 
-### WhatsApp
-- Evolution API already sees outbound messages (`fromMe: true`) — currently filtered out in `processWhatsAppWebhook`. Enable capture (write to ES, don't notify agent unless relevant)
-- Agent can then understand full conversations, not just one side
-
-### Slack
-- Android notification listener only sees incoming. Options:
-  - Slack API (if workspace allows): read conversation history
-  - Accessibility service: capture compose/send events (invasive, fragile)
-  - Manual: user shares conversation screenshots to LL5
-
-### Other chats (Telegram, SMS)
-- Telegram: Bot API can read messages in conversations where bot is a member
-- SMS: Android SMS ContentProvider has full sent/received history — sync on demand
+### Remaining
+- **Slack**: API (if workspace allows), accessibility service (fragile), or manual screenshots
+- **Telegram**: Bot API reads conversations where bot is member
+- **SMS**: Android SMS ContentProvider — sync on demand
 
 ---
 
