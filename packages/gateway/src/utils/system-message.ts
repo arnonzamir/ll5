@@ -15,6 +15,15 @@ export interface SchedulerEventMeta {
   fired_at: string;
 }
 
+export interface SourceRoutingMeta {
+  platform: string;         // 'whatsapp', 'telegram'
+  remote_jid: string;       // conversation ID on the platform
+  account_id?: string;      // messaging account UUID
+  sender_name?: string;     // display name of sender
+  is_group?: boolean;
+  group_name?: string;
+}
+
 /**
  * Generate a scheduler event ID and metadata.
  */
@@ -38,6 +47,7 @@ export async function insertSystemMessage(
   content: string,
   notify?: NotifyOptions,
   schedulerEvent?: SchedulerEventMeta,
+  sourceRouting?: SourceRoutingMeta,
 ): Promise<string | null> {
   let messageId: string | null = null;
 
@@ -47,6 +57,9 @@ export async function insertSystemMessage(
     metadata.scheduler = schedulerEvent.scheduler;
     metadata.event_id = schedulerEvent.event_id;
     metadata.fired_at = schedulerEvent.fired_at;
+  }
+  if (sourceRouting) {
+    metadata.source = sourceRouting;
   }
 
   // Append event_id to content so the agent can reference it

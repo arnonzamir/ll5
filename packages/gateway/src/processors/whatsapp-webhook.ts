@@ -389,6 +389,15 @@ export async function processWhatsAppWebhook(
       pgPool,
       userId,
       `[WhatsApp] ${sender}${groupInfo}: "${truncBody}"${mediaInfo}`,
+      undefined, // notify
+      undefined, // schedulerEvent
+      {
+        platform: 'whatsapp',
+        remote_jid: remoteJid,
+        sender_name: sender,
+        is_group: isGroup,
+        group_name: groupName ?? undefined,
+      },
     );
 
     // Mark as processed so batch review doesn't re-report it

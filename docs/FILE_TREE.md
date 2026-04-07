@@ -96,7 +96,7 @@ ll5/
 │       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich), WhatsApp webhook (images via Evolution API), routing rule matcher
 │       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge (journal+proactivity), journal consolidation
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
-│       ├── utils/system-message.ts    # Shared system message writer with scheduler event correlation
+│       ├── utils/system-message.ts    # Shared system message writer with scheduler event correlation + source routing metadata
 │       ├── utils/export.ts            # Full user data export (ES + PG → JSON, no media binaries)
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message
 │       ├── utils/fcm-sender.ts       # FCM v1 API sender (service account JWT + OAuth2, 4-level notification)
