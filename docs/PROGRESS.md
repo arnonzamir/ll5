@@ -28,7 +28,7 @@ Current state of the LL5 personal assistant system.
 | Component | Status |
 |-----------|--------|
 | MCP connections (6) | Working |
-| Skills (10) | Written (review, daily, clarify, engage, sweep, plan, welcome, consolidate, catchup, calendar-review) |
+| Skills (10) | review, daily, clarify, engage, sweep, plan, welcome, consolidate, catchup, calendar-review |
 | Welcome launcher | Working |
 | Chat bridge (SSE listener) | Working |
 | Stop/FileChanged hooks | Configured |
@@ -36,15 +36,16 @@ Current state of the LL5 personal assistant system.
 
 ## Tool Count
 
-| MCP | Tools |
-|-----|-------|
-| personal-knowledge | 17 |
-| gtd | 14 + 3 chat |
-| awareness | 10 (+ 4 geo search) |
-| calendar | 13 (10 + 3 tickler) |
-| messaging | 14 (send, sync, contacts, link, auto-match) |
-| health | 8 (sleep, HR, daily stats, activities, body comp, trends, sources, sync) |
-| **Total** | **83** |
+| MCP | Tools | Notes |
+|-----|-------|-------|
+| personal-knowledge | 17 | facts, people (with status), places, profile, data gaps, search |
+| gtd | 17 | actions, projects, horizons, inbox, shopping, chat, health check, recommendations |
+| awareness | 29 | IM, entity status, situation, calendar, notable events, geo search (4), notification rules, location (3), media (6), journal (3), user model (4) |
+| calendar (google) | 18 | OAuth, calendars, events, availability, email, ticklers |
+| messaging | 14 | accounts, send (WA/TG), conversations, contacts, link/unlink, auto-match, sync |
+| health | 11 | sleep, HR, daily stats, activities, body comp, trends, sources (4), sync |
+| channel (ll5-run) | 5 | get_current_time, reply, push_to_user, inspect_image, save_image |
+| **Total** | **111** | |
 
 ## Roadmap Status
 

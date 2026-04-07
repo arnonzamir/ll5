@@ -34,7 +34,7 @@ ll5/
 │   │   ├── auth-token-system.md      # Signed tokens with PIN re-auth
 │   │   ├── mcp-personal-knowledge.md # 17 tools, ES indices
 │   │   ├── mcp-gtd.md               # 14 tools, PG tables
-│   │   ├── mcp-awareness.md          # 8 tools, ES indices
+│   │   ├── mcp-awareness.md          # 29 tools, ES indices (IM, location, calendar, journal, user model, geo search, media, notification rules)
 │   │   ├── mcp-google.md             # 9 tools, OAuth
 │   │   ├── mcp-messaging.md          # 8 tools, WhatsApp/Telegram
 │   │   ├── gateway.md                # Webhook receiver design
@@ -134,7 +134,7 @@ ll5/
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
 │   └── src/
 │       ├── app/(auth)/login/          # Login page + server action
-│       ├── app/(user)/                # dashboard, calendar (timeline day/week views +settings +ticklers), actions, projects, inbox, shopping, people, locations, places, media, health, phone-data, sessions, settings (contacts [3 tabs: people/contacts/groups, link/unlink/auto-match, optimistic UI + sessionStorage cache], notifications, messaging, health, notification-levels, scheduler), profile
+│       ├── app/(user)/                # 26 pages: dashboard, calendar (+settings +ticklers), actions, projects, inbox, shopping, people, knowledge, horizons, contacts (old), locations, places, media, health, journal, phone-data, sessions, export, profile, settings/ (contacts [3 tabs + link/unlink/auto-match], notifications, messaging, health, notification-levels, scheduler)
 │       ├── app/(admin)/               # Admin pages: health, users, tools
 │       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations
 │       ├── components/                # Nav (Calendar/Organize/People/Data dropdowns, profile menu), cards, chat widget, shadcn/ui

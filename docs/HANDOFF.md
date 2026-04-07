@@ -24,9 +24,9 @@ Gateway (Express)
   ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY)
   ├── /media, /media/:id/links — media file listing + linked entities (ES ll5_media, ll5_media_links)
   ├── /commands/* — device command queue (queue, pending, confirm)
-  ├── Schedulers — calendar sync (30min), calendar review (2h), daily briefing (7am),
-      tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00), message batch (30min),
-      journal consolidation (2am)
+  ├── Schedulers (10) — heartbeat (5min), calendar sync (30min), calendar review (periodic),
+      daily briefing (morning), tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00),
+      message batch (30min), journal consolidation (2am), journal health/agent nudge (15min)
   ├── System message dedup — checks PG for recent duplicate before inserting
   └── Immediate + ignored messages mark ES doc as processed (prevents double-report/leak in batch review)
 
@@ -128,7 +128,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - Agent must journal every notification level decision
 - Legacy channels (`urgent`, `info`, `ll5_morning`, `ll5_tickler`, `ll5_urgent`, `ll5_general`) kept for backward compat
 
-**Elasticsearch** (8.15.0, 15 indices):
+**Elasticsearch** (8.15.0 on server, 8.17.0 in repo compose — server pinned to 8.15.0):
 - `ll5_knowledge_*` — facts, people (with `status`: full/contact-only), places, profile, data_gaps
 - `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
 - `ll5_agent_*` — journal (micro-entries), user_model (consolidated, versioned with history index), user_model_history (snapshots before overwrite)
