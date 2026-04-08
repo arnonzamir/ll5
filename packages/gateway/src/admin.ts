@@ -8,6 +8,27 @@ import { logger } from './utils/logger.js';
 const BCRYPT_SALT_ROUNDS = 12;
 const MIN_PIN_LENGTH = 4;
 
+/** Common weak PINs that should be rejected. */
+const WEAK_PIN_BLOCKLIST = new Set([
+  '1234', '0000', '1111', '2222', '3333', '4444',
+  '5555', '6666', '7777', '8888', '9999',
+  '123456', '654321', '111111', '000000',
+]);
+
+/**
+ * Validate PIN strength beyond minimum length.
+ * Returns an error message if the PIN is too weak, or null if acceptable.
+ */
+function validatePinStrength(pin: string): string | null {
+  if (pin.length < MIN_PIN_LENGTH) {
+    return `PIN must be at least ${MIN_PIN_LENGTH} characters`;
+  }
+  if (WEAK_PIN_BLOCKLIST.has(pin)) {
+    return 'PIN is too common and easily guessed. Choose a less predictable PIN.';
+  }
+  return null;
+}
+
 interface AdminRequest extends Request {
   adminUserId: string;
 }
@@ -150,8 +171,9 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
       return;
     }
 
-    if (pin.length < MIN_PIN_LENGTH) {
-      res.status(400).json({ error: `PIN must be at least ${MIN_PIN_LENGTH} characters` });
+    const pinError = validatePinStrength(pin);
+    if (pinError) {
+      res.status(400).json({ error: pinError });
       return;
     }
 
@@ -316,8 +338,14 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
   router.post('/users/:id/pin', admin, async (req: Request, res: Response) => {
     const { pin } = req.body as { pin?: string };
 
-    if (!pin || pin.length < MIN_PIN_LENGTH) {
-      res.status(400).json({ error: `PIN must be at least ${MIN_PIN_LENGTH} characters` });
+    if (!pin) {
+      res.status(400).json({ error: 'pin is required' });
+      return;
+    }
+
+    const pinError = validatePinStrength(pin);
+    if (pinError) {
+      res.status(400).json({ error: pinError });
       return;
     }
 

@@ -19,6 +19,7 @@ import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
 import { isSourceEnabled } from './utils/data-source-config.js';
+import { resolveWhatsAppUserId } from './utils/whatsapp-user-resolver.js';
 import type { EnvConfig } from './utils/env.js';
 import { logger } from './utils/logger.js';
 
@@ -962,8 +963,14 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     try {
       const payload = req.body;
 
-      // Get the default user ID from webhook tokens
-      const userId = Object.values(config.webhookTokens)[0];
+      // Resolve user from the instance name in the webhook payload
+      const instanceName = payload?.instance as string | undefined;
+      const fallbackUserId = Object.values(config.webhookTokens)[0];
+
+      const userId = instanceName
+        ? await resolveWhatsAppUserId(pgPool, instanceName, fallbackUserId)
+        : fallbackUserId;
+
       if (!userId) {
         res.status(500).json({ error: 'No user configured' });
         return;

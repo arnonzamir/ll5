@@ -97,6 +97,7 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 ## Recent Changes
 
+- 2026-04-08: User management Phase 3+4: Multi-user schedulers (per-user scheduler sets from auth_users, 5-min reconciliation for new/disabled users), WhatsApp webhook user routing (instance→user_id cache with 5min TTL), PIN strength validation (blocklist of common PINs)
 - 2026-04-08: Fix admin users page: gateway returns `{users:[...]}` not bare array, field is `user_id` not `id`
 - 2026-04-08: User management Phase 2: Admin CRUD API (10 endpoints: users + families), admin dashboard UI (list/create/edit/disable users, PIN reset, family management), login rate limiting (5 attempts / 15min lockout)
 - 2026-04-08: User management Phase 1: AsyncLocalStorage in all 6 MCPs (fixes concurrency hazard), DB migration 019 (auth_users: role/enabled/username/display_name columns, families + family_members tables), username login (dashboard + gateway), audit log username field
