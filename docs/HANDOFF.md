@@ -219,3 +219,4 @@ See docs/implementation/deployment-log.md for full details:
 - **Contacts page performance**: Setting changes are fire-and-forget (optimistic UI, no blocking). Data cached in sessionStorage (key: `ll5_contacts_cache`, 5min TTL). On revisit: instant paint from cache, background refresh if stale.
 - **Contact-only persons**: Person records with `status: 'contact-only'` are lightweight stubs auto-created from messaging contacts. They enable per-contact routing without a full KB entry. The gateway matcher is unchanged — all routing resolves via person_id → contact_settings. Promote to `status: 'full'` to make a real KB person. Dashboard `/settings/contacts` has 3 tabs: People (full+contacts), Contacts (contact-only + unlinked), Groups. `ensureIndices` now calls `putMapping` on existing indices to add new fields.
 
+
