@@ -6,7 +6,8 @@ import { getToken, decodeTokenPayload } from "@/lib/auth";
 // --- Types ---
 
 export interface User {
-  id: string;
+  id: string;        // mapped from user_id
+  user_id: string;
   username: string | null;
   display_name: string | null;
   role: string;
@@ -68,7 +69,9 @@ export async function fetchUsers(): Promise<User[]> {
   try {
     const res = await adminFetch("/admin/users");
     if (!res || !res.ok) return [];
-    return (await res.json()) as User[];
+    const data = (await res.json()) as { users?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
+    const rows = Array.isArray(data) ? data : data.users ?? [];
+    return rows.map((r) => ({ ...r, id: r.user_id ?? r.id })) as User[];
   } catch (err) {
     console.error("[fetchUsers] error:", err instanceof Error ? err.message : String(err));
     return [];
@@ -193,7 +196,8 @@ export async function fetchFamilies(): Promise<Family[]> {
   try {
     const res = await adminFetch("/admin/families");
     if (!res || !res.ok) return [];
-    return (await res.json()) as Family[];
+    const data = (await res.json()) as { families?: Family[] } | Family[];
+    return Array.isArray(data) ? data : data.families ?? [];
   } catch (err) {
     console.error("[fetchFamilies] error:", err instanceof Error ? err.message : String(err));
     return [];
