@@ -467,6 +467,7 @@ export function ContactsView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [platformFilter, setPlatformFilter] = useState<PlatformFilter>("all");
   const [linkFilter, setLinkFilter] = useState<LinkFilter>("all");
+  const [namedOnly, setNamedOnly] = useState(false);
   const [page, setPage] = useState(1);
 
   // Link modal state
@@ -477,10 +478,11 @@ export function ContactsView() {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadContacts = useCallback(
-    (opts?: { query?: string; platform?: PlatformFilter; linked?: LinkFilter; p?: number }) => {
+    (opts?: { query?: string; platform?: PlatformFilter; linked?: LinkFilter; named?: boolean; p?: number }) => {
       const q = opts?.query ?? searchQuery;
       const plat = opts?.platform ?? platformFilter;
       const link = opts?.linked ?? linkFilter;
+      const named = opts?.named ?? namedOnly;
       const pg = opts?.p ?? page;
 
       startTransition(async () => {
@@ -491,13 +493,14 @@ export function ContactsView() {
         if (plat !== "all") params.platform = plat;
         if (link === "linked") params.linkedOnly = true;
         else if (link === "unlinked") params.linkedOnly = false;
+        if (named) params.namedOnly = true;
 
         const { contacts: data, total } = await fetchContacts(params);
         setContacts(data);
         setTotalContacts(total);
       });
     },
-    [searchQuery, platformFilter, linkFilter, page]
+    [searchQuery, platformFilter, linkFilter, namedOnly, page]
   );
 
   const loadPeople = useCallback(() => {
@@ -534,6 +537,12 @@ export function ContactsView() {
     setLinkFilter(value);
     setPage(1);
     loadContacts({ linked: value, p: 1 });
+  }
+
+  function handleNamedOnlyChange(value: boolean) {
+    setNamedOnly(value);
+    setPage(1);
+    loadContacts({ named: value, p: 1 });
   }
 
   function handlePageChange(newPage: number) {
@@ -677,6 +686,18 @@ export function ContactsView() {
             </button>
           ))}
         </div>
+
+        {/* Named only toggle */}
+        <button
+          onClick={() => handleNamedOnlyChange(!namedOnly)}
+          className={`px-2.5 py-1 text-xs font-medium rounded border transition-colors cursor-pointer shrink-0 ${
+            namedOnly
+              ? "bg-gray-100 text-gray-800 border-gray-300"
+              : "text-gray-400 hover:text-gray-600 border-gray-200"
+          }`}
+        >
+          Named only
+        </button>
       </div>
 
       {/* Stats */}

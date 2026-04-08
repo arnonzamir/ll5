@@ -24,6 +24,7 @@ export interface ContactListParams {
   platform?: string;
   query?: string;
   hasPersonLink?: boolean;
+  hasName?: boolean;
   is_group?: boolean;
   limit?: number;
   offset?: number;

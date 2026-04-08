@@ -61,14 +61,15 @@ export async function fetchLogs(params: LogQuery): Promise<LogResult> {
   // Free text search
   const must: Record<string, unknown>[] = [];
   if (params.search) {
+    const searchTerm = params.search;
     must.push({
       bool: {
         should: [
           // Text fields: phrase_prefix for partial matching
-          { multi_match: { query: params.search, fields: ["message", "summary", "error_message"], type: "phrase_prefix" } },
+          { multi_match: { query: searchTerm, fields: ["message", "summary", "error_message"], type: "phrase_prefix" } },
           // Keyword fields: wildcard for partial matching
           ...["tool_name", "entity_type", "service", "source", "action", "level"].map(f => ({
-            wildcard: { [f]: { value: `*${params.search.toLowerCase()}*` } },
+            wildcard: { [f]: { value: `*${searchTerm.toLowerCase()}*` } },
           })),
         ],
         minimum_should_match: 1,

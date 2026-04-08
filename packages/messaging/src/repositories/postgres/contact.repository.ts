@@ -116,6 +116,10 @@ export class PostgresContactRepository
       values.push(params.is_group);
     }
 
+    if (params?.hasName === true) {
+      conditions.push("display_name IS NOT NULL AND display_name != ''");
+    }
+
     const whereClause = conditions.join(' AND ');
 
     // Get total count

@@ -28,12 +28,14 @@ export async function fetchContacts(params?: {
   platform?: string;
   query?: string;
   linkedOnly?: boolean;
+  namedOnly?: boolean;
   offset?: number;
 }): Promise<{ contacts: Contact[]; total: number }> {
   const args: Record<string, unknown> = { is_group: false, limit: 50 };
   if (params?.platform) args.platform = params.platform;
   if (params?.query) args.query = params.query;
   if (params?.linkedOnly !== undefined) args.linked_only = params.linkedOnly;
+  if (params?.namedOnly) args.named_only = true;
   if (params?.offset !== undefined) args.offset = params.offset;
 
   const raw = await mcpCallJsonSafe<Record<string, unknown>>(
