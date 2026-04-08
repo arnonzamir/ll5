@@ -139,7 +139,7 @@ ll5/
 │       ├── app/(auth)/login/          # Login page + server action
 │       ├── middleware.ts               # Injects x-pathname header for server-side route detection
 │       ├── app/(user)/                # 27 pages: dashboard, calendar (+settings +ticklers), actions, projects, inbox, shopping, people, knowledge, horizons, contacts (old), locations, places, media, health, journal, phone-data, sessions, export, profile, settings/ (contacts [3 tabs + link/unlink/auto-match], notifications, messaging, health, notification-levels, scheduler)
-│       ├── app/(admin)/               # Admin pages: health, users, tools
+│       ├── app/(admin)/               # Admin pages: health, users, tools, logs (Datadog-style LogExplorer), audit
 │       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations
 │       ├── components/                # Nav (Calendar/Organize/People/Data dropdowns, profile menu), cards, chat widget, shadcn/ui
 │       ├── lib/                       # MCP client, auth helpers, env

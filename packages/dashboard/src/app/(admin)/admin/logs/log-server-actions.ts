@@ -3,77 +3,77 @@
 import { env } from "@/lib/env";
 import { mcpCallJsonSafe } from "@/lib/api";
 
-export interface LogEntry {
-  timestamp: string;
-  // App log fields
-  service: string;
-  level: string;
-  action: string;
-  message: string;
-  user_id?: string;
-  tool_name?: string;
-  duration_ms?: number;
-  success?: boolean;
-  error_message?: string;
-  metadata?: Record<string, unknown>;
-  // Audit log fields (different schema)
-  source?: string;
-  summary?: string;
-  entity_type?: string;
-  entity_id?: string;
-}
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
 
 export interface LogQuery {
-  index?: "app" | "audit";
-  service?: string;
-  level?: string;
-  action?: string;
-  tool_name?: string;
-  query?: string;
-  from?: string;
-  limit?: number;
+  index: string;                          // 'll5_app_log' | 'll5_audit_log'
+  search?: string;                        // free text
+  timeRange: string;                      // '15m' | '1h' | '4h' | '1d' | '7d'
+  filters: Record<string, string[]>;      // { level: ['error','warn'], service: ['gtd'] }
+  facetFields: string[];                  // ['level', 'service', 'action', 'tool_name']
+  sortField?: string;                     // default: 'timestamp'
+  sortOrder?: "asc" | "desc";            // default: 'desc'
+  limit?: number;                         // default: 100
+  offset?: number;                        // for pagination
 }
 
-export async function fetchLogs(params: LogQuery): Promise<{
-  logs: LogEntry[];
+export interface LogResult {
+  logs: Array<{ _id: string; _source: Record<string, unknown> }>;
   total: number;
-}> {
+  facets: Record<string, Array<{ key: string; count: number }>>;
+}
+
+/* ------------------------------------------------------------------ */
+/*  fetchLogs — main query with aggregations                           */
+/* ------------------------------------------------------------------ */
+
+export async function fetchLogs(params: LogQuery): Promise<LogResult> {
   const baseUrl = env.ELASTICSEARCH_URL;
-  const index =
-    params.index === "audit" ? "ll5_audit_log" : "ll5_app_log";
+  const index = params.index;
   const limit = params.limit ?? 100;
+  const offset = params.offset ?? 0;
+  const sortField = params.sortField ?? "timestamp";
+  const sortOrder = params.sortOrder ?? "desc";
 
-  const filters: Record<string, unknown>[] = [];
+  // Time range filter
+  const timeRangeMap: Record<string, string> = {
+    "15m": "now-15m",
+    "1h": "now-1h",
+    "4h": "now-4h",
+    "1d": "now-1d",
+    "7d": "now-7d",
+  };
+  const gte = timeRangeMap[params.timeRange] ?? "now-1h";
 
-  if (params.service) {
-    // Audit log uses 'source', app log uses 'service'
-    if (params.index === "audit") {
-      filters.push({ term: { source: params.service } });
-    } else {
-      filters.push({ term: { service: params.service } });
+  const filters: Record<string, unknown>[] = [
+    { range: { timestamp: { gte } } },
+  ];
+
+  // Facet filters
+  for (const [field, values] of Object.entries(params.filters)) {
+    if (values.length > 0) {
+      filters.push({ terms: { [field]: values } });
     }
   }
-  if (params.level) {
-    filters.push({ term: { level: params.level } });
-  }
-  if (params.action) {
-    filters.push({ term: { action: params.action } });
-  }
-  if (params.tool_name) {
-    filters.push({ term: { tool_name: params.tool_name } });
-  }
-  if (params.from) {
-    filters.push({ range: { timestamp: { gte: params.from } } });
-  }
 
+  // Free text search
   const must: Record<string, unknown>[] = [];
-  if (params.query) {
+  if (params.search) {
     must.push({
       multi_match: {
-        query: params.query,
+        query: params.search,
         fields: ["message", "summary", "error_message", "tool_name", "entity_type"],
+        type: "phrase_prefix",
       },
     });
+  }
+
+  // Aggregations for facets
+  const aggs: Record<string, unknown> = {};
+  for (const field of params.facetFields) {
+    aggs[field] = { terms: { field, size: 30 } };
   }
 
   try {
@@ -82,40 +82,83 @@ export async function fetchLogs(params: LogQuery): Promise<{
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         size: limit,
-        sort: [{ timestamp: { order: "desc" } }],
+        from: offset,
+        sort: [{ [sortField]: { order: sortOrder } }],
         query: {
           bool: {
-            ...(filters.length > 0 ? { filter: filters } : {}),
+            filter: filters,
             ...(must.length > 0 ? { must } : {}),
           },
         },
+        aggs,
       }),
     });
 
     if (!response.ok) {
-      return { logs: [], total: 0 };
+      console.error("[logs] ES error:", response.status, await response.text().catch(() => ""));
+      return { logs: [], total: 0, facets: {} };
     }
 
     const data = (await response.json()) as {
       hits: {
         total: { value: number };
-        hits: Array<{ _source: LogEntry }>;
+        hits: Array<{ _id: string; _source: Record<string, unknown> }>;
       };
+      aggregations?: Record<string, { buckets: Array<{ key: string; doc_count: number }> }>;
     };
 
+    // Parse facets from aggregations
+    const facets: Record<string, Array<{ key: string; count: number }>> = {};
+    if (data.aggregations) {
+      for (const [field, agg] of Object.entries(data.aggregations)) {
+        facets[field] = agg.buckets.map((b) => ({
+          key: b.key,
+          count: b.doc_count,
+        }));
+      }
+    }
+
     return {
-      logs: data.hits.hits.map((h) => h._source),
+      logs: data.hits.hits.map((h) => ({ _id: h._id, _source: h._source })),
       total: data.hits.total.value,
+      facets,
     };
   } catch (err) {
     console.error("[logs] fetchLogs failed:", err instanceof Error ? err.message : String(err));
-    return { logs: [], total: 0 };
+    return { logs: [], total: 0, facets: {} };
   }
 }
 
-/**
- * Fetch entity details by type and ID for the audit log tooltip.
- */
+/* ------------------------------------------------------------------ */
+/*  fetchLogById — single document for detail panel                    */
+/* ------------------------------------------------------------------ */
+
+export async function fetchLogById(
+  index: string,
+  id: string,
+): Promise<Record<string, unknown> | null> {
+  const baseUrl = env.ELASTICSEARCH_URL;
+
+  try {
+    const response = await fetch(`${baseUrl}/${index}/_doc/${id}`, {
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as {
+      _id: string;
+      _source: Record<string, unknown>;
+    };
+    return { _id: data._id, ...data._source };
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  fetchEntityDetails — audit log entity tooltips                     */
+/* ------------------------------------------------------------------ */
+
 export async function fetchEntityDetails(
   entityType: string,
   entityId: string,

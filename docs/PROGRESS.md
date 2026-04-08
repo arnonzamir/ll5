@@ -91,6 +91,7 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 ## Recent Changes
 
+- 2026-04-08: Admin log overhaul: Datadog-style LogExplorer with faceted sidebar (dynamic ES aggregations), time range presets (15m/1h/4h/1d/7d), sortable columns, search with debounce, slide-out detail panel. Separate /admin/logs (app) and /admin/audit (audit) pages.
 - 2026-04-08: Tech debt: add 235 MCP tests (knowledge: 41, gtd: 45, awareness: 47, health: 35, messaging: 40, google: 27). Grand total: 362 across 8 packages.
 - 2026-04-08: Tech debt: add 168 MCP tests (first batch) (knowledge: 41, gtd: 45, awareness: 47, health: 35). Total: 295+ passing across 6 packages.
 - 2026-04-08: Tech debt: fix 7 failing gateway tests, add 44 new tests (21 shared auth + 23 admin API). Total: 127 tests passing. Add vitest to shared package.
