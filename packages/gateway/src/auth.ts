@@ -7,6 +7,51 @@ import { logger } from './utils/logger.js';
 
 const REFRESH_GRACE_PERIOD_DAYS = 7; // Allow refresh up to 7 days after expiry
 
+// --- In-memory rate limiter for login attempts ---
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+interface LoginAttempt {
+  count: number;
+  firstAttempt: number;
+}
+
+const loginAttempts = new Map<string, LoginAttempt>();
+
+/** Prune expired entries periodically to prevent memory leak. */
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of loginAttempts) {
+    if (now - entry.firstAttempt > LOGIN_WINDOW_MS) {
+      loginAttempts.delete(key);
+    }
+  }
+}, LOGIN_WINDOW_MS);
+
+function recordFailedAttempt(loginId: string): void {
+  const now = Date.now();
+  const existing = loginAttempts.get(loginId);
+  if (!existing || now - existing.firstAttempt > LOGIN_WINDOW_MS) {
+    loginAttempts.set(loginId, { count: 1, firstAttempt: now });
+  } else {
+    existing.count++;
+  }
+}
+
+function isRateLimited(loginId: string): boolean {
+  const entry = loginAttempts.get(loginId);
+  if (!entry) return false;
+  if (Date.now() - entry.firstAttempt > LOGIN_WINDOW_MS) {
+    loginAttempts.delete(loginId);
+    return false;
+  }
+  return entry.count >= LOGIN_MAX_ATTEMPTS;
+}
+
+function clearAttempts(loginId: string): void {
+  loginAttempts.delete(loginId);
+}
+
 interface AuthUser {
   user_id: string;
   pin_hash: string;
@@ -33,6 +78,13 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
       return;
     }
 
+    // Rate limit check
+    if (isRateLimited(loginId)) {
+      logger.warn('[auth][issueToken] Rate limited', { loginId });
+      res.status(429).json({ error: 'Too many failed attempts. Try again later.' });
+      return;
+    }
+
     try {
       const result = await pool.query<AuthUser>(
         'SELECT user_id, pin_hash, name, token_ttl_days, role, enabled, username, display_name FROM auth_users WHERE (user_id::text = $1 OR username = $1) AND enabled = true',
@@ -48,10 +100,14 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
 
       const pinValid = await bcrypt.compare(pin, user.pin_hash);
       if (!pinValid) {
+        recordFailedAttempt(loginId);
         logger.warn('[auth][issueToken] Invalid PIN attempt', { userId: loginId });
         res.status(401).json({ error: 'Invalid PIN' });
         return;
       }
+
+      // Successful login — clear rate limit tracking
+      clearAttempts(loginId);
 
       const token = generateToken(user.user_id, authSecret, user.token_ttl_days, user.role);
       const expiresAt = new Date(

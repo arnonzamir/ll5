@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { ZodError } from 'zod';
 import { initAppLog, initAudit, appLog, logAudit } from '@ll5/shared';
+import { createAdminRouter } from './admin.js';
 import { createAuthRouter } from './auth.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { processCalendar } from './processors/calendar.js';
@@ -274,6 +275,9 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Mount auth routes
   app.use('/auth', createAuthRouter(pgPool, config.authSecret));
+
+  // Mount admin routes
+  app.use('/admin', createAdminRouter(pgPool, config.authSecret));
 
   // Serve uploaded files
   const uploadsDir = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
