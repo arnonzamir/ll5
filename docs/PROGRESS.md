@@ -86,11 +86,12 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 | Item | Priority |
 |------|----------|
 | Auth hardening (device-bound sessions, passkeys, or OAuth) | Low — current PIN+bcrypt sufficient for family use |
-| Tests: 127 passing (shared + gateway). MCPs + dashboard still uncovered. | Medium |
+| Tests: 295+ passing (shared: 21, gateway: 106, knowledge: 41, gtd: 45, awareness: 47, health: 35). Messaging + google + dashboard uncovered. | Low |
 | Android: polling → SSE for chat | Medium — Android repo, not this codebase |
 
 ## Recent Changes
 
+- 2026-04-08: Tech debt: add 168 MCP tests (knowledge: 41, gtd: 45, awareness: 47, health: 35). Total: 295+ passing across 6 packages.
 - 2026-04-08: Tech debt: fix 7 failing gateway tests, add 44 new tests (21 shared auth + 23 admin API). Total: 127 tests passing. Add vitest to shared package.
 - 2026-04-08: Tech debt: deduplicate auth-middleware (4 MCPs now import from @ll5/shared), fix logging format in shared/mcp/server.ts and personal-knowledge/setup/indices.ts
 - 2026-04-08: User management Phase 5: Onboarding wizard (5 steps: profile, timezone, Google Calendar, Android app, complete). Auto-redirect for new users. Admin user creation seeds onboarding state. PIN minimum bumped to 6 chars.

@@ -69,10 +69,11 @@ ll5/
 │       ├── repositories/elasticsearch/  # 5 ES repositories (fact, person, place, profile, data-gap)
 │       ├── repositories/interfaces/     # Repository interfaces
 │       ├── tools/                       # 17 MCP tools (all logged via withToolLogging)
+│       ├── __tests__/                   # 41 tests: person repo, people tools
 │       ├── setup/indices.ts             # ES index creation
 │       └── server.ts                    # MCP server with StreamableHTTP + AsyncLocalStorage (auth from @ll5/shared)
 │
-├── packages/gtd/                      # @ll5/gtd — PG-backed MCP
+├── packages/gtd/                      # @ll5/gtd — PG-backed MCP (45 tests)
 │   └── src/
 │       ├── repositories/postgres/       # 3 PG repositories (horizon, inbox, review-session)
 │       ├── repositories/interfaces/     # Repository interfaces
