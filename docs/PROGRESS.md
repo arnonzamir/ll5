@@ -77,24 +77,17 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 | Feature | Design Doc | Priority | Effort |
 |---------|-----------|----------|--------|
-| ~~Health polling scheduler~~ | DONE | — | Gateway scheduler, polls every 20min, detects sleep/activity/HR/stress/energy/weight |
 | WhatsApp history backfill | ROADMAP.md | Low | Medium — Evolution API findMessages or export parser |
 | Email sync from phone | ROADMAP.md | Low | Medium — Android ContentProvider for metadata |
 | Money tracking MCP | ROADMAP.md | Low | Large — bank APIs, categorization, projections |
-| ~~Data source config~~ | DONE | — | Gateway enforcement + dashboard /settings/data-sources toggle UI |
-| User management | ROADMAP.md | Low | Medium — multi-user UI, onboarding wizard |
-| Agent routing rename | agent-routing-rename.md | Low | Small — cosmetic rename of notification_rules |
 
 ### Tech Debt
 
 | Item | Priority |
 |------|----------|
 | Auth hardening (device-bound sessions, passkeys, or OAuth) | Low — current PIN+bcrypt sufficient for family use |
-| Tests: 127 passing (shared: 21, gateway: 106). MCPs + dashboard still uncovered. | Medium |
-| Android: polling → SSE for chat | Medium |
-| ~~Duplicated auth-middleware~~ | Done — 4 MCPs use @ll5/shared |
-| ~~Uniform logging format~~ | Done — audited (93% compliant), fixed critical offenders |
-| Session resume with channel MCP unclear | Low |
+| Tests: 127 passing (shared + gateway). MCPs + dashboard still uncovered. | Medium |
+| Android: polling → SSE for chat | Medium — Android repo, not this codebase |
 
 ## Recent Changes
 

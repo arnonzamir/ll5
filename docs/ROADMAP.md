@@ -140,16 +140,9 @@ Someday/maybe works end-to-end (list_type filter, create dialog, badges in UI). 
 
 ---
 
-## User Management
+## ~~User Management~~ (DONE — Apr 8)
 
-Adding and managing multiple users:
-
-- **User CRUD**: dashboard UI for creating, editing, disabling users (currently only admin user exists, seeded manually)
-- **Role management**: admin vs regular user permissions
-- **Per-user config**: timezone, notification preferences, connected accounts
-- **Multi-tenant isolation**: already built into the data layer (every record has user_id), needs UI
-- **Auth improvements**: password hashing upgrade, token refresh, session management
-- **Onboarding flow**: new user setup wizard (connect Google, set timezone, install Android app)
+All 5 phases built: AsyncLocalStorage concurrency fix, DB migration (auth_users + families), admin CRUD API (10 endpoints), dashboard admin UI, username login, rate limiting, PIN validation (6+ chars + blocklist), multi-user schedulers (per-user with 5min reconciliation), WhatsApp webhook user routing, onboarding wizard (5 steps). **Remaining**: per-user Claude Code agents (deployment concern, not code).
 
 ---
 
@@ -174,7 +167,7 @@ Current: 6+ char PIN with bcrypt, rate limiting (5 attempts/15min), 7-day tokens
 - ~~**Nightly journal consolidation**~~: DONE — gateway 2am scheduler + awareness MCP tools
 - **Test coverage**: unit + integration tests for gateway, MCPs, channel MCP
 - ~~**CI deploy**~~: DONE — GitHub Actions SSH deploy with GHCR docker login
-- **Session resume**: ensure `--resume` works with channel MCP, or document that `./ll5` is required
+- ~~**Session resume**~~: DONE — `./ll5 --resume` works with channel MCP
 - ~~**UI list views audit**~~: DONE — all pages have headers, subtitles, search, edit/delete
-- **Uniform logging format**: all services should use `[ClassName][methodName] message` format consistently
-- **Duplicated auth-middleware**: personal-knowledge + gtd MCPs have identical copies, should use @ll5/shared
+- ~~**Uniform logging format**~~: DONE — audited (93% compliant), fixed critical offenders (shared was 0% → 100%)
+- ~~**Duplicated auth-middleware**~~: DONE — extracted to @ll5/shared, 4 local copies deleted
