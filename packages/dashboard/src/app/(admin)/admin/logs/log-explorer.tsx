@@ -195,11 +195,13 @@ function FacetSection({
   buckets,
   selected,
   onToggle,
+  onOnly,
 }: {
   field: string;
   buckets: Array<{ key: string; count: number }>;
   selected: string[];
   onToggle: (field: string, value: string) => void;
+  onOnly: (field: string, value: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [showAll, setShowAll] = useState(false);
@@ -234,6 +236,12 @@ function FacetSection({
                 className="h-3.5 w-3.5"
               />
               <span className="text-xs text-gray-700 truncate flex-1">{b.key}</span>
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOnly(field, b.key); }}
+                className="text-[10px] text-blue-500 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+              >
+                only
+              </button>
               <span className="text-[10px] text-gray-400 tabular-nums">{b.count.toLocaleString()}</span>
             </label>
           ))}
@@ -481,6 +489,11 @@ export function LogExplorer({
     });
   }
 
+  // "Only" — select exactly one value, deselect all others in this facet
+  function onlyFacet(field: string, value: string) {
+    setFilters((prev) => ({ ...prev, [field]: [value] }));
+  }
+
   function removeFilter(field: string, value: string) {
     toggleFacet(field, value);
   }
@@ -664,6 +677,7 @@ export function LogExplorer({
               buckets={displayFacets[field] ?? []}
               selected={filters[field] ?? []}
               onToggle={toggleFacet}
+              onOnly={onlyFacet}
             />
           ))}
         </div>
