@@ -36,10 +36,16 @@ const PushCalendarItemSchema = z.object({
   availability: z.enum(['busy', 'free', 'tentative']).nullish(),
 });
 
+// Device calendar list — metadata about available calendars on the phone (no-op, just accept)
+const PushDeviceCalendarSchema = z.object({
+  type: z.literal('device_calendar'),
+}).passthrough();
+
 const PushItemSchema = z.discriminatedUnion('type', [
   PushLocationItemSchema,
   PushMessageItemSchema,
   PushCalendarItemSchema,
+  PushDeviceCalendarSchema,
 ]);
 
 export const WebhookPayloadSchema = z.object({

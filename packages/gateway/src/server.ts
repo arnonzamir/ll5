@@ -237,6 +237,9 @@ async function processItem(
       case 'calendar_event':
         await processCalendar(es, userId, item);
         break;
+      case 'device_calendar':
+        // Metadata about phone's available calendars — accepted but not processed
+        break;
     }
     return { index: itemIndex, type: item.type, status: 'ok' };
   } catch (err) {
