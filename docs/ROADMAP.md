@@ -153,6 +153,21 @@ Adding and managing multiple users:
 
 ---
 
+## Auth Hardening (Future)
+
+Current: 6+ char PIN with bcrypt, rate limiting (5 attempts/15min), 7-day tokens with refresh. Sufficient for private family system.
+
+**Future options (when needed):**
+- **Device-bound sessions** — tie token to device fingerprint, stolen token useless on different device. Highest value, moderate effort.
+- **Passkeys/WebAuthn** — passwordless, phishing-resistant. Best UX + security but complex to implement and device-bound (no cross-device).
+- **Google OAuth SSO** — strong, familiar, no password to manage. Requires Google account per user, breaks for kids without Google.
+- **TOTP 2FA** — PIN + authenticator app. Strong but kids can't manage it.
+- **Admin passphrase** — require stronger passphrase (12+ chars, mixed) for admin accounts specifically.
+
+**Not recommended:** Don't add complexity until there's a real threat or a user base beyond family. The bcrypt + rate limiting + token expiry + enabled flag covers the current threat model.
+
+---
+
 ## Technical Debt & Infrastructure
 
 - **SSE for Android chat**: replace polling with OkHttp SSE (web already uses SSE)

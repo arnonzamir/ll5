@@ -6,7 +6,7 @@ import type { Pool } from 'pg';
 import { logger } from './utils/logger.js';
 
 const BCRYPT_SALT_ROUNDS = 12;
-const MIN_PIN_LENGTH = 4;
+const MIN_PIN_LENGTH = 6;
 
 /** Common weak PINs that should be rejected. */
 const WEAK_PIN_BLOCKLIST = new Set([
@@ -205,17 +205,21 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
         [userId, username, display_name, pinHash, userRole],
       );
 
-      // If timezone provided, store in user_settings
+      // Initialize user_settings with onboarding state (and timezone if provided)
+      const initialSettings: Record<string, unknown> = {
+        onboarding: { completed: false, steps: {} },
+      };
       if (timezone) {
-        await pool.query(
-          `INSERT INTO user_settings (user_id, settings, updated_at)
-           VALUES ($1, $2, now())
-           ON CONFLICT (user_id) DO UPDATE SET
-             settings = user_settings.settings || $2::jsonb,
-             updated_at = now()`,
-          [userId, JSON.stringify({ timezone })],
-        );
+        initialSettings.timezone = timezone;
       }
+      await pool.query(
+        `INSERT INTO user_settings (user_id, settings, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (user_id) DO UPDATE SET
+           settings = user_settings.settings || $2::jsonb,
+           updated_at = now()`,
+        [userId, JSON.stringify(initialSettings)],
+      );
 
       logger.info('[admin][createUser] User created', { userId, username, role: userRole });
       res.status(201).json(result.rows[0]);

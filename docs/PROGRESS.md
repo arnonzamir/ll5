@@ -89,6 +89,7 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 | Item | Priority |
 |------|----------|
+| Auth hardening (device-bound sessions, passkeys, or OAuth) | Low — current PIN+bcrypt sufficient for family use |
 | No tests (any MCP, gateway, dashboard) | Medium |
 | Android: polling → SSE for chat | Medium |
 | Duplicated auth-middleware in personal-knowledge + gtd | Low |
@@ -97,6 +98,7 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 ## Recent Changes
 
+- 2026-04-08: User management Phase 5: Onboarding wizard (5 steps: profile, timezone, Google Calendar, Android app, complete). Auto-redirect for new users. Admin user creation seeds onboarding state. PIN minimum bumped to 6 chars.
 - 2026-04-08: User management Phase 3+4: Multi-user schedulers (per-user scheduler sets from auth_users, 5-min reconciliation for new/disabled users), WhatsApp webhook user routing (instance→user_id cache with 5min TTL), PIN strength validation (blocklist of common PINs)
 - 2026-04-08: Fix admin users page: gateway returns `{users:[...]}` not bare array, field is `user_id` not `id`
 - 2026-04-08: User management Phase 2: Admin CRUD API (10 endpoints: users + families), admin dashboard UI (list/create/edit/disable users, PIN reset, family management), login rate limiting (5 attempts / 15min lockout)

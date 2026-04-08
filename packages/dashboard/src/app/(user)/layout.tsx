@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { Nav } from "@/components/nav";
 import { getToken, decodeTokenPayload } from "@/lib/auth";
 import { mcpCallJsonSafe } from "@/lib/api";
+import { env } from "@/lib/env";
 
 interface KnowledgeProfile {
   profile: {
@@ -23,6 +25,30 @@ export default async function UserLayout({
   const payload = decodeTokenPayload(token);
   const uid = (payload?.uid as string) ?? "User";
   const isAdmin = payload?.role === "admin";
+
+  // Detect current path to avoid infinite redirect on /onboarding
+  const headersList = await headers();
+  const pathname = headersList.get("x-pathname") ?? "";
+  const isOnOnboarding = pathname.startsWith("/onboarding");
+
+  // Check onboarding status (only redirect if not already on /onboarding)
+  if (!isOnOnboarding) {
+    try {
+      const res = await fetch(`${env.GATEWAY_URL}/user-settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const settings = (await res.json()) as Record<string, unknown>;
+        const onboarding = settings.onboarding as { completed?: boolean } | undefined;
+        // Only redirect if onboarding key exists AND completed is false
+        if (onboarding && onboarding.completed === false) {
+          redirect("/onboarding");
+        }
+      }
+    } catch (err) {
+      console.error("[layout] Failed to check onboarding:", err instanceof Error ? err.message : String(err));
+    }
+  }
 
   // Fetch display name from personal-knowledge MCP
   let displayName = uid.length > 8 ? uid.slice(0, 8) : uid;
