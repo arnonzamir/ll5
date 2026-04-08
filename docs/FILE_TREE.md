@@ -102,7 +102,7 @@ ll5/
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message
 │       ├── utils/fcm-sender.ts       # FCM v1 API sender (service account JWT + OAuth2, 4-level notification)
 │       ├── utils/escalation.ts      # Conversation escalation: detect user activity in low-priority chats, 30-min attention window
-│       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, notification_rules, device_commands, user_settings (unified JSONB)
+│       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, notification_rules, device_commands, user_settings, contact_settings, chat_notify_source, user_management (019: role/enabled/username + families)
 │       └── server.ts                  # Express app: webhooks, auth, chat, media, commands, availability check, health, schedulers
 │
 ├── packages/google/                   # calendar MCP — unified calendar layer (PG+ES)

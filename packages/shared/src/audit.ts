@@ -6,6 +6,7 @@
 
 export interface AuditEntry {
   user_id: string;
+  username?: string;
   source: string;
   action: string;
   entity_type: string;

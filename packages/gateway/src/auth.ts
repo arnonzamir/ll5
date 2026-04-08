@@ -13,6 +13,9 @@ interface AuthUser {
   name: string | null;
   token_ttl_days: number;
   role: string;
+  enabled: boolean;
+  username: string | null;
+  display_name: string | null;
 }
 
 /**
@@ -22,17 +25,18 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
   const router = Router();
 
   router.post('/token', async (req: Request, res: Response) => {
-    const { user_id, pin } = req.body as { user_id?: string; pin?: string };
+    const { user_id, username, pin } = req.body as { user_id?: string; username?: string; pin?: string };
+    const loginId = user_id || username;
 
-    if (!user_id || !pin) {
-      res.status(400).json({ error: 'Missing user_id or pin' });
+    if (!loginId || !pin) {
+      res.status(400).json({ error: 'Missing user_id/username or pin' });
       return;
     }
 
     try {
       const result = await pool.query<AuthUser>(
-        'SELECT user_id, pin_hash, name, token_ttl_days, role FROM auth_users WHERE user_id = $1',
-        [user_id],
+        'SELECT user_id, pin_hash, name, token_ttl_days, role, enabled, username, display_name FROM auth_users WHERE (user_id::text = $1 OR username = $1) AND enabled = true',
+        [loginId],
       );
 
       if (result.rows.length === 0) {
@@ -44,17 +48,17 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
 
       const pinValid = await bcrypt.compare(pin, user.pin_hash);
       if (!pinValid) {
-        logger.warn('[auth][issueToken] Invalid PIN attempt', { userId: user_id });
+        logger.warn('[auth][issueToken] Invalid PIN attempt', { userId: loginId });
         res.status(401).json({ error: 'Invalid PIN' });
         return;
       }
 
-      const token = generateToken(user_id, authSecret, user.token_ttl_days, user.role);
+      const token = generateToken(user.user_id, authSecret, user.token_ttl_days, user.role);
       const expiresAt = new Date(
         Date.now() + user.token_ttl_days * 86400 * 1000,
       ).toISOString();
 
-      logger.info('[auth][issueToken] Token issued', { userId: user_id, ttlDays: user.token_ttl_days });
+      logger.info('[auth][issueToken] Token issued', { userId: user.user_id, username: user.username, ttlDays: user.token_ttl_days });
 
       res.json({
         token,
@@ -104,14 +108,14 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
         return;
       }
 
-      // Look up user to get current TTL and role
+      // Look up user to get current TTL and role, verify still enabled
       const result = await pool.query<AuthUser>(
-        'SELECT user_id, token_ttl_days, role FROM auth_users WHERE user_id = $1',
+        'SELECT user_id, token_ttl_days, role, enabled, username, display_name FROM auth_users WHERE user_id = $1 AND enabled = true',
         [payload.uid],
       );
 
       if (result.rows.length === 0) {
-        res.status(404).json({ error: 'User not found' });
+        res.status(404).json({ error: 'User not found or disabled' });
         return;
       }
 

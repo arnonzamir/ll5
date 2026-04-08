@@ -25,13 +25,16 @@ export async function clearToken(): Promise<void> {
 }
 
 export async function login(
-  userId: string,
+  loginId: string,
   pin: string
 ): Promise<{ token: string }> {
+  // loginId can be a UUID (user_id) or a username — gateway accepts both
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(loginId);
+  const body = isUuid ? { user_id: loginId, pin } : { username: loginId, pin };
   const res = await fetch(`${env.GATEWAY_URL}/auth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_id: userId, pin }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "Login failed");

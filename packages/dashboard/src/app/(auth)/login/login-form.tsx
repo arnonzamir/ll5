@@ -29,14 +29,14 @@ export function LoginForm() {
       <CardContent>
         <form action={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="user_id">User ID</Label>
+            <Label htmlFor="user_id">Username</Label>
             <Input
               id="user_id"
               name="user_id"
               type="text"
               required
               autoComplete="username"
-              placeholder="Enter your user ID"
+              placeholder="Username or user ID"
             />
           </div>
           <div className="space-y-2">

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import express from 'express';
 import type { Request, Response } from 'express';
 import { tokenAuthMiddleware } from './auth-middleware.js';
@@ -16,11 +17,13 @@ import { registerAllTools } from './tools/index.js';
 
 const { Pool } = pg;
 
-// User ID resolved per-request via auth middleware
-let currentUserId: string = '';
+// Per-request userId storage using AsyncLocalStorage for proper request isolation.
+const userStore = new AsyncLocalStorage<string>();
 
 function getUserId(): string {
-  return currentUserId;
+  const uid = userStore.getStore();
+  if (!uid) throw new Error('No user context — request not wrapped in userStore.run()');
+  return uid;
 }
 
 export async function startServer(): Promise<void> {
@@ -110,26 +113,28 @@ export async function startServer(): Promise<void> {
 
   // MCP endpoint (stateless — new server+transport per request)
   app.all('/mcp', authMw, async (req: Request, res: Response) => {
-    currentUserId = (req as AuthenticatedRequest).userId;
-    try {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
-      const mcpServer = new McpServer({
-        name: 'll5-gtd',
-        version: '0.1.0',
-      });
-      withToolLogging(mcpServer, getUserId);
-      registerAllTools(mcpServer, deps, getUserId);
-      await mcpServer.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error('[startServer] MCP request failed', { error: message });
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Internal server error' });
+    const userId = (req as AuthenticatedRequest).userId;
+    await userStore.run(userId, async () => {
+      try {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+        });
+        const mcpServer = new McpServer({
+          name: 'll5-gtd',
+          version: '0.1.0',
+        });
+        withToolLogging(mcpServer, getUserId);
+        registerAllTools(mcpServer, deps, getUserId);
+        await mcpServer.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error('[startServer] MCP request failed', { error: message });
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Internal server error' });
+        }
       }
-    }
+    });
   });
 
   // -------------------------------------------------------------------------

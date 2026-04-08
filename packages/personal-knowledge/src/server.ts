@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { Client as ElasticsearchClient } from '@elastic/elasticsearch';
@@ -17,11 +18,13 @@ import { ElasticsearchDataGapRepository } from './repositories/elasticsearch/dat
 import { registerAllTools } from './tools/index.js';
 import { initAppLog, initAudit, withToolLogging } from '@ll5/shared';
 
-// Per-request userId set by auth middleware
-let currentUserId = '';
+// Per-request userId storage using AsyncLocalStorage for proper request isolation.
+const userStore = new AsyncLocalStorage<string>();
 
 function getUserId(): string {
-  return currentUserId;
+  const uid = userStore.getStore();
+  if (!uid) throw new Error('No user context — request not wrapped in userStore.run()');
+  return uid;
 }
 
 export async function startServer(): Promise<void> {
@@ -89,28 +92,30 @@ export async function startServer(): Promise<void> {
 
   // MCP endpoint using StreamableHTTP transport (stateless — new transport per request)
   app.all('/mcp', authMw, async (req: Request, res: Response) => {
-    currentUserId = (req as AuthenticatedRequest).userId;
-    try {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
+    const userId = (req as AuthenticatedRequest).userId;
+    await userStore.run(userId, async () => {
+      try {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+        });
 
-      // Each request gets its own server+transport pair in stateless mode
-      const reqServer = new McpServer({
-        name: 'll5-personal-knowledge',
-        version: '0.1.0',
-      });
-      withToolLogging(reqServer, getUserId);
-      registerAllTools(reqServer, repos, getUserId);
-      await reqServer.connect(transport);
+        // Each request gets its own server+transport pair in stateless mode
+        const reqServer = new McpServer({
+          name: 'll5-personal-knowledge',
+          version: '0.1.0',
+        });
+        withToolLogging(reqServer, getUserId);
+        registerAllTools(reqServer, repos, getUserId);
+        await reqServer.connect(transport);
 
-      await transport.handleRequest(req, res, req.body);
-    } catch (err) {
-      logger.error('[startServer][mcp] MCP request failed', { error: String(err) });
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Internal server error' });
+        await transport.handleRequest(req, res, req.body);
+      } catch (err) {
+        logger.error('[startServer][mcp] MCP request failed', { error: String(err) });
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Internal server error' });
+        }
       }
-    }
+    });
   });
 
   // Start HTTP server

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
@@ -16,11 +17,17 @@ import { initAppLog, initAudit, withToolLogging } from '@ll5/shared';
 
 const { Pool } = pg;
 
-// User ID resolved per-request via auth middleware
-let currentUserId: string = '';
+interface AuthenticatedRequest extends Request {
+  userId: string;
+}
+
+// Per-request userId storage using AsyncLocalStorage for proper request isolation.
+const userStore = new AsyncLocalStorage<string>();
 
 function getUserId(): string {
-  return currentUserId;
+  const uid = userStore.getStore();
+  if (!uid) throw new Error('No user context — request not wrapped in userStore.run()');
+  return uid;
 }
 
 export async function startServer(): Promise<void> {
@@ -110,7 +117,7 @@ export async function startServer(): Promise<void> {
                 crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
               const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
               if (payload.exp > Date.now() / 1000) {
-                currentUserId = payload.uid;
+                (req as AuthenticatedRequest).userId = payload.uid;
                 next();
                 return;
               }
@@ -126,7 +133,7 @@ export async function startServer(): Promise<void> {
 
     // Legacy API key fallback
     if (bearer === env.apiKey) {
-      currentUserId = env.userId;
+      (req as AuthenticatedRequest).userId = env.userId;
       next();
       return;
     }
@@ -151,25 +158,28 @@ export async function startServer(): Promise<void> {
 
   // MCP endpoint (stateless -- new server+transport per request)
   app.all('/mcp', authMiddleware, async (req: Request, res: Response) => {
-    try {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      });
-      const mcpServer = new McpServer({
-        name: 'll5-messaging',
-        version: '0.1.0',
-      });
-      withToolLogging(mcpServer, getUserId);
-      registerAllTools(mcpServer, deps, getUserId);
-      await mcpServer.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error('[startServer][mcp] MCP request failed', { error: message });
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Internal server error' });
+    const userId = (req as AuthenticatedRequest).userId;
+    await userStore.run(userId, async () => {
+      try {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+        });
+        const mcpServer = new McpServer({
+          name: 'll5-messaging',
+          version: '0.1.0',
+        });
+        withToolLogging(mcpServer, getUserId);
+        registerAllTools(mcpServer, deps, getUserId);
+        await mcpServer.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error('[startServer][mcp] MCP request failed', { error: message });
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Internal server error' });
+        }
       }
-    }
+    });
   });
 
   // ---------------------------------------------------------------------------
