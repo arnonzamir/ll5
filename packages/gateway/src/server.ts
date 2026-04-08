@@ -16,7 +16,7 @@ import { processMessage } from './processors/message.js';
 import { NotificationRuleMatcher } from './processors/notification-rules.js';
 import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
 import { startSchedulers } from './scheduler/index.js';
-import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type WebhookResponse } from './types/index.js';
+import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
 import { isSourceEnabled } from './utils/data-source-config.js';
 import { resolveWhatsAppUserId } from './utils/whatsapp-user-resolver.js';
@@ -1090,6 +1090,61 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       typeCounts[item.type] = (typeCounts[item.type] ?? 0) + 1;
       const result = await processItem(esClient, userId, item, i, config, pgPool, notificationMatcher);
       results.push(result);
+    }
+
+    // Clean up deleted phone calendar events: remove phone-sourced events
+    // in the pushed time window that weren't in this batch
+    try {
+      const calendarItems = payload.items
+        .map((raw) => PushItemSchema.safeParse(raw))
+        .filter((r) => r.success && r.data.type === 'calendar_event')
+        .map((r) => r.data as PushCalendarItem);
+
+      if (calendarItems.length > 0) {
+        const cryptoMod = await import('node:crypto');
+        const pushedIds = new Set(calendarItems.map((item) => {
+          const end = item.end ?? item.start;
+          const hash = cryptoMod.createHash('sha256')
+            .update(`${item.title}|${item.start}|${end}`)
+            .digest('hex')
+            .slice(0, 16);
+          return `phone-${hash}`;
+        }));
+
+        // Find the time window from pushed events
+        const starts = calendarItems.map((i) => new Date(i.start).getTime());
+        const windowStart = new Date(Math.min(...starts) - 60000).toISOString();
+        const windowEnd = new Date(Math.max(...starts) + 60000).toISOString();
+
+        // Delete phone events in this window that aren't in the pushed set
+        const staleResult = await esClient.deleteByQuery({
+          index: 'll5_awareness_calendar_events',
+          refresh: false,
+          body: {
+            query: {
+              bool: {
+                filter: [
+                  { term: { user_id: userId } },
+                  { term: { source: 'phone' } },
+                  { range: { start_time: { gte: windowStart, lte: windowEnd } } },
+                ],
+                must_not: [
+                  { ids: { values: [...pushedIds] } },
+                ],
+              },
+            },
+          },
+        });
+        const deleted = (staleResult as { deleted?: number }).deleted ?? 0;
+        if (deleted > 0) {
+          logger.info('[startServer][webhook] Cleaned up stale phone calendar events', { deleted });
+        }
+      }
+    } catch (err) {
+      // Non-critical — don't fail the webhook response
+      logger.warn('[startServer][webhook] Calendar cleanup failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     const accepted = results.filter((r) => r.status === 'ok').length;
