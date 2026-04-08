@@ -146,8 +146,8 @@ describe('docToPerson mapping', () => {
     } as unknown as PersonDoc;
 
     // Simulate what ES might return with undefined fields
-    (doc as Record<string, unknown>).aliases = undefined;
-    (doc as Record<string, unknown>).tags = undefined;
+    (doc as unknown as Record<string, unknown>).aliases = undefined;
+    (doc as unknown as Record<string, unknown>).tags = undefined;
 
     const person = docToPerson(doc, 'p-3');
     expect(person.aliases).toEqual([]);
@@ -164,7 +164,7 @@ describe('docToPerson mapping', () => {
       updated_at: '2025-01-01T00:00:00Z',
     } as unknown as PersonDoc;
 
-    (doc as Record<string, unknown>).relationship = undefined;
+    (doc as unknown as Record<string, unknown>).relationship = undefined;
 
     const person = docToPerson(doc, 'p-4');
     expect(person.relationship).toBe('');
