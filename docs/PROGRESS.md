@@ -87,10 +87,11 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 |------|----------|
 | Auth hardening (device-bound sessions, passkeys, or OAuth) | Low — current PIN+bcrypt sufficient for family use |
 | Tests: 362 passing across 8 packages. Dashboard uncovered. | Low |
-| Android: polling → SSE for chat | Medium — Android repo, not this codebase |
+| ~~Android SSE for chat~~ | Done — already uses OkHttp SSE |
 
 ## Recent Changes
 
+- 2026-04-08: Android: alert vibration bypasses silent mode, data source toggle sync via device commands (dashboard → gateway → FCM → Android). Chat already uses SSE (tech debt was stale).
 - 2026-04-08: Admin log overhaul: Datadog-style LogExplorer with faceted sidebar (dynamic ES aggregations), time range presets (15m/1h/4h/1d/7d), sortable columns, search with debounce, slide-out detail panel. Separate /admin/logs (app) and /admin/audit (audit) pages.
 - 2026-04-08: Tech debt: add 235 MCP tests (knowledge: 41, gtd: 45, awareness: 47, health: 35, messaging: 40, google: 27). Grand total: 362 across 8 packages.
 - 2026-04-08: Tech debt: add 168 MCP tests (first batch) (knowledge: 41, gtd: 45, awareness: 47, health: 35). Total: 295+ passing across 6 packages.

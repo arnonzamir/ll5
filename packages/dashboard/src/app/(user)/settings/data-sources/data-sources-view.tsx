@@ -6,6 +6,7 @@ import { RefreshCw, MapPin, MessageSquare, Calendar, Heart, Phone } from "lucide
 import {
   fetchDataSources,
   updateDataSources,
+  syncDataSourceToDevice,
   DEFAULTS,
   type DataSources,
 } from "./data-sources-server-actions";
@@ -43,6 +44,8 @@ export function DataSourcesView() {
 
     setSaving(true);
     await updateDataSources(updated);
+    // Sync to Android app via device command (fire-and-forget)
+    syncDataSourceToDevice(key, enabled);
     setSaving(false);
   }
 

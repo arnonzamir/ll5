@@ -62,3 +62,22 @@ export async function updateDataSources(sources: DataSources): Promise<boolean> 
     return false;
   }
 }
+
+/** Send a device command to sync a data source toggle to the Android app. */
+export async function syncDataSourceToDevice(source: string, enabled: boolean): Promise<void> {
+  const token = await getToken();
+  if (!token) return;
+
+  try {
+    await fetch(`${env.GATEWAY_URL}/commands/queue`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        command_type: "update_data_source",
+        payload: { source, enabled },
+      }),
+    });
+  } catch {
+    // Non-critical — device will sync on next connection
+  }
+}
