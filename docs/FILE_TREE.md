@@ -74,6 +74,7 @@ ll5/
 │       └── server.ts                    # MCP server with StreamableHTTP + AsyncLocalStorage (auth from @ll5/shared)
 │
 ├── packages/gtd/                      # @ll5/gtd — PG-backed MCP (45 tests)
+│   └── src/__tests__/                   # GTD action CRUD, inbox, health metrics
 │   └── src/
 │       ├── repositories/postgres/       # 3 PG repositories (horizon, inbox, review-session)
 │       ├── repositories/interfaces/     # Repository interfaces
