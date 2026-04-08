@@ -4,8 +4,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { Client as ElasticsearchClient } from '@elastic/elasticsearch';
 import express from 'express';
 import type { Request, Response } from 'express';
-import { tokenAuthMiddleware } from './auth-middleware.js';
-import type { AuthenticatedRequest } from './auth-middleware.js';
+import { tokenAuthMiddleware, initAppLog, initAudit, withToolLogging } from '@ll5/shared';
+import type { AuthenticatedRequest } from '@ll5/shared';
 import { loadEnv } from './utils/env.js';
 import { logger, setLogLevel } from './utils/logger.js';
 import type { LogLevel } from './utils/logger.js';
@@ -16,7 +16,6 @@ import { ElasticsearchPersonRepository } from './repositories/elasticsearch/pers
 import { ElasticsearchPlaceRepository } from './repositories/elasticsearch/place.repository.js';
 import { ElasticsearchDataGapRepository } from './repositories/elasticsearch/data-gap.repository.js';
 import { registerAllTools } from './tools/index.js';
-import { initAppLog, initAudit, withToolLogging } from '@ll5/shared';
 
 // Per-request userId storage using AsyncLocalStorage for proper request isolation.
 const userStore = new AsyncLocalStorage<string>();
@@ -85,9 +84,8 @@ export async function startServer(): Promise<void> {
 
   // Auth middleware — supports token auth + legacy API key fallback
   const authMw = tokenAuthMiddleware({
-    authSecret: env.authSecret,
-    legacyApiKey: env.apiKey,
-    legacyUserId: env.userId,
+    authSecret: env.authSecret!,
+    legacy: env.apiKey && env.userId ? { apiKey: env.apiKey, userId: env.userId } : undefined,
   });
 
   // MCP endpoint using StreamableHTTP transport (stateless — new transport per request)

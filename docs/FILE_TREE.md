@@ -70,8 +70,7 @@ ll5/
 │       ├── repositories/interfaces/     # Repository interfaces
 │       ├── tools/                       # 17 MCP tools (all logged via withToolLogging)
 │       ├── setup/indices.ts             # ES index creation
-│       ├── auth-middleware.ts           # Token + legacy auth
-│       └── server.ts                    # MCP server with StreamableHTTP
+│       └── server.ts                    # MCP server with StreamableHTTP + AsyncLocalStorage (auth from @ll5/shared)
 │
 ├── packages/gtd/                      # @ll5/gtd — PG-backed MCP
 │   └── src/
@@ -79,8 +78,7 @@ ll5/
 │       ├── repositories/interfaces/     # Repository interfaces
 │       ├── tools/                       # 14 GTD tools + 3 chat tools
 │       ├── migrations/                  # SQL: gtd_horizons, gtd_inbox, gtd_review_sessions
-│       ├── auth-middleware.ts
-│       └── server.ts
+│       └── server.ts                    # Auth from @ll5/shared + AsyncLocalStorage
 │
 ├── packages/awareness/                # @ll5/awareness — ES-backed MCP
 │   └── src/

@@ -92,12 +92,13 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 | Auth hardening (device-bound sessions, passkeys, or OAuth) | Low — current PIN+bcrypt sufficient for family use |
 | No tests (any MCP, gateway, dashboard) | Medium |
 | Android: polling → SSE for chat | Medium |
-| Duplicated auth-middleware in personal-knowledge + gtd | Low |
-| Uniform logging format across services | Low |
+| ~~Duplicated auth-middleware~~ | Done — 4 MCPs use @ll5/shared |
+| ~~Uniform logging format~~ | Done — audited (93% compliant), fixed critical offenders |
 | Session resume with channel MCP unclear | Low |
 
 ## Recent Changes
 
+- 2026-04-08: Tech debt: deduplicate auth-middleware (4 MCPs now import from @ll5/shared), fix logging format in shared/mcp/server.ts and personal-knowledge/setup/indices.ts
 - 2026-04-08: User management Phase 5: Onboarding wizard (5 steps: profile, timezone, Google Calendar, Android app, complete). Auto-redirect for new users. Admin user creation seeds onboarding state. PIN minimum bumped to 6 chars.
 - 2026-04-08: User management Phase 3+4: Multi-user schedulers (per-user scheduler sets from auth_users, 5-min reconciliation for new/disabled users), WhatsApp webhook user routing (instance→user_id cache with 5min TTL), PIN strength validation (blocklist of common PINs)
 - 2026-04-08: Fix admin users page: gateway returns `{users:[...]}` not bare array, field is `user_id` not `id`

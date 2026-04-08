@@ -5,9 +5,8 @@ import { Client as ElasticsearchClient } from '@elastic/elasticsearch';
 import pg from 'pg';
 import express from 'express';
 import type { Request, Response } from 'express';
-import { initAppLog, initAudit, withToolLogging } from '@ll5/shared';
-import { tokenAuthMiddleware } from './auth-middleware.js';
-import type { AuthenticatedRequest } from './auth-middleware.js';
+import { initAppLog, initAudit, withToolLogging, tokenAuthMiddleware } from '@ll5/shared';
+import type { AuthenticatedRequest } from '@ll5/shared';
 import { loadEnv } from './utils/env.js';
 import { logger, setLogLevel } from './utils/logger.js';
 import type { LogLevel } from './utils/logger.js';
@@ -129,11 +128,10 @@ export async function startServer(): Promise<void> {
     }
   });
 
-  // Auth middleware
+  // Auth middleware — supports token auth + legacy API key fallback
   const authMw = tokenAuthMiddleware({
-    authSecret: env.authSecret,
-    legacyApiKey: env.apiKey,
-    legacyUserId: env.userId,
+    authSecret: env.authSecret!,
+    legacy: env.apiKey && env.userId ? { apiKey: env.apiKey, userId: env.userId } : undefined,
   });
 
   // MCP endpoint using StreamableHTTP transport (stateless -- new transport per request)

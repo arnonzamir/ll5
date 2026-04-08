@@ -34,7 +34,7 @@ export async function createMcpServer(config: McpServerConfig): Promise<{ start:
           return await tool.handler(params, userId);
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : 'Unknown error';
-          logger.error('Tool execution failed', { tool: tool.name, error: message });
+          logger.error('[McpServer][toolHandler] Tool execution failed', { tool: tool.name, error: message });
           return {
             content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
             isError: true,
@@ -96,7 +96,7 @@ export async function createMcpServer(config: McpServerConfig): Promise<{ start:
         res.status(err.statusCode).json({ error: err.message });
       } else {
         const message = err instanceof Error ? err.message : 'Internal server error';
-        logger.error('Request failed', { error: message });
+        logger.error('[McpServer][handleRequest] Request failed', { error: message });
         res.status(500).json({ error: message });
       }
     }
@@ -108,13 +108,13 @@ export async function createMcpServer(config: McpServerConfig): Promise<{ start:
     start: async () => {
       return new Promise<void>((resolve) => {
         httpServer = app.listen(port, () => {
-          logger.info('Server started', { port });
+          logger.info('[McpServer][start] Server started', { port });
           resolve();
         });
       });
     },
     stop: async () => {
-      logger.info('Shutting down');
+      logger.info('[McpServer][stop] Shutting down');
       for (const transport of transports.values()) {
         await transport.close();
       }
@@ -124,7 +124,7 @@ export async function createMcpServer(config: McpServerConfig): Promise<{ start:
           httpServer!.close(() => resolve());
         });
       }
-      logger.info('Server stopped');
+      logger.info('[McpServer][stop] Server stopped');
     },
   };
 }

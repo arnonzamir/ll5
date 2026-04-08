@@ -1,12 +1,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import express from 'express';
 import type { Request, Response } from 'express';
-import { tokenAuthMiddleware } from './auth-middleware.js';
-import type { AuthenticatedRequest } from './auth-middleware.js';
+import { tokenAuthMiddleware, initAudit, initAppLog, withToolLogging } from '@ll5/shared';
+import type { AuthenticatedRequest } from '@ll5/shared';
 import pg from 'pg';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { initAudit, initAppLog, withToolLogging } from '@ll5/shared';
 import { loadEnv } from './utils/env.js';
 import { logger, setLogLevel } from './utils/logger.js';
 import type { LogLevel } from './utils/logger.js';
@@ -89,9 +88,8 @@ export async function startServer(): Promise<void> {
 
   // Auth middleware — supports token auth + legacy API key fallback
   const authMw = tokenAuthMiddleware({
-    authSecret: env.authSecret,
-    legacyApiKey: env.apiKey,
-    legacyUserId: env.userId,
+    authSecret: env.authSecret!,
+    legacy: env.apiKey && env.userId ? { apiKey: env.apiKey, userId: env.userId } : undefined,
   });
 
   // Health endpoint (no auth required)

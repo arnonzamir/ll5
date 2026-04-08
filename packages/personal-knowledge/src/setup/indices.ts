@@ -114,21 +114,21 @@ export async function ensureIndices(client: Client): Promise<void> {
   for (const def of INDICES) {
     const exists = await client.indices.exists({ index: def.index });
     if (!exists) {
-      logger.info(`[ensureIndices][ensureIndices] Creating index: ${def.index}`);
+      logger.info(`[ensureIndices][init] Creating index: ${def.index}`);
       await client.indices.create({
         index: def.index,
         settings: INDEX_SETTINGS,
         mappings: def.mappings,
       });
-      logger.info(`[ensureIndices][ensureIndices] Index created: ${def.index}`);
+      logger.info(`[ensureIndices][init] Index created: ${def.index}`);
     } else {
       // Update mapping to add any new fields (idempotent, non-breaking)
       try {
         await client.indices.putMapping({ index: def.index, ...def.mappings });
       } catch (e) {
-        logger.warn(`[ensureIndices] putMapping failed for ${def.index}: ${e instanceof Error ? e.message : String(e)}`);
+        logger.warn(`[ensureIndices][putMapping] Failed for ${def.index}: ${e instanceof Error ? e.message : String(e)}`);
       }
-      logger.debug(`[ensureIndices][ensureIndices] Index already exists: ${def.index}`);
+      logger.debug(`[ensureIndices][init] Index already exists: ${def.index}`);
     }
   }
 }
