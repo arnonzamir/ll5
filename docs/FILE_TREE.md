@@ -143,6 +143,9 @@ ll5/
 │       ├── lib/                       # MCP client, auth helpers, env
 │       └── providers/                 # React Query
 │
+├── packages/shared/src/__tests__/      # 21 tests: auth token generation, validation, expiry
+├── packages/gateway/src/__tests__/     # 106 tests: whatsapp webhook, notification rules, chat, admin API
+│
 └── packages/ll5-auth/                 # @ll5/auth-cli — login/status/logout CLI
     └── src/
         ├── commands/                  # login, logout, status, setup

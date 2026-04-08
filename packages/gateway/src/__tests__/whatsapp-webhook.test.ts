@@ -12,6 +12,14 @@ vi.mock('../utils/system-message.js', () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock escalation to avoid side effects
+// ---------------------------------------------------------------------------
+vi.mock('../utils/escalation.js', () => ({
+  escalateConversation: vi.fn().mockResolvedValue(undefined),
+  isEscalated: vi.fn().mockResolvedValue(false),
+}));
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -30,11 +38,12 @@ function makePgPool(): Pool {
 
 function makeMatcher(
   priority: string | null = null,
-  downloadImages = false,
+  downloadMedia = false,
 ): NotificationRuleMatcher {
   return {
     match: vi.fn().mockResolvedValue(priority),
-    shouldDownloadImages: vi.fn().mockResolvedValue(downloadImages),
+    shouldDownloadMedia: vi.fn().mockResolvedValue(downloadMedia),
+    shouldDownloadImages: vi.fn().mockResolvedValue(downloadMedia),
   } as unknown as NotificationRuleMatcher;
 }
 
@@ -324,6 +333,15 @@ describe('processWhatsAppWebhook', () => {
         pool,
         'user-1',
         expect.stringContaining('Charlie'),
+        undefined, // notify
+        undefined, // schedulerEvent
+        {
+          platform: 'whatsapp',
+          remote_jid: '972501234567@s.whatsapp.net',
+          sender_name: 'Charlie',
+          is_group: false,
+          group_name: undefined,
+        },
       );
     });
 

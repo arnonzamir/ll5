@@ -364,10 +364,11 @@ describe('NotificationRuleMatcher', () => {
   });
 
   // -----------------------------------------------------------------------
-  // shouldDownloadImages
+  // shouldDownloadMedia (replaces shouldDownloadImages)
   // -----------------------------------------------------------------------
-  describe('shouldDownloadImages', () => {
-    it('returns true for conversation with download_images enabled', async () => {
+  describe('shouldDownloadMedia', () => {
+    it('returns true for conversation with download_images enabled (legacy)', async () => {
+      // isGroup=false, no personId => skips getContactSettings, goes straight to refresh + legacy
       pool = makeMockPool([
         makeRule({
           rule_type: 'conversation',
@@ -379,10 +380,10 @@ describe('NotificationRuleMatcher', () => {
       ]);
       matcher = new NotificationRuleMatcher(pool);
 
-      expect(await matcher.shouldDownloadImages('user-1', 'whatsapp', 'conv-img')).toBe(true);
+      expect(await matcher.shouldDownloadMedia('user-1', 'whatsapp', 'conv-img', false)).toBe(true);
     });
 
-    it('returns false for conversation without download_images', async () => {
+    it('returns false for conversation without download_images (legacy)', async () => {
       pool = makeMockPool([
         makeRule({
           rule_type: 'conversation',
@@ -394,23 +395,33 @@ describe('NotificationRuleMatcher', () => {
       ]);
       matcher = new NotificationRuleMatcher(pool);
 
-      expect(await matcher.shouldDownloadImages('user-1', 'whatsapp', 'conv-no-img')).toBe(false);
+      expect(await matcher.shouldDownloadMedia('user-1', 'whatsapp', 'conv-no-img', false)).toBe(false);
     });
 
-    it('returns false for non-conversation rules', async () => {
+    it('returns false for non-conversation rules (legacy)', async () => {
       pool = makeMockPool([
         makeRule({ rule_type: 'sender', match_value: 'alice', priority: 'immediate', download_images: true }),
       ]);
       matcher = new NotificationRuleMatcher(pool);
 
-      expect(await matcher.shouldDownloadImages('user-1', 'whatsapp', 'any-conv')).toBe(false);
+      expect(await matcher.shouldDownloadMedia('user-1', 'whatsapp', 'any-conv', false)).toBe(false);
     });
 
     it('returns false when no rules for user', async () => {
       pool = makeMockPool([]);
       matcher = new NotificationRuleMatcher(pool);
 
-      expect(await matcher.shouldDownloadImages('user-1', 'whatsapp', 'any-conv')).toBe(false);
+      expect(await matcher.shouldDownloadMedia('user-1', 'whatsapp', 'any-conv', false)).toBe(false);
+    });
+
+    it('returns download_media from contact_settings when available', async () => {
+      const mockQuery = vi.fn()
+        // getContactSettings returns a match for the group
+        .mockResolvedValueOnce({ rows: [{ routing: 'immediate', permission: 'readwrite', download_media: true }] });
+      pool = { query: mockQuery } as unknown as Pool;
+      matcher = new NotificationRuleMatcher(pool);
+
+      expect(await matcher.shouldDownloadMedia('user-1', 'whatsapp', 'group-conv', true)).toBe(true);
     });
   });
 
