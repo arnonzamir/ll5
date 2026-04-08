@@ -221,3 +221,4 @@ See docs/implementation/deployment-log.md for full details:
 
 
 - Exclude __tests__ from tsc in all MCP tsconfigs (vitest handles test compilation)
+

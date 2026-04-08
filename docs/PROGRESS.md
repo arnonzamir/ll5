@@ -133,3 +133,4 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 - Evolution API encrypted key was stored as plain text — re-encrypted manually (2026-04-07). Future accounts use proper encryption via create_whatsapp_account tool.
 
 
+
