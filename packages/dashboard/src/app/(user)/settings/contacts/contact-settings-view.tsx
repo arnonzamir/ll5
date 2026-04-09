@@ -358,14 +358,14 @@ function AutoMatchPanel({
 
                 <div className="flex justify-end">
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
                     onClick={handleSkip}
                     disabled={actionPending}
                     className="gap-1.5 text-gray-500"
                   >
-                    <SkipForward className="h-3.5 w-3.5" />
-                    Skip
+                    <X className="h-3.5 w-3.5" />
+                    Don&apos;t link
                   </Button>
                 </div>
               </div>
