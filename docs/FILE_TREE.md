@@ -94,7 +94,7 @@ ll5/
 │       ├── admin.ts                    # Admin CRUD: /admin/users (list/get/create/patch/pin/delete), /admin/families (list/create/members)
 │       ├── auth.ts                    # POST /auth/token (PIN + username login, rate limiting), POST /auth/refresh (token refresh)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
-│       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich), WhatsApp webhook (images, fromMe capture, pushName enrichment, source routing), routing rule matcher
+│       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich), WhatsApp webhook (images, fromMe capture, pushName enrichment, source routing), routing rule matcher, phone contacts enrichment
 │       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge (journal+proactivity), journal consolidation, health polling
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/whatsapp-user-resolver.ts # Instance name → user_id mapping with 5min cache
@@ -146,7 +146,7 @@ ll5/
 │       └── providers/                 # React Query
 │
 ├── packages/shared/src/__tests__/      # 21 tests: auth token generation, validation, expiry
-├── packages/gateway/src/__tests__/     # 106 tests: whatsapp webhook, notification rules, chat, admin API
+├── packages/gateway/src/__tests__/     # 113 tests: whatsapp webhook, notification rules, chat, admin API, phone contacts
 │
 └── packages/ll5-auth/                 # @ll5/auth-cli — login/status/logout CLI
     └── src/

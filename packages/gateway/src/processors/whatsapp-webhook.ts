@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
 import { escalateConversation } from '../utils/escalation.js';
+import { decrypt } from '../utils/encryption.js';
 import type { NotificationRuleMatcher } from './notification-rules.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
@@ -63,6 +64,7 @@ export async function processWhatsAppWebhook(
   matcher: NotificationRuleMatcher,
   userId: string,
   payload: EvolutionWebhookPayload,
+  encryptionKey?: string,
 ): Promise<void> {
   // Only process messages.upsert
   if (payload.event !== 'messages.upsert') {
@@ -169,12 +171,23 @@ export async function processWhatsAppWebhook(
 
         if (evo) {
           try {
+            // api_key is stored encrypted in DB — decrypt before use
+            let apiKey = evo.api_key;
+            if (encryptionKey) {
+              try {
+                apiKey = decrypt(evo.api_key, encryptionKey);
+              } catch (decryptErr) {
+                logger.warn('[processWhatsAppWebhook][handle] Failed to decrypt API key, using raw value', {
+                  error: decryptErr instanceof Error ? decryptErr.message : String(decryptErr),
+                });
+              }
+            }
             const mediaRes = await fetch(
               `${evo.api_url}/chat/getBase64FromMediaMessage/${evo.instance_name}`,
               {
                 method: 'POST',
                 headers: {
-                  'apikey': evo.api_key,
+                  'apikey': apiKey,
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({ message: data }),

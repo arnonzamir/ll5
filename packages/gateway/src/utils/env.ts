@@ -24,6 +24,7 @@ export interface EnvConfig {
   messageBatchIntervalMinutes: number;
   journalConsolidationHour: number;
   fcmServerKey?: string;
+  encryptionKey?: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -89,5 +90,6 @@ export function loadEnv(): EnvConfig {
     messageBatchIntervalMinutes: parseInt(process.env.MESSAGE_BATCH_INTERVAL_MINUTES ?? '30', 10),
     journalConsolidationHour: parseInt(process.env.JOURNAL_CONSOLIDATION_HOUR ?? '2', 10),
     fcmServerKey: process.env.FCM_SERVER_KEY,
+    encryptionKey: process.env.ENCRYPTION_KEY,
   };
 }

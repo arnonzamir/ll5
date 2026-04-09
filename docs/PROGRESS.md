@@ -76,14 +76,16 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 | Data source config | Apr 7-8 | Per-source toggles, gateway enforcement, dashboard UI, Android device command sync |
 | Health polling scheduler | Apr 7 | Polls every 20min, sleep/activity/HR/stress/energy/weight detection, 7-day baselines |
 | Admin log explorer | Apr 8 | Datadog-style: faceted sidebar, time range, search, slide-out detail, separate app/audit pages |
-| Test suite (362 tests) | Apr 8 | All 8 packages: shared, gateway, knowledge, gtd, awareness, health, messaging, google |
+| Test suite (369 tests) | Apr 8-9 | All 8 packages: shared, gateway, knowledge, gtd, awareness, health, messaging, google |
 | Auto-match contacts | Apr 9 | Person-first, Hebrew-Latin cross-script, multi-candidate UI, name similarity scoring |
+| Android phone contacts push | Apr 9 | Address book sync → gateway → messaging_contacts enrichment (fixes 2043 nameless contacts) |
+| WhatsApp image download fix | Apr 9 | Gateway decrypts Evolution API key before media download (was passing encrypted key) |
 
 ### Not Built — Planned
 
 | Feature | Design Doc | Priority | Effort |
 |---------|-----------|----------|--------|
-| Android phone contacts push | — | Medium | Medium — enriches messaging contacts with address book names |
+| ~~Android phone contacts push~~ | — | ~~Medium~~ | ~~DONE (Apr 9)~~ |
 | WhatsApp history backfill | ROADMAP.md | Low | Medium — Evolution API findMessages or export parser |
 | Email sync from phone | ROADMAP.md | Low | Medium — Android ContentProvider for metadata |
 | Money tracking MCP | ROADMAP.md | Low | Large — bank APIs, categorization, projections |
@@ -98,6 +100,8 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 ## Recent Changes
 
+- 2026-04-09: Fix WhatsApp image download: gateway was passing encrypted Evolution API key to getBase64FromMediaMessage (regression from api_key encryption). Added decrypt util + ENCRYPTION_KEY env var to gateway.
+- 2026-04-09: Android phone contacts push: ContactsRepository reads device address book (ContactsContract), pushes name→phone pairs as phone_contact webhook items. Gateway normalizes phone numbers (Israeli +972/0 variants), enriches messaging_contacts display_name where current name is null/phone-number/JID.
 - 2026-04-09: Contacts & Routing: person-first auto-match with Hebrew-Latin cross-script matching (~80 Israeli name lookup table), multi-candidate UI, link contact from People tab via search modal, "Named only" filter (excludes JIDs/phone numbers), client-side pagination (50/page), calendar event cleanup (delete phone events removed from calendar)
 - 2026-04-08: Android: alert vibration bypasses silent mode (Vibrator.vibrate), data source toggle sync via device commands, calendar push window reduced (1+14 days, was 7+60), device_calendar webhook items accepted
 - 2026-04-08: Admin log overhaul: Datadog-style LogExplorer with faceted sidebar, time range presets, sortable columns, search, slide-out detail panel. Separate /admin/logs and /admin/audit. "Only" button on facets.
@@ -131,7 +135,7 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 ## Known Issues
 
 - Evolution API `findContacts({where:{}})` times out on 2913 contacts — single-JID queries work fine
-- Most messaging contacts lack display names — Evolution API only provides WhatsApp `pushName`, not phone address book names. Fix: Android phone contacts push (planned).
+- Most messaging contacts lack display names — Evolution API only provides WhatsApp `pushName`. Fix deployed: Android phone contacts push enriches from address book (needs READ_CONTACTS permission grant + first sync).
 - Dashboard MCP client sometimes gets stale responses (needs cache-busting)
 
 

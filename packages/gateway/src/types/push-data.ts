@@ -41,11 +41,20 @@ const PushDeviceCalendarSchema = z.object({
   type: z.literal('device_calendar'),
 }).passthrough();
 
+// Phone contact — address book entry with name and phone number (for WhatsApp name enrichment)
+const PushPhoneContactSchema = z.object({
+  type: z.literal('phone_contact'),
+  timestamp: z.string(),
+  sender: z.string().min(1),  // display name from address book
+  body: z.string().min(1),    // phone number (normalized: +digits or digits)
+});
+
 const PushItemSchema = z.discriminatedUnion('type', [
   PushLocationItemSchema,
   PushMessageItemSchema,
   PushCalendarItemSchema,
   PushDeviceCalendarSchema,
+  PushPhoneContactSchema,
 ]);
 
 export const WebhookPayloadSchema = z.object({
@@ -59,6 +68,7 @@ export { PushItemSchema };
 export type PushLocationItem = z.infer<typeof PushLocationItemSchema>;
 export type PushMessageItem = z.infer<typeof PushMessageItemSchema>;
 export type PushCalendarItem = z.infer<typeof PushCalendarItemSchema>;
+export type PushPhoneContactItem = z.infer<typeof PushPhoneContactSchema>;
 export type PushItem = z.infer<typeof PushItemSchema>;
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 

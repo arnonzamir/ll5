@@ -14,6 +14,7 @@ import { processCalendar } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
 import { NotificationRuleMatcher } from './processors/notification-rules.js';
+import { processPhoneContacts } from './processors/phone-contacts.js';
 import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
@@ -239,6 +240,9 @@ async function processItem(
         break;
       case 'device_calendar':
         // Metadata about phone's available calendars — accepted but not processed
+        break;
+      case 'phone_contact':
+        // Batched after the loop — accepted individually, processed in bulk
         break;
     }
     return { index: itemIndex, type: item.type, status: 'ok' };
@@ -984,7 +988,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         res.json({ status: 'ok' }); // 200 to Evolution API, but skip processing
         return;
       }
-      await processWhatsAppWebhook(esClient, pgPool, notificationMatcher, userId, payload);
+      await processWhatsAppWebhook(esClient, pgPool, notificationMatcher, userId, payload, config.encryptionKey);
       res.json({ status: 'ok' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1090,6 +1094,23 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       typeCounts[item.type] = (typeCounts[item.type] ?? 0) + 1;
       const result = await processItem(esClient, userId, item, i, config, pgPool, notificationMatcher);
       results.push(result);
+    }
+
+    // Batch process phone contacts — enrich messaging_contacts display_name
+    try {
+      const phoneContactItems = payload.items
+        .map((raw) => PushItemSchema.safeParse(raw))
+        .filter((r) => r.success && r.data.type === 'phone_contact')
+        .map((r) => r.data as { sender: string; body: string });
+
+      if (phoneContactItems.length > 0) {
+        await processPhoneContacts(pgPool, userId, phoneContactItems);
+      }
+    } catch (err) {
+      // Non-critical — don't fail the webhook response
+      logger.warn('[startServer][webhook] Phone contacts enrichment failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     // Clean up deleted phone calendar events: remove phone-sourced events
