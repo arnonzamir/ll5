@@ -384,10 +384,132 @@ export interface MatchSuggestion {
 }
 
 /**
+ * Hebrew name → Latin equivalents lookup.
+ * Maps common Hebrew first names to their Latin spellings.
+ * Each Hebrew name can have multiple Latin forms.
+ */
+const HEBREW_LATIN_NAMES: Array<[string, string[]]> = [
+  // Male names
+  ['אורי', ['ori', 'uri']], ['ארנון', ['arnon']], ['איתמר', ['itamar']], ['אלון', ['alon']],
+  ['אמיר', ['amir']], ['אריאל', ['ariel']], ['אסף', ['asaf', 'assaf']], ['אביב', ['aviv']],
+  ['אבי', ['avi']], ['בועז', ['boaz']], ['בן', ['ben']], ['ברק', ['barak']],
+  ['גיא', ['guy']], ['גיל', ['gil']], ['גלעד', ['gilad']], ['דוד', ['david', 'dudi']],
+  ['דימה', ['dima']], ['דניאל', ['daniel']], ['דן', ['dan']], ['דור', ['dor']],
+  ['הראל', ['harel']], ['זיו', ['ziv']], ['חי', ['hai', 'chai']], ['טל', ['tal']],
+  ['יואב', ['yoav', 'joav']], ['יונתן', ['yonatan', 'jonathan']], ['יוסי', ['yossi', 'yosi']],
+  ['יניב', ['yaniv']], ['יעקב', ['yaakov', 'jacob']], ['ירון', ['yaron']],
+  ['לירון', ['liron']], ['לירז', ['liraz']], ['מיכאל', ['michael', 'mihael']],
+  ['מתן', ['matan']], ['משה', ['moshe', 'moses']], ['נדב', ['nadav']],
+  ['ניר', ['nir']], ['נועם', ['noam']], ['עומר', ['omer']], ['עידו', ['ido']],
+  ['עמית', ['amit']], ['רועי', ['roi', 'roei']], ['רון', ['ron']],
+  ['רותם', ['rotem']], ['שחר', ['shahar']], ['שי', ['shai', 'shay']],
+  ['שמעון', ['shimon', 'simon']], ['תומר', ['tomer']],
+  // Female names
+  ['אורית', ['orit']], ['אילת', ['eilat', 'ayelet']], ['אביגיל', ['avigail', 'abigail']],
+  ['גלית', ['galit']], ['דנה', ['dana']], ['הילה', ['hila']], ['הדס', ['hadas', 'hadass']],
+  ['חן', ['chen']], ['טלי', ['tali']], ['יעל', ['yael']], ['כרמל', ['carmel', 'karmel']],
+  ['לי', ['li', 'lee']], ['ליאת', ['liat']], ['לינוי', ['linoy', 'linoi']],
+  ['מאיה', ['maya', 'maia']], ['מור', ['mor']], ['מיכל', ['michal']],
+  ['נועה', ['noa', 'noah']], ['נטע', ['neta']], ['סיון', ['sivan']],
+  ['עדי', ['adi']], ['ענבל', ['inbal']], ['רוני', ['roni', 'ronit']],
+  ['רחל', ['rachel', 'rahel']], ['שירה', ['shira']], ['שרה', ['sara', 'sarah']],
+  ['תמר', ['tamar']], ['נגה', ['noga']],
+  // Common last names
+  ['כהן', ['cohen', 'kohen']], ['לוי', ['levi', 'levy']], ['מזרחי', ['mizrahi', 'mizrachi']],
+  ['פרידמן', ['friedman', 'fridman']], ['גולדברג', ['goldberg']], ['שניצר', ['schnitzer', 'shnitser']],
+  ['רוזנברג', ['rosenberg']], ['אברהם', ['avraham', 'abraham']], ['גרינברג', ['greenberg', 'grinberg']],
+  ['שפירא', ['shapira', 'shapiro']], ['ברקוביץ', ['berkowitz', 'berkovitz']],
+];
+
+// Build bidirectional lookup: latin→hebrew[], hebrew→latin[]
+const latinToHebrew = new Map<string, string[]>();
+const hebrewToLatin = new Map<string, string[]>();
+for (const [heb, latins] of HEBREW_LATIN_NAMES) {
+  hebrewToLatin.set(heb, latins);
+  for (const lat of latins) {
+    const existing = latinToHebrew.get(lat) ?? [];
+    existing.push(heb);
+    latinToHebrew.set(lat, existing);
+  }
+}
+
+const hasHebrew = (s: string) => /[\u0590-\u05ff]/.test(s);
+
+/**
+ * Check if two words match across Hebrew ↔ Latin scripts using the name table.
+ */
+function crossScriptWordMatch(a: string, b: string): boolean {
+  const aLower = a.toLowerCase();
+  const bLower = b.toLowerCase();
+
+  if (hasHebrew(a) && !hasHebrew(b)) {
+    // a is Hebrew, b is Latin
+    const latins = hebrewToLatin.get(aLower);
+    return latins?.includes(bLower) ?? false;
+  }
+  if (!hasHebrew(a) && hasHebrew(b)) {
+    // a is Latin, b is Hebrew
+    const hebrews = latinToHebrew.get(aLower);
+    return hebrews?.includes(bLower) ?? false;
+  }
+  return false;
+}
+
+/**
+ * Cross-script name matching for Hebrew ↔ Latin names.
+ * Uses a lookup table of common Israeli names.
+ * Returns similarity score 0-1 or null if not applicable (same script).
+ */
+function crossScriptMatch(a: string, b: string): number | null {
+  const aHeb = hasHebrew(a);
+  const bHeb = hasHebrew(b);
+  if (aHeb === bHeb) return null; // same script, use normal comparison
+
+  const wordsA = a.replace(/[^a-zA-Z\u0590-\u05ff]/g, ' ').trim().split(/\s+/).filter(w => w.length > 0);
+  const wordsB = b.replace(/[^a-zA-Z\u0590-\u05ff]/g, ' ').trim().split(/\s+/).filter(w => w.length > 0);
+
+  if (wordsA.length === 0 || wordsB.length === 0) return 0;
+
+  // Count how many words match cross-script
+  let matchedWords = 0;
+  const maxWords = Math.max(wordsA.length, wordsB.length);
+  const usedB = new Set<number>();
+
+  for (const wa of wordsA) {
+    for (let i = 0; i < wordsB.length; i++) {
+      if (usedB.has(i)) continue;
+      if (crossScriptWordMatch(wa, wordsB[i])) {
+        matchedWords++;
+        usedB.add(i);
+        break;
+      }
+    }
+  }
+
+  if (matchedWords === 0) return 0;
+
+  // Both multi-word and all matched → very strong
+  if (matchedWords >= 2 && matchedWords >= maxWords) return 0.95;
+  // Both multi-word, first+last matched
+  if (wordsA.length >= 2 && wordsB.length >= 2 && matchedWords >= 2) return 0.9;
+  // At least first word matched
+  if (crossScriptWordMatch(wordsA[0], wordsB[0])) {
+    if (wordsA.length === 1 || wordsB.length === 1) return 0.75;
+    return 0.7; // first name matches but last doesn't
+  }
+  // Some word matched but not the first
+  return 0.6;
+}
+
+/**
  * Name similarity scoring. Returns 0-1 where 1 is exact match.
  * Both inputs should be human names (pre-filtered for JIDs/phone numbers).
  */
 function nameSimilarity(a: string, b: string): number {
+  // Try cross-script matching first (Hebrew ↔ Latin)
+  const crossScore = crossScriptMatch(a, b);
+  if (crossScore !== null) return crossScore;
+
   const na = a.toLowerCase().replace(/[^a-z0-9\u0590-\u05ff]/g, " ").replace(/\s+/g, " ").trim();
   const nb = b.toLowerCase().replace(/[^a-z0-9\u0590-\u05ff]/g, " ").replace(/\s+/g, " ").trim();
 
