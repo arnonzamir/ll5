@@ -710,7 +710,12 @@ export function ContactSettingsView() {
     p.platforms.some((pl) => pl.display_name?.toLowerCase().includes(searchLower))
   );
   const filteredContacts = contacts.filter((c) => {
-    if (namedOnly && !c.displayName) return false;
+    if (namedOnly) {
+      if (!c.displayName) return false;
+      // Exclude names that are just phone numbers, WhatsApp JIDs, or platform IDs
+      if (/^[\d+\s()-]+$/.test(c.displayName)) return false;
+      if (c.displayName.includes("@s.whatsapp.net") || c.displayName.includes("@lid") || c.displayName.includes("@g.us")) return false;
+    }
     if (!search) return true;
     return c.displayName?.toLowerCase().includes(searchLower) ||
       c.phoneNumber?.toLowerCase().includes(searchLower) ||
