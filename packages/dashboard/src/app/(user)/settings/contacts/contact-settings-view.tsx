@@ -13,6 +13,7 @@ import {
   createStubAndSaveSetting,
   promoteContact,
   searchPeopleForLink,
+  searchContactsForLink,
   linkContactToPerson,
   unlinkContactFromPerson,
   fetchMatchSuggestions,
@@ -216,6 +217,118 @@ function LinkPopover({
   );
 }
 
+function LinkContactToPersonModal({
+  open,
+  personId,
+  personName,
+  onClose,
+  onLinked,
+}: {
+  open: boolean;
+  personId: string;
+  personName: string;
+  onClose: () => void;
+  onLinked: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Array<{ id: string; display_name: string | null; phone_number: string | null; platform: string; platform_id: string; person_id: string | null }>>([]);
+  const [searching, setSearching] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset on open
+  useEffect(() => {
+    if (open) { setQuery(""); setResults([]); }
+  }, [open]);
+
+  function handleSearch(value: string) {
+    setQuery(value);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (value.trim().length < 2) { setResults([]); return; }
+    timerRef.current = setTimeout(async () => {
+      setSearching(true);
+      const r = await searchContactsForLink(value.trim());
+      setResults(r);
+      setSearching(false);
+    }, 300);
+  }
+
+  async function handleLink(contactId: string) {
+    setLinking(true);
+    await linkContactToPerson(contactId, personId);
+    setLinking(false);
+    onLinked();
+    onClose();
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 relative">
+        <button onClick={onClose} className="absolute top-3 right-3 p-1 rounded text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
+          <X className="h-4 w-4" />
+        </button>
+
+        <h3 className="text-lg font-semibold mb-1">Link Contact</h3>
+        <p className="text-sm text-gray-500 mb-4">Search for a contact to link to <strong>{personName}</strong></p>
+
+        <div className="relative mb-3">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            value={query}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search by name or phone..."
+            className="pl-9"
+            autoFocus
+          />
+        </div>
+
+        <div className="max-h-64 overflow-y-auto space-y-1">
+          {searching && (
+            <div className="flex items-center justify-center gap-2 py-4 text-gray-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Searching...</span>
+            </div>
+          )}
+
+          {!searching && query.length >= 2 && results.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-4">No contacts found</p>
+          )}
+
+          {results.map((c) => (
+            <div
+              key={c.id}
+              className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors"
+            >
+              <UserPlus className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium truncate block">{c.display_name || c.platform_id.split("@")[0]}</span>
+                {c.phone_number && <span className="text-[10px] text-gray-400">{c.phone_number}</span>}
+              </div>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{c.platform}</Badge>
+              {c.person_id ? (
+                <span className="text-[10px] text-amber-500 shrink-0">already linked</span>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleLink(c.id)}
+                  disabled={linking}
+                  className="h-7 px-2 gap-1 text-green-600 hover:text-green-700 hover:bg-green-50"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Link
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AutoMatchPanel({
   onDone,
 }: {
@@ -377,10 +490,12 @@ function PersonRow({
   person,
   onUpdate,
   onUnlink,
+  onLinkContact,
 }: {
   person: PersonWithPlatforms;
   onUpdate: (targetId: string, field: string, value: unknown) => void;
   onUnlink: (contactId: string) => void;
+  onLinkContact: (personId: string) => void;
 }) {
   const routing = person.settings?.routing ?? "batch";
   const permission = person.settings?.permission ?? "input";
@@ -413,6 +528,14 @@ function PersonRow({
           </div>
         )}
       </div>
+
+      <button
+        onClick={() => onLinkContact(person.id)}
+        title="Link a contact to this person"
+        className="p-1 rounded text-gray-300 hover:text-blue-500 hover:bg-blue-50 transition-colors cursor-pointer shrink-0"
+      >
+        <Link className="h-3.5 w-3.5" />
+      </button>
 
       <MediaButton active={downloadMedia} onClick={() => onUpdate(person.id, "download_media", !downloadMedia)} />
 
@@ -544,6 +667,8 @@ export function ContactSettingsView() {
   const [namedOnly, setNamedOnly] = useState(false);
   const [contactPage, setContactPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [linkPersonId, setLinkPersonId] = useState<string | null>(null);
+  const [linkPersonName, setLinkPersonName] = useState("");
   // Track if we've ever loaded from server (vs just cache)
   const serverLoaded = useRef(false);
 
@@ -817,7 +942,7 @@ export function ContactSettingsView() {
           ) : (
             <div className="divide-y divide-gray-50">
               {filteredPeople.map((p) => (
-                <PersonRow key={p.id} person={p} onUpdate={handlePersonUpdate} onUnlink={handleUnlink} />
+                <PersonRow key={p.id} person={p} onUpdate={handlePersonUpdate} onUnlink={handleUnlink} onLinkContact={(id) => { setLinkPersonId(id); setLinkPersonName(p.name); }} />
               ))}
             </div>
           )
@@ -869,6 +994,14 @@ export function ContactSettingsView() {
           )
         )}
       </div>
+
+      <LinkContactToPersonModal
+        open={linkPersonId !== null}
+        personId={linkPersonId ?? ""}
+        personName={linkPersonName}
+        onClose={() => setLinkPersonId(null)}
+        onLinked={refreshFromServer}
+      />
     </div>
   );
 }

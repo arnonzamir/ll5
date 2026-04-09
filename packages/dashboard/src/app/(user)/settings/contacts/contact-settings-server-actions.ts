@@ -344,6 +344,25 @@ export async function searchPeopleForLink(query: string): Promise<Array<{ id: st
   }
 }
 
+export async function searchContactsForLink(query: string): Promise<Array<{ id: string; display_name: string | null; phone_number: string | null; platform: string; platform_id: string; person_id: string | null }>> {
+  try {
+    const raw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", {
+      query,
+      is_group: false,
+      limit: 20,
+    });
+    if (!raw || typeof raw !== "object") return [];
+    for (const val of Object.values(raw)) {
+      if (Array.isArray(val)) {
+        return val as Array<{ id: string; display_name: string | null; phone_number: string | null; platform: string; platform_id: string; person_id: string | null }>;
+      }
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 export async function linkContactToPerson(contactId: string, personId: string): Promise<boolean> {
   try {
     await mcpCallJsonSafe("ll5-messaging", "link_contact_to_person", {
