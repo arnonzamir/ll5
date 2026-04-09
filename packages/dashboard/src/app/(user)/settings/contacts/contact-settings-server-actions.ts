@@ -377,77 +377,115 @@ export interface MatchSuggestion {
   suggestions: Array<{ personId: string; personName: string; relationship?: string; notes?: string }>;
 }
 
+/**
+ * Simple name similarity: normalize and compare.
+ * Returns a score 0-1 where 1 is exact match.
+ */
+function nameSimilarity(a: string, b: string): number {
+  const na = a.toLowerCase().replace(/[^a-z0-9\u0590-\u05ff]/g, " ").trim();
+  const nb = b.toLowerCase().replace(/[^a-z0-9\u0590-\u05ff]/g, " ").trim();
+  if (na === nb) return 1;
+  // Check if one contains the other (e.g. "Dima" matches "Dima Petrov")
+  if (na.includes(nb) || nb.includes(na)) return 0.8;
+  // Check first name match (first word)
+  const fa = na.split(/\s+/)[0];
+  const fb = nb.split(/\s+/)[0];
+  if (fa && fb && fa === fb && fa.length >= 3) return 0.6;
+  return 0;
+}
+
+function isRealName(name: string): boolean {
+  if (!name) return false;
+  if (/^[\d+\s()-]+$/.test(name)) return false;
+  if (name.includes("@s.whatsapp.net") || name.includes("@lid") || name.includes("@g.us")) return false;
+  return true;
+}
+
 export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
   const token = await getToken();
   if (!token) return [];
 
   try {
-    // Get unlinked contacts via auto_match_contacts
-    const raw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "auto_match_contacts", {});
-    // auto_match_contacts returns { unlinked_contacts: [{ contact_id, contact_name, contact_platform, contact_platform_id }] }
-    let unlinked: Array<{ contact_id: string; contact_name: string; contact_platform: string; contact_platform_id: string }> = [];
-    if (raw && typeof raw === "object") {
-      for (const val of Object.values(raw)) {
+    const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
+
+    // Step 1: Fetch all people and all unlinked named contacts in parallel
+    const [peopleResult, contactsRaw] = await Promise.all([
+      callMcpTool(knowledgeUrl, "list_people", { limit: 200 }, token),
+      mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "auto_match_contacts", { limit: 500 }),
+    ]);
+
+    // Parse people
+    let allPeople: Array<{ id: string; name: string; aliases?: string[]; relationship?: string; notes?: string }> = [];
+    const parsedPeople = extractJson<Record<string, unknown>>(peopleResult);
+    if (parsedPeople && typeof parsedPeople === "object") {
+      for (const val of Object.values(parsedPeople)) {
+        if (Array.isArray(val)) { allPeople = val as typeof allPeople; break; }
+      }
+    }
+
+    // Parse unlinked contacts
+    let unlinkedContacts: Array<{ contact_id: string; contact_name: string; contact_platform: string; contact_platform_id: string }> = [];
+    if (contactsRaw && typeof contactsRaw === "object") {
+      for (const val of Object.values(contactsRaw)) {
+        if (Array.isArray(val)) { unlinkedContacts = val as typeof unlinkedContacts; break; }
+      }
+    }
+
+    // Filter contacts to real names only
+    const namedContacts = unlinkedContacts.filter((c) => isRealName(c.contact_name));
+
+    // Step 2: Get IDs of people who already have linked contacts
+    const linkedContactsRaw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { linked_only: true, limit: 500 });
+    const linkedPersonIds = new Set<string>();
+    if (linkedContactsRaw && typeof linkedContactsRaw === "object") {
+      for (const val of Object.values(linkedContactsRaw)) {
         if (Array.isArray(val)) {
-          unlinked = val as typeof unlinked;
+          for (const c of val as Array<{ person_id?: string }>) {
+            if (c.person_id) linkedPersonIds.add(c.person_id);
+          }
           break;
         }
       }
     }
 
-    // Limit to 20 contacts
-    const batch = unlinked.slice(0, 20);
-    const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
-
-    // Filter out non-human names client-side too (belt-and-suspenders with MCP filter)
-    const validBatch = batch.filter((c) => {
-      const name = c.contact_name;
-      if (!name) return false;
-      if (/^[\d+\s()-]+$/.test(name)) return false;
-      if (name.includes("@s.whatsapp.net") || name.includes("@lid") || name.includes("@g.us")) return false;
-      return true;
-    });
-
+    // Step 3: For each unlinked person, find matching contacts by name similarity
+    const unlinkedPeople = allPeople.filter((p) => !linkedPersonIds.has(p.id));
     const results: MatchSuggestion[] = [];
-    const matchedPersonIds = new Set<string>(); // prevent multiple contacts matching the same person
+    const claimedContactIds = new Set<string>();
 
-    for (const contact of validBatch) {
-      const contactName = contact.contact_name;
+    for (const person of unlinkedPeople) {
+      const names = [person.name, ...(person.aliases ?? [])];
+      const matches: Array<{ contact: typeof namedContacts[0]; score: number }> = [];
 
-      try {
-        const result = await callMcpTool(knowledgeUrl, "list_people", { query: contactName, limit: 3 }, token);
-        const parsed = extractJson<Record<string, unknown>>(result);
-        let people: Array<{ id: string; name: string; relationship?: string; notes?: string }> = [];
-        if (parsed && typeof parsed === "object") {
-          for (const val of Object.values(parsed)) {
-            if (Array.isArray(val)) {
-              people = val as typeof people;
-              break;
-            }
-          }
+      for (const contact of namedContacts) {
+        if (claimedContactIds.has(contact.contact_id)) continue;
+        const bestScore = Math.max(...names.map((n) => nameSimilarity(n, contact.contact_name)));
+        if (bestScore >= 0.6) {
+          matches.push({ contact, score: bestScore });
         }
+      }
 
-        // Filter out people already matched to another contact in this batch
-        const available = people.filter((p) => !matchedPersonIds.has(p.id));
+      // Sort by score descending, take top 3
+      matches.sort((a, b) => b.score - a.score);
+      const topMatches = matches.slice(0, 3);
 
-        if (available.length > 0) {
-          results.push({
-            contactId: contact.contact_id,
-            contactName,
-            contactPlatformId: contact.contact_platform_id,
-            platform: contact.contact_platform,
-            suggestions: available.map((p) => ({
-              personId: p.id,
-              personName: p.name,
-              relationship: p.relationship,
-              notes: p.notes,
-            })),
-          });
-          // Mark the first suggestion as taken (most likely match)
-          matchedPersonIds.add(available[0].id);
-        }
-      } catch {
-        // Skip this contact if search fails
+      if (topMatches.length > 0) {
+        // Present as: this contact should link to this person
+        // Use the best match as the primary suggestion
+        const best = topMatches[0];
+        results.push({
+          contactId: best.contact.contact_id,
+          contactName: best.contact.contact_name,
+          contactPlatformId: best.contact.contact_platform_id,
+          platform: best.contact.contact_platform,
+          suggestions: [{
+            personId: person.id,
+            personName: person.name,
+            relationship: person.relationship,
+            notes: person.notes,
+          }],
+        });
+        claimedContactIds.add(best.contact.contact_id);
       }
     }
 
