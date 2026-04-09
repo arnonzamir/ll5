@@ -545,6 +545,8 @@ export function ContactSettingsView() {
   const [contacts, setContacts] = useState<ContactEntry[]>([]);
   const [groups, setGroups] = useState<GroupWithSettings[]>([]);
   const [search, setSearch] = useState("");
+  const [namedOnly, setNamedOnly] = useState(false);
+  const [contactPage, setContactPage] = useState(1);
   const [loading, setLoading] = useState(true);
   // Track if we've ever loaded from server (vs just cache)
   const serverLoaded = useRef(false);
@@ -707,12 +709,16 @@ export function ContactSettingsView() {
     !search || p.name.toLowerCase().includes(searchLower) ||
     p.platforms.some((pl) => pl.display_name?.toLowerCase().includes(searchLower))
   );
-  const filteredContacts = contacts.filter((c) =>
-    !search ||
-    c.displayName?.toLowerCase().includes(searchLower) ||
-    c.phoneNumber?.toLowerCase().includes(searchLower) ||
-    c.platformId.toLowerCase().includes(searchLower)
-  );
+  const filteredContacts = contacts.filter((c) => {
+    if (namedOnly && !c.displayName) return false;
+    if (!search) return true;
+    return c.displayName?.toLowerCase().includes(searchLower) ||
+      c.phoneNumber?.toLowerCase().includes(searchLower) ||
+      c.platformId.toLowerCase().includes(searchLower);
+  });
+  const CONTACTS_PAGE_SIZE = 50;
+  const contactTotalPages = Math.max(1, Math.ceil(filteredContacts.length / CONTACTS_PAGE_SIZE));
+  const pagedContacts = filteredContacts.slice((contactPage - 1) * CONTACTS_PAGE_SIZE, contactPage * CONTACTS_PAGE_SIZE);
   const filteredGroups = groups.filter((g) =>
     !search || (g.name?.toLowerCase().includes(searchLower)) ||
     g.conversation_id.toLowerCase().includes(searchLower)
@@ -720,7 +726,7 @@ export function ContactSettingsView() {
 
   const tabs: { id: TabId; label: string; count: number; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: "people", label: "People", count: people.length, icon: User },
-    { id: "contacts", label: "Contacts", count: contacts.length, icon: UserPlus },
+    { id: "contacts", label: "Contacts", count: filteredContacts.length, icon: UserPlus },
     { id: "groups", label: "Groups", count: groups.length, icon: MessageSquare },
   ];
 
@@ -764,7 +770,7 @@ export function ContactSettingsView() {
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setContactPage(1); }}
             placeholder={
               activeTab === "people" ? "Search people..." :
               activeTab === "contacts" ? "Search contacts..." :
@@ -774,7 +780,19 @@ export function ContactSettingsView() {
           />
         </div>
         {activeTab === "contacts" && (
-          <AutoMatchPanel onDone={refreshFromServer} />
+          <>
+            <button
+              onClick={() => { setNamedOnly(!namedOnly); setContactPage(1); }}
+              className={`px-2.5 py-1.5 text-xs font-medium rounded border transition-colors cursor-pointer shrink-0 ${
+                namedOnly
+                  ? "bg-gray-100 text-gray-800 border-gray-300"
+                  : "text-gray-400 hover:text-gray-600 border-gray-200"
+              }`}
+            >
+              Named only
+            </button>
+            <AutoMatchPanel onDone={refreshFromServer} />
+          </>
         )}
       </div>
 
@@ -810,11 +828,29 @@ export function ContactSettingsView() {
               {loading ? "Loading..." : contacts.length === 0 ? "No unlinked contacts" : "No matches"}
             </p>
           ) : (
-            <div className="divide-y divide-gray-50">
-              {filteredContacts.map((c) => (
-                <ContactRow key={c.contactId} contact={c} onUpdate={handleContactUpdate} onPromote={handlePromote} onLinked={handleLinked} />
-              ))}
-            </div>
+            <>
+              <div className="divide-y divide-gray-50">
+                {pagedContacts.map((c) => (
+                  <ContactRow key={c.contactId} contact={c} onUpdate={handleContactUpdate} onPromote={handlePromote} onLinked={handleLinked} />
+                ))}
+              </div>
+              {contactTotalPages > 1 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+                  <span className="text-xs text-gray-400">
+                    {(contactPage - 1) * CONTACTS_PAGE_SIZE + 1}–{Math.min(contactPage * CONTACTS_PAGE_SIZE, filteredContacts.length)} of {filteredContacts.length}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" onClick={() => setContactPage((p) => Math.max(1, p - 1))} disabled={contactPage <= 1} className="h-7 w-7 p-0">
+                      &lt;
+                    </Button>
+                    <span className="text-xs text-gray-500 px-2">Page {contactPage} of {contactTotalPages}</span>
+                    <Button variant="outline" size="sm" onClick={() => setContactPage((p) => Math.min(contactTotalPages, p + 1))} disabled={contactPage >= contactTotalPages} className="h-7 w-7 p-0">
+                      &gt;
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )
         )}
 
