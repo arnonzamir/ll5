@@ -246,25 +246,21 @@ function AutoMatchPanel({
     onDone();
   }
 
-  async function handleAccept(contactId: string, personId: string) {
-    setActionPending(true);
-    try {
-      await linkContactToPerson(contactId, personId);
-      if (currentIndex < suggestions.length - 1) {
-        setCurrentIndex((i) => i + 1);
-      } else {
-        handleClose();
-      }
-    } finally {
-      setActionPending(false);
-    }
-  }
-
-  function handleSkip() {
+  function advance() {
     if (currentIndex < suggestions.length - 1) {
       setCurrentIndex((i) => i + 1);
     } else {
       handleClose();
+    }
+  }
+
+  async function handleLink(contactId: string, personId: string) {
+    setActionPending(true);
+    try {
+      await linkContactToPerson(contactId, personId);
+      advance();
+    } finally {
+      setActionPending(false);
     }
   }
 
@@ -279,7 +275,7 @@ function AutoMatchPanel({
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 relative">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 relative">
             <button
               onClick={handleClose}
               className="absolute top-3 right-3 p-1 rounded text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
@@ -288,7 +284,7 @@ function AutoMatchPanel({
             </button>
 
             <h3 className="text-lg font-semibold mb-1">Auto-match Contacts</h3>
-            <p className="text-sm text-gray-500 mb-4">Link unlinked contacts to existing KB people</p>
+            <p className="text-sm text-gray-500 mb-4">For each person, pick the matching contact</p>
 
             {loading && (
               <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
@@ -312,36 +308,36 @@ function AutoMatchPanel({
                   {currentIndex + 1} of {suggestions.length}
                 </div>
 
-                <div className="p-3 bg-gray-50 rounded-lg mb-3">
+                {/* Person card */}
+                <div className="p-3 bg-blue-50 rounded-lg mb-3">
                   <div className="flex items-center gap-2">
-                    <UserPlus className="h-4 w-4 text-gray-400 shrink-0" />
-                    <span className="text-sm font-medium">{current.contactName}</span>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{current.platform}</Badge>
+                    <User className="h-4 w-4 text-blue-500 shrink-0" />
+                    <span className="text-sm font-semibold text-blue-900">{current.personName}</span>
+                    {current.relationship && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{current.relationship}</Badge>
+                    )}
                   </div>
-                  {current.contactPlatformId && (
-                    <div className="text-[11px] text-gray-400 mt-1 pl-6">
-                      {current.contactPlatformId.split("@")[0]}
-                    </div>
+                  {current.notes && (
+                    <div className="text-[11px] text-blue-700/70 mt-1 pl-6 line-clamp-2">{current.notes}</div>
                   )}
                 </div>
 
-                <div className="text-xs text-gray-500 mb-2">Match with:</div>
-                <div className="space-y-1.5 mb-4">
-                  {current.suggestions.map((s) => (
+                <div className="text-xs text-gray-500 mb-2">Link to which contact?</div>
+                <div className="space-y-1.5 mb-4 max-h-64 overflow-y-auto">
+                  {current.candidates.map((c) => (
                     <div
-                      key={s.personId}
-                      className="p-2 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors"
+                      key={c.contactId}
+                      className="p-2 border border-gray-200 rounded-lg hover:border-green-300 transition-colors"
                     >
                       <div className="flex items-center gap-2">
-                        <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                        <span className="text-sm font-medium flex-1 truncate">{s.personName}</span>
-                        {s.relationship && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{s.relationship}</Badge>
-                        )}
+                        <UserPlus className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                        <span className="text-sm font-medium flex-1 truncate">{c.contactName}</span>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">{c.platform}</Badge>
+                        <span className="text-[10px] text-gray-300 tabular-nums shrink-0">{c.score}%</span>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleAccept(current.contactId, s.personId)}
+                          onClick={() => handleLink(c.contactId, current.personId)}
                           disabled={actionPending}
                           className="h-7 px-2 gap-1 text-green-600 hover:text-green-700 hover:bg-green-50"
                         >
@@ -349,9 +345,9 @@ function AutoMatchPanel({
                           Link
                         </Button>
                       </div>
-                      {s.notes && (
-                        <div className="text-[11px] text-gray-400 mt-1 pl-5.5 line-clamp-2">{s.notes}</div>
-                      )}
+                      <div className="text-[11px] text-gray-400 mt-0.5 pl-5.5">
+                        {c.contactPlatformId.split("@")[0]}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -360,7 +356,7 @@ function AutoMatchPanel({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleSkip}
+                    onClick={advance}
                     disabled={actionPending}
                     className="gap-1.5 text-gray-500"
                   >

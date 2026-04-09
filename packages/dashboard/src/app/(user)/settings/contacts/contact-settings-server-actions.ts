@@ -370,27 +370,63 @@ export async function unlinkContactFromPerson(contactId: string): Promise<boolea
 }
 
 export interface MatchSuggestion {
-  contactId: string;
-  contactName: string;
-  contactPlatformId: string;
-  platform: string;
-  suggestions: Array<{ personId: string; personName: string; relationship?: string; notes?: string }>;
+  personId: string;
+  personName: string;
+  relationship?: string;
+  notes?: string;
+  candidates: Array<{
+    contactId: string;
+    contactName: string;
+    contactPlatformId: string;
+    platform: string;
+    score: number;
+  }>;
 }
 
 /**
- * Simple name similarity: normalize and compare.
- * Returns a score 0-1 where 1 is exact match.
+ * Name similarity scoring. Returns 0-1 where 1 is exact match.
+ * Both inputs should be human names (pre-filtered for JIDs/phone numbers).
  */
 function nameSimilarity(a: string, b: string): number {
-  const na = a.toLowerCase().replace(/[^a-z0-9\u0590-\u05ff]/g, " ").trim();
-  const nb = b.toLowerCase().replace(/[^a-z0-9\u0590-\u05ff]/g, " ").trim();
-  if (na === nb) return 1;
-  // Check if one contains the other (e.g. "Dima" matches "Dima Petrov")
-  if (na.includes(nb) || nb.includes(na)) return 0.8;
-  // Check first name match (first word)
-  const fa = na.split(/\s+/)[0];
-  const fb = nb.split(/\s+/)[0];
-  if (fa && fb && fa === fb && fa.length >= 3) return 0.6;
+  const na = a.toLowerCase().replace(/[^a-z0-9\u0590-\u05ff]/g, " ").replace(/\s+/g, " ").trim();
+  const nb = b.toLowerCase().replace(/[^a-z0-9\u0590-\u05ff]/g, " ").replace(/\s+/g, " ").trim();
+
+  // Skip very short names (abbreviations like "O.", "A.")
+  if (na.length < 2 || nb.length < 2) return 0;
+
+  // Exact full match
+  if (na === nb) return 1.0;
+
+  const wordsA = na.split(" ").filter(w => w.length > 0);
+  const wordsB = nb.split(" ").filter(w => w.length > 0);
+
+  // Both have 2+ words: check first+last match (either order)
+  if (wordsA.length >= 2 && wordsB.length >= 2) {
+    const setA = new Set(wordsA);
+    const matchCount = wordsB.filter(w => setA.has(w)).length;
+    if (matchCount >= 2) return 0.9; // at least first+last match
+    // First names match but last names differ — weak match
+    if (wordsA[0] === wordsB[0] && wordsA[0].length >= 3) return 0.5;
+    return 0;
+  }
+
+  // One is single word, other has multiple — check if the single word is the first name
+  const single = wordsA.length === 1 ? na : (wordsB.length === 1 ? nb : null);
+  const multi = wordsA.length >= 2 ? wordsA : (wordsB.length >= 2 ? wordsB : null);
+  if (single && multi && single.length >= 3) {
+    if (multi[0] === single) return 0.75; // first name matches
+    if (multi.some(w => w === single)) return 0.65; // matches a non-first word
+    return 0;
+  }
+
+  // Both single words
+  if (wordsA.length === 1 && wordsB.length === 1) {
+    if (na === nb) return 1.0;
+    // One contains the other, both >= 3 chars
+    if (na.length >= 3 && nb.length >= 3 && (na.includes(nb) || nb.includes(na))) return 0.7;
+    return 0;
+  }
+
   return 0;
 }
 
@@ -451,43 +487,41 @@ export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
     // Step 3: For each unlinked person, find matching contacts by name similarity
     const unlinkedPeople = allPeople.filter((p) => !linkedPersonIds.has(p.id));
     const results: MatchSuggestion[] = [];
-    const claimedContactIds = new Set<string>();
 
     for (const person of unlinkedPeople) {
       const names = [person.name, ...(person.aliases ?? [])];
       const matches: Array<{ contact: typeof namedContacts[0]; score: number }> = [];
 
       for (const contact of namedContacts) {
-        if (claimedContactIds.has(contact.contact_id)) continue;
         const bestScore = Math.max(...names.map((n) => nameSimilarity(n, contact.contact_name)));
-        if (bestScore >= 0.6) {
+        if (bestScore >= 0.65) {
           matches.push({ contact, score: bestScore });
         }
       }
 
-      // Sort by score descending, take top 3
+      // Sort by score descending, take top 5 candidates
       matches.sort((a, b) => b.score - a.score);
-      const topMatches = matches.slice(0, 3);
+      const topMatches = matches.slice(0, 5);
 
       if (topMatches.length > 0) {
-        // Present as: this contact should link to this person
-        // Use the best match as the primary suggestion
-        const best = topMatches[0];
         results.push({
-          contactId: best.contact.contact_id,
-          contactName: best.contact.contact_name,
-          contactPlatformId: best.contact.contact_platform_id,
-          platform: best.contact.contact_platform,
-          suggestions: [{
-            personId: person.id,
-            personName: person.name,
-            relationship: person.relationship,
-            notes: person.notes,
-          }],
+          personId: person.id,
+          personName: person.name,
+          relationship: person.relationship,
+          notes: person.notes,
+          candidates: topMatches.map((m) => ({
+            contactId: m.contact.contact_id,
+            contactName: m.contact.contact_name,
+            contactPlatformId: m.contact.contact_platform_id,
+            platform: m.contact.contact_platform,
+            score: Math.round(m.score * 100),
+          })),
         });
-        claimedContactIds.add(best.contact.contact_id);
       }
     }
+
+    // Sort results: highest best-match score first
+    results.sort((a, b) => (b.candidates[0]?.score ?? 0) - (a.candidates[0]?.score ?? 0));
 
     return results;
   } catch (err) {
