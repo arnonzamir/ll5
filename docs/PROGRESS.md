@@ -72,11 +72,18 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 | Calendar integration | Mar 29 | Google Cal + phone sync, ticklers (recurring), week view, availability check |
 | WhatsApp integration | Mar 30+ | Evolution API, webhook, image download, pushName enrichment, contact sync (2,874 contacts) |
 | Android app | Mar 29 | Chat, GPS, notification capture, FCM, Health Connect |
+| User management | Apr 8 | All 5 phases: AsyncLocalStorage, admin CRUD, username login, rate limiting, PIN validation, multi-user schedulers, WhatsApp routing, onboarding, families |
+| Data source config | Apr 7-8 | Per-source toggles, gateway enforcement, dashboard UI, Android device command sync |
+| Health polling scheduler | Apr 7 | Polls every 20min, sleep/activity/HR/stress/energy/weight detection, 7-day baselines |
+| Admin log explorer | Apr 8 | Datadog-style: faceted sidebar, time range, search, slide-out detail, separate app/audit pages |
+| Test suite (362 tests) | Apr 8 | All 8 packages: shared, gateway, knowledge, gtd, awareness, health, messaging, google |
+| Auto-match contacts | Apr 9 | Person-first, Hebrew-Latin cross-script, multi-candidate UI, name similarity scoring |
 
 ### Not Built — Planned
 
 | Feature | Design Doc | Priority | Effort |
 |---------|-----------|----------|--------|
+| Android phone contacts push | — | Medium | Medium — enriches messaging contacts with address book names |
 | WhatsApp history backfill | ROADMAP.md | Low | Medium — Evolution API findMessages or export parser |
 | Email sync from phone | ROADMAP.md | Low | Medium — Android ContentProvider for metadata |
 | Money tracking MCP | ROADMAP.md | Low | Large — bank APIs, categorization, projections |
@@ -87,21 +94,15 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 |------|----------|
 | Auth hardening (device-bound sessions, passkeys, or OAuth) | Low — current PIN+bcrypt sufficient for family use |
 | Tests: 362 passing across 8 packages. Dashboard uncovered. | Low |
-| ~~Android SSE for chat~~ | Done — already uses OkHttp SSE |
+| Evolution API findContacts times out on full dataset (2913 contacts) | Low — workaround: single-JID queries work |
 
 ## Recent Changes
 
-- 2026-04-08: Android: alert vibration bypasses silent mode, data source toggle sync via device commands (dashboard → gateway → FCM → Android). Chat already uses SSE (tech debt was stale).
-- 2026-04-08: Admin log overhaul: Datadog-style LogExplorer with faceted sidebar (dynamic ES aggregations), time range presets (15m/1h/4h/1d/7d), sortable columns, search with debounce, slide-out detail panel. Separate /admin/logs (app) and /admin/audit (audit) pages.
-- 2026-04-08: Tech debt: add 235 MCP tests (knowledge: 41, gtd: 45, awareness: 47, health: 35, messaging: 40, google: 27). Grand total: 362 across 8 packages.
-- 2026-04-08: Tech debt: add 168 MCP tests (first batch) (knowledge: 41, gtd: 45, awareness: 47, health: 35). Total: 295+ passing across 6 packages.
-- 2026-04-08: Tech debt: fix 7 failing gateway tests, add 44 new tests (21 shared auth + 23 admin API). Total: 127 tests passing. Add vitest to shared package.
-- 2026-04-08: Tech debt: deduplicate auth-middleware (4 MCPs now import from @ll5/shared), fix logging format in shared/mcp/server.ts and personal-knowledge/setup/indices.ts
-- 2026-04-08: User management Phase 5: Onboarding wizard (5 steps: profile, timezone, Google Calendar, Android app, complete). Auto-redirect for new users. Admin user creation seeds onboarding state. PIN minimum bumped to 6 chars.
-- 2026-04-08: User management Phase 3+4: Multi-user schedulers (per-user scheduler sets from auth_users, 5-min reconciliation for new/disabled users), WhatsApp webhook user routing (instance→user_id cache with 5min TTL), PIN strength validation (blocklist of common PINs)
-- 2026-04-08: Fix admin users page: gateway returns `{users:[...]}` not bare array, field is `user_id` not `id`
-- 2026-04-08: User management Phase 2: Admin CRUD API (10 endpoints: users + families), admin dashboard UI (list/create/edit/disable users, PIN reset, family management), login rate limiting (5 attempts / 15min lockout)
-- 2026-04-08: User management Phase 1: AsyncLocalStorage in all 6 MCPs (fixes concurrency hazard), DB migration 019 (auth_users: role/enabled/username/display_name columns, families + family_members tables), username login (dashboard + gateway), audit log username field
+- 2026-04-09: Contacts & Routing: person-first auto-match with Hebrew-Latin cross-script matching (~80 Israeli name lookup table), multi-candidate UI, link contact from People tab via search modal, "Named only" filter (excludes JIDs/phone numbers), client-side pagination (50/page), calendar event cleanup (delete phone events removed from calendar)
+- 2026-04-08: Android: alert vibration bypasses silent mode (Vibrator.vibrate), data source toggle sync via device commands, calendar push window reduced (1+14 days, was 7+60), device_calendar webhook items accepted
+- 2026-04-08: Admin log overhaul: Datadog-style LogExplorer with faceted sidebar, time range presets, sortable columns, search, slide-out detail panel. Separate /admin/logs and /admin/audit. "Only" button on facets.
+- 2026-04-08: Tech debt: 362 tests across 8 packages (was 0). Auth-middleware deduplicated (4 copies → @ll5/shared). Logging format fixed (shared 0% → 100%).
+- 2026-04-08: User management: all 5 phases — AsyncLocalStorage (6 MCPs), DB migration 019, admin CRUD API (10 endpoints + dashboard), username login, rate limiting, PIN validation (6+ blocklist), multi-user schedulers, WhatsApp routing, onboarding wizard, families tables
 - 2026-04-07: Data source config: per-source toggles (GPS, IM, calendar, health, WhatsApp) in user_settings JSONB. Gateway isSourceEnabled() helper with 60s cache. Enforcement in processItem + WhatsApp webhook. Dashboard /settings/data-sources page with toggle switches.
 - 2026-04-07: Health polling scheduler: polls ES every 20min during active hours, detects new sleep/activity/HR anomaly/stress/energy/weight events, batches into system messages with notification levels. 7-day baseline for conditional alerts. Dedup per day.
 - 2026-04-07: Source routing metadata on system messages: WhatsApp webhook includes platform/remote_jid/sender in metadata, PG NOTIFY passes it through, channel MCP exposes it in meta.source. Agent instructions updated: MUST reply on the same platform using send_whatsapp with remote_jid.
@@ -129,13 +130,9 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 ## Known Issues
 
-- Gateway SSE listener needs reconnect-on-error improvement
+- Evolution API `findContacts({where:{}})` times out on 2913 contacts — single-JID queries work fine
+- Most messaging contacts lack display names — Evolution API only provides WhatsApp `pushName`, not phone address book names. Fix: Android phone contacts push (planned).
 - Dashboard MCP client sometimes gets stale responses (needs cache-busting)
-- Evolution API encrypted key was stored as plain text — re-encrypted manually (2026-04-07). Future accounts use proper encryption via create_whatsapp_account tool.
-
-
-
-
 
 
 

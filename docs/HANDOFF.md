@@ -203,7 +203,7 @@ See docs/implementation/deployment-log.md for full details:
 - **Bidirectional WhatsApp capture**: `fromMe` messages written to ES (`from_me: true`, `processed: true`). Agent sees "You sent" for immediate/agent conversations. Escalation on user activity in ignored/batched chats.
 - **Source routing for replies**: System messages from WhatsApp include `metadata.source` with `{ platform, remote_jid, sender_name, is_group, group_name }`. PG NOTIFY trigger (migration 018) passes `source` in the payload. Channel MCP includes it in `meta.source`. Agent must use `send_whatsapp(to=remote_jid)` — never `reply()` — for WhatsApp messages. This fixes the bug where image message replies went to the wrong channel.
 - **Admin logs**: Datadog-style LogExplorer at `/admin/logs` (app log) and `/admin/audit` (audit log). Faceted sidebar with ES aggregations, time range presets, sortable table, slide-out detail panel with entity tooltips. ES queries use `aggs` for dynamic facet counts.
-- **Test suite**: 362 tests across 8 packages (shared: 21, gateway: 106, knowledge: 41, gtd: 45, awareness: 47, health: 35, messaging: 40, google: 27). Run per-package: `cd packages/PKG && npx vitest run`. Dashboard not covered. Shared: 21 (auth token gen/validate/expiry). Gateway: 106 (whatsapp webhook, notification rules, chat, message processor, admin API). Run: `cd packages/shared && npx vitest run` and `cd packages/gateway && npx vitest run`.
+- **Test suite**: 362 tests across 8 packages (shared: 21, gateway: 106, knowledge: 41, gtd: 45, awareness: 47, health: 35, messaging: 40, google: 27). Run per-package: `cd packages/PKG && npx vitest run`. Dashboard not covered.
 - **Shared auth middleware**: `tokenAuthMiddleware` from `@ll5/shared` used by personal-knowledge, gtd, awareness, health MCPs. Config: `{ authSecret, legacy?: { apiKey, userId } }`. Messaging and google MCPs still have inline auth (different pattern).
 - **Onboarding**: New users with `user_settings.onboarding.completed === false` are auto-redirected to `/onboarding`. 5 steps: profile name, timezone (browser-detected default), Google Calendar (optional), Android app (optional), complete. Admin user creation seeds the onboarding state. Existing users without the `onboarding` key are unaffected. Middleware injects `x-pathname` header for redirect loop prevention.
 - **Multi-user schedulers**: `scheduler/index.ts` queries `auth_users WHERE enabled = true`, starts full scheduler set per user. `reconcileUsers()` runs every 5min to start/stop schedulers for new/disabled users. Falls back to webhookTokens if no users in DB.
@@ -217,14 +217,14 @@ See docs/implementation/deployment-log.md for full details:
 - **Data source toggles**: `user_settings.data_sources` JSONB with per-source `{ enabled: bool }`. Gateway `isSourceEnabled()` in `utils/data-source-config.ts` (60s cache). Checked before `processItem` (location/message/calendar) and WhatsApp webhook. Defaults to all enabled. Dashboard page: `/settings/data-sources`.
 - **Documentation hygiene**: PROGRESS.md uses `bash` snippets instead of hardcoded counts (tool counts, page counts, etc.). `/doc-audit` skill in ll5-run audits all living docs against codebase reality. Run at session end or when drift is suspected.
 - **Contacts page performance**: Setting changes are fire-and-forget (optimistic UI, no blocking). Data cached in sessionStorage (key: `ll5_contacts_cache`, 5min TTL). On revisit: instant paint from cache, background refresh if stale.
-- **Contact-only persons**: Person records with `status: 'contact-only'` are lightweight stubs auto-created from messaging contacts. They enable per-contact routing without a full KB entry. The gateway matcher is unchanged — all routing resolves via person_id → contact_settings. Promote to `status: 'full'` to make a real KB person. Dashboard `/settings/contacts` has 3 tabs: People (full+contacts), Contacts (contact-only + unlinked), Groups. `ensureIndices` now calls `putMapping` on existing indices to add new fields.
-
-
+- **Contact-only persons**: Person records with `status: 'contact-only'` are lightweight stubs auto-created from messaging contacts. They enable per-contact routing without a full KB entry. The gateway matcher is unchanged — all routing resolves via person_id → contact_settings. Promote to `status: 'full'` to make a real KB person. Dashboard `/settings/contacts` has 3 tabs: People (full+contacts), Contacts (contact-only + unlinked), Groups.
+- **Auto-match**: Person-first approach — fetches all unlinked people + named contacts, scores by name similarity (exact/contains/first-name), with Hebrew-Latin cross-script lookup table (~80 Israeli names). Threshold 0.65, up to 5 candidates per person. UI shows person card + contact candidates to pick from.
+- **Contacts Named only filter**: Client-side filter excludes contacts whose display_name is a phone number, WhatsApp JID (@s.whatsapp.net, @lid, @g.us), or digits-only.
+- **Contacts pagination**: Client-side 50/page for the Contacts tab in /settings/contacts.
+- **Calendar event cleanup**: After processing calendar_event webhook items, gateway deletes phone-sourced ES events in the pushed time window that weren't in the batch — detects events deleted from the phone calendar.
+- **Android calendar push**: Reduced from 7+60 days to 1+14 days (500→~100 events per push). device_calendar items silently accepted.
 - Exclude __tests__ from tsc in all MCP tsconfigs (vitest handles test compilation)
-
-
-
-
+- **Evolution API contact limitation**: `findContacts({where:{}})` times out on 2913 contacts. Single-JID queries work. `pushName` is the only name field — no phone address book access. Fix needed: Android phone contacts push to enrich names.
 
 
 
