@@ -32,10 +32,16 @@ export function registerAutoMatchContactsTool(
         limit: params.limit ?? 200,
       });
 
-      // Filter to those with a display name (skip groups and unnamed contacts)
-      const candidates = contacts.filter(
-        (c) => c.display_name && !c.is_group,
-      );
+      // Filter to those with a real human name (skip groups, unnamed, phone numbers, platform IDs)
+      const candidates = contacts.filter((c) => {
+        if (!c.display_name || c.is_group) return false;
+        const name = c.display_name;
+        // Skip phone numbers (digits, +, spaces, dashes, parens only)
+        if (/^[\d+\s()-]+$/.test(name)) return false;
+        // Skip WhatsApp JIDs and platform IDs
+        if (name.includes('@s.whatsapp.net') || name.includes('@lid') || name.includes('@g.us')) return false;
+        return true;
+      });
 
       logger.info('[autoMatchContacts] Found unlinked contact candidates', {
         total_unlinked: contacts.length,

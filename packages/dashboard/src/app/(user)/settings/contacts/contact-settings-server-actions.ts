@@ -399,10 +399,20 @@ export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
     const batch = unlinked.slice(0, 20);
     const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
 
+    // Filter out non-human names client-side too (belt-and-suspenders with MCP filter)
+    const validBatch = batch.filter((c) => {
+      const name = c.contact_name;
+      if (!name) return false;
+      if (/^[\d+\s()-]+$/.test(name)) return false;
+      if (name.includes("@s.whatsapp.net") || name.includes("@lid") || name.includes("@g.us")) return false;
+      return true;
+    });
+
     const results: MatchSuggestion[] = [];
-    for (const contact of batch) {
+    const matchedPersonIds = new Set<string>(); // prevent multiple contacts matching the same person
+
+    for (const contact of validBatch) {
       const contactName = contact.contact_name;
-      if (!contactName) continue;
 
       try {
         const result = await callMcpTool(knowledgeUrl, "list_people", { query: contactName, limit: 3 }, token);
@@ -417,19 +427,24 @@ export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
           }
         }
 
-        if (people.length > 0) {
+        // Filter out people already matched to another contact in this batch
+        const available = people.filter((p) => !matchedPersonIds.has(p.id));
+
+        if (available.length > 0) {
           results.push({
             contactId: contact.contact_id,
             contactName,
             contactPlatformId: contact.contact_platform_id,
             platform: contact.contact_platform,
-            suggestions: people.map((p) => ({
+            suggestions: available.map((p) => ({
               personId: p.id,
               personName: p.name,
               relationship: p.relationship,
               notes: p.notes,
             })),
           });
+          // Mark the first suggestion as taken (most likely match)
+          matchedPersonIds.add(available[0].id);
         }
       } catch {
         // Skip this contact if search fails
