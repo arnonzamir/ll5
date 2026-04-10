@@ -933,7 +933,7 @@ export function ContactSettingsView() {
       </div>
 
       {/* Content */}
-      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+      <div className="rounded-lg border border-gray-200 bg-white">
         {activeTab === "people" && (
           filteredPeople.length === 0 ? (
             <p className="p-6 text-sm text-gray-400 text-center">
