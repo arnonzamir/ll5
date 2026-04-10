@@ -103,7 +103,7 @@ ll5/
 │       ├── utils/export.ts            # Full user data export (ES + PG → JSON, no media binaries)
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message
 │       ├── utils/fcm-sender.ts       # FCM v1 API sender (service account JWT + OAuth2, 4-level notification)
-│       ├── utils/escalation.ts      # Conversation escalation: detect user activity in low-priority chats, 30-min attention window
+│       ├── utils/escalation.ts      # Conversation escalation: detect user activity in low-priority chats, 30-min attention window, scoped recent messages, resolved contact name + chat type
 │       ├── migrations/                # auth_users, chat_messages, NOTIFY trigger, notification_rules, device_commands, user_settings, contact_settings, chat_notify_source, user_management (019: role/enabled/username + families)
 │       └── server.ts                  # Express app: webhooks, auth, chat, media, commands, availability check, health, schedulers
 │

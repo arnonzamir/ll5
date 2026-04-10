@@ -101,19 +101,37 @@ export async function escalateConversation(
       [userId, JSON.stringify(escalations)],
     );
 
-    // Fetch recent messages for context
+    // Resolve contact name for 1:1 conversations
+    const isGroup = conversationId.endsWith('@g.us');
+    const chatType = isGroup ? 'group' : '1:1';
+    let resolvedName = conversationName;
+    if (!isGroup) {
+      try {
+        const contactResult = await pool.query(
+          "SELECT display_name FROM messaging_contacts WHERE platform = 'whatsapp' AND platform_id = $1 AND user_id = $2 AND display_name IS NOT NULL AND display_name != '' LIMIT 1",
+          [conversationId, userId],
+        );
+        if (contactResult.rows[0]?.display_name) {
+          resolvedName = contactResult.rows[0].display_name;
+        }
+      } catch {
+        // Non-critical
+      }
+    }
+
+    // Fetch recent messages scoped to this conversation only
     const recentMessages = await fetchRecentMessages(es, userId, platform, conversationId);
     const contextBlock = recentMessages.length > 0
-      ? `\nRecent messages:\n${recentMessages.map((m) => `- ${m.sender}: ${m.content}`).join('\n')}`
+      ? `\nRecent messages in this conversation:\n${recentMessages.map((m) => `- ${m.sender}: ${m.content}`).join('\n')}`
       : '';
 
     // Notify agent
     await insertSystemMessage(
       pool,
       userId,
-      `[Escalation] You sent a message in "${conversationName}" (${platform}). ` +
-      `This conversation is normally "${originalPriority}". ` +
-      `Temporarily elevated to immediate for 30 minutes (ID: ${escalation.id}).` +
+      `[Escalation] "${resolvedName}" (${chatType}, ${platform}, ${conversationId}). ` +
+      `You sent a message in this conversation. ` +
+      `Normally "${originalPriority}", temporarily elevated to immediate for 30 minutes (ID: ${escalation.id}).` +
       `${contextBlock}\n\n` +
       `You will be notified when the window expires. You must then decide whether to change this conversation's priority permanently.`,
     );
@@ -188,7 +206,9 @@ export async function checkExpiredEscalations(pool: Pool): Promise<void> {
 }
 
 /**
- * Fetch recent messages from a conversation for escalation context.
+ * Fetch recent messages from a specific conversation for escalation context.
+ * For groups: matches on group_name field (the @g.us JID).
+ * For 1:1: matches on sender containing the phone portion of the JID.
  */
 async function fetchRecentMessages(
   es: Client,
@@ -198,24 +218,37 @@ async function fetchRecentMessages(
   limit = 10,
 ): Promise<Array<{ sender: string; content: string; timestamp: string }>> {
   try {
+    const isGroup = conversationId.endsWith('@g.us');
+    const filter: Array<Record<string, unknown>> = [
+      { term: { user_id: userId } },
+      { term: { app: platform } },
+    ];
+
+    if (isGroup) {
+      // For groups, match on group_name (the @g.us JID)
+      filter.push({ term: { 'group_name.keyword': conversationId } });
+    } else {
+      // For 1:1, match messages where is_group=false and the remoteJid is the sender
+      // ES stores sender as pushName or phone portion, so match via a combination
+      filter.push({ term: { is_group: false } });
+      const phonePart = conversationId.split('@')[0];
+      filter.push({
+        bool: {
+          should: [
+            { match_phrase: { sender: phonePart } },
+            { term: { from_me: true } },
+          ],
+          minimum_should_match: 1,
+        },
+      });
+    }
+
     const result = await es.search({
       index: 'll5_awareness_messages',
-      query: {
-        bool: {
-          filter: [
-            { term: { user_id: userId } },
-            { term: { app: platform } },
-          ],
-          should: [
-            // Match by group_name (for groups) or sender context
-            { term: { group_name: conversationId } },
-          ],
-          minimum_should_match: 0,
-        },
-      },
+      query: { bool: { filter } },
       size: limit,
       sort: [{ timestamp: 'desc' }],
-      _source: ['sender', 'content', 'timestamp'],
+      _source: ['sender', 'content', 'timestamp', 'from_me'],
     });
 
     return result.hits.hits.map((h) => {

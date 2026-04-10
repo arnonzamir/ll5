@@ -231,6 +231,7 @@ See docs/implementation/deployment-log.md for full details:
 - **Evolution API participantAlt**: Group messages from `@lid` participants include `participantAlt` with the `@s.whatsapp.net` JID. Both JIDs get enriched with pushName on every message. This provides LID→phone number mapping.
 - **backfill_contact_names tool**: MCP tool on messaging MCP. Paginates through all Evolution messages (`findMessages` with `where:{}`, limit=500), extracts latest pushName per sender JID, bulk-upserts to `messaging_contacts`. Safe to re-run (COALESCE preserves existing names).
 - **Contact link popover z-index**: The `LinkPopover` wrapper gets `z-50` when open so the search dropdown renders above sibling rows and the column header.
+- **Escalation message scoping**: `fetchRecentMessages` in `escalation.ts` now properly filters by conversation: groups match on `group_name.keyword`, 1:1 matches on sender phone + `is_group=false`. Previously used `minimum_should_match: 0` which returned all conversations. Escalation header now includes resolved contact name and chat type (1:1/group).
 
 
 
