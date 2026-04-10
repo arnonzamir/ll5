@@ -101,6 +101,7 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 ## Recent Changes
 
+- 2026-04-10: People page: server-side search (ES full-text via MCP query param, 300ms debounce), prev/next pagination (24/page), fetch limit 200 (was 50 default).
 - 2026-04-10: WhatsApp contact name enrichment: (1) webhook now enriches contacts from group messages too (participant + participantAlt for LID→phone mapping), (2) Evolution API webhook subscribed to CONTACTS_UPSERT + CONTACTS_UPDATE events with gateway handler, (3) backfill_contact_names MCP tool scans Evolution message history (24K+ messages) to extract pushNames for nameless contacts.
 - 2026-04-09: Fix WhatsApp image download: gateway was passing encrypted Evolution API key to getBase64FromMediaMessage (regression from api_key encryption). Added decrypt util + ENCRYPTION_KEY env var to gateway.
 - 2026-04-09: Android phone contacts push: ContactsRepository reads device address book (ContactsContract), pushes name→phone pairs as phone_contact webhook items. Gateway normalizes phone numbers (Israeli +972/0 variants), enriches messaging_contacts display_name where current name is null/phone-number/JID.

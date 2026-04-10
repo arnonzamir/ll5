@@ -15,8 +15,10 @@ export interface Person {
   tags?: string[];
 }
 
-export async function fetchPeople(): Promise<Person[]> {
-  return mcpCallList<Person>("knowledge", "list_people");
+export async function fetchPeople(query?: string): Promise<Person[]> {
+  const args: Record<string, unknown> = { limit: 200 };
+  if (query?.trim()) args.query = query.trim();
+  return mcpCallList<Person>("knowledge", "list_people", args);
 }
 
 export async function upsertPerson(

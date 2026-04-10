@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect, useMemo } from "react";
+import { useState, useTransition, useEffect, useMemo, useCallback, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Search, Users, Trash2 } from "lucide-react";
+import { Plus, Search, Users, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   fetchPeople,
   upsertPerson,
@@ -30,6 +30,7 @@ import {
 } from "./people-server-actions";
 
 const RELATIONSHIP_GROUPS = ["family", "friend", "colleague", "acquaintance", "other"] as const;
+const PAGE_SIZE = 24;
 
 /** Map a free-text relationship to a high-level group for filtering. */
 function relationshipGroup(rel: string | null | undefined): string {
@@ -97,6 +98,7 @@ export function PeopleView() {
   const [isPending, startTransition] = useTransition();
   const [search, setSearch] = useState("");
   const [filterRelationship, setFilterRelationship] = useState("all");
+  const [page, setPage] = useState(0);
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -104,35 +106,43 @@ export function PeopleView() {
   const [form, setForm] = useState<PersonFormData>(EMPTY_FORM);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  function load() {
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const load = useCallback((query?: string) => {
     startTransition(async () => {
-      const result = await fetchPeople();
+      const result = await fetchPeople(query);
       setPeople(result);
     });
-  }
+  }, []);
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [load]);
+
+  // Debounced server-side search
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      load(search || undefined);
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [search, load]);
 
   const filtered = useMemo(() => {
     let list = people;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.aliases?.some((a) => a.toLowerCase().includes(q))
-      );
-    }
     if (filterRelationship !== "all") {
       list = list.filter(
         (p) => relationshipGroup(p.relationship) === filterRelationship
       );
     }
     return list;
-  }, [people, search, filterRelationship]);
+  }, [people, filterRelationship]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  // Reset page when data or filters change
+  useEffect(() => { setPage(0); }, [people, filterRelationship]);
 
   function openAdd() {
     setEditingPerson(null);
@@ -179,7 +189,7 @@ export function PeopleView() {
     setDialogOpen(false);
     startTransition(async () => {
       await upsertPerson(data as Parameters<typeof upsertPerson>[0]);
-      load();
+      load(search || undefined);
     });
   }
 
@@ -193,7 +203,7 @@ export function PeopleView() {
     setDialogOpen(false);
     startTransition(async () => {
       await deletePerson(id);
-      load();
+      load(search || undefined);
     });
   }
 
@@ -229,6 +239,29 @@ export function PeopleView() {
         </Button>
       </div>
 
+      {/* Pagination + count */}
+      {filtered.length > 0 && (
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-sm text-muted-foreground">
+            {filtered.length} {filtered.length === 1 ? "person" : "people"}
+            {filtered.length !== people.length && ` (of ${people.length})`}
+          </span>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                {page + 1} / {totalPages}
+              </span>
+              <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(page + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* People grid */}
       {filtered.length === 0 ? (
         <Card>
@@ -248,7 +281,7 @@ export function PeopleView() {
         </Card>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((p) => (
+          {paged.map((p) => (
             <Card
               key={p.id}
               className="hover:shadow-md transition-shadow cursor-pointer"

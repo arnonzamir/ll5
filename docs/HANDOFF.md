@@ -50,7 +50,7 @@ Dashboard (Next.js 15)
   ├── /settings/health — connect/disconnect health sources, trigger sync
   ├── /locations — Leaflet map with clustering, timeline, trail (z-0 to stay below nav)
   ├── /places — list + map split view (Leaflet markers for places with coordinates)
-  ├── /people, /knowledge, /horizons — personal knowledge pages
+  ├── /people, /knowledge, /horizons — personal knowledge pages (people: server-side search, 24/page pagination, limit 200)
   ├── /export — full data backup download (JSON)
   ├── /profile — user settings
   └── /admin — system health, users, tools
