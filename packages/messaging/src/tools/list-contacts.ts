@@ -44,7 +44,7 @@ export function registerListContactsTool(
       }));
 
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ contacts: result, total, count: result.length }, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify({ contacts: result, total, count: result.length }) }],
       };
     },
   );

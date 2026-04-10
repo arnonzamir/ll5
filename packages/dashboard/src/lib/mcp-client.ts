@@ -32,19 +32,32 @@ function makeRequest(
   return { jsonrpc: "2.0", id, method, ...(params ? { params } : {}) };
 }
 
-/** Parse SSE text to extract JSON-RPC responses. */
+/** Parse SSE text to extract JSON-RPC responses. Handles multi-line data fields. */
 function parseSseResponse(text: string): JsonRpcResponse | null {
   const lines = text.split("\n");
+  let dataBuffer = "";
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed.startsWith("data:")) {
       const data = trimmed.slice(5).trim();
       if (data === "[DONE]") continue;
+      dataBuffer += data;
+    } else if (trimmed === "" && dataBuffer) {
+      // Empty line marks end of SSE event — try to parse accumulated data
       try {
-        return JSON.parse(data) as JsonRpcResponse;
+        return JSON.parse(dataBuffer) as JsonRpcResponse;
       } catch (err) {
-        console.error("[parseSseResponse] Failed to parse SSE data line:", data.slice(0, 200), err instanceof Error ? err.message : String(err));
+        console.error("[parseSseResponse] Failed to parse SSE data:", dataBuffer.slice(0, 200), err instanceof Error ? err.message : String(err));
       }
+      dataBuffer = "";
+    }
+  }
+  // Try parsing any remaining data
+  if (dataBuffer) {
+    try {
+      return JSON.parse(dataBuffer) as JsonRpcResponse;
+    } catch (err) {
+      console.error("[parseSseResponse] Failed to parse final SSE data:", dataBuffer.slice(0, 200), err instanceof Error ? err.message : String(err));
     }
   }
   return null;
