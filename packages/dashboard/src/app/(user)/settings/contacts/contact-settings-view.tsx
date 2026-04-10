@@ -165,7 +165,7 @@ function LinkPopover({
   }
 
   return (
-    <div className="relative">
+    <div className={`relative ${open ? "z-50" : ""}`}>
       <button
         onClick={() => setOpen(!open)}
         title="Link to KB person"
