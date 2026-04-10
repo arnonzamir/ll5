@@ -135,7 +135,7 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
 
   // Get contacts from messaging MCP
   try {
-    const raw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { limit: 1000 });
+    const raw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { limit: 10000 });
     if (raw && typeof raw === "object") {
       for (const val of Object.values(raw)) {
         if (Array.isArray(val)) {
@@ -208,7 +208,7 @@ export async function fetchContactsForTab(): Promise<ContactEntry[]> {
   const fullPersonIds = new Set<string>();
 
   const [contactsRaw, peopleRaw, { settings }] = await Promise.all([
-    mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { is_group: false, limit: 1000 }),
+    mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { is_group: false, limit: 10000 }),
     (async () => {
       try {
         const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
