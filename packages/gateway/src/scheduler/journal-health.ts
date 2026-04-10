@@ -153,6 +153,7 @@ export class JournalHealthScheduler {
         '- Any system messages you haven\'t acted on?',
         '- Any conversations you\'re escalated on that need a decision?',
         '- Anything worth pushing to the user proactively?',
+        '- If your user model feels stale or context was compacted, call read_user_model() to refresh.',
         '',
         'Your role is to be proactively helpful — don\'t wait to be asked.',
       );

@@ -1,0 +1,159 @@
+import type { Pool } from 'pg';
+import { logger } from '../utils/logger.js';
+import { sendFCMNotification } from '../utils/fcm-sender.js';
+
+interface ResponseTimeoutConfig {
+  timeoutMinutes: number; // default 2
+  startHour: number;
+  endHour: number;
+  timezone: string;
+  userId: string;
+}
+
+/**
+ * Checks for channel messages (WhatsApp/Telegram) that the agent received
+ * but hasn't responded to within the timeout window. Sends a push notification
+ * to the user and a system message nudging the agent.
+ */
+export class ResponseTimeoutScheduler {
+  private timer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(
+    private pool: Pool,
+    private config: ResponseTimeoutConfig,
+  ) {}
+
+  start(): void {
+    logger.info('[ResponseTimeoutScheduler][start] Started', {
+      timeoutMinutes: this.config.timeoutMinutes,
+    });
+    this.timer = setInterval(() => void this.tick(), 30_000); // every 30s
+  }
+
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  private getCurrentHour(): number {
+    return parseInt(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: this.config.timezone,
+        hour: 'numeric',
+        hour12: false,
+      }).format(new Date()),
+      10,
+    );
+  }
+
+  private async tick(): Promise<void> {
+    const hour = this.getCurrentHour();
+    if (hour < this.config.startHour || hour >= this.config.endHour) return;
+
+    try {
+      // Find channel messages that are still 'processing' past the timeout
+      // and haven't been notified yet
+      const staleResult = await this.pool.query<{
+        id: string;
+        content: string;
+        created_at: Date;
+        metadata: Record<string, unknown>;
+      }>(
+        `SELECT id, content, created_at, metadata
+         FROM chat_messages
+         WHERE user_id = $1
+           AND direction = 'inbound'
+           AND status = 'processing'
+           AND metadata->>'source' IS NOT NULL
+           AND (metadata->>'timeout_notified') IS NULL
+           AND created_at < now() - make_interval(mins := $2)
+         ORDER BY created_at ASC
+         LIMIT 5`,
+        [this.config.userId, this.config.timeoutMinutes],
+      );
+
+      if (staleResult.rows.length === 0) return;
+
+      // Check if agent has sent ANY outbound message recently (it's alive)
+      const recentOutbound = await this.pool.query<{ count: string }>(
+        `SELECT COUNT(*) as count FROM chat_messages
+         WHERE user_id = $1
+           AND direction = 'outbound'
+           AND created_at > now() - make_interval(mins := $2)`,
+        [this.config.userId, this.config.timeoutMinutes],
+      );
+      const agentActive = parseInt(recentOutbound.rows[0]?.count ?? '0', 10) > 0;
+
+      for (const msg of staleResult.rows) {
+        // Mark as notified so we don't re-trigger
+        await this.pool.query(
+          `UPDATE chat_messages
+           SET metadata = metadata || '{"timeout_notified": true}'::jsonb,
+               updated_at = now()
+           WHERE id = $1`,
+          [msg.id],
+        );
+
+        const source = msg.metadata?.source as Record<string, unknown> | undefined;
+        const senderName = (source?.sender_name as string) ?? 'someone';
+        const platform = (source?.platform as string) ?? 'chat';
+        const ageMinutes = Math.round((Date.now() - new Date(msg.created_at).getTime()) / 60000);
+
+        if (agentActive) {
+          // Agent is alive but didn't reply to this specific message — just log
+          logger.info('[ResponseTimeoutScheduler] Agent active but message unreplied', {
+            messageId: msg.id,
+            sender: senderName,
+            ageMinutes,
+          });
+          continue;
+        }
+
+        // Agent is not responding — nudge + push
+        logger.warn('[ResponseTimeoutScheduler] Response timeout triggered', {
+          messageId: msg.id,
+          sender: senderName,
+          platform,
+          ageMinutes,
+        });
+
+        // Send push notification to user's phone
+        try {
+          await sendFCMNotification(this.pool, this.config.userId, {
+            title: `${senderName} is waiting`,
+            body: `Message from ${platform} ${ageMinutes}min ago — agent hasn't responded`,
+            type: 'response_timeout',
+            notification_level: 'notify',
+          });
+        } catch (err) {
+          logger.warn('[ResponseTimeoutScheduler] FCM push failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        // Insert system message nudging the agent
+        // (import-free: direct SQL insert matching insertSystemMessage pattern)
+        await this.pool.query(
+          `INSERT INTO chat_messages
+             (user_id, channel, direction, role, content, status, metadata, created_at, updated_at)
+           VALUES ($1, 'system', 'inbound', 'system', $2, 'pending', $3, now(), now())`,
+          [
+            this.config.userId,
+            `[Response Timeout] ${senderName} (${platform}) sent a message ${ageMinutes} minutes ago and you haven't responded. Check and reply, or push_to_user to let them know you're on it.`,
+            JSON.stringify({
+              scheduler: 'response_timeout',
+              event_id: `evt_timeout_${msg.id}`,
+              original_message_id: msg.id,
+            }),
+          ],
+        );
+      }
+    } catch (err) {
+      logger.warn('[ResponseTimeoutScheduler][tick] Failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}

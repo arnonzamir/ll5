@@ -13,6 +13,7 @@ import { HeartbeatScheduler } from './heartbeat.js';
 import { JournalHealthScheduler } from './journal-health.js';
 import { JournalConsolidationScheduler } from './journal-consolidation.js';
 import { HealthPollingScheduler } from './health-polling.js';
+import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { logger } from '../utils/logger.js';
 
 /** Common interface for all schedulers — they all have start() and stop(). */
@@ -153,6 +154,13 @@ async function startSchedulersForUser(
   });
   ticklerAlertScheduler.start();
   schedulers.push(ticklerAlertScheduler);
+
+  const responseTimeoutScheduler = new ResponseTimeoutScheduler(pgPool, {
+    timeoutMinutes: s('response_timeout_minutes', 2),
+    startHour, endHour, timezone, userId,
+  });
+  responseTimeoutScheduler.start();
+  schedulers.push(responseTimeoutScheduler);
 
   return schedulers;
 }

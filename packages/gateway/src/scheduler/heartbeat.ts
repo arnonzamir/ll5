@@ -210,6 +210,7 @@ export class HeartbeatScheduler {
         // non-critical
       }
 
+      parts.push('', 'If your user model feels stale or context was compacted, call read_user_model() to refresh.');
       parts.push('', 'Anything to push to the user?');
 
       const evt = createSchedulerEvent('heartbeat');
