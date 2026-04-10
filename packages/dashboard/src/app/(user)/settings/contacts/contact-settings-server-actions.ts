@@ -243,8 +243,22 @@ export async function fetchContactsForTab(): Promise<ContactEntry[]> {
   const settingsMap = new Map(settings.map((s) => [s.target_id, s]));
 
   // Contacts tab: contacts NOT linked to a full person
-  return allContacts
-    .filter((c) => !c.is_group && (!c.person_id || !fullPersonIds.has(c.person_id)))
+  const unlinked = allContacts
+    .filter((c) => !c.is_group && (!c.person_id || !fullPersonIds.has(c.person_id)));
+
+  // Deduplicate @lid contacts: hide @lid entries when a @s.whatsapp.net contact with the same name exists
+  const phoneNames = new Set(
+    unlinked
+      .filter((c) => c.platform_id.endsWith("@s.whatsapp.net") && c.display_name)
+      .map((c) => c.display_name!.toLowerCase()),
+  );
+  const deduped = unlinked.filter((c) => {
+    if (!c.platform_id.endsWith("@lid")) return true;
+    if (!c.display_name) return true;
+    return !phoneNames.has(c.display_name.toLowerCase());
+  });
+
+  return deduped
     .map((c) => ({
       contactId: c.id,
       platform: c.platform,
@@ -578,14 +592,21 @@ function isRealName(name: string): boolean {
   return true;
 }
 
-export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
+/**
+ * Fetch the next auto-match suggestion, excluding skipped person IDs.
+ * Returns a single suggestion or null if none remain.
+ */
+export async function fetchNextMatchSuggestion(
+  skipPersonIds: string[] = [],
+): Promise<{ suggestion: MatchSuggestion | null; remaining: number }> {
   const token = await getToken();
-  if (!token) return [];
+  if (!token) return { suggestion: null, remaining: 0 };
 
   try {
     const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
+    const skipSet = new Set(skipPersonIds);
 
-    // Step 1: Fetch all people and all unlinked named contacts in parallel
+    // Fetch all people and all unlinked named contacts in parallel
     const [peopleResult, contactsRaw] = await Promise.all([
       callMcpTool(knowledgeUrl, "list_people", { limit: 200 }, token),
       mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "auto_match_contacts", { limit: 500 }),
@@ -608,11 +629,10 @@ export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
       }
     }
 
-    // Filter contacts to real names only
     const namedContacts = unlinkedContacts.filter((c) => isRealName(c.contact_name));
 
-    // Step 2: Get IDs of people who already have linked contacts
-    const linkedContactsRaw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { linked_only: true, limit: 500 });
+    // Get IDs of people who already have linked contacts
+    const linkedContactsRaw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { linked_only: true, limit: 10000 });
     const linkedPersonIds = new Set<string>();
     if (linkedContactsRaw && typeof linkedContactsRaw === "object") {
       for (const val of Object.values(linkedContactsRaw)) {
@@ -625,8 +645,8 @@ export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
       }
     }
 
-    // Step 3: For each unlinked person, find matching contacts by name similarity
-    const unlinkedPeople = allPeople.filter((p) => !linkedPersonIds.has(p.id));
+    // For each unlinked person (excluding skipped), find matching contacts
+    const unlinkedPeople = allPeople.filter((p) => !linkedPersonIds.has(p.id) && !skipSet.has(p.id));
     const results: MatchSuggestion[] = [];
 
     for (const person of unlinkedPeople) {
@@ -640,7 +660,6 @@ export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
         }
       }
 
-      // Sort by score descending, take top 5 candidates
       matches.sort((a, b) => b.score - a.score);
       const topMatches = matches.slice(0, 5);
 
@@ -661,12 +680,14 @@ export async function fetchMatchSuggestions(): Promise<MatchSuggestion[]> {
       }
     }
 
-    // Sort results: highest best-match score first
     results.sort((a, b) => (b.candidates[0]?.score ?? 0) - (a.candidates[0]?.score ?? 0));
 
-    return results;
+    return {
+      suggestion: results[0] ?? null,
+      remaining: results.length,
+    };
   } catch (err) {
-    console.error("[contacts] fetchMatchSuggestions failed:", err instanceof Error ? err.message : String(err));
-    return [];
+    console.error("[contacts] fetchNextMatchSuggestion failed:", err instanceof Error ? err.message : String(err));
+    return { suggestion: null, remaining: 0 };
   }
 }

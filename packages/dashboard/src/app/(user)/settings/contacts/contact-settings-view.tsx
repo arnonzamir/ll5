@@ -16,7 +16,7 @@ import {
   searchContactsForLink,
   linkContactToPerson,
   unlinkContactFromPerson,
-  fetchMatchSuggestions,
+  fetchNextMatchSuggestion,
   type PersonWithPlatforms,
   type GroupWithSettings,
   type ContactEntry,
@@ -329,6 +329,25 @@ function LinkContactToPersonModal({
   );
 }
 
+const SKIP_STORAGE_KEY = "ll5_automatch_skipped";
+
+function getSkippedIds(): string[] {
+  try {
+    const raw = sessionStorage.getItem(SKIP_STORAGE_KEY);
+    if (!raw) return [];
+    const { ids, date } = JSON.parse(raw);
+    // Expire after 24h
+    if (date !== new Date().toISOString().slice(0, 10)) return [];
+    return ids ?? [];
+  } catch { return []; }
+}
+
+function addSkippedId(personId: string): string[] {
+  const ids = [...getSkippedIds(), personId];
+  sessionStorage.setItem(SKIP_STORAGE_KEY, JSON.stringify({ ids, date: new Date().toISOString().slice(0, 10) }));
+  return ids;
+}
+
 function AutoMatchPanel({
   onDone,
 }: {
@@ -336,48 +355,52 @@ function AutoMatchPanel({
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState<MatchSuggestion[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [current, setCurrent] = useState<MatchSuggestion | null>(null);
+  const [remaining, setRemaining] = useState(0);
   const [actionPending, setActionPending] = useState(false);
+  const [skippedIds, setSkippedIds] = useState<string[]>([]);
 
-  async function handleOpen() {
-    setOpen(true);
+  async function loadNext(skipIds?: string[]) {
+    const ids = skipIds ?? skippedIds;
     setLoading(true);
-    setCurrentIndex(0);
     try {
-      const s = await fetchMatchSuggestions();
-      setSuggestions(s);
+      const { suggestion, remaining: rem } = await fetchNextMatchSuggestion(ids);
+      setCurrent(suggestion);
+      setRemaining(rem);
     } finally {
       setLoading(false);
     }
   }
 
-  function handleClose() {
-    setOpen(false);
-    setSuggestions([]);
-    setCurrentIndex(0);
-    onDone();
+  async function handleOpen() {
+    const ids = getSkippedIds();
+    setSkippedIds(ids);
+    setOpen(true);
+    await loadNext(ids);
   }
 
-  function advance() {
-    if (currentIndex < suggestions.length - 1) {
-      setCurrentIndex((i) => i + 1);
-    } else {
-      handleClose();
-    }
+  function handleClose() {
+    setOpen(false);
+    setCurrent(null);
+    onDone();
   }
 
   async function handleLink(contactId: string, personId: string) {
     setActionPending(true);
     try {
       await linkContactToPerson(contactId, personId);
-      advance();
+      await loadNext();
     } finally {
       setActionPending(false);
     }
   }
 
-  const current = suggestions[currentIndex];
+  async function handleSkip() {
+    if (!current) return;
+    const newIds = addSkippedId(current.personId);
+    setSkippedIds(newIds);
+    await loadNext(newIds);
+  }
 
   return (
     <>
@@ -406,9 +429,9 @@ function AutoMatchPanel({
               </div>
             )}
 
-            {!loading && suggestions.length === 0 && (
+            {!loading && !current && (
               <div className="py-8 text-center">
-                <p className="text-sm text-gray-400">No match suggestions found</p>
+                <p className="text-sm text-gray-400">No more match suggestions</p>
                 <Button variant="ghost" size="sm" onClick={handleClose} className="mt-3">
                   Close
                 </Button>
@@ -418,7 +441,7 @@ function AutoMatchPanel({
             {!loading && current && (
               <div>
                 <div className="text-xs text-gray-400 mb-3">
-                  {currentIndex + 1} of {suggestions.length}
+                  {remaining} remaining
                 </div>
 
                 {/* Person card */}
@@ -465,16 +488,24 @@ function AutoMatchPanel({
                   ))}
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex justify-between">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleClose}
+                    className="gap-1.5 text-gray-400"
+                  >
+                    Stop for now
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={advance}
+                    onClick={handleSkip}
                     disabled={actionPending}
                     className="gap-1.5 text-gray-500"
                   >
                     <X className="h-3.5 w-3.5" />
-                    Don&apos;t link
+                    Skip
                   </Button>
                 </div>
               </div>
