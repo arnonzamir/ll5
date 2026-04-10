@@ -16,6 +16,7 @@ import { processMessage } from './processors/message.js';
 import { NotificationRuleMatcher } from './processors/notification-rules.js';
 import { processPhoneContacts } from './processors/phone-contacts.js';
 import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
+import { processWhatsAppContactWebhook } from './processors/whatsapp-contact-webhook.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
@@ -988,6 +989,16 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         res.json({ status: 'ok' }); // 200 to Evolution API, but skip processing
         return;
       }
+
+      // Route contact events to dedicated processor
+      const event = payload?.event as string | undefined;
+      if (event === 'contacts.upsert' || event === 'contacts.update') {
+        const contacts = Array.isArray(payload?.data) ? payload.data : [];
+        await processWhatsAppContactWebhook(pgPool, userId, contacts);
+        res.json({ status: 'ok' });
+        return;
+      }
+
       await processWhatsAppWebhook(esClient, pgPool, notificationMatcher, userId, payload, config.encryptionKey);
       res.json({ status: 'ok' });
     } catch (err) {

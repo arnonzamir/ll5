@@ -94,7 +94,7 @@ ll5/
 │       ├── admin.ts                    # Admin CRUD: /admin/users (list/get/create/patch/pin/delete), /admin/families (list/create/members)
 │       ├── auth.ts                    # POST /auth/token (PIN + username login, rate limiting), POST /auth/refresh (token refresh)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
-│       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich), WhatsApp webhook (images, fromMe capture, pushName enrichment, source routing), routing rule matcher, phone contacts enrichment
+│       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich), WhatsApp webhook (images, fromMe, pushName enrichment, group participant enrichment, LID→phone mapping), WhatsApp contact webhook (CONTACTS_UPSERT/UPDATE), routing rule matcher, phone contacts enrichment
 │       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge (journal+proactivity), journal consolidation, health polling
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/whatsapp-user-resolver.ts # Instance name → user_id mapping with 5min cache
@@ -130,7 +130,7 @@ ll5/
 │   └── src/
 │       ├── clients/                   # Evolution API (WhatsApp), Telegram Bot API
 │       ├── repositories/postgres/     # Accounts, conversations, contacts (with person linking)
-│       ├── tools/                     # 14 tools (send, read, sync, contacts, link, auto-match)
+│       ├── tools/                     # 15 tools (send, read, sync, contacts, link, auto-match, backfill-contact-names)
 │       ├── migrations/               # 001 tables, 002 contacts, 003 archived conversations
 │       └── server.ts
 │

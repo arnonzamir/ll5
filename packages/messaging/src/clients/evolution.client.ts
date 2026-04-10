@@ -173,6 +173,40 @@ export class EvolutionClient {
   }
 
   /**
+   * Fetch all messages with pagination (for backfill).
+   * Uses POST /chat/findMessages with empty where clause.
+   */
+  async fetchMessagesPaginated(
+    page: number = 1,
+    limit: number = 500,
+  ): Promise<{
+    total: number;
+    pages: number;
+    currentPage: number;
+    records: Array<{
+      key: { remoteJid: string; fromMe: boolean; participant?: string; participantAlt?: string };
+      pushName?: string;
+      messageTimestamp?: number;
+    }>;
+  }> {
+    const result = await this.request<{
+      messages?: {
+        total: number;
+        pages: number;
+        currentPage: number;
+        records: Array<Record<string, unknown>>;
+      };
+    }>('POST', `/chat/findMessages/${this.instanceName}`, {
+      where: {},
+      limit,
+      page,
+    });
+
+    const msgs = result?.messages ?? { total: 0, pages: 0, currentPage: page, records: [] };
+    return msgs as any;
+  }
+
+  /**
    * Fetch recent messages for a chat.
    */
   async fetchMessages(

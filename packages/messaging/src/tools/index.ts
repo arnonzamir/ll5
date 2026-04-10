@@ -15,6 +15,7 @@ import { registerListContactsTool } from './list-contacts.js';
 import { registerResolveContactTool } from './resolve-contact.js';
 import { registerLinkContactTool, registerUnlinkContactTool } from './link-contact.js';
 import { registerAutoMatchContactsTool } from './auto-match-contacts.js';
+import { registerBackfillContactNamesTool } from './backfill-contact-names.js';
 
 import type { Pool } from 'pg';
 
@@ -45,4 +46,5 @@ export function registerAllTools(
   registerLinkContactTool(server, deps.contactRepo, getUserId);
   registerUnlinkContactTool(server, deps.contactRepo, getUserId);
   registerAutoMatchContactsTool(server, deps.contactRepo, getUserId);
+  registerBackfillContactNamesTool(server, deps.accountRepo, deps.contactRepo, getUserId);
 }

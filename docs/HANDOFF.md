@@ -227,6 +227,9 @@ See docs/implementation/deployment-log.md for full details:
 - **Evolution API contact limitation**: `findContacts({where:{}})` times out on 2913 contacts. Single-JID queries work. `pushName` is the only name field — no phone address book access. Fix: Android phone contacts push enriches names from address book.
 - **Android phone contacts push**: `ContactsRepository` reads `ContactsContract.CommonDataKinds.Phone`, pushes name+phone as `phone_contact` webhook items (batches of 200). Gateway `processPhoneContacts` normalizes phone numbers (strips non-digits, generates Israeli +972/0 variants), matches against `messaging_contacts.platform_id` JIDs, updates `display_name` only where current name is null/empty/phone-number-only/JID. Runs in `PushSyncWorker` every 15min alongside IM and GPS push. Requires `READ_CONTACTS` permission.
 - **Gateway ENCRYPTION_KEY**: Gateway needs `ENCRYPTION_KEY` env var to decrypt Evolution API key for WhatsApp media download. Add to Coolify gateway service config (same value as messaging MCP). Without it, media download falls back to using the raw (encrypted) key, which fails silently.
+- **Evolution API webhook events**: Subscribed to `MESSAGES_UPSERT`, `CONTACTS_UPSERT`, `CONTACTS_UPDATE`. Contact events route to `processWhatsAppContactWebhook` in gateway. Contact enrichment uses INSERT...ON CONFLICT (ensure-upsert) with weak-name detection (null/empty/phone-number/JID-as-name).
+- **Evolution API participantAlt**: Group messages from `@lid` participants include `participantAlt` with the `@s.whatsapp.net` JID. Both JIDs get enriched with pushName on every message. This provides LID→phone number mapping.
+- **backfill_contact_names tool**: MCP tool on messaging MCP. Paginates through all Evolution messages (`findMessages` with `where:{}`, limit=500), extracts latest pushName per sender JID, bulk-upserts to `messaging_contacts`. Safe to re-run (COALESCE preserves existing names).
 
 
 

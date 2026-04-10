@@ -11,11 +11,65 @@ import type { NotificationRuleMatcher } from './notification-rules.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 
+/**
+ * Enrich a contact's display_name from pushName.
+ * Creates the contact if it doesn't exist (ensure-upsert).
+ * Only overwrites null, empty, phone-number-only, or JID-as-name values.
+ */
+async function enrichContactFromPushName(
+  pgPool: Pool,
+  userId: string,
+  platformId: string,
+  pushName: string,
+): Promise<void> {
+  const phonePart = platformId.split('@')[0];
+  if (pushName === phonePart) return;
+
+  const isLid = platformId.endsWith('@lid');
+  const isGroupJid = platformId.endsWith('@g.us');
+  if (isGroupJid) return;
+
+  let phoneNumber: string | null = null;
+  if (!isLid && /^\d+$/.test(phonePart)) {
+    phoneNumber = `+${phonePart}`;
+  }
+
+  try {
+    await pgPool.query(
+      `INSERT INTO messaging_contacts
+         (user_id, platform, platform_id, display_name, phone_number, is_group, last_seen_at)
+       VALUES ($1, 'whatsapp', $2, $3, $4, false, NOW())
+       ON CONFLICT (user_id, platform, platform_id)
+       DO UPDATE SET
+         display_name = CASE
+           WHEN messaging_contacts.display_name IS NULL
+             OR messaging_contacts.display_name = ''
+             OR messaging_contacts.display_name ~ '^\\+?[0-9]+$'
+             OR messaging_contacts.display_name LIKE '%@s.whatsapp.net'
+             OR messaging_contacts.display_name LIKE '%@lid'
+           THEN EXCLUDED.display_name
+           ELSE messaging_contacts.display_name
+         END,
+         phone_number = COALESCE(EXCLUDED.phone_number, messaging_contacts.phone_number),
+         last_seen_at = NOW(),
+         updated_at = NOW()`,
+      [userId, platformId, pushName, phoneNumber],
+    );
+  } catch (err) {
+    logger.warn('[enrichContactFromPushName] Failed', {
+      error: err instanceof Error ? err.message : String(err),
+      platformId,
+    });
+  }
+}
+
 interface EvolutionMessageData {
   key: {
     remoteJid: string;
     fromMe: boolean;
     id: string;
+    participant?: string;      // sender JID in group messages (@lid or @s.whatsapp.net)
+    participantAlt?: string;   // alternative JID (e.g., @s.whatsapp.net when participant is @lid)
   };
   pushName?: string;
   message?: {
@@ -129,23 +183,18 @@ export async function processWhatsAppWebhook(
     } catch {
       // Non-critical — fall back to name-based matching
     }
+  }
 
-    // Enrich contact display_name from pushName if current name is missing or phone-number-only
-    const pushName = data.pushName;
-    if (pushName && pushName !== remoteJid.split('@')[0]) {
-      try {
-        await pgPool.query(
-          `UPDATE messaging_contacts
-           SET display_name = $1, updated_at = NOW()
-           WHERE platform = 'whatsapp' AND platform_id = $2 AND user_id = $3
-             AND (display_name IS NULL OR display_name = '' OR display_name ~ '^\\+?[0-9]+$')`,
-          [pushName, remoteJid, userId],
-        );
-      } catch (err) {
-        logger.warn('[processWhatsAppWebhook] Failed to update contact display_name from pushName', {
-          error: err instanceof Error ? err.message : String(err),
-          remoteJid,
-        });
+  // Enrich contact display_name from pushName (both 1:1 and group senders)
+  const pushName = data.pushName;
+  if (pushName && !fromMe) {
+    const senderJid = isGroup ? data.key.participant : remoteJid;
+    if (senderJid) {
+      await enrichContactFromPushName(pgPool, userId, senderJid, pushName);
+      // If participant is @lid and participantAlt provides @s.whatsapp.net, enrich that too
+      const altJid = data.key.participantAlt;
+      if (altJid && altJid !== senderJid) {
+        await enrichContactFromPushName(pgPool, userId, altJid, pushName);
       }
     }
   }

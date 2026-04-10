@@ -54,6 +54,8 @@ interface PayloadOverrides {
   fromMe?: boolean;
   id?: string;
   pushName?: string;
+  participant?: string;
+  participantAlt?: string;
   conversation?: string;
   extendedText?: string;
   imageMessage?: {
@@ -78,15 +80,19 @@ function makePayload(overrides: PayloadOverrides = {}) {
     message.conversation = 'Hello from WhatsApp';
   }
 
+  const key: Record<string, unknown> = {
+    remoteJid: overrides.remoteJid ?? '972501234567@s.whatsapp.net',
+    fromMe: overrides.fromMe ?? false,
+    id: overrides.id ?? 'msg-id-1',
+  };
+  if (overrides.participant !== undefined) key.participant = overrides.participant;
+  if (overrides.participantAlt !== undefined) key.participantAlt = overrides.participantAlt;
+
   return {
     event: overrides.event ?? 'messages.upsert',
     instance: overrides.instance ?? 'test-instance',
     data: {
-      key: {
-        remoteJid: overrides.remoteJid ?? '972501234567@s.whatsapp.net',
-        fromMe: overrides.fromMe ?? false,
-        id: overrides.id ?? 'msg-id-1',
-      },
+      key,
       pushName: overrides.pushName ?? 'Alice',
       message,
       messageTimestamp: overrides.messageTimestamp ?? 1711878000,
@@ -420,6 +426,85 @@ describe('processWhatsAppWebhook', () => {
 
       const indexCall = vi.mocked(es.index).mock.calls[0][0] as Record<string, unknown>;
       expect(indexCall.index).toBe('ll5_awareness_messages');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Contact enrichment from pushName
+  // -----------------------------------------------------------------------
+  describe('contact enrichment', () => {
+    it('enriches 1:1 contact from pushName via INSERT...ON CONFLICT', async () => {
+      const payload = makePayload({ fromMe: false, pushName: 'Bob', remoteJid: '972509876543@s.whatsapp.net' });
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+
+      const pgQuery = vi.mocked(pool.query);
+      const enrichCall = pgQuery.mock.calls.find(
+        (call) => typeof call[0] === 'string' && call[0].includes('INSERT INTO messaging_contacts') && (call[1] as unknown[])?.includes('972509876543@s.whatsapp.net'),
+      );
+      expect(enrichCall).toBeDefined();
+      expect((enrichCall![1] as unknown[])[2]).toBe('Bob');
+    });
+
+    it('enriches group participant contact from pushName', async () => {
+      const payload = makePayload({
+        fromMe: false,
+        pushName: 'GroupSender',
+        remoteJid: '120363041234567890@g.us',
+        participant: '972551112222@s.whatsapp.net',
+      });
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+
+      const pgQuery = vi.mocked(pool.query);
+      const enrichCall = pgQuery.mock.calls.find(
+        (call) => typeof call[0] === 'string' && call[0].includes('INSERT INTO messaging_contacts') && (call[1] as unknown[])?.includes('972551112222@s.whatsapp.net'),
+      );
+      expect(enrichCall).toBeDefined();
+      expect((enrichCall![1] as unknown[])[2]).toBe('GroupSender');
+    });
+
+    it('enriches both @lid participant and @s.whatsapp.net participantAlt', async () => {
+      const payload = makePayload({
+        fromMe: false,
+        pushName: 'LidUser',
+        remoteJid: '120363041234567890@g.us',
+        participant: '12345678@lid',
+        participantAlt: '972553334444@s.whatsapp.net',
+      });
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+
+      const pgQuery = vi.mocked(pool.query);
+      const calls = pgQuery.mock.calls.filter(
+        (call) => typeof call[0] === 'string' && call[0].includes('INSERT INTO messaging_contacts'),
+      );
+      const jids = calls.map((call) => (call[1] as unknown[])[1]);
+      expect(jids).toContain('12345678@lid');
+      expect(jids).toContain('972553334444@s.whatsapp.net');
+    });
+
+    it('does not enrich contact for fromMe messages', async () => {
+      const payload = makePayload({ fromMe: true, pushName: 'MyName' });
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+
+      const pgQuery = vi.mocked(pool.query);
+      const enrichCall = pgQuery.mock.calls.find(
+        (call) => typeof call[0] === 'string' && call[0].includes('INSERT INTO messaging_contacts'),
+      );
+      expect(enrichCall).toBeUndefined();
+    });
+
+    it('skips enrichment when pushName equals phone number', async () => {
+      const payload = makePayload({
+        fromMe: false,
+        pushName: '972501234567',
+        remoteJid: '972501234567@s.whatsapp.net',
+      });
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+
+      const pgQuery = vi.mocked(pool.query);
+      const enrichCall = pgQuery.mock.calls.find(
+        (call) => typeof call[0] === 'string' && call[0].includes('INSERT INTO messaging_contacts'),
+      );
+      expect(enrichCall).toBeUndefined();
     });
   });
 });

@@ -80,13 +80,14 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 | Auto-match contacts | Apr 9 | Person-first, Hebrew-Latin cross-script, multi-candidate UI, name similarity scoring |
 | Android phone contacts push | Apr 9 | Address book sync → gateway → messaging_contacts enrichment (fixes 2043 nameless contacts) |
 | WhatsApp image download fix | Apr 9 | Gateway decrypts Evolution API key before media download (was passing encrypted key) |
+| WhatsApp contact name enrichment | Apr 10 | Group message pushName extraction, CONTACTS_UPSERT/UPDATE webhook, backfill tool (24K messages), LID→phone mapping via participantAlt |
 
 ### Not Built — Planned
 
 | Feature | Design Doc | Priority | Effort |
 |---------|-----------|----------|--------|
 | ~~Android phone contacts push~~ | — | ~~Medium~~ | ~~DONE (Apr 9)~~ |
-| WhatsApp history backfill | ROADMAP.md | Low | Medium — Evolution API findMessages or export parser |
+| ~~WhatsApp history backfill~~ | — | ~~Low~~ | ~~DONE (Apr 10)~~ |
 | Email sync from phone | ROADMAP.md | Low | Medium — Android ContentProvider for metadata |
 | Money tracking MCP | ROADMAP.md | Low | Large — bank APIs, categorization, projections |
 
@@ -95,11 +96,12 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 | Item | Priority |
 |------|----------|
 | Auth hardening (device-bound sessions, passkeys, or OAuth) | Low — current PIN+bcrypt sufficient for family use |
-| Tests: 362 passing across 8 packages. Dashboard uncovered. | Low |
+| Tests: 368 passing across 8 packages. Dashboard uncovered. | Low |
 | Evolution API findContacts times out on full dataset (2913 contacts) | Low — workaround: single-JID queries work |
 
 ## Recent Changes
 
+- 2026-04-10: WhatsApp contact name enrichment: (1) webhook now enriches contacts from group messages too (participant + participantAlt for LID→phone mapping), (2) Evolution API webhook subscribed to CONTACTS_UPSERT + CONTACTS_UPDATE events with gateway handler, (3) backfill_contact_names MCP tool scans Evolution message history (24K+ messages) to extract pushNames for nameless contacts.
 - 2026-04-09: Fix WhatsApp image download: gateway was passing encrypted Evolution API key to getBase64FromMediaMessage (regression from api_key encryption). Added decrypt util + ENCRYPTION_KEY env var to gateway.
 - 2026-04-09: Android phone contacts push: ContactsRepository reads device address book (ContactsContract), pushes name→phone pairs as phone_contact webhook items. Gateway normalizes phone numbers (Israeli +972/0 variants), enriches messaging_contacts display_name where current name is null/phone-number/JID.
 - 2026-04-09: Contacts & Routing: person-first auto-match with Hebrew-Latin cross-script matching (~80 Israeli name lookup table), multi-candidate UI, link contact from People tab via search modal, "Named only" filter (excludes JIDs/phone numbers), client-side pagination (50/page), calendar event cleanup (delete phone events removed from calendar)
