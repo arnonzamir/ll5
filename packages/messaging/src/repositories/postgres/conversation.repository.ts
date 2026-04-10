@@ -84,18 +84,20 @@ export class PostgresConversationRepository
       name: string;
       is_group: boolean;
       is_archived?: boolean;
+      unread_count?: number;
     },
   ): Promise<{ created: boolean }> {
     // Use INSERT ... ON CONFLICT to upsert. Preserve existing permission.
     const result = await this.query<{ xmax: string }>(
       `INSERT INTO messaging_conversations
-         (user_id, account_id, platform, conversation_id, name, is_group, is_archived)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (user_id, account_id, platform, conversation_id, name, is_group, is_archived, unread_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (user_id, platform, conversation_id)
        DO UPDATE SET
          name = EXCLUDED.name,
          is_group = EXCLUDED.is_group,
          is_archived = EXCLUDED.is_archived,
+         unread_count = EXCLUDED.unread_count,
          account_id = EXCLUDED.account_id,
          updated_at = now()
        RETURNING xmax`,
@@ -107,6 +109,7 @@ export class PostgresConversationRepository
         conversation.name,
         conversation.is_group,
         conversation.is_archived ?? false,
+        conversation.unread_count ?? 0,
       ],
     );
 

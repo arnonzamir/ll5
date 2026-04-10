@@ -999,6 +999,42 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         return;
       }
 
+      // Route chat events (archive/unarchive/mute changes)
+      if (event === 'chats.upsert' || event === 'chats.update') {
+        const chats = Array.isArray(payload?.data) ? payload.data : [];
+        for (const chat of chats) {
+          const jid = chat.remoteJid ?? chat.id;
+          if (!jid) continue;
+          const archived = chat.archive ?? chat.archived ?? null;
+          const unreadCount = chat.unreadCount ?? null;
+          if (archived !== null || unreadCount !== null) {
+            const updates: string[] = [];
+            const values: unknown[] = [];
+            let pi = 1;
+            if (archived !== null) {
+              updates.push(`is_archived = $${pi++}`);
+              values.push(archived);
+            }
+            if (unreadCount !== null) {
+              updates.push(`unread_count = $${pi++}`);
+              values.push(unreadCount);
+            }
+            updates.push('updated_at = now()');
+            values.push(userId, jid);
+            await pgPool.query(
+              `UPDATE messaging_conversations SET ${updates.join(', ')} WHERE user_id = $${pi++} AND conversation_id = $${pi}`,
+              values,
+            ).catch((err) => {
+              logger.warn('[server][chatsWebhook] Failed to update conversation', {
+                error: err instanceof Error ? err.message : String(err), jid,
+              });
+            });
+          }
+        }
+        res.json({ status: 'ok' });
+        return;
+      }
+
       await processWhatsAppWebhook(esClient, pgPool, notificationMatcher, userId, payload, config.encryptionKey);
       res.json({ status: 'ok' });
     } catch (err) {

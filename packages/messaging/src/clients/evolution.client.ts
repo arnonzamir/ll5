@@ -10,6 +10,7 @@ export interface EvolutionChat {
   name: string;
   isGroup: boolean;
   isArchived: boolean;
+  unreadCount: number;
   lastMessageTimestamp?: number;
 }
 
@@ -112,6 +113,7 @@ export class EvolutionClient {
           isGroup?: boolean;
           archive?: boolean;
           archived?: boolean;
+          unreadCount?: number;
           lastMessageTimestamp?: number;
         }>
       >('POST', `/chat/findChats/${this.instanceName}`, {}),
@@ -141,6 +143,7 @@ export class EvolutionClient {
           name: displayName,
           isGroup: chat.isGroup ?? jid.endsWith('@g.us'),
           isArchived: chat.archive ?? chat.archived ?? false,
+          unreadCount: chat.unreadCount ?? 0,
           lastMessageTimestamp: chat.lastMessageTimestamp,
         };
       });
