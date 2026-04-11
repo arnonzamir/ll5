@@ -53,20 +53,21 @@ export class ResponseTimeoutScheduler {
     if (hour < this.config.startHour || hour >= this.config.endHour) return;
 
     try {
-      // Find channel messages that are still 'processing' past the timeout
-      // and haven't been notified yet
+      // Find user messages (web/android/cli) that are still 'processing' past the timeout.
+      // Only checks messages FROM THE USER — not WhatsApp/Telegram system notifications.
       const staleResult = await this.pool.query<{
         id: string;
         content: string;
+        channel: string;
         created_at: Date;
         metadata: Record<string, unknown>;
       }>(
-        `SELECT id, content, created_at, metadata
+        `SELECT id, content, channel, created_at, metadata
          FROM chat_messages
          WHERE user_id = $1
            AND direction = 'inbound'
            AND status = 'processing'
-           AND metadata->>'source' IS NOT NULL
+           AND channel IN ('web', 'android', 'cli')
            AND (metadata->>'timeout_notified') IS NULL
            AND created_at < now() - make_interval(mins := $2)
            AND created_at > now() - interval '30 minutes'
@@ -97,34 +98,31 @@ export class ResponseTimeoutScheduler {
           [msg.id],
         );
 
-        const source = msg.metadata?.source as Record<string, unknown> | undefined;
-        const senderName = (source?.sender_name as string) ?? 'someone';
-        const platform = (source?.platform as string) ?? 'chat';
+        const channel = msg.channel ?? 'chat';
         const ageMinutes = Math.round((Date.now() - new Date(msg.created_at).getTime()) / 60000);
+        const preview = (msg.content ?? '').slice(0, 80);
 
         if (agentActive) {
-          // Agent is alive but didn't reply to this specific message — just log
           logger.info('[ResponseTimeoutScheduler] Agent active but message unreplied', {
             messageId: msg.id,
-            sender: senderName,
+            channel,
             ageMinutes,
           });
           continue;
         }
 
-        // Agent is not responding — nudge + push
         logger.warn('[ResponseTimeoutScheduler] Response timeout triggered', {
           messageId: msg.id,
-          sender: senderName,
-          platform,
+          channel,
           ageMinutes,
         });
 
-        // Send push notification to user's phone
+        // Send push notification to user's other device
         try {
+          // Push to the OTHER device — if user wrote from web, push to android and vice versa
           await sendFCMNotification(this.pool, this.config.userId, {
-            title: `${senderName} is waiting`,
-            body: `Message from ${platform} ${ageMinutes}min ago — agent hasn't responded`,
+            title: 'Agent not responding',
+            body: `Your message from ${ageMinutes}min ago hasn't been answered`,
             type: 'response_timeout',
             notification_level: 'notify',
           });
@@ -135,14 +133,13 @@ export class ResponseTimeoutScheduler {
         }
 
         // Insert system message nudging the agent
-        // (import-free: direct SQL insert matching insertSystemMessage pattern)
         await this.pool.query(
           `INSERT INTO chat_messages
              (user_id, channel, direction, role, content, status, metadata, created_at, updated_at)
            VALUES ($1, 'system', 'inbound', 'system', $2, 'pending', $3, now(), now())`,
           [
             this.config.userId,
-            `[Response Timeout] ${senderName} (${platform}) sent a message ${ageMinutes} minutes ago and you haven't responded. Check and reply, or push_to_user to let them know you're on it.`,
+            `[Response Timeout] User sent a message via ${channel} ${ageMinutes} minutes ago and you haven't responded: "${preview}". Reply now.`,
             JSON.stringify({
               scheduler: 'response_timeout',
               event_id: `evt_timeout_${msg.id}`,
