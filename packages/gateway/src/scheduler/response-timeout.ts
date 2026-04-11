@@ -69,6 +69,7 @@ export class ResponseTimeoutScheduler {
            AND metadata->>'source' IS NOT NULL
            AND (metadata->>'timeout_notified') IS NULL
            AND created_at < now() - make_interval(mins := $2)
+           AND created_at > now() - interval '30 minutes'
          ORDER BY created_at ASC
          LIMIT 5`,
         [this.config.userId, this.config.timeoutMinutes],
