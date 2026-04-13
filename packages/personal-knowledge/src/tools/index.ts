@@ -4,12 +4,14 @@ import type { PersonRepository } from '../repositories/interfaces/person.reposit
 import type { PlaceRepository } from '../repositories/interfaces/place.repository.js';
 import type { ProfileRepository } from '../repositories/interfaces/profile.repository.js';
 import type { DataGapRepository } from '../repositories/interfaces/data-gap.repository.js';
+import type { NetworkRepository } from '../repositories/interfaces/network.repository.js';
 import { registerProfileTools } from './profile.js';
 import { registerFactTools } from './facts.js';
 import { registerPeopleTools } from './people.js';
 import { registerPlaceTools } from './places.js';
 import { registerDataGapTools } from './data-gaps.js';
 import { registerSearchTools } from './search.js';
+import { registerNetworkTools } from './networks.js';
 
 export interface Repositories {
   profile: ProfileRepository;
@@ -17,6 +19,7 @@ export interface Repositories {
   person: PersonRepository;
   place: PlaceRepository;
   dataGap: DataGapRepository;
+  network: NetworkRepository;
 }
 
 export function registerAllTools(
@@ -30,4 +33,5 @@ export function registerAllTools(
   registerPlaceTools(server, repos.place, getUserId);
   registerDataGapTools(server, repos.dataGap, getUserId);
   registerSearchTools(server, repos.fact, repos.person, repos.place, getUserId);
+  registerNetworkTools(server, repos.network, repos.place, getUserId);
 }

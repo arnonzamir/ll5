@@ -13,11 +13,23 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Wifi,
+  WifiOff,
+  Battery,
+  BatteryCharging,
+  Smartphone,
+  Tag,
 } from "lucide-react";
 import {
   fetchLocations,
   fetchCurrentLocation,
+  fetchCurrentWifi,
+  fetchCurrentPhoneStatus,
+  fetchKnownNetworks,
   type LocationPoint,
+  type CurrentWifi,
+  type CurrentPhoneStatus,
+  type KnownNetwork,
 } from "./locations-server-actions";
 
 // ---------------------------------------------------------------------------
@@ -127,6 +139,22 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null) return "—";
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
+
+function formatAge(minutes: number): string {
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 // ---------------------------------------------------------------------------
 // Date range presets
 // ---------------------------------------------------------------------------
@@ -174,6 +202,10 @@ export function LocationsView() {
   // State
   const [points, setPoints] = useState<LocationPoint[]>([]);
   const [currentLoc, setCurrentLoc] = useState<LocationPoint | null>(null);
+  const [currentWifi, setCurrentWifi] = useState<CurrentWifi | null>(null);
+  const [currentPhoneStatus, setCurrentPhoneStatus] = useState<CurrentPhoneStatus | null>(null);
+  const [knownNetworks, setKnownNetworks] = useState<KnownNetwork[]>([]);
+  const [devicePanelOpen, setDevicePanelOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [rangePreset, setRangePreset] = useState<RangePreset>("today");
   const [customFrom, setCustomFrom] = useState(isoDate(new Date()));
@@ -204,13 +236,19 @@ export function LocationsView() {
           }
         : getDateRange(rangePreset);
 
-    const [locData, curLoc] = await Promise.all([
+    const [locData, curLoc, curWifi, curPhone, networks] = await Promise.all([
       fetchLocations({ ...range, limit: 500 }),
       fetchCurrentLocation(),
+      fetchCurrentWifi(),
+      fetchCurrentPhoneStatus(),
+      fetchKnownNetworks(100),
     ]);
 
     setPoints(locData);
     setCurrentLoc(curLoc);
+    setCurrentWifi(curWifi);
+    setCurrentPhoneStatus(curPhone);
+    setKnownNetworks(networks);
     setLoading(false);
   }, [rangePreset, customFrom, customTo]);
 
@@ -600,6 +638,21 @@ export function LocationsView() {
             <Navigation className="h-3 w-3" />
             {clusters.length} stops
           </span>
+          <Button
+            variant={devicePanelOpen ? "default" : "outline"}
+            size="sm"
+            onClick={() => setDevicePanelOpen((v) => !v)}
+            className="ml-2"
+            title="Show phone status, current WiFi, and known networks"
+          >
+            <Smartphone className="h-3 w-3 mr-1" />
+            Devices
+            {knownNetworks.length > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-primary/10 text-[10px] leading-none">
+                {knownNetworks.length}
+              </span>
+            )}
+          </Button>
         </div>
       </div>
 
@@ -704,6 +757,213 @@ export function LocationsView() {
                   selectedCluster.last_seen
                 )}
               </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Devices panel — phone status + current wifi + known networks */}
+      {devicePanelOpen && (
+        <div className="absolute top-16 right-4 z-20 w-96 max-h-[calc(100vh-9rem)] overflow-y-auto space-y-3">
+          {/* Phone status */}
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Smartphone className="h-4 w-4 text-gray-500" />
+                Phone status
+              </CardTitle>
+              <button
+                onClick={() => setDevicePanelOpen(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </CardHeader>
+            <CardContent className="text-xs space-y-2">
+              {currentPhoneStatus ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    {currentPhoneStatus.is_charging ? (
+                      <BatteryCharging className="h-4 w-4 text-green-600" />
+                    ) : (
+                      <Battery className={`h-4 w-4 ${currentPhoneStatus.battery_pct <= 20 ? "text-red-600" : "text-gray-500"}`} />
+                    )}
+                    <span className="font-medium">
+                      {currentPhoneStatus.battery_pct}%
+                    </span>
+                    <span className="text-gray-500">
+                      {currentPhoneStatus.is_charging
+                        ? `charging${currentPhoneStatus.plug_type && currentPhoneStatus.plug_type !== "none" ? ` (${currentPhoneStatus.plug_type})` : ""}`
+                        : "on battery"}
+                    </span>
+                    {currentPhoneStatus.low_power_mode && (
+                      <span className="ml-auto text-amber-600">low-power</span>
+                    )}
+                  </div>
+                  {currentPhoneStatus.battery_temp_c != null && (
+                    <div className="text-gray-500">
+                      Temp: {currentPhoneStatus.battery_temp_c.toFixed(1)}°C
+                    </div>
+                  )}
+                  {currentPhoneStatus.ram_total_bytes != null && (
+                    <div className="text-gray-500">
+                      RAM: {formatBytes(currentPhoneStatus.ram_used_bytes)} / {formatBytes(currentPhoneStatus.ram_total_bytes)}
+                    </div>
+                  )}
+                  {currentPhoneStatus.storage_total_bytes != null && (
+                    <div className="text-gray-500">
+                      Storage: {formatBytes(currentPhoneStatus.storage_used_bytes)} / {formatBytes(currentPhoneStatus.storage_total_bytes)}
+                    </div>
+                  )}
+                  <div className="text-gray-400 text-[10px] pt-1 border-t">
+                    {formatAge(currentPhoneStatus.age_minutes)}
+                    {currentPhoneStatus.trigger ? ` · ${currentPhoneStatus.trigger}` : ""}
+                  </div>
+                </>
+              ) : (
+                <p className="text-gray-400">No phone status data yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Current wifi */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                {currentWifi?.connected ? (
+                  <Wifi className="h-4 w-4 text-blue-600" />
+                ) : (
+                  <WifiOff className="h-4 w-4 text-gray-400" />
+                )}
+                Current WiFi
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs space-y-1">
+              {currentWifi ? (
+                <>
+                  <div className="font-medium">
+                    {currentWifi.connected
+                      ? currentWifi.ssid ?? "(unknown SSID)"
+                      : "Disconnected"}
+                  </div>
+                  {currentWifi.bssid && (
+                    <div className="text-gray-500 font-mono text-[11px] break-all">
+                      {currentWifi.bssid}
+                    </div>
+                  )}
+                  {currentWifi.connected && (
+                    <div className="text-gray-500 flex flex-wrap gap-x-3">
+                      {currentWifi.rssi_dbm != null && (
+                        <span>{currentWifi.rssi_dbm} dBm</span>
+                      )}
+                      {currentWifi.frequency_mhz != null && (
+                        <span>{(currentWifi.frequency_mhz / 1000).toFixed(1)} GHz</span>
+                      )}
+                      {currentWifi.link_speed_mbps != null && (
+                        <span>{currentWifi.link_speed_mbps} Mbps</span>
+                      )}
+                    </div>
+                  )}
+                  {currentWifi.ip_address && (
+                    <div className="text-gray-500">{currentWifi.ip_address}</div>
+                  )}
+                  <div className="text-gray-400 text-[10px] pt-1 border-t">
+                    {formatAge(currentWifi.age_minutes)}
+                    {currentWifi.trigger ? ` · ${currentWifi.trigger}` : ""}
+                  </div>
+                </>
+              ) : (
+                <p className="text-gray-400">No WiFi data yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Known networks */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Tag className="h-4 w-4 text-gray-500" />
+                Known networks ({knownNetworks.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs space-y-2 max-h-96 overflow-y-auto">
+              {knownNetworks.length === 0 && (
+                <p className="text-gray-400">
+                  No networks observed yet. Once the phone connects to WiFi
+                  and the gateway sees a co-located GPS fix at a known place,
+                  it will start auto-learning here.
+                </p>
+              )}
+              {knownNetworks.map((n) => {
+                const dominant = n.manual_place_name
+                  ? { name: n.manual_place_name, source: "manual" as const }
+                  : n.place_observations.length > 0
+                    ? {
+                        name: [...n.place_observations].sort((a, b) => b.count - a.count)[0]!.place_name,
+                        source: "auto" as const,
+                      }
+                    : null;
+                return (
+                  <div
+                    key={n.bssid}
+                    className="border-b border-gray-100 pb-2 last:border-0 last:pb-0"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium truncate">
+                          {n.ssid ?? "(unknown SSID)"}
+                        </div>
+                        <div className="text-gray-400 font-mono text-[10px] break-all">
+                          {n.bssid}
+                        </div>
+                      </div>
+                      {dominant && (
+                        <span
+                          className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] ${
+                            dominant.source === "manual"
+                              ? "bg-indigo-50 text-indigo-700"
+                              : "bg-emerald-50 text-emerald-700"
+                          }`}
+                          title={dominant.source === "manual" ? "Manually labeled" : "Auto-learned"}
+                        >
+                          <MapPin className="h-2.5 w-2.5" />
+                          {dominant.name}
+                        </span>
+                      )}
+                    </div>
+                    {n.label && (
+                      <div className="text-gray-500 text-[11px] mt-0.5 italic">
+                        “{n.label}”
+                      </div>
+                    )}
+                    <div className="flex items-center gap-3 text-[10px] text-gray-400 mt-1">
+                      <span>{n.total_observations} obs</span>
+                      <span>
+                        last {formatAge(
+                          Math.round(
+                            (Date.now() - new Date(n.last_seen).getTime()) / 60000,
+                          ),
+                        )}
+                      </span>
+                    </div>
+                    {n.place_observations.length > 1 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {[...n.place_observations]
+                          .sort((a, b) => b.count - a.count)
+                          .slice(0, 4)
+                          .map((o) => (
+                            <span
+                              key={o.place_id}
+                              className="px-1 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px]"
+                            >
+                              {o.place_name} · {o.count}
+                            </span>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
         </div>

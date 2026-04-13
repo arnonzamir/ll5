@@ -162,6 +162,43 @@ const INDICES: IndexDefinition[] = [
       },
     },
   },
+  {
+    index: 'll5_awareness_phone_statuses',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        battery_pct: { type: 'float' },
+        is_charging: { type: 'boolean' },
+        plug_type: { type: 'keyword' }, // none, ac, usb, wireless, dock, unknown
+        battery_temp_c: { type: 'float' },
+        battery_health: { type: 'keyword' },
+        low_power_mode: { type: 'boolean' },
+        storage_used_bytes: { type: 'long' },
+        storage_total_bytes: { type: 'long' },
+        ram_used_bytes: { type: 'long' },
+        ram_total_bytes: { type: 'long' },
+        trigger: { type: 'keyword' }, // why this push fired: change, plug, low, heartbeat
+        timestamp: { type: 'date' },
+      },
+    },
+  },
+  {
+    index: 'll5_awareness_wifi_connections',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        ssid: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+        bssid: { type: 'keyword' },
+        rssi_dbm: { type: 'integer' },
+        frequency_mhz: { type: 'integer' },
+        link_speed_mbps: { type: 'integer' },
+        ip_address: { type: 'keyword' },
+        connected: { type: 'boolean' }, // false on disconnect events
+        trigger: { type: 'keyword' }, // connect, disconnect, ssid_change, heartbeat
+        timestamp: { type: 'date' },
+      },
+    },
+  },
 ];
 
 export async function ensureIndices(client: Client): Promise<void> {

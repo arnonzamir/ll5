@@ -81,6 +81,8 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 | Android phone contacts push | Apr 9 | Address book sync → gateway → messaging_contacts enrichment (fixes 2043 nameless contacts) |
 | WhatsApp image download fix | Apr 9 | Gateway decrypts Evolution API key before media download (was passing encrypted key) |
 | WhatsApp contact name enrichment | Apr 10 | Group message pushName extraction, CONTACTS_UPSERT/UPDATE webhook, backfill tool (24K messages), LID→phone mapping via participantAlt |
+| System MCP (local stdio) | Apr 13 | New @ll5/system package — local stdio MCP, 6 tools (battery, cpu, memory, disk, system_info, system_health). First non-remote MCP. Source in ll5/packages/system; registered in ll5-run/.mcp.json with absolute path. Pull-only; thresholds fire warning/critical in `get_system_health`. |
+| Phone status + WiFi push pipeline | Apr 13 | Android collects battery/charging/storage/ram via BatteryStateReceiver (push on plug/5%-delta/low-cross) + current WiFi via ConnectivityManager.NetworkCallback (push on connect/disconnect/ssid_change). 1h DeviceHeartbeatWorker fallback. Gateway: 2 new schemas + processors, wifi processor auto-learns BSSID→place from co-occurrence with GPS. Awareness MCP: 2 new ES indices, 4 new tools (get_phone_status, get_phone_status_history, get_current_wifi, get_wifi_history). Personal-knowledge MCP: ll5_knowledge_networks index, NetworkRepository, 4 tools (find_place_by_bssid, label_network, unlabel_network, list_known_networks). APK built, dex verified, 8 new classes shipped. |
 
 ### Not Built — Planned
 

@@ -66,11 +66,11 @@ ll5/
 │
 ├── packages/personal-knowledge/       # @ll5/personal-knowledge — ES-backed MCP
 │   └── src/
-│       ├── repositories/elasticsearch/  # 5 ES repositories (fact, person, place, profile, data-gap)
+│       ├── repositories/elasticsearch/  # 6 ES repositories (fact, person, place, profile, data-gap, network)
 │       ├── repositories/interfaces/     # Repository interfaces
-│       ├── tools/                       # 17 MCP tools (all logged via withToolLogging)
+│       ├── tools/                       # 21 MCP tools (all logged via withToolLogging) — includes networks: find_place_by_bssid, label_network, unlabel_network, list_known_networks
 │       ├── __tests__/                   # 41 tests: person repo, people tools
-│       ├── setup/indices.ts             # ES index creation
+│       ├── setup/indices.ts             # ES index creation (6 indices: profile, facts, people, places, data_gaps, networks)
 │       └── server.ts                    # MCP server with StreamableHTTP + AsyncLocalStorage (auth from @ll5/shared)
 │
 ├── packages/gtd/                      # @ll5/gtd — PG-backed MCP (45 tests)
@@ -84,9 +84,9 @@ ll5/
 │
 ├── packages/awareness/                # @ll5/awareness — ES-backed MCP
 │   └── src/
-│       ├── repositories/elasticsearch/  # 5 ES repositories (location, message, entity-status, calendar, notable)
-│       ├── tools/                       # 17 MCP tools (situation, location+delete, messages, journal, user model+versioning, geo search, media)
-│       ├── setup/indices.ts
+│       ├── repositories/elasticsearch/  # 7 ES repositories (location, message, entity-status, calendar, notable, phone-status, wifi)
+│       ├── tools/                       # 21 MCP tools (situation, location+delete, messages, journal, user model+versioning, geo search, media, phone_status x2, wifi x2)
+│       ├── setup/indices.ts             # 11 indices: locations, messages, entity_statuses, calendar_events, notable_events, journal, user_model, media, media_links, phone_statuses, wifi_connections
 │       └── server.ts
 │
 ├── packages/gateway/                  # @ll5/gateway — Express HTTP service
@@ -125,6 +125,11 @@ ll5/
 │       ├── utils/                       # env, encryption (AES-256-GCM), logger, migration runner
 │       ├── migrations/                  # health_source_credentials table
 │       └── server.ts                    # MCP server with ES+PG, registers adapters
+│
+├── packages/system/                  # @ll5/system — local stdio MCP for this Mac (battery, cpu, memory, disk, system_health)
+│   └── src/
+│       ├── collectors.ts              # macOS shell-based collectors (pmset, vm_stat, df, ps, os module) + threshold-based health summary
+│       └── index.ts                   # MCP server on StdioServerTransport, 6 tools
 │
 ├── packages/messaging/                # @ll5/messaging — PG-backed MCP (live: mcp-messaging.noninoni.click)
 │   └── src/

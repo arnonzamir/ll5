@@ -10,12 +10,13 @@ Claude Code is the agent. 5 MCP servers are the data layer. Gateway handles webh
 
 ```
 Claude Code (ll5-run workspace)
-  ├── personal-knowledge MCP (ES) — facts, people, places, profile, data gaps
+  ├── personal-knowledge MCP (ES) — facts, people, places, profile, data gaps, known_networks (BSSID→place bindings, manual + auto-learned)
   ├── gtd MCP (PG) — actions, projects, horizons, inbox, shopping, chat tools
-  ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation, journal, user model, geo search (POI/distance/geocode)
+  ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation, journal, user model, geo search (POI/distance/geocode), phone_statuses, wifi_connections
   ├── calendar MCP (PG+ES) — Unified timeline (Google+phone+tickler), Gmail, OAuth
   ├── health MCP (ES+PG) — sleep, heart rate, daily stats, activities, body comp, stress, trends
-  └── messaging MCP (PG) — WhatsApp send/receive, contacts, auto-match
+  ├── messaging MCP (PG) — WhatsApp send/receive, contacts, auto-match
+  └── system MCP (local stdio, no storage) — battery, cpu, memory, disk, system_health for THIS Mac. Source in ll5/packages/system; registered in ll5-run/.mcp.json (absolute path to ll5/packages/system/dist/index.js). Pull-only; not deployed remotely.
 
 Gateway (Express)
   ├── POST /webhook/:token — phone push data (GPS, IM, calendar)

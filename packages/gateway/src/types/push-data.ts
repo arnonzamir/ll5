@@ -49,12 +49,45 @@ const PushPhoneContactSchema = z.object({
   body: z.string().min(1),    // phone number (normalized: +digits or digits)
 });
 
+// Phone status — battery / charging / storage / ram snapshot from the phone
+const PushPhoneStatusItemSchema = z.object({
+  type: z.literal('phone_status'),
+  timestamp: z.string().datetime({ offset: true }),
+  battery_pct: z.number().min(0).max(100),
+  is_charging: z.boolean(),
+  plug_type: z.enum(['none', 'ac', 'usb', 'wireless', 'dock', 'unknown']).optional(),
+  battery_temp_c: z.number().optional(),
+  battery_health: z.string().optional(),
+  low_power_mode: z.boolean().optional(),
+  storage_used_bytes: z.number().nonnegative().optional(),
+  storage_total_bytes: z.number().nonnegative().optional(),
+  ram_used_bytes: z.number().nonnegative().optional(),
+  ram_total_bytes: z.number().nonnegative().optional(),
+  trigger: z.enum(['change', 'plug', 'low', 'heartbeat']).optional(),
+});
+
+// WiFi connection — current connected network (or disconnect event)
+const PushWifiItemSchema = z.object({
+  type: z.literal('wifi'),
+  timestamp: z.string().datetime({ offset: true }),
+  connected: z.boolean(),
+  ssid: z.string().nullable().optional(),
+  bssid: z.string().nullable().optional(),
+  rssi_dbm: z.number().int().optional(),
+  frequency_mhz: z.number().int().optional(),
+  link_speed_mbps: z.number().int().optional(),
+  ip_address: z.string().nullable().optional(),
+  trigger: z.enum(['connect', 'disconnect', 'ssid_change', 'heartbeat']).optional(),
+});
+
 const PushItemSchema = z.discriminatedUnion('type', [
   PushLocationItemSchema,
   PushMessageItemSchema,
   PushCalendarItemSchema,
   PushDeviceCalendarSchema,
   PushPhoneContactSchema,
+  PushPhoneStatusItemSchema,
+  PushWifiItemSchema,
 ]);
 
 export const WebhookPayloadSchema = z.object({
@@ -69,6 +102,8 @@ export type PushLocationItem = z.infer<typeof PushLocationItemSchema>;
 export type PushMessageItem = z.infer<typeof PushMessageItemSchema>;
 export type PushCalendarItem = z.infer<typeof PushCalendarItemSchema>;
 export type PushPhoneContactItem = z.infer<typeof PushPhoneContactSchema>;
+export type PushPhoneStatusItem = z.infer<typeof PushPhoneStatusItemSchema>;
+export type PushWifiItem = z.infer<typeof PushWifiItemSchema>;
 export type PushItem = z.infer<typeof PushItemSchema>;
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 

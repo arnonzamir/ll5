@@ -5,6 +5,8 @@ import type { MessageRepository } from '../repositories/interfaces/message.repos
 import type { EntityStatusRepository } from '../repositories/interfaces/entity-status.repository.js';
 import type { CalendarEventRepository } from '../repositories/interfaces/calendar-event.repository.js';
 import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
+import type { PhoneStatusRepository } from '../repositories/interfaces/phone-status.repository.js';
+import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
 import { registerLocationTools } from './location.js';
 import { registerMessageTools } from './messages.js';
 import { registerEntityStatusTools } from './entity-statuses.js';
@@ -14,6 +16,8 @@ import { registerNotificationRuleTools } from './notification-rules.js';
 import { registerJournalTools } from './journal.js';
 import { registerMediaTools } from './media.js';
 import { registerGeoSearchTools } from './geo-search.js';
+import { registerPhoneStatusTools } from './phone-status.js';
+import { registerWifiTools } from './wifi.js';
 
 export interface Repositories {
   location: LocationRepository;
@@ -21,6 +25,8 @@ export interface Repositories {
   entityStatus: EntityStatusRepository;
   calendar: CalendarEventRepository;
   notableEvent: NotableEventRepository;
+  phoneStatus: PhoneStatusRepository;
+  wifi: WifiRepository;
 }
 
 export function registerAllTools(
@@ -56,4 +62,6 @@ export function registerAllTools(
     registerMediaTools(server, esClient, getUserId);
   }
   registerGeoSearchTools(server, getUserId);
+  registerPhoneStatusTools(server, repos.phoneStatus, getUserId);
+  registerWifiTools(server, repos.wifi, getUserId);
 }

@@ -15,6 +15,8 @@ import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
 import { NotificationRuleMatcher } from './processors/notification-rules.js';
 import { processPhoneContacts } from './processors/phone-contacts.js';
+import { processPhoneStatus } from './processors/phone-status.js';
+import { processWifi } from './processors/wifi.js';
 import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
 import { processWhatsAppContactWebhook } from './processors/whatsapp-contact-webhook.js';
 import { startSchedulers } from './scheduler/index.js';
@@ -186,6 +188,76 @@ const AWARENESS_INDICES: IndexDefinition[] = [
       },
     },
   },
+  {
+    index: 'll5_awareness_phone_statuses',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        battery_pct: { type: 'float' },
+        is_charging: { type: 'boolean' },
+        plug_type: { type: 'keyword' },
+        battery_temp_c: { type: 'float' },
+        battery_health: { type: 'keyword' },
+        low_power_mode: { type: 'boolean' },
+        storage_used_bytes: { type: 'long' },
+        storage_total_bytes: { type: 'long' },
+        ram_used_bytes: { type: 'long' },
+        ram_total_bytes: { type: 'long' },
+        trigger: { type: 'keyword' },
+        timestamp: { type: 'date' },
+      },
+    },
+  },
+  {
+    index: 'll5_awareness_wifi_connections',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        ssid: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+        bssid: { type: 'keyword' },
+        rssi_dbm: { type: 'integer' },
+        frequency_mhz: { type: 'integer' },
+        link_speed_mbps: { type: 'integer' },
+        ip_address: { type: 'keyword' },
+        connected: { type: 'boolean' },
+        trigger: { type: 'keyword' },
+        timestamp: { type: 'date' },
+      },
+    },
+  },
+  {
+    index: 'll5_knowledge_networks',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        bssid: { type: 'keyword' },
+        ssid: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+        // Per-place observation counts. Auto-learned: each time a wifi push
+        // arrives and a recent GPS fix matches a known place, the gateway
+        // increments the matching entry. The dominant place above a confidence
+        // threshold becomes the inferred location for this BSSID.
+        place_observations: {
+          type: 'nested',
+          properties: {
+            place_id: { type: 'keyword' },
+            place_name: { type: 'keyword' },
+            count: { type: 'integer' },
+            last_seen: { type: 'date' },
+          },
+        },
+        // Optional manual override. If set, find_place_by_bssid returns this
+        // regardless of observation counts — user is the source of truth.
+        manual_place_id: { type: 'keyword' },
+        manual_place_name: { type: 'keyword' },
+        label: { type: 'text' },
+        total_observations: { type: 'integer' },
+        first_seen: { type: 'date' },
+        last_seen: { type: 'date' },
+        created_at: { type: 'date' },
+        updated_at: { type: 'date' },
+      },
+    },
+  },
 ];
 
 /**
@@ -223,7 +295,13 @@ async function processItem(
 ): Promise<ItemResult> {
   try {
     // Check data source toggles (user_settings.data_sources)
-    const sourceMap: Record<string, string> = { location: 'gps', message: 'im_capture', calendar_event: 'calendar' };
+    const sourceMap: Record<string, string> = {
+      location: 'gps',
+      message: 'im_capture',
+      calendar_event: 'calendar',
+      phone_status: 'phone_status',
+      wifi: 'wifi',
+    };
     const sourceKey = sourceMap[item.type];
     if (sourceKey && pgPool && !await isSourceEnabled(pgPool, userId, sourceKey)) {
       return { index: itemIndex, type: item.type, status: 'ok' }; // silently skip
@@ -244,6 +322,12 @@ async function processItem(
         break;
       case 'phone_contact':
         // Batched after the loop — accepted individually, processed in bulk
+        break;
+      case 'phone_status':
+        await processPhoneStatus(es, userId, item);
+        break;
+      case 'wifi':
+        await processWifi(es, userId, item);
         break;
     }
     return { index: itemIndex, type: item.type, status: 'ok' };
@@ -1307,6 +1391,7 @@ export async function startServer(config: EnvConfig): Promise<void> {
     logger.info(`[startServer][listen] Gateway listening on port ${config.port}`, {
       env: config.nodeEnv,
       tokenCount: Object.keys(config.webhookTokens).length,
+      webhook_item_types: ['location', 'message', 'calendar_event', 'device_calendar', 'phone_contact', 'phone_status', 'wifi'],
     });
   });
 }

@@ -4,3 +4,4 @@ export { ElasticsearchFactRepository } from './fact.repository.js';
 export { ElasticsearchPersonRepository } from './person.repository.js';
 export { ElasticsearchPlaceRepository } from './place.repository.js';
 export { ElasticsearchDataGapRepository } from './data-gap.repository.js';
+export { ElasticsearchNetworkRepository } from './network.repository.js';
