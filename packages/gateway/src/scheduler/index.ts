@@ -14,6 +14,8 @@ import { JournalHealthScheduler } from './journal-health.js';
 import { JournalConsolidationScheduler } from './journal-consolidation.js';
 import { HealthPollingScheduler } from './health-polling.js';
 import { ResponseTimeoutScheduler } from './response-timeout.js';
+import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
+import { ChannelLivenessMonitor } from './channel-liveness-monitor.js';
 import { logger } from '../utils/logger.js';
 
 /** Common interface for all schedulers — they all have start() and stop(). */
@@ -120,6 +122,29 @@ async function startSchedulersForUser(
   });
   journalConsolidationScheduler.start();
   schedulers.push(journalConsolidationScheduler);
+
+  // MCP health + tool-error-rate monitor — cluster-wide, not user-specific,
+  // but tied to a user for FCM routing.
+  const mcpHealthMonitor = new MCPHealthMonitorScheduler(pgPool, es, {
+    intervalMinutes: s('mcp_health_monitor_minutes', 2),
+    mcpUrls: config.mcpHealthUrls,
+    userId,
+    failureThreshold: s('mcp_health_failure_threshold', 2),
+    errorRateThreshold: 0.25,
+    errorRateMinSamples: 10,
+  });
+  mcpHealthMonitor.start();
+  schedulers.push(mcpHealthMonitor);
+
+  // Channel bridge liveness — detects pending inbound messages piling up
+  // because the client-side channel MCP has gone silent.
+  const channelLivenessMonitor = new ChannelLivenessMonitor(pgPool, {
+    intervalMinutes: s('channel_liveness_minutes', 2),
+    stalenessSeconds: s('channel_stale_seconds', 300), // 5 min
+    startHour, endHour, timezone, userId,
+  });
+  channelLivenessMonitor.start();
+  schedulers.push(channelLivenessMonitor);
 
   // --- Google-dependent schedulers (only start if googleClient exists) ---
 

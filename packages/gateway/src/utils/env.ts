@@ -10,6 +10,9 @@ export interface EnvConfig {
   // Google MCP integration (for calendar sync and periodic review)
   googleMcpUrl: string | undefined;
   googleMcpApiKey: string | undefined;
+  // All MCP URLs — used by mcp-health-monitor scheduler for periodic liveness checks.
+  // Defaults are the internal Coolify DNS names for the current deploy.
+  mcpHealthUrls: Record<string, string>;
   // Calendar review schedule
   calendarReviewStartHour: number;
   calendarReviewEndHour: number;
@@ -78,6 +81,15 @@ export function loadEnv(): EnvConfig {
     databaseUrl,
     googleMcpUrl: process.env.GOOGLE_MCP_URL,
     googleMcpApiKey: process.env.GOOGLE_MCP_API_KEY,
+    mcpHealthUrls: {
+      gateway: process.env.GATEWAY_SELF_URL ?? 'http://localhost:3006',
+      knowledge: process.env.MCP_KNOWLEDGE_URL ?? 'http://personal-knowledge-xkkcc0g4o48kkcows8488so4:3000',
+      gtd: process.env.MCP_GTD_URL ?? 'http://gtd-xkkcc0g4o48kkcows8488so4:3000',
+      awareness: process.env.MCP_AWARENESS_URL ?? 'http://awareness-xkkcc0g4o48kkcows8488so4:3000',
+      google: process.env.MCP_CALENDAR_URL ?? process.env.GOOGLE_MCP_URL ?? 'http://google-xkkcc0g4o48kkcows8488so4:3000',
+      health: process.env.MCP_HEALTH_URL ?? 'http://health-xkkcc0g4o48kkcows8488so4:3000',
+      messaging: process.env.MCP_MESSAGING_URL ?? 'http://messaging-xkkcc0g4o48kkcows8488so4:3000',
+    },
     calendarReviewStartHour: parseInt(process.env.CALENDAR_REVIEW_START_HOUR ?? '7', 10),
     calendarReviewEndHour: parseInt(process.env.CALENDAR_REVIEW_END_HOUR ?? '22', 10),
     calendarReviewIntervalMinutes: parseInt(process.env.CALENDAR_REVIEW_INTERVAL_MINUTES ?? '120', 10),

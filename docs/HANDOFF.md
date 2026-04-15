@@ -22,13 +22,16 @@ Gateway (Express)
   ├── POST /webhook/:token — phone push data (GPS, IM, calendar)
   ├── POST /auth/token — PIN login, returns signed token
   ├── /chat/* — message queue REST endpoints
-  ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY)
+  ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY, 30s keepalive ping)
+  ├── GET /admin/health — aggregate health (all MCPs + DBs + per-user channel liveness, cached from monitors)
   ├── /media, /media/:id/links — media file listing + linked entities (ES ll5_media, ll5_media_links)
   ├── /commands/* — device command queue (queue, pending, confirm)
-  ├── Schedulers (11) — heartbeat (5min), calendar sync (30min), calendar review (periodic),
+  ├── Schedulers (13) — heartbeat (5min), calendar sync (30min), calendar review (periodic),
       daily briefing (morning), tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00),
       message batch (30min), journal consolidation (2am), journal health/agent nudge (15min),
-      health polling (20min, detects sleep/activity/HR/stress/energy/weight, 7-day baseline)
+      health polling (20min, detects sleep/activity/HR/stress/energy/weight, 7-day baseline),
+      mcp-health-monitor (2min ping all 7 services + tool error-rate scan, critical FCM on 2-in-a-row failure),
+      channel-liveness-monitor (2min check for pending inbound msgs stalled >5min → critical FCM, 10min cooldown)
   ├── System message dedup — checks PG for recent duplicate before inserting
   └── Immediate + ignored messages mark ES doc as processed (prevents double-report/leak in batch review)
 
@@ -233,6 +236,10 @@ See docs/implementation/deployment-log.md for full details:
 - **backfill_contact_names tool**: MCP tool on messaging MCP. Paginates through all Evolution messages (`findMessages` with `where:{}`, limit=500), extracts latest pushName per sender JID, bulk-upserts to `messaging_contacts`. Safe to re-run (COALESCE preserves existing names).
 - **Contact link popover z-index**: The `LinkPopover` wrapper gets `z-50` when open so the search dropdown renders above sibling rows and the column header.
 - **Escalation message scoping**: `fetchRecentMessages` in `escalation.ts` now properly filters by conversation: groups match on `group_name.keyword`, 1:1 matches on sender phone + `is_group=false`. Previously used `minimum_should_match: 0` which returned all conversations. Escalation header now includes resolved contact name and chat type (1:1/group).
+- **Channel MCP liveness**: The stdio bridge at `ll5-run/channel/ll5-channel.mjs` keeps a single SSE connection open to `/chat/listen`. It aborts and reconnects on (a) 60s of idle (no keepalive received), (b) HTTP non-2xx, (c) token refresh. Liveness is written every 15s to `~/.ll5/channel-health.json` (`{connected, last_sse_data_at, idle_ms, reconnect_count, last_error, pid}`). The `channel_health` MCP tool exposes the same snapshot so Claude can self-diagnose. `unhandledRejection`/`uncaughtException` → `process.exit(1)` so Claude Code's MCP SDK respawns the child.
+- **MCP health monitor**: `packages/gateway/src/scheduler/mcp-health-monitor.ts` pings `/health` on all 7 services every 2 min (parallel, 5s timeout each), caches the snapshot in-memory (exported via `getHealthSnapshot()`), and additionally aggregates `ll5_app_log` for the last 15 min to catch "responds 200 but tool calls failing" — alerts when ≥10 calls show >25% error rate. FCM critical push on transition to unhealthy after 2 consecutive failures, FCM notify on recovery.
+- **Channel liveness monitor**: `packages/gateway/src/scheduler/channel-liveness-monitor.ts` detects the "zombie bridge" mode (channel MCP process alive, SSE hung) by querying `chat_messages` for inbound rows in `status='pending'` older than 5 min. Only alerts during active hours with a 10-min cooldown. This is the last-line defense — the client watchdog may miss it if the MCP process is still running but not delivering.
+- **Client watchdog**: `ll5-run/watchdog/watchdog.sh` reads `~/.ll5/channel-health.json` and enforces two invariants during active hours (07–23 Asia/Jerusalem): (1) main claude session is running in ll5-run workspace (detected via `pgrep -f 'claude .*ll5-channel'`); (2) SSE idle time from the health file is <120s. Violations trigger a single FCM push (via `POST /chat/messages` with `notification_level`) with a 10-min cooldown. Does **not** attempt nohup-launched Claude restarts — that can't attach a TTY, it silently fails and spams the log.
 
 
 

@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 import { logger } from './utils/logger.js';
+import { getHealthSnapshot } from './scheduler/mcp-health-monitor.js';
+import { getAllLivenessSnapshots } from './scheduler/channel-liveness-monitor.js';
 
 const BCRYPT_SALT_ROUNDS = 12;
 const MIN_PIN_LENGTH = 6;
@@ -104,6 +106,45 @@ const USER_SELECT_FIELDS = 'user_id, username, display_name, role, enabled, crea
 export function createAdminRouter(pool: Pool, authSecret: string): Router {
   const router = Router();
   const admin = requireAdmin(authSecret);
+
+  // ---------------------------------------------------------------------------
+  // GET /admin/health — aggregate health of all MCPs, gateway, DBs, channel bridge
+  // Returns the cached snapshot from the MCPHealthMonitor + ChannelLivenessMonitor,
+  // so there's no fan-out penalty per request. Falls back to live DB pings on empty cache.
+  // ---------------------------------------------------------------------------
+  router.get('/health', admin, async (_req: Request, res: Response) => {
+    try {
+      const services = getHealthSnapshot();
+      const channels = getAllLivenessSnapshots();
+
+      // Live DB pings on every call — cheap and authoritative
+      let pgHealthy = false;
+      let pgError: string | null = null;
+      try {
+        await pool.query('SELECT 1');
+        pgHealthy = true;
+      } catch (err) {
+        pgError = err instanceof Error ? err.message : String(err);
+      }
+
+      res.json({
+        services,
+        channels,
+        databases: {
+          postgres: { healthy: pgHealthy, error: pgError },
+        },
+        summary: {
+          services_total: services.length,
+          services_unhealthy: services.filter((s) => !s.healthy).length,
+          channels_stale: channels.filter((c) => c.stale).length,
+        },
+        checked_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      logger.error('[admin][health] Failed', { error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 
   // ---------------------------------------------------------------------------
   // GET /admin/users — list all users
