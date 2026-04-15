@@ -82,7 +82,7 @@ export function loadEnv(): EnvConfig {
     googleMcpUrl: process.env.GOOGLE_MCP_URL,
     googleMcpApiKey: process.env.GOOGLE_MCP_API_KEY,
     mcpHealthUrls: {
-      gateway: process.env.GATEWAY_SELF_URL ?? 'http://localhost:3006',
+      gateway: process.env.GATEWAY_SELF_URL ?? `http://127.0.0.1:${process.env.PORT ?? '3006'}`,
       knowledge: process.env.MCP_KNOWLEDGE_URL ?? 'http://personal-knowledge-xkkcc0g4o48kkcows8488so4:3000',
       gtd: process.env.MCP_GTD_URL ?? 'http://gtd-xkkcc0g4o48kkcows8488so4:3000',
       awareness: process.env.MCP_AWARENESS_URL ?? 'http://awareness-xkkcc0g4o48kkcows8488so4:3000',
