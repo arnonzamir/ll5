@@ -50,8 +50,11 @@ export function getHealthSnapshot(): ServiceHealth[] {
  * Keyed by user_id so alerts respect notification-level routing, but the
  * checks themselves are user-independent.
  */
+const MAX_ALERTS_PER_EPISODE = 5;
+
 export class MCPHealthMonitorScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
+  private alertCounts: Map<string, number> = new Map(); // per-service alert counter, resets on recovery
 
   constructor(
     private pool: Pool,
@@ -161,21 +164,28 @@ export class MCPHealthMonitorScheduler {
     const isHealthy = next.healthy;
 
     // Only alert on crossings, and only after failureThreshold consecutive failures.
-    if (!isHealthy && next.consecutive_failures === this.config.failureThreshold) {
-      logger.error('[MCPHealthMonitor][alert] Service down', {
-        service: next.name,
-        url: next.url,
-        error: next.error,
-        consecutive_failures: next.consecutive_failures,
-      });
-      await sendFCMNotification(this.pool, this.config.userId, {
-        title: 'LL5 service down',
-        body: `${next.name} is failing: ${next.error ?? 'unhealthy'} (${next.consecutive_failures}× in a row)`,
-        type: 'mcp_health',
-        notification_level: 'critical',
-        data: { service: next.name, error: next.error ?? '' },
-      });
+    // Cap at MAX_ALERTS_PER_EPISODE per service, reset on recovery.
+    if (!isHealthy && next.consecutive_failures >= this.config.failureThreshold) {
+      const count = this.alertCounts.get(next.name) ?? 0;
+      if (count < MAX_ALERTS_PER_EPISODE) {
+        this.alertCounts.set(next.name, count + 1);
+        logger.error('[MCPHealthMonitor][alert] Service down', {
+          service: next.name,
+          url: next.url,
+          error: next.error,
+          consecutive_failures: next.consecutive_failures,
+          alert_number: count + 1,
+        });
+        await sendFCMNotification(this.pool, this.config.userId, {
+          title: 'LL5 service down',
+          body: `${next.name} is failing: ${next.error ?? 'unhealthy'} (${next.consecutive_failures}× in a row, alert ${count + 1}/${MAX_ALERTS_PER_EPISODE})`,
+          type: 'mcp_health',
+          notification_level: 'critical',
+          data: { service: next.name, error: next.error ?? '' },
+        });
+      }
     } else if (isHealthy && !wasHealthy) {
+      this.alertCounts.delete(next.name);
       const downtimeSec = prev?.last_healthy_at
         ? Math.round((Date.now() - new Date(prev.last_healthy_at).getTime()) / 1000)
         : null;
@@ -210,16 +220,22 @@ export class MCPHealthMonitorScheduler {
       if (sample.total_calls < this.config.errorRateMinSamples) continue;
       if (sample.error_rate < this.config.errorRateThreshold) continue;
 
+      const errKey = `errors_${sample.service}`;
+      const count = this.alertCounts.get(errKey) ?? 0;
+      if (count >= MAX_ALERTS_PER_EPISODE) continue;
+      this.alertCounts.set(errKey, count + 1);
+
       logger.error('[MCPHealthMonitor][toolErrors] Elevated tool error rate', {
         service: sample.service,
         errors: sample.errors,
         total: sample.total_calls,
         error_rate: sample.error_rate.toFixed(2),
+        alert_number: count + 1,
       });
 
       await sendFCMNotification(this.pool, this.config.userId, {
         title: 'LL5 tool errors spiking',
-        body: `${sample.service}: ${sample.errors}/${sample.total_calls} calls failed in last 15 min (${Math.round(sample.error_rate * 100)}%)`,
+        body: `${sample.service}: ${sample.errors}/${sample.total_calls} failed in 15 min (${Math.round(sample.error_rate * 100)}%, alert ${count + 1}/${MAX_ALERTS_PER_EPISODE})`,
         type: 'mcp_tool_errors',
         notification_level: 'alert',
         data: {

@@ -95,7 +95,7 @@ ll5/
 │       ├── auth.ts                    # POST /auth/token (PIN + username login, rate limiting), POST /auth/refresh (token refresh)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
 │       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich), WhatsApp webhook (images, fromMe, pushName enrichment, group participant enrichment, LID→phone mapping), WhatsApp contact webhook (CONTACTS_UPSERT/UPDATE), routing rule matcher, phone contacts enrichment
-│       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge, journal consolidation, health polling, mcp-health-monitor (2min /health + tool-error-rate; gateway self-URL uses PORT env), channel-liveness-monitor (pending-inbound stall detection)
+│       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge, journal consolidation, health polling, mcp-health-monitor (2min /health + tool-error-rate; 5-alert cap per episode), channel-liveness-monitor (pending-inbound stall; 5-alert cap per episode)
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/whatsapp-user-resolver.ts # Instance name → user_id mapping with 5min cache
 │       ├── utils/data-source-config.ts # Per-source enabled/disabled check with 60s cache (reads user_settings JSONB)

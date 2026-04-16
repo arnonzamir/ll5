@@ -48,7 +48,9 @@ export function getAllLivenessSnapshots(): ChannelLivenessSnapshot[] {
 export class ChannelLivenessMonitor {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastAlertAt: number = 0;
-  private readonly ALERT_COOLDOWN_MS = 10 * 60 * 1000; // don't re-spam within 10 min
+  private alertCount: number = 0;
+  private readonly ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+  private readonly MAX_ALERTS_PER_EPISODE = 5;
 
   constructor(
     private pool: Pool,
@@ -132,6 +134,10 @@ export class ChannelLivenessMonitor {
 
       const snapshotCtx = { ...snapshot } as Record<string, unknown>;
       if (!stale) {
+        if (this.alertCount > 0) {
+          logger.info('[ChannelLivenessMonitor][tick] Channel recovered, resetting alert counter', { alertCount: this.alertCount });
+          this.alertCount = 0;
+        }
         logger.debug('[ChannelLivenessMonitor][tick] Channel healthy', snapshotCtx);
         return;
       }
@@ -143,12 +149,17 @@ export class ChannelLivenessMonitor {
         return;
       }
 
-      // Cooldown so we don't spam the user every 2 min
+      // Cooldown + max-per-episode cap
+      if (this.alertCount >= this.MAX_ALERTS_PER_EPISODE) {
+        logger.debug('[ChannelLivenessMonitor][tick] Stale channel but max alerts reached', { alertCount: this.alertCount });
+        return;
+      }
       if (Date.now() - this.lastAlertAt < this.ALERT_COOLDOWN_MS) {
         logger.debug('[ChannelLivenessMonitor][tick] Stale channel but within cooldown', snapshotCtx);
         return;
       }
       this.lastAlertAt = Date.now();
+      this.alertCount += 1;
 
       logger.error('[ChannelLivenessMonitor][alert] Channel bridge stale', snapshotCtx);
 
