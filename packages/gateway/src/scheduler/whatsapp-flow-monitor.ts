@@ -48,7 +48,7 @@ export class WhatsAppFlowMonitor {
   private lastAlertAt: number = 0;
   private alertCount: number = 0;
   private readonly ALERT_COOLDOWN_MS = 30 * 60 * 1000;
-  private readonly MAX_ALERTS_PER_EPISODE = 5;
+  private readonly MAX_ALERTS_PER_EPISODE = 2;
 
   constructor(
     private pool: Pool,

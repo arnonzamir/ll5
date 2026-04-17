@@ -50,7 +50,7 @@ export function getHealthSnapshot(): ServiceHealth[] {
  * Keyed by user_id so alerts respect notification-level routing, but the
  * checks themselves are user-independent.
  */
-const MAX_ALERTS_PER_EPISODE = 5;
+const MAX_ALERTS_PER_EPISODE = 2;
 
 export class MCPHealthMonitorScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
