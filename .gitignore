@@ -10,6 +10,10 @@ dist/
 .env.local
 .env.*.local
 
+# Claude Code project config (may hold secrets — Coolify token etc.)
+.mcp.json
+.claude/
+
 # IDE
 .vscode/
 .idea/

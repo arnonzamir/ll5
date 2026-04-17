@@ -12,7 +12,7 @@ ll5/
 ├── .env.example                       # All environment variables documented
 │
 ├── .github/workflows/
-│   └── build-and-push.yml            # CI: build changed packages, push to GHCR, deploy via SSH (pulls only GHCR images, never DBs; 5min timeout)
+│   └── build-and-push.yml            # CI: build changed packages, push to GHCR, deploy via SSH (pulls only GHCR images, never DBs; 15min command_timeout — 5min wasn't enough under host pressure)
 │
 ├── docker/
 │   ├── Dockerfile.mcp                # Shared Dockerfile for all MCP servers (PACKAGE_NAME build arg)
