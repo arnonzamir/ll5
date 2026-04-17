@@ -6,6 +6,8 @@ import type { Pool } from 'pg';
 import { logger } from './utils/logger.js';
 import { getHealthSnapshot } from './scheduler/mcp-health-monitor.js';
 import { getAllLivenessSnapshots } from './scheduler/channel-liveness-monitor.js';
+import { getAllWhatsAppFlowSnapshots } from './scheduler/whatsapp-flow-monitor.js';
+import { getAllPhoneLivenessSnapshots } from './scheduler/phone-liveness-monitor.js';
 
 const BCRYPT_SALT_ROUNDS = 12;
 const MIN_PIN_LENGTH = 6;
@@ -116,6 +118,8 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
     try {
       const services = getHealthSnapshot();
       const channels = getAllLivenessSnapshots();
+      const whatsapp = getAllWhatsAppFlowSnapshots();
+      const phones = getAllPhoneLivenessSnapshots();
 
       // Live DB pings on every call — cheap and authoritative
       let pgHealthy = false;
@@ -130,6 +134,8 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
       res.json({
         services,
         channels,
+        whatsapp,
+        phones,
         databases: {
           postgres: { healthy: pgHealthy, error: pgError },
         },
@@ -137,6 +143,8 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
           services_total: services.length,
           services_unhealthy: services.filter((s) => !s.healthy).length,
           channels_stale: channels.filter((c) => c.stale).length,
+          whatsapp_stale: whatsapp.filter((w) => w.stale).length,
+          phones_stale: phones.filter((p) => p.stale).length,
         },
         checked_at: new Date().toISOString(),
       });

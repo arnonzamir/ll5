@@ -95,7 +95,7 @@ ll5/
 │       ├── auth.ts                    # POST /auth/token (PIN + username login, rate limiting), POST /auth/refresh (token refresh)
 │       ├── chat.ts                    # /chat/* REST + SSE listen endpoint
 │       ├── processors/                # GPS geocoding, IM processing, calendar (dedup + enrich), WhatsApp webhook (images, fromMe, pushName enrichment, group participant enrichment, LID→phone mapping), WhatsApp contact webhook (CONTACTS_UPSERT/UPDATE), routing rule matcher, phone contacts enrichment
-│       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge, journal consolidation, health polling, mcp-health-monitor (2min /health + tool-error-rate; 5-alert cap per episode), channel-liveness-monitor (pending-inbound stall; 5-alert cap per episode)
+│       ├── scheduler/                 # Calendar sync, daily review, tickler alerts, GTD health, weekly review, message batch, agent nudge, journal consolidation, health polling, mcp-health-monitor (2min /health + tool-error-rate; 5-alert cap per episode), channel-liveness-monitor (pending-inbound stall; 5-alert cap per episode), whatsapp-flow-monitor (ES-based "no WhatsApp in 6h" during active hours — catches Evolution ghost-connected), phone-liveness-monitor (ES-based "no GPS/phone_status in 3h" — promotes heartbeat warning to FCM critical)
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/whatsapp-user-resolver.ts # Instance name → user_id mapping with 5min cache
 │       ├── utils/data-source-config.ts # Per-source enabled/disabled check with 60s cache (reads user_settings JSONB)
@@ -135,7 +135,7 @@ ll5/
 │   └── src/
 │       ├── clients/                   # Evolution API (WhatsApp), Telegram Bot API
 │       ├── repositories/postgres/     # Accounts, conversations, contacts (with person linking)
-│       ├── tools/                     # 15 tools (send, read, sync, contacts, link, auto-match, backfill-contact-names)
+│       ├── tools/                     # 16 tools (send, read, sync, contacts, link, auto-match, backfill-contact-names, restart-whatsapp-account)
 │       ├── migrations/               # 001 tables, 002 contacts, 003 archived conversations
 │       └── server.ts
 │
