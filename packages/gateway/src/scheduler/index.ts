@@ -16,6 +16,8 @@ import { HealthPollingScheduler } from './health-polling.js';
 import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
 import { ChannelLivenessMonitor } from './channel-liveness-monitor.js';
+import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
+import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { logger } from '../utils/logger.js';
 
 /** Common interface for all schedulers — they all have start() and stop(). */
@@ -145,6 +147,26 @@ async function startSchedulersForUser(
   });
   channelLivenessMonitor.start();
   schedulers.push(channelLivenessMonitor);
+
+  // WhatsApp flow — catches Evolution's ghost-connected failure where state
+  // reports open but the webhook has been silent for hours.
+  const whatsappFlowMonitor = new WhatsAppFlowMonitor(pgPool, es, {
+    intervalMinutes: s('whatsapp_flow_minutes', 15),
+    stalenessHours: s('whatsapp_flow_stale_hours', 6),
+    startHour, endHour, timezone, userId,
+  });
+  whatsappFlowMonitor.start();
+  schedulers.push(whatsappFlowMonitor);
+
+  // Phone liveness — Android notification/location service dying is invisible
+  // from the server side until the heartbeat message happens to notice.
+  const phoneLivenessMonitor = new PhoneLivenessMonitor(pgPool, es, {
+    intervalMinutes: s('phone_liveness_minutes', 15),
+    stalenessHours: s('phone_liveness_stale_hours', 3),
+    startHour, endHour, timezone, userId,
+  });
+  phoneLivenessMonitor.start();
+  schedulers.push(phoneLivenessMonitor);
 
   // --- Google-dependent schedulers (only start if googleClient exists) ---
 

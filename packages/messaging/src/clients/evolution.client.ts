@@ -176,6 +176,19 @@ export class EvolutionClient {
   }
 
   /**
+   * Restart the Evolution instance. Used to recover from Baileys "ghost
+   * connected" sessions where connectionState reports open but the WhatsApp
+   * Web socket has silently desynced and no messages arrive.
+   */
+  async restart(): Promise<{ state: string }> {
+    const result = await this.request<{ instance?: { state?: string } }>(
+      'POST',
+      `/instance/restart/${this.instanceName}`,
+    );
+    return { state: result?.instance?.state ?? 'unknown' };
+  }
+
+  /**
    * Fetch all messages with pagination (for backfill).
    * Uses POST /chat/findMessages with empty where clause.
    */
