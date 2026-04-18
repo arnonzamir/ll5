@@ -18,6 +18,7 @@ import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
 import { ChannelLivenessMonitor } from './channel-liveness-monitor.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
+import { MCPStatusPulseScheduler } from './mcp-status-pulse.js';
 import { logger } from '../utils/logger.js';
 
 /** Common interface for all schedulers — they all have start() and stop(). */
@@ -167,6 +168,18 @@ async function startSchedulersForUser(
   });
   phoneLivenessMonitor.start();
   schedulers.push(phoneLivenessMonitor);
+
+  // Temporary 2h status pulse — fires through 2026-04-21 so the user gets
+  // regular visibility while the new monitors stabilise. Self-expires; no
+  // cleanup commit needed once the date passes.
+  const mcpStatusPulse = new MCPStatusPulseScheduler(pgPool, {
+    intervalMinutes: s('mcp_status_pulse_minutes', 120),
+    expiresAt: sched['mcp_status_pulse_expires_at'] as unknown as string
+      ?? '2026-04-21T18:00:00Z',
+    startHour, endHour, timezone, userId,
+  });
+  mcpStatusPulse.start();
+  schedulers.push(mcpStatusPulse);
 
   // --- Google-dependent schedulers (only start if googleClient exists) ---
 

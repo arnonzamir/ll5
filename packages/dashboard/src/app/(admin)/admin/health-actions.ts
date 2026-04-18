@@ -8,6 +8,11 @@ interface ServiceHealth {
   name: string;
   healthy: boolean;
   responseTime: number;
+  statusCode?: number | null;
+  error?: string | null;
+  consecutiveFailures?: number;
+  lastHealthyAt?: string | null;
+  lastCheckedAt?: string | null;
 }
 
 export interface ChannelLiveness {
@@ -20,11 +25,38 @@ export interface ChannelLiveness {
   checked_at: string;
 }
 
+export interface WhatsAppFlowSnapshot {
+  userId: string;
+  account_count: number;
+  last_message_at: string | null;
+  last_message_age_hours: number | null;
+  stale: boolean;
+  checked_at: string;
+}
+
+export interface PhoneLivenessSnapshot {
+  userId: string;
+  last_location_at: string | null;
+  last_status_at: string | null;
+  last_signal_at: string | null;
+  last_signal_age_hours: number | null;
+  stale: boolean;
+  checked_at: string;
+}
+
 export interface HealthSnapshot {
   services: ServiceHealth[];
   channels: ChannelLiveness[];
+  whatsapp: WhatsAppFlowSnapshot[];
+  phones: PhoneLivenessSnapshot[];
   databases: { postgres: { healthy: boolean; error: string | null } };
-  summary: { services_total: number; services_unhealthy: number; channels_stale: number };
+  summary: {
+    services_total: number;
+    services_unhealthy: number;
+    channels_stale: number;
+    whatsapp_stale: number;
+    phones_stale: number;
+  };
   checked_at: string;
 }
 
@@ -43,10 +75,21 @@ export async function pollHealth(): Promise<HealthSnapshot> {
       });
       if (res.ok) {
         const data = (await res.json()) as {
-          services: Array<{ name: string; healthy: boolean; response_time_ms: number }>;
+          services: Array<{
+            name: string;
+            healthy: boolean;
+            response_time_ms: number;
+            status_code?: number | null;
+            error?: string | null;
+            consecutive_failures?: number;
+            last_healthy_at?: string | null;
+            last_checked_at?: string | null;
+          }>;
           channels: ChannelLiveness[];
+          whatsapp?: WhatsAppFlowSnapshot[];
+          phones?: PhoneLivenessSnapshot[];
           databases: HealthSnapshot["databases"];
-          summary: HealthSnapshot["summary"];
+          summary: Partial<HealthSnapshot["summary"]> & HealthSnapshot["summary"];
           checked_at: string;
         };
         return {
@@ -54,10 +97,23 @@ export async function pollHealth(): Promise<HealthSnapshot> {
             name: s.name,
             healthy: s.healthy,
             responseTime: s.response_time_ms,
+            statusCode: s.status_code ?? null,
+            error: s.error ?? null,
+            consecutiveFailures: s.consecutive_failures ?? 0,
+            lastHealthyAt: s.last_healthy_at ?? null,
+            lastCheckedAt: s.last_checked_at ?? null,
           })),
           channels: data.channels,
+          whatsapp: data.whatsapp ?? [],
+          phones: data.phones ?? [],
           databases: data.databases,
-          summary: data.summary,
+          summary: {
+            services_total: data.summary?.services_total ?? data.services.length,
+            services_unhealthy: data.summary?.services_unhealthy ?? 0,
+            channels_stale: data.summary?.channels_stale ?? 0,
+            whatsapp_stale: data.summary?.whatsapp_stale ?? 0,
+            phones_stale: data.summary?.phones_stale ?? 0,
+          },
           checked_at: data.checked_at,
         };
       }
@@ -77,11 +133,15 @@ export async function pollHealth(): Promise<HealthSnapshot> {
   return {
     services: results,
     channels: [],
+    whatsapp: [],
+    phones: [],
     databases: { postgres: { healthy: false, error: "unknown (fallback mode)" } },
     summary: {
       services_total: results.length,
       services_unhealthy: results.filter((r) => !r.healthy).length,
       channels_stale: 0,
+      whatsapp_stale: 0,
+      phones_stale: 0,
     },
     checked_at: new Date().toISOString(),
   };
