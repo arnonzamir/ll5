@@ -14,6 +14,11 @@ ll5/
 ├── .github/workflows/
 │   └── build-and-push.yml            # CI: build changed packages, push to GHCR, deploy via SSH (pulls only GHCR images, never DBs; 15min command_timeout — 5min wasn't enough under host pressure)
 │
+│ (ll5-run repo — client workspace — is a separate git repo.)
+│ (ll5-run/ll5 launcher: exports MCP_TIMEOUT=30000, parallel /health pre-warm, then exec claude.)
+│ (ll5-run/channel/ll5-channel.mjs: SSE chat bridge + MCP connectivity probe for all 6 remote MCPs)
+│ (every 10min, exposes `check_mcp_connectivity` tool, rate-limited system notifications on failure.)
+│
 ├── docker/
 │   ├── Dockerfile.mcp                # Shared Dockerfile for all MCP servers (PACKAGE_NAME build arg)
 │   ├── Dockerfile.gateway            # Gateway-specific Dockerfile (copies src/migrations to dist)
