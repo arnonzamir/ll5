@@ -18,6 +18,15 @@ ll5/
 │ (ll5-run/ll5 launcher: exports MCP_TIMEOUT=30000, parallel /health pre-warm, then exec claude.)
 │ (ll5-run/channel/ll5-channel.mjs: SSE chat bridge + MCP connectivity probe for all 6 remote MCPs)
 │ (every 10min, exposes `check_mcp_connectivity` tool, rate-limited system notifications on failure.)
+│ (Apr 19: simplified push_to_user (drops channel heuristic), added new_conversation + react tools,)
+│ (passes reply_to_id/reaction/display_compact through SSE meta, handles conversation_archived/_created events.)
+│
+│ (ll5-android repo — Android app — is a separate git repo.)
+│ (data/remote/ChatApi.kt: chat/conversations/active, /new, PATCH /chat/messages/{id} for reactions.)
+│ (data/repository/ChatRepository.kt: listenForEvents parses conversation_archived/_created, reply_to_id,)
+│ (reaction, display_compact. sendMessage surfaces 409 as structured response, not exception.)
+│ (ui/chat/ChatScreen.kt: reply-quote bubbles, reaction strip, long-press action sheet + reaction sheet,)
+│ (compact rendering with 60s group-collapse, new-conversation dialog. Ships via manual APK install.)
 │
 ├── docker/
 │   ├── Dockerfile.mcp                # Shared Dockerfile for all MCP servers (PACKAGE_NAME build arg)
