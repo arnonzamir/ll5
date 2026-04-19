@@ -256,7 +256,7 @@ describe('createChatRouter', () => {
       await handler(req, res);
 
       expect(res._status).toBe(400);
-      expect((res._json as { error: string }).error).toContain('Missing required fields');
+      expect((res._json as { error: string }).error).toMatch(/Missing required field/);
     });
 
     it('rejects invalid channel', async () => {

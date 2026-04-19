@@ -19,6 +19,7 @@ import { ChannelLivenessMonitor } from './channel-liveness-monitor.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MCPStatusPulseScheduler } from './mcp-status-pulse.js';
+import { ChatSearchIndexer } from './chat-search-indexer.js';
 import { logger } from '../utils/logger.js';
 
 /** Common interface for all schedulers — they all have start() and stop(). */
@@ -29,6 +30,9 @@ interface Stoppable {
 
 /** Active schedulers keyed by user_id. */
 const activeSchedulers = new Map<string, Stoppable[]>();
+
+/** Cluster-wide singletons (not per-user). */
+let chatSearchIndexer: ChatSearchIndexer | null = null;
 
 /** Periodic reconciliation timer handle. */
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
@@ -350,6 +354,22 @@ export async function startSchedulers(
     users: [...activeSchedulers.keys()],
   });
 
+  // Cluster-wide chat search indexer — single process tails NOTIFY and
+  // mirrors chat into ES. Independent of per-user scheduler sets.
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl) {
+    chatSearchIndexer = new ChatSearchIndexer(pgPool, es, dbUrl);
+    try {
+      await chatSearchIndexer.start();
+    } catch (err) {
+      logger.error('[startSchedulers][init] ChatSearchIndexer start failed — search will fall back to ILIKE', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  } else {
+    logger.warn('[startSchedulers][init] DATABASE_URL not set — chat search indexer skipped');
+  }
+
   // Set up periodic reconciliation to detect new/disabled users
   reconcileTimer = setInterval(
     () => void reconcileUsers(config, es, pgPool),
@@ -367,8 +387,18 @@ export function stopAllSchedulers(): void {
     reconcileTimer = null;
   }
 
+  if (chatSearchIndexer) {
+    chatSearchIndexer.stop();
+    chatSearchIndexer = null;
+  }
+
   for (const userId of activeSchedulers.keys()) {
     stopSchedulersForUser(userId);
   }
   logger.info('[stopAllSchedulers] All schedulers stopped');
+}
+
+/** Exposed for admin endpoints / one-shot backfill. */
+export function getChatSearchIndexer(): ChatSearchIndexer | null {
+  return chatSearchIndexer;
 }
