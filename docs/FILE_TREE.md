@@ -155,8 +155,8 @@ ll5/
 │
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
 │   └── src/
-│       ├── app/(auth)/login/          # Login page + server action
-│       ├── middleware.ts               # Injects x-pathname header for server-side route detection
+│       ├── app/(auth)/login/          # Login page + server action; honors ?next= with same-origin guard; LoginForm wrapped in <Suspense> so useSearchParams can bail out of SSG
+│       ├── middleware.ts               # Redirects non-public pages to /login?next=<path> when ll5_token cookie is missing (catches (admin) routes) + injects x-pathname header
 │       ├── app/(user)/                # 27 pages: dashboard, calendar (+settings +ticklers), actions, projects, inbox, shopping, people (server-side search + pagination), knowledge, horizons, contacts (old), locations, places, media, health, journal, phone-data, sessions, export, profile, settings/ (contacts [3 tabs + link/unlink/auto-match + z-indexed popover], notifications, messaging, health, notification-levels, scheduler)
 │       ├── app/(admin)/               # Admin pages: health, users, tools, logs (Datadog-style LogExplorer), audit
 │       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations (list + new + active + search + [id]), upload, listen
