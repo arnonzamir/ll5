@@ -64,10 +64,20 @@ export default async function UserLayout({
     console.error("[layout] Failed to fetch display name:", err instanceof Error ? err.message : String(err));
   }
 
+  // `/chat` is a full-bleed view — it manages its own max-width, padding,
+  // and scroll container. Every other page keeps the centered 7xl wrapper.
+  const isImmersive = pathname.startsWith("/chat");
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <Nav username={displayName} isAdmin={isAdmin} />
-      <main className="flex-1 mx-auto w-full max-w-7xl px-4 py-4 min-h-0 overflow-y-auto">{children}</main>
+      {isImmersive ? (
+        <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
+      ) : (
+        <main className="flex-1 mx-auto w-full max-w-7xl px-4 py-4 min-h-0 overflow-y-auto">
+          {children}
+        </main>
+      )}
       <footer className="shrink-0 text-left text-[10px] text-black py-1 px-4">
         build {process.env.NEXT_PUBLIC_BUILD_ID ?? "dev"}
       </footer>

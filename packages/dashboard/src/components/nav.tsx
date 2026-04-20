@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import {
   LayoutDashboard,
+  MessageSquareText,
   CalendarDays,
   CheckSquare,
   FolderKanban,
@@ -44,6 +45,7 @@ interface NavLink {
 
 const topLevelLinks: NavLink[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/chat", label: "Chat", icon: MessageSquareText },
   { href: "/actions", label: "Actions", icon: CheckSquare },
 ];
 

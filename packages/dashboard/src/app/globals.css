@@ -24,4 +24,52 @@
   --color-admin-800: #92400e;
   --color-admin-900: #78350f;
   --color-admin: #d97706;
+
+  /* --- Chat view palette — warm, coach-tone, CLI-flavored --- */
+  /* Surfaces in a warm off-white family. Each ~1% apart so they stack without shadows. */
+  --color-surface-page:     #faf9f6;
+  --color-surface-thread:   #fbfaf7;
+  --color-surface-composer: #ffffff;
+  --color-surface-sunken:   #f3f1ec;
+  --color-surface-rail:     #f6f4ef;
+
+  /* Ink scale — warm grays, never pure black. */
+  --color-ink-900: #1f1d1a;
+  --color-ink-700: #3d3a36;
+  --color-ink-500: #78736b;
+  --color-ink-400: #9b958c;
+  --color-ink-300: #cfc9bf;
+
+  /* Coach accent — terracotta. Used sparingly: coach dot, thinking caret, emphasis. */
+  --color-coach-50:  #fdf3ec;
+  --color-coach-500: #c8623a;
+  --color-coach-700: #8a4126;
+
+  /* Mono font stack for CLI flavor spots (timestamps, system rows, slash hints, caret). */
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Chat-view typography — loaded on `/chat` only via the layout so other
+   pages aren't affected. Inter + JetBrains Mono via next/font would be
+   better but we stick with system UI + CSS font-stack mono to avoid a
+   font-loading hop on the first frame. */
+.chat-surface {
+  font-feature-settings: "ss01", "cv11", "ss03";
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Blinking mono caret used for the "coach is thinking" indicator — step-end
+   easing to get the terminal look instead of a smooth fade. */
+@keyframes chat-caret-blink {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.chat-caret {
+  animation: chat-caret-blink 1.1s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-caret { animation: none; opacity: 0.6; }
 }
