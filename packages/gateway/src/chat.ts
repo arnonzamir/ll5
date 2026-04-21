@@ -19,8 +19,13 @@ const ARCHIVED_WRITE_GRACE_MS = 30_000;
 
 /** Channels whose messages live in the unified LL5 conversation model.
  *  External messengers (WhatsApp/Telegram) keep their per-remote_jid
- *  conversations and are exempt from active-conversation routing. */
-const UNIFIED_CHANNELS = new Set(['web', 'android', 'cli', 'system']);
+ *  conversations and are exempt from active-conversation routing.
+ *  `system` is ephemeral (scheduler events, escalation notices,
+ *  whatsapp-to-system conversions) — each event owns a fresh
+ *  conversation_id and never surfaces in the user's chat thread, so it
+ *  stays outside the unified model. Migration 023 scopes the DB
+ *  counter-maintenance trigger to match. */
+const UNIFIED_CHANNELS = new Set(['web', 'android', 'cli']);
 
 const VALID_CHANNELS = ['web', 'telegram', 'whatsapp', 'cli', 'android', 'system'];
 const VALID_REACTIONS = ['acknowledge', 'reject', 'agree', 'disagree', 'confused', 'thinking'];

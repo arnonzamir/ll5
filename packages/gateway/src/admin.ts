@@ -8,6 +8,7 @@ import { getHealthSnapshot } from './scheduler/mcp-health-monitor.js';
 import { getAllLivenessSnapshots } from './scheduler/channel-liveness-monitor.js';
 import { getAllWhatsAppFlowSnapshots } from './scheduler/whatsapp-flow-monitor.js';
 import { getAllPhoneLivenessSnapshots } from './scheduler/phone-liveness-monitor.js';
+import { getSystemMessageFailureStats } from './utils/system-message.js';
 
 const BCRYPT_SALT_ROUNDS = 12;
 const MIN_PIN_LENGTH = 6;
@@ -131,11 +132,14 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
         pgError = err instanceof Error ? err.message : String(err);
       }
 
+      const systemMessages = getSystemMessageFailureStats();
+
       res.json({
         services,
         channels,
         whatsapp,
         phones,
+        system_messages: systemMessages,
         databases: {
           postgres: { healthy: pgHealthy, error: pgError },
         },
@@ -145,6 +149,7 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
           channels_stale: channels.filter((c) => c.stale).length,
           whatsapp_stale: whatsapp.filter((w) => w.stale).length,
           phones_stale: phones.filter((p) => p.stale).length,
+          system_message_failures: systemMessages.total_failures,
         },
         checked_at: new Date().toISOString(),
       });
