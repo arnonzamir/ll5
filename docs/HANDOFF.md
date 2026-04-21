@@ -89,7 +89,7 @@ Dashboard (Next.js 15)
 | Admin PIN | `1234` |
 | Token format | `ll5.<base64url {uid,role,iat,exp}>.<32char hmac>` |
 | Token TTL | 7 days |
-| Token refresh | `POST /auth/refresh` — accepts valid or expired token (within 7-day grace), returns new token. Channel MCP auto-refreshes on startup + every 12h. |
+| Token refresh | `POST /auth/refresh` — accepts valid or expired token (within 7-day grace), returns new token. Channel MCP auto-refreshes on startup + every 12h. Dashboard refreshes via `middleware.ts` when `secondsLeft < 2 days`; writes the new token to both `request.cookies` (so current-request server actions see it) and the response cookie. Beyond grace it clears the cookie and redirects to `/login?next=<path>`. |
 
 ## Google OAuth
 
