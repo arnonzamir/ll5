@@ -2,6 +2,7 @@ import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { sendFCMNotification } from '../utils/fcm-sender.js';
+import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface WhatsAppFlowMonitorConfig {
   /** How often to check (minutes). */
@@ -85,7 +86,7 @@ export class WhatsAppFlowMonitor {
   }
 
   private async tick(): Promise<void> {
-    try {
+    try { await withSchedulerHealth('whatsapp_flow_monitor', async () => {
       const accountRes = await this.pool.query<{ count: string }>(
         `SELECT COUNT(*)::int AS count
          FROM messaging_whatsapp_accounts
@@ -182,10 +183,8 @@ export class WhatsAppFlowMonitor {
           age_hours: ageHours === null ? '' : String(Math.round(ageHours)),
         },
       });
-    } catch (err) {
-      logger.warn('[WhatsAppFlowMonitor][tick] Failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    }); } catch {
+      // withSchedulerHealth already recorded the failure + logged at error.
     }
   }
 }

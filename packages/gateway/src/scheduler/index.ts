@@ -66,8 +66,21 @@ async function startSchedulersForUser(
       Object.assign(sched, result.rows[0].sched);
     }
     logger.info('[startSchedulersForUser][init] Using settings', { userId, timezone, schedulerKeys: Object.keys(sched) });
-  } catch {
-    // Table may not exist yet on first deploy — use env vars
+  } catch (err) {
+    // 42P01 = undefined_table — expected on the very first deploy before
+    // migrations run. Any other error (connection drop, privilege, schema
+    // drift) needs to be loud or we silently fall back to env defaults,
+    // which may have wrong timezone/active-hours/intervals.
+    const code = (err as { code?: string } | null)?.code;
+    if (code === '42P01') {
+      logger.warn('[startSchedulersForUser][init] user_settings missing — using env defaults', { userId });
+    } else {
+      logger.error('[startSchedulersForUser][init] Failed to read user_settings — falling back to env defaults', {
+        userId,
+        code,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // Helper: read scheduler setting with env var fallback
@@ -258,8 +271,16 @@ async function reconcileUsers(
       'SELECT user_id FROM auth_users WHERE enabled = true',
     );
     enabledUserIds = result.rows.map((r: { user_id: string }) => r.user_id);
-  } catch {
-    // auth_users table may not exist on first deploy — skip reconciliation
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === '42P01') {
+      logger.warn('[reconcileUsers] auth_users missing — skipping');
+    } else {
+      logger.error('[reconcileUsers] Failed to query auth_users', {
+        code,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     return;
   }
 
@@ -317,8 +338,16 @@ export async function startSchedulers(
       'SELECT user_id FROM auth_users WHERE enabled = true',
     );
     userIds = result.rows.map((r: { user_id: string }) => r.user_id);
-  } catch {
-    // Table may not exist on first deploy — fall through to webhookTokens fallback
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code;
+    if (code === '42P01') {
+      logger.warn('[startSchedulers][init] auth_users missing — falling back to webhookTokens');
+    } else {
+      logger.error('[startSchedulers][init] Failed to query auth_users', {
+        code,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // Fall back to webhookTokens if no users found in DB

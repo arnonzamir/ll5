@@ -119,38 +119,53 @@ export function chatAuthMiddleware(authSecret: string) {
 // ---------------------------------------------------------------------------
 
 /** Return the user's active LL5-native conversation id, creating one if none
- *  exists. Safe against the unique-partial-index race: on 23505 we re-select. */
+ *  exists. Safe against the unique-partial-index race via a bounded retry
+ *  loop: up to 3 attempts (read → insert → re-read on 23505). Under high
+ *  concurrency with read-committed isolation, the loser of the race can
+ *  still see zero rows on the first re-read (the winner's row hasn't
+ *  COMMITted yet), so a few retries with a small backoff is the cheapest
+ *  robust fix.
+ *
+ *  **Invariant**: this is the only sanctioned path to resolve or create an
+ *  active LL5-native conversation. Do not INSERT into chat_conversations
+ *  outside this helper — hand-rolled INSERTs will either race against the
+ *  unique-partial-index or miss the "archived writes reroute" logic at the
+ *  POST /messages layer. */
 async function getOrCreateActiveConversation(
   client: PoolClient | Pool,
   userId: string,
 ): Promise<string> {
-  const existing = await client.query<{ conversation_id: string }>(
-    `SELECT conversation_id FROM chat_conversations
-     WHERE user_id = $1 AND archived_at IS NULL`,
-    [userId],
-  );
-  if (existing.rows.length > 0) return existing.rows[0].conversation_id;
-
-  try {
-    const inserted = await client.query<{ conversation_id: string }>(
-      `INSERT INTO chat_conversations (conversation_id, user_id, created_at, last_message_at, message_count)
-       VALUES (gen_random_uuid(), $1, now(), now(), 0)
-       RETURNING conversation_id`,
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const existing = await client.query<{ conversation_id: string }>(
+      `SELECT conversation_id FROM chat_conversations
+       WHERE user_id = $1 AND archived_at IS NULL`,
       [userId],
     );
-    return inserted.rows[0].conversation_id;
-  } catch (err) {
-    // 23505 = unique_violation. A concurrent call won the race.
-    if (err && typeof err === 'object' && (err as { code?: string }).code === '23505') {
-      const retry = await client.query<{ conversation_id: string }>(
-        `SELECT conversation_id FROM chat_conversations
-         WHERE user_id = $1 AND archived_at IS NULL`,
+    if (existing.rows.length > 0) return existing.rows[0].conversation_id;
+
+    try {
+      const inserted = await client.query<{ conversation_id: string }>(
+        `INSERT INTO chat_conversations (conversation_id, user_id, created_at, last_message_at, message_count)
+         VALUES (gen_random_uuid(), $1, now(), now(), 0)
+         RETURNING conversation_id`,
         [userId],
       );
-      if (retry.rows.length > 0) return retry.rows[0].conversation_id;
+      return inserted.rows[0].conversation_id;
+    } catch (err) {
+      // 23505 = unique_violation. A concurrent call won the race. Fall
+      // through to the next attempt's SELECT — the winner's row may not
+      // be COMMITted yet on the first retry, so small linear backoff.
+      if (err && typeof err === 'object' && (err as { code?: string }).code === '23505') {
+        if (attempt < MAX_ATTEMPTS - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+          continue;
+        }
+      }
+      throw err;
     }
-    throw err;
   }
+  throw new Error(`getOrCreateActiveConversation: exhausted ${MAX_ATTEMPTS} attempts for user ${userId}`);
 }
 
 /** Given a conversation id submitted by a client, decide what to do:

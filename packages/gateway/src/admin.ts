@@ -9,6 +9,10 @@ import { getAllLivenessSnapshots } from './scheduler/channel-liveness-monitor.js
 import { getAllWhatsAppFlowSnapshots } from './scheduler/whatsapp-flow-monitor.js';
 import { getAllPhoneLivenessSnapshots } from './scheduler/phone-liveness-monitor.js';
 import { getSystemMessageFailureStats } from './utils/system-message.js';
+import { getSchedulerHealthSnapshot } from './utils/scheduler-health.js';
+import { getFcmStats } from './utils/fcm-sender.js';
+import { getChatSearchIndexerStats } from './scheduler/chat-search-indexer.js';
+import { getWebhookStats } from './utils/webhook-stats.js';
 
 const BCRYPT_SALT_ROUNDS = 12;
 const MIN_PIN_LENGTH = 6;
@@ -133,6 +137,13 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
       }
 
       const systemMessages = getSystemMessageFailureStats();
+      const schedulers = getSchedulerHealthSnapshot();
+      const schedulersUnhealthy = schedulers.filter(
+        (s) => s.consecutive_failures >= 3,
+      ).length;
+      const fcm = getFcmStats();
+      const chatIndexer = getChatSearchIndexerStats();
+      const webhook = getWebhookStats();
 
       res.json({
         services,
@@ -140,6 +151,10 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
         whatsapp,
         phones,
         system_messages: systemMessages,
+        schedulers,
+        fcm,
+        chat_indexer: chatIndexer,
+        webhook,
         databases: {
           postgres: { healthy: pgHealthy, error: pgError },
         },
@@ -150,6 +165,9 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
           whatsapp_stale: whatsapp.filter((w) => w.stale).length,
           phones_stale: phones.filter((p) => p.stale).length,
           system_message_failures: systemMessages.total_failures,
+          schedulers_unhealthy: schedulersUnhealthy,
+          fcm_failures: fcm.total_failures,
+          webhook_failures: webhook.total_failures,
         },
         checked_at: new Date().toISOString(),
       });

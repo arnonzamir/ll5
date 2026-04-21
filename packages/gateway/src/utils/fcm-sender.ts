@@ -218,7 +218,8 @@ export async function sendFCMNotification(
   try {
     accessToken = await getAccessToken(sa);
   } catch (err) {
-    logger.warn('[FCMSender][send] Failed to get access token', {
+    recordFcmFailure('access_token', err);
+    logger.error('[FCMSender][send] Failed to get access token', {
       error: err instanceof Error ? err.message : String(err),
     });
     return;
@@ -253,14 +254,64 @@ export async function sendFCMNotification(
 
       if (!response.ok) {
         const text = await response.text();
-        logger.warn('[FCMSender][send] FCM v1 send failed', { status: response.status, body: text });
+        recordFcmFailure(`http_${response.status}`, text);
+        logger.error('[FCMSender][send] FCM v1 send failed', {
+          status: response.status,
+          body: text,
+          type: message.type,
+          user_id: userId,
+        });
       } else {
+        recordFcmSuccess();
         logger.info('[FCMSender][send] Push sent', { type: message.type, level });
       }
     } catch (err) {
-      logger.warn('[FCMSender][send] FCM send error', {
+      recordFcmFailure('network', err);
+      logger.error('[FCMSender][send] FCM send error', {
         error: err instanceof Error ? err.message : String(err),
+        type: message.type,
+        user_id: userId,
       });
     }
   }
+}
+
+// Failure counter for /admin/health.fcm. Same pattern as system-message.ts —
+// surface silent FCM failures (token drift, service-account rotation, network)
+// so the dashboard sees the user going dark.
+interface FcmStats {
+  total_sends: number;
+  total_failures: number;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_failure_reason: string | null;
+  failures_by_reason: Record<string, number>;
+}
+
+const fcmStats: FcmStats = {
+  total_sends: 0,
+  total_failures: 0,
+  last_success_at: null,
+  last_failure_at: null,
+  last_failure_reason: null,
+  failures_by_reason: {},
+};
+
+function recordFcmSuccess(): void {
+  fcmStats.total_sends += 1;
+  fcmStats.last_success_at = new Date().toISOString();
+}
+
+function recordFcmFailure(reason: string, err: unknown): void {
+  fcmStats.total_sends += 1;
+  fcmStats.total_failures += 1;
+  fcmStats.last_failure_at = new Date().toISOString();
+  fcmStats.last_failure_reason = typeof err === 'string'
+    ? err.slice(0, 200)
+    : err instanceof Error ? err.message : reason;
+  fcmStats.failures_by_reason[reason] = (fcmStats.failures_by_reason[reason] ?? 0) + 1;
+}
+
+export function getFcmStats(): FcmStats {
+  return { ...fcmStats, failures_by_reason: { ...fcmStats.failures_by_reason } };
 }

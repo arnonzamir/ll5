@@ -26,6 +26,7 @@ import { isSourceEnabled } from './utils/data-source-config.js';
 import { resolveWhatsAppUserId } from './utils/whatsapp-user-resolver.js';
 import type { EnvConfig } from './utils/env.js';
 import { logger } from './utils/logger.js';
+import { recordWebhookFailure } from './utils/webhook-stats.js';
 
 // --- Elasticsearch index definitions for awareness domain ---
 
@@ -1238,8 +1239,10 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         await processPhoneContacts(pgPool, userId, phoneContactItems);
       }
     } catch (err) {
-      // Non-critical — don't fail the webhook response
-      logger.warn('[startServer][webhook] Phone contacts enrichment failed', {
+      // Non-critical — don't fail the webhook response. Still bump the
+      // counter so /admin/health.webhook surfaces persistent failures.
+      recordWebhookFailure('phone_contacts_enrichment', err);
+      logger.error('[startServer][webhook] Phone contacts enrichment failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -1293,8 +1296,10 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         }
       }
     } catch (err) {
-      // Non-critical — don't fail the webhook response
-      logger.warn('[startServer][webhook] Calendar cleanup failed', {
+      // Non-critical — don't fail the webhook response. Still bump the
+      // counter so /admin/health.webhook surfaces persistent failures.
+      recordWebhookFailure('calendar_cleanup', err);
+      logger.error('[startServer][webhook] Calendar cleanup failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -1351,11 +1356,83 @@ async function runMigrations(pool: pg.Pool): Promise<void> {
     .filter((f: string) => f.endsWith('.sql'))
     .sort();
 
+  // Step 1: always apply 000_schema_migrations.sql first (creates the ledger
+  // table). It's IF NOT EXISTS and re-runnable. Doesn't go through the skip
+  // loop — we need the table before we can read the ledger.
+  const ledgerFile = '000_schema_migrations.sql';
+  if (files.includes(ledgerFile)) {
+    const sql = fs.readFileSync(path.join(migrationsDir, ledgerFile), 'utf-8');
+    await pool.query(sql);
+  } else {
+    // Older deploy without the ledger file — bootstrap the table inline.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        filename   TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `);
+  }
+
+  // Step 2: first-boot backfill. If the ledger is empty but an older table
+  // (chat_messages) already exists, the DB was initialized pre-ledger —
+  // mark every migration file as already applied so we don't re-run the old
+  // non-idempotent ones.
+  const ledgerCount = await pool.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM schema_migrations');
+  const ledgerEmpty = ledgerCount.rows[0].n === '0';
+  if (ledgerEmpty) {
+    const legacyCheck = await pool.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'chat_messages') AS exists",
+    );
+    if (legacyCheck.rows[0].exists) {
+      logger.info('[runMigrations][init] Ledger empty + legacy tables present → backfilling ledger with all existing migration files (none will re-run)');
+      for (const file of files) {
+        await pool.query(
+          'INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING',
+          [file],
+        );
+      }
+    }
+  }
+
+  // Step 3: apply pending migrations. Each file runs exactly once per DB.
+  const applied = await pool.query<{ filename: string }>('SELECT filename FROM schema_migrations');
+  const appliedSet = new Set(applied.rows.map((r) => r.filename));
+
+  let runCount = 0;
   for (const file of files) {
+    if (appliedSet.has(file)) continue;
+    if (file === ledgerFile) {
+      // Already applied above; record it.
+      await pool.query(
+        'INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING',
+        [file],
+      );
+      continue;
+    }
+
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
     logger.info(`[runMigrations][run] Running migration: ${file}`);
-    await pool.query(sql);
+    try {
+      await pool.query(sql);
+      await pool.query(
+        'INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING',
+        [file],
+      );
+      runCount += 1;
+    } catch (err) {
+      logger.error('[runMigrations][run] Migration failed', {
+        file,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   }
+
+  logger.info('[runMigrations][init] Migrations complete', {
+    total_files: files.length,
+    applied_this_boot: runCount,
+    already_applied: files.length - runCount,
+  });
 }
 
 export async function startServer(config: EnvConfig): Promise<void> {

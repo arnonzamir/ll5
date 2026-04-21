@@ -64,6 +64,28 @@ const CONVERSATIONS_MAPPING = {
   },
 };
 
+interface IndexerStats {
+  started_at: string | null;
+  connected_at: string | null;
+  connected: boolean;
+  reconnect_count: number;
+  last_error: string | null;
+  last_error_at: string | null;
+}
+
+const indexerStats: IndexerStats = {
+  started_at: null,
+  connected_at: null,
+  connected: false,
+  reconnect_count: 0,
+  last_error: null,
+  last_error_at: null,
+};
+
+export function getChatSearchIndexerStats(): IndexerStats {
+  return { ...indexerStats };
+}
+
 export class ChatSearchIndexer {
   private listener: pg.Client | null = null;
   private stopping = false;
@@ -76,6 +98,7 @@ export class ChatSearchIndexer {
   ) {}
 
   async start(): Promise<void> {
+    indexerStats.started_at = new Date().toISOString();
     await this.ensureIndices();
     void this.connect();
     logger.info('[ChatSearchIndexer][start] Started');
@@ -88,9 +111,14 @@ export class ChatSearchIndexer {
       this.reconnectTimer = null;
     }
     if (this.listener) {
-      this.listener.end().catch(() => { /* noop */ });
+      this.listener.end().catch((err) => {
+        logger.debug('[ChatSearchIndexer][stop] listener.end cleanup error (benign)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       this.listener = null;
     }
+    indexerStats.connected = false;
   }
 
   private async ensureIndices(): Promise<void> {
@@ -134,35 +162,53 @@ export class ChatSearchIndexer {
       });
 
       client.on('error', (err) => {
+        indexerStats.last_error = err instanceof Error ? err.message : String(err);
+        indexerStats.last_error_at = new Date().toISOString();
         logger.warn('[ChatSearchIndexer][connect] Listener error — reconnecting', {
-          error: err instanceof Error ? err.message : String(err),
+          error: indexerStats.last_error,
+          reconnect_count: indexerStats.reconnect_count,
         });
         this.scheduleReconnect();
       });
 
       client.on('end', () => {
+        indexerStats.connected = false;
         if (!this.stopping) this.scheduleReconnect();
       });
 
-      logger.info('[ChatSearchIndexer][connect] LISTEN established');
+      indexerStats.connected = true;
+      indexerStats.connected_at = new Date().toISOString();
+      logger.info('[ChatSearchIndexer][connect] LISTEN established', {
+        reconnect_count: indexerStats.reconnect_count,
+      });
     } catch (err) {
+      indexerStats.last_error = err instanceof Error ? err.message : String(err);
+      indexerStats.last_error_at = new Date().toISOString();
       logger.error('[ChatSearchIndexer][connect] Failed to connect', {
-        error: err instanceof Error ? err.message : String(err),
+        error: indexerStats.last_error,
+        reconnect_count: indexerStats.reconnect_count,
       });
       this.scheduleReconnect();
     }
   }
 
+  /** Exponential backoff bounded at 60s. Reconnect storms should slow down. */
   private scheduleReconnect(): void {
     if (this.stopping || this.reconnectTimer) return;
     if (this.listener) {
-      this.listener.end().catch(() => { /* noop */ });
+      this.listener.end().catch((err) => {
+        logger.debug('[ChatSearchIndexer][scheduleReconnect] listener.end cleanup error (benign)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       this.listener = null;
     }
+    indexerStats.reconnect_count += 1;
+    const delayMs = Math.min(60_000, 5_000 * Math.pow(2, Math.min(indexerStats.reconnect_count - 1, 4)));
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       void this.connect();
-    }, 5000);
+    }, delayMs);
   }
 
   private async handleMessageEvent(payload: string): Promise<void> {

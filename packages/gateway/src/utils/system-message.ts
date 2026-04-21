@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 import { sendFCMNotification } from './fcm-sender.js';
 import { logger } from './logger.js';
+import { recordTickOk, recordTickError } from './scheduler-health.js';
 
 interface NotifyOptions {
   title: string;
@@ -107,6 +108,12 @@ export async function insertSystemMessage(
       [userId, fullContent, JSON.stringify(metadata)],
     );
     messageId = result.rows[0]?.id ?? null;
+    // Implicit scheduler-health tick: every scheduler that reaches a
+    // successful insertSystemMessage with an event tag gets ok-tracked here
+    // without each scheduler having to wire it explicitly.
+    if (schedulerEvent?.scheduler) {
+      recordTickOk(schedulerEvent.scheduler);
+    }
   } catch (err) {
     const errMessage = err instanceof Error ? err.message : String(err);
     const errCode = (err as { code?: string } | null)?.code ?? null;
@@ -117,6 +124,9 @@ export async function insertSystemMessage(
     const schedulerName = schedulerEvent?.scheduler ?? 'ad_hoc';
     failureStats.recent_by_scheduler[schedulerName] =
       (failureStats.recent_by_scheduler[schedulerName] ?? 0) + 1;
+    if (schedulerEvent?.scheduler) {
+      recordTickError(schedulerEvent.scheduler, err);
+    }
     logger.error('[SystemMessage][insert] Failed to insert system message', {
       error: errMessage,
       error_code: errCode,

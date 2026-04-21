@@ -1,6 +1,8 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { sendFCMNotification } from '../utils/fcm-sender.js';
+import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
+import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface ResponseTimeoutConfig {
   timeoutMinutes: number; // default 2
@@ -52,7 +54,7 @@ export class ResponseTimeoutScheduler {
     const hour = this.getCurrentHour();
     if (hour < this.config.startHour || hour >= this.config.endHour) return;
 
-    try {
+    try { await withSchedulerHealth('response_timeout', async () => {
       // Find user messages (web/android/cli) that are still 'processing' past the timeout.
       // Only checks messages FROM THE USER — not WhatsApp/Telegram system notifications.
       const staleResult = await this.pool.query<{
@@ -132,26 +134,20 @@ export class ResponseTimeoutScheduler {
           });
         }
 
-        // Insert system message nudging the agent
-        await this.pool.query(
-          `INSERT INTO chat_messages
-             (user_id, channel, direction, role, content, status, metadata, created_at, updated_at)
-           VALUES ($1, 'system', 'inbound', 'system', $2, 'pending', $3, now(), now())`,
-          [
-            this.config.userId,
-            `[Response Timeout] User sent a message via ${channel} ${ageMinutes} minutes ago and you haven't responded: "${preview}". Reply now.`,
-            JSON.stringify({
-              scheduler: 'response_timeout',
-              event_id: `evt_timeout_${msg.id}`,
-              original_message_id: msg.id,
-            }),
-          ],
+        // Insert system message nudging the agent. Route through the shared
+        // helper so failures bump the /admin/health.system_messages counter
+        // and the per-scheduler health counter.
+        const evt = createSchedulerEvent('response_timeout');
+        await insertSystemMessage(
+          this.pool,
+          this.config.userId,
+          `[Response Timeout] User sent a message via ${channel} ${ageMinutes} minutes ago and you haven't responded: "${preview}". Reply now.`,
+          undefined,
+          evt,
         );
       }
-    } catch (err) {
-      logger.warn('[ResponseTimeoutScheduler][tick] Failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    }); } catch {
+      // withSchedulerHealth already recorded the failure + logged at error.
     }
   }
 }

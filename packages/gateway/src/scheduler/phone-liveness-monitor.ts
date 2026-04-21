@@ -2,6 +2,7 @@ import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { sendFCMNotification } from '../utils/fcm-sender.js';
+import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface PhoneLivenessConfig {
   /** How often to check (minutes). */
@@ -106,7 +107,7 @@ export class PhoneLivenessMonitor {
   }
 
   private async tick(): Promise<void> {
-    try {
+    try { await withSchedulerHealth('phone_liveness_monitor', async () => {
       const [locTs, statusTs] = await Promise.all([
         this.lastTimestamp('ll5_awareness_locations'),
         this.lastTimestamp('ll5_awareness_phone_statuses'),
@@ -172,10 +173,8 @@ export class PhoneLivenessMonitor {
           age_hours: ageHours === null ? '' : String(Math.round(ageHours)),
         },
       });
-    } catch (err) {
-      logger.warn('[PhoneLivenessMonitor][tick] Failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    }); } catch {
+      // withSchedulerHealth already recorded the failure + logged at error.
     }
   }
 }

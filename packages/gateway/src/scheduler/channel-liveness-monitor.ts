@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { sendFCMNotification } from '../utils/fcm-sender.js';
+import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface ChannelLivenessConfig {
   /** How often to check (minutes). */
@@ -86,7 +87,7 @@ export class ChannelLivenessMonitor {
   }
 
   private async tick(): Promise<void> {
-    try {
+    try { await withSchedulerHealth('channel_liveness_monitor', async () => {
       // Oldest pending inbound + count
       const pendingResult = await this.pool.query<{ count: string; oldest: Date | null }>(
         `SELECT COUNT(*)::int AS count, MIN(created_at) AS oldest
@@ -173,10 +174,9 @@ export class ChannelLivenessMonitor {
           age_seconds: String(oldestAgeSec),
         },
       });
-    } catch (err) {
-      logger.warn('[ChannelLivenessMonitor][tick] Failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    }); } catch {
+      // withSchedulerHealth already recorded the failure + logged at error;
+      // swallow here so setInterval keeps ticking.
     }
   }
 }

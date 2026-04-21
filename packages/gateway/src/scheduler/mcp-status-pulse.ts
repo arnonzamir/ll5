@@ -5,6 +5,7 @@ import { getHealthSnapshot } from './mcp-health-monitor.js';
 import { getLivenessSnapshot } from './channel-liveness-monitor.js';
 import { getWhatsAppFlowSnapshot } from './whatsapp-flow-monitor.js';
 import { getPhoneLivenessSnapshot } from './phone-liveness-monitor.js';
+import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface PulseConfig {
   /** How often to send a status pulse (minutes). */
@@ -86,7 +87,7 @@ export class MCPStatusPulseScheduler {
       return;
     }
 
-    try {
+    try { await withSchedulerHealth('mcp_status_pulse', async () => {
       const services = getHealthSnapshot();
       const channel = getLivenessSnapshot(this.config.userId);
       const whatsapp = getWhatsAppFlowSnapshot(this.config.userId);
@@ -135,10 +136,8 @@ export class MCPStatusPulseScheduler {
           phone_stale: String(phoneStale),
         },
       });
-    } catch (err) {
-      logger.warn('[MCPStatusPulse][tick] Failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    }); } catch {
+      // withSchedulerHealth already recorded the failure + logged at error.
     }
   }
 }

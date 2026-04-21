@@ -2,6 +2,7 @@ import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { sendFCMNotification } from '../utils/fcm-sender.js';
+import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 export interface ServiceHealth {
   name: string;
@@ -204,6 +205,7 @@ export class MCPHealthMonitorScheduler {
   }
 
   private async tick(): Promise<void> {
+    try { await withSchedulerHealth('mcp_health_monitor', async () => {
     // 1. Concurrent /health probes for all services
     const entries = Object.entries(this.config.mcpUrls);
     const results = await Promise.all(entries.map(([name, url]) => this.checkOne(name, url)));
@@ -252,5 +254,6 @@ export class MCPHealthMonitorScheduler {
     } else {
       logger.debug('[MCPHealthMonitor][tick] All services healthy', { count: results.length });
     }
+    }); } catch { /* withSchedulerHealth already recorded + logged */ }
   }
 }
