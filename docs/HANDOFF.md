@@ -107,6 +107,8 @@ Dashboard (Next.js 15)
 
 OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects to callback → tokens stored automatically. Dashboard: Calendar settings → Google Account → Reconnect button (calls `/api/auth-url` REST endpoint).
 
+Browser gotcha (Reconnect / onboarding Connect Google): the consent-URL new tab must be opened **synchronously inside the click handler** — Chrome/Safari drop the user-gesture flag across any `await`, so `window.open(auth_url)` called after the server action silently popup-blocks. Current pattern: `window.open('about:blank', '_blank')` at click time, then assign `popup.location.href` once the auth URL returns. Keep this shape if you add more OAuth entry points.
+
 Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API key. Set `AUTH_SECRET` env var for token auth. Do NOT add explicit OAuth discovery route handlers (/.well-known/*, /register) — the default HTML 404 is correct. JSON 404s confuse Claude Code's MCP SDK into thinking auth is needed.
 
 ## Databases

@@ -69,10 +69,17 @@ export function CalendarSettingsView() {
 
   function handleReconnect() {
     setConnectError(null);
+    // Open a blank tab synchronously so the browser preserves the user gesture.
+    // Navigating it after `await` below would otherwise be silently popup-blocked.
+    const popup = window.open('about:blank', '_blank');
     startConnect(async () => {
       const result = await getGoogleAuthUrl();
       if (result.auth_url) {
-        window.open(result.auth_url, '_blank');
+        if (popup && !popup.closed) {
+          popup.location.href = result.auth_url;
+        } else {
+          window.location.href = result.auth_url;
+        }
         setTimeout(() => {
           startConnect(async () => {
             const s = await fetchGoogleConnectionStatus();
@@ -81,6 +88,7 @@ export function CalendarSettingsView() {
           });
         }, 10000);
       } else {
+        popup?.close();
         setConnectError(result.error ?? "Failed to get auth URL");
       }
     });

@@ -168,11 +168,19 @@ export function OnboardingView() {
   // Step 3: Connect Google
   function handleConnectGoogle() {
     setConnectError(null);
+    // Pre-open synchronously under the user gesture; navigating after `await`
+    // is otherwise silently blocked by popup blockers.
+    const popup = window.open("about:blank", "_blank");
     startTransition(async () => {
       const result = await getGoogleAuthUrl();
       if (result.auth_url) {
-        window.open(result.auth_url, "_blank");
+        if (popup && !popup.closed) {
+          popup.location.href = result.auth_url;
+        } else {
+          window.location.href = result.auth_url;
+        }
       } else {
+        popup?.close();
         setConnectError(result.error ?? "Failed to get Google auth URL");
       }
     });

@@ -159,7 +159,7 @@ ll5/
 │   └── src/
 │       ├── app/(auth)/login/          # Login page + server action; honors ?next= with same-origin guard; LoginForm wrapped in <Suspense> so useSearchParams can bail out of SSG
 │       ├── middleware.ts               # Redirects non-public pages to /login?next=<path> when ll5_token cookie is missing (catches (admin) routes) + injects x-pathname header
-│       ├── app/(user)/                # 27 pages: dashboard, calendar (+settings +ticklers), actions, projects, inbox, shopping, people (server-side search + pagination), knowledge, horizons, contacts (old), locations, places, media, health, journal, phone-data, sessions, export, profile, settings/ (contacts [3 tabs + link/unlink/auto-match + z-indexed popover], notifications, messaging, health, notification-levels, scheduler)
+│       ├── app/(user)/                # 27 pages: dashboard, calendar (+settings [Google connect/reconnect: pre-opens about:blank synchronously then sets location.href, avoids post-await popup block] +ticklers), actions, projects, inbox, shopping, people (server-side search + pagination), knowledge, horizons, contacts (old), locations, places, media, health, journal, phone-data, sessions, export, profile, settings/ (contacts [3 tabs + link/unlink/auto-match + z-indexed popover], notifications, messaging, health, notification-levels, scheduler)
 │       ├── app/(admin)/               # Admin pages: health, users, tools, logs (Datadog-style LogExplorer), audit
 │       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations (list + new + active + search + [id]), upload, listen
 │       ├── app/(user)/chat/page.tsx   # Full-screen "coach" chat view — server component seeds initial convo + history, renders <ChatRoot/>
