@@ -15,9 +15,20 @@ ALTER TABLE chat_messages
 
 -- XOR: exactly one of content/reaction is set. Empty string vs NULL bites
 -- every COUNT(content) and full-text path, so reactions use NULL content.
-ALTER TABLE chat_messages
-  ADD CONSTRAINT chat_messages_reaction_xor_content
-    CHECK ((reaction IS NULL) <> (content IS NULL));
+-- PG has no ADD CONSTRAINT IF NOT EXISTS (as of 16), so guard via pg_catalog.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'chat_messages_reaction_xor_content'
+      AND conrelid = 'chat_messages'::regclass
+  ) THEN
+    ALTER TABLE chat_messages
+      ADD CONSTRAINT chat_messages_reaction_xor_content
+        CHECK ((reaction IS NULL) <> (content IS NULL));
+  END IF;
+END
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_reply_to
   ON chat_messages(reply_to_id) WHERE reply_to_id IS NOT NULL;
