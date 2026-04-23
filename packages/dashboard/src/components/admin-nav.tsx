@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   Menu,
   X,
+  MapPin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ const adminLinks = [
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/tools", label: "MCP Tools", icon: Wrench },
+  { href: "/admin/gps-cleanup", label: "GPS Cleanup", icon: MapPin },
 ];
 
 export function AdminNav() {

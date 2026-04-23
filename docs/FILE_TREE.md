@@ -49,6 +49,7 @@ ll5/
 │   │   ├── mcp-personal-knowledge.md # 17 tools, ES indices
 │   │   ├── mcp-gtd.md               # 14 tools, PG tables
 │   │   ├── mcp-awareness.md          # ES indices (IM, location, calendar, journal, user model, geo search, media, notification rules)
+│   │   ├── LOCATION_SERVICE.md       # GPS + wifi fusion design (awareness MCP)
 │   │   ├── mcp-google.md             # 9 tools, OAuth
 │   │   ├── mcp-messaging.md          # 8 tools, WhatsApp/Telegram
 │   │   ├── gateway.md                # Webhook receiver design
@@ -162,7 +163,7 @@ ll5/
 │       ├── app/(auth)/login/          # Login page + server action; honors ?next= with same-origin guard; LoginForm wrapped in <Suspense> so useSearchParams can bail out of SSG
 │       ├── middleware.ts               # Redirects non-public pages to /login?next=<path> when ll5_token cookie is missing (catches (admin) routes) + auto-refreshes token within 2-day window via POST /auth/refresh (writes to both request.cookies and response cookie) + clears cookie & redirects to /login on hard expiry or malformed token + injects x-pathname header
 │       ├── app/(user)/                # 27 pages: dashboard, calendar (+settings [Google connect/reconnect: pre-opens about:blank synchronously then sets location.href, avoids post-await popup block] +ticklers), actions, projects, inbox, shopping, people (server-side search + pagination), knowledge, horizons, contacts (old), locations, places, media, health, journal, phone-data, sessions, export, profile, settings/ (contacts [3 tabs + link/unlink/auto-match + z-indexed popover], notifications, messaging, health, notification-levels, scheduler)
-│       ├── app/(admin)/               # Admin pages: health, users, tools, logs (Datadog-style LogExplorer), audit
+│       ├── app/(admin)/               # Admin pages: health, users, tools, logs (Datadog-style LogExplorer), audit, gps-cleanup (scan+prune ll5_awareness_locations via direct ES _delete_by_query)
 │       ├── app/api/chat/              # Proxy routes: messages (latest-N), conversations (list + new + active + search + [id]), upload, listen
 │       ├── app/(user)/chat/page.tsx   # Full-screen "coach" chat view — server component seeds initial convo + history, renders <ChatRoot/>
 │       ├── components/chat/           # /chat-only components: chat-root (layout + shortcuts + overlays), message-stream (unboxed assistant + compact groups + thinking caret), composer (CLI-flavored, slash hints, paste-to-attach), conversation-list (active/archived + debounced ES search), command-palette (⌘K, fuzzy across commands + conversations), new-conversation-dialog, message-bubble (shared unboxed/bubble variants)
