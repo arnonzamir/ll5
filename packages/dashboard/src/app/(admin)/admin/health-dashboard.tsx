@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, AlertTriangle, MessageSquare, Smartphone, Database, Server, Radio } from "lucide-react";
+import { RefreshCw, AlertTriangle, MessageSquare, Smartphone, Database, Server, Radio, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { pollHealth, type HealthSnapshot } from "./health-actions";
 
@@ -63,6 +63,7 @@ export function HealthDashboard() {
   const channels = snapshot?.channels ?? [];
   const whatsapp = snapshot?.whatsapp ?? [];
   const phones = snapshot?.phones ?? [];
+  const agentOutput = snapshot?.agent_output ?? [];
   const summary = snapshot?.summary;
   const pgHealthy = snapshot?.databases.postgres.healthy ?? false;
   const pgError = snapshot?.databases.postgres.error ?? null;
@@ -72,6 +73,7 @@ export function HealthDashboard() {
     (summary?.channels_stale ?? 0) +
     (summary?.whatsapp_stale ?? 0) +
     (summary?.phones_stale ?? 0) +
+    (summary?.agent_output_stale ?? 0) +
     (pgHealthy ? 0 : 1);
 
   return (
@@ -90,6 +92,7 @@ export function HealthDashboard() {
               {(summary?.channels_stale ?? 0) > 0 && <span>{summary?.channels_stale} channel(s) stalled</span>}
               {(summary?.whatsapp_stale ?? 0) > 0 && <span>{summary?.whatsapp_stale} WhatsApp stalled</span>}
               {(summary?.phones_stale ?? 0) > 0 && <span>{summary?.phones_stale} phone(s) silent</span>}
+              {(summary?.agent_output_stale ?? 0) > 0 && <span>{summary?.agent_output_stale} agent silent</span>}
               {!pgHealthy && <span>Postgres down</span>}
             </div>
           ) : summary ? (
@@ -241,6 +244,48 @@ export function HealthDashboard() {
                       )}
                     </div>
                     <div>Probe: {fmtSince(w.checked_at)}</div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Agent output */}
+      <section>
+        <h2 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+          <Bot className="h-4 w-4" /> Agent output
+        </h2>
+        {agentOutput.length === 0 ? (
+          <p className="text-sm text-gray-500">No probes yet — runs every 15 min during active hours.</p>
+        ) : (
+          <div className="grid sm:grid-cols-2 gap-4">
+            {agentOutput.map((a) => (
+              <Card key={a.userId}>
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">User {a.userId.slice(0, 8)}…</span>
+                    <Badge variant={a.stale ? "destructive" : "success"}>
+                      {a.stale ? "Silent" : "Replying"}
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-gray-500 space-y-0.5">
+                    <div>
+                      Scheduler triggers (lookback): <span className="font-mono">{a.system_inbound_lookback}</span>
+                    </div>
+                    <div>
+                      Last agent reply:{" "}
+                      {a.last_agent_outbound_at ? (
+                        <span>
+                          {fmtSince(a.last_agent_outbound_at)} (
+                          <span className="font-mono">{fmtAgeHours(a.hours_since_last_outbound)}</span>)
+                        </span>
+                      ) : (
+                        "never"
+                      )}
+                    </div>
+                    <div>Probe: {fmtSince(a.checked_at)}</div>
                   </div>
                 </CardContent>
               </Card>

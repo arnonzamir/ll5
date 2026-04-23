@@ -44,11 +44,21 @@ export interface PhoneLivenessSnapshot {
   checked_at: string;
 }
 
+export interface AgentOutputSnapshot {
+  userId: string;
+  system_inbound_lookback: number;
+  last_agent_outbound_at: string | null;
+  hours_since_last_outbound: number | null;
+  stale: boolean;
+  checked_at: string;
+}
+
 export interface HealthSnapshot {
   services: ServiceHealth[];
   channels: ChannelLiveness[];
   whatsapp: WhatsAppFlowSnapshot[];
   phones: PhoneLivenessSnapshot[];
+  agent_output: AgentOutputSnapshot[];
   databases: { postgres: { healthy: boolean; error: string | null } };
   summary: {
     services_total: number;
@@ -56,6 +66,7 @@ export interface HealthSnapshot {
     channels_stale: number;
     whatsapp_stale: number;
     phones_stale: number;
+    agent_output_stale: number;
   };
   checked_at: string;
 }
@@ -88,6 +99,7 @@ export async function pollHealth(): Promise<HealthSnapshot> {
           channels: ChannelLiveness[];
           whatsapp?: WhatsAppFlowSnapshot[];
           phones?: PhoneLivenessSnapshot[];
+          agent_output?: AgentOutputSnapshot[];
           databases: HealthSnapshot["databases"];
           summary: Partial<HealthSnapshot["summary"]> & HealthSnapshot["summary"];
           checked_at: string;
@@ -106,6 +118,7 @@ export async function pollHealth(): Promise<HealthSnapshot> {
           channels: data.channels,
           whatsapp: data.whatsapp ?? [],
           phones: data.phones ?? [],
+          agent_output: data.agent_output ?? [],
           databases: data.databases,
           summary: {
             services_total: data.summary?.services_total ?? data.services.length,
@@ -113,6 +126,7 @@ export async function pollHealth(): Promise<HealthSnapshot> {
             channels_stale: data.summary?.channels_stale ?? 0,
             whatsapp_stale: data.summary?.whatsapp_stale ?? 0,
             phones_stale: data.summary?.phones_stale ?? 0,
+            agent_output_stale: data.summary?.agent_output_stale ?? 0,
           },
           checked_at: data.checked_at,
         };
@@ -135,6 +149,7 @@ export async function pollHealth(): Promise<HealthSnapshot> {
     channels: [],
     whatsapp: [],
     phones: [],
+    agent_output: [],
     databases: { postgres: { healthy: false, error: "unknown (fallback mode)" } },
     summary: {
       services_total: results.length,
@@ -142,6 +157,7 @@ export async function pollHealth(): Promise<HealthSnapshot> {
       channels_stale: 0,
       whatsapp_stale: 0,
       phones_stale: 0,
+      agent_output_stale: 0,
     },
     checked_at: new Date().toISOString(),
   };

@@ -8,6 +8,7 @@ import { getHealthSnapshot } from './scheduler/mcp-health-monitor.js';
 import { getAllLivenessSnapshots } from './scheduler/channel-liveness-monitor.js';
 import { getAllWhatsAppFlowSnapshots } from './scheduler/whatsapp-flow-monitor.js';
 import { getAllPhoneLivenessSnapshots } from './scheduler/phone-liveness-monitor.js';
+import { getAllAgentOutputSnapshots } from './scheduler/agent-output-monitor.js';
 import { getSystemMessageFailureStats } from './utils/system-message.js';
 import { getSchedulerHealthSnapshot } from './utils/scheduler-health.js';
 import { getFcmStats } from './utils/fcm-sender.js';
@@ -125,6 +126,7 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
       const channels = getAllLivenessSnapshots();
       const whatsapp = getAllWhatsAppFlowSnapshots();
       const phones = getAllPhoneLivenessSnapshots();
+      const agentOutput = getAllAgentOutputSnapshots();
 
       // Live DB pings on every call — cheap and authoritative
       let pgHealthy = false;
@@ -150,6 +152,7 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
         channels,
         whatsapp,
         phones,
+        agent_output: agentOutput,
         system_messages: systemMessages,
         schedulers,
         fcm,
@@ -164,6 +167,7 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
           channels_stale: channels.filter((c) => c.stale).length,
           whatsapp_stale: whatsapp.filter((w) => w.stale).length,
           phones_stale: phones.filter((p) => p.stale).length,
+          agent_output_stale: agentOutput.filter((a) => a.stale).length,
           system_message_failures: systemMessages.total_failures,
           schedulers_unhealthy: schedulersUnhealthy,
           fcm_failures: fcm.total_failures,

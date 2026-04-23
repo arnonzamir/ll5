@@ -16,6 +16,7 @@ import { HealthPollingScheduler } from './health-polling.js';
 import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
 import { ChannelLivenessMonitor } from './channel-liveness-monitor.js';
+import { AgentOutputMonitor } from './agent-output-monitor.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MCPStatusPulseScheduler } from './mcp-status-pulse.js';
@@ -165,6 +166,20 @@ async function startSchedulersForUser(
   });
   channelLivenessMonitor.start();
   schedulers.push(channelLivenessMonitor);
+
+  // Agent-output monitor — catches the "channel drains but agent stays silent"
+  // failure mode that channel-liveness and mcp-health don't see. If
+  // scheduler-triggered system rows are landing but no assistant-outbound is
+  // being emitted during active hours, FCM-critical the user.
+  const agentOutputMonitor = new AgentOutputMonitor(pgPool, {
+    intervalMinutes: s('agent_output_minutes', 15),
+    minSystemInbound: s('agent_output_min_triggers', 2),
+    silenceHours: s('agent_output_silence_hours', 2),
+    lookbackHours: s('agent_output_lookback_hours', 3),
+    startHour, endHour, timezone, userId,
+  });
+  agentOutputMonitor.start();
+  schedulers.push(agentOutputMonitor);
 
   // WhatsApp flow — catches Evolution's ghost-connected failure where state
   // reports open but the webhook has been silent for hours.
