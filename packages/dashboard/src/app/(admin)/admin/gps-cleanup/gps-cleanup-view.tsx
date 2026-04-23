@@ -4,8 +4,11 @@ import { useState, useTransition } from "react";
 import {
   scanBadGpsPoints,
   deleteGpsPoints,
+  scanAndDelete,
   type BadPoint,
+  type BadReason,
   type GpsScanResult,
+  type TimeRange,
 } from "./gps-cleanup-server-actions";
 
 type ScanState =
@@ -18,25 +21,62 @@ type DeleteState =
   | { kind: "idle" }
   | { kind: "deleting" }
   | { kind: "error"; message: string }
-  | { kind: "done"; deleted: number };
+  | { kind: "done"; deleted: number; perCriterion?: Record<BadReason, number> };
+
+const TIME_RANGE_OPTIONS: { value: TimeRange; label: string }[] = [
+  { value: "1d", label: "Last 24h" },
+  { value: "3d", label: "Last 3 days" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "all", label: "All time" },
+];
 
 export function GpsCleanupView() {
   const [scan, setScan] = useState<ScanState>({ kind: "idle" });
   const [del, setDel] = useState<DeleteState>({ kind: "idle" });
   const [isPending, startTransition] = useTransition();
-  const [selected, setSelected] = useState<Set<"accuracy" | "speed" | "place_drift">>(
-    new Set(["accuracy", "speed", "place_drift"]),
+  const [timeRange, setTimeRange] = useState<TimeRange>("3d");
+  const [selected, setSelected] = useState<Set<BadReason>>(
+    new Set(["speed", "out_of_israel"]),
   );
 
   const runScan = () => {
     setScan({ kind: "scanning" });
     setDel({ kind: "idle" });
     startTransition(async () => {
-      const res = await scanBadGpsPoints();
+      const res = await scanBadGpsPoints(timeRange);
       if (!res.ok) {
         setScan({ kind: "error", message: res.error });
       } else {
         setScan({ kind: "scanned", result: res.result, scannedAt: new Date().toISOString() });
+      }
+    });
+  };
+
+  const runOneClick = () => {
+    const criteria: BadReason[] = [...selected];
+    if (criteria.length === 0) {
+      alert("Select at least one criterion.");
+      return;
+    }
+    if (!confirm(`One-click: scan ${humanRange(timeRange)} and DELETE points matching [${criteria.join(", ")}]?\n\nThis runs without a preview.`)) return;
+
+    setDel({ kind: "deleting" });
+    startTransition(async () => {
+      const res = await scanAndDelete(timeRange, criteria);
+      if (!res.ok) {
+        setDel({ kind: "error", message: res.error });
+      } else {
+        setDel({ kind: "done", deleted: res.deleted, perCriterion: res.perCriterion });
+        // Re-scan to show the post-delete state
+        const after = await scanBadGpsPoints(timeRange);
+        if (after.ok) {
+          setScan({
+            kind: "scanned",
+            result: after.result,
+            scannedAt: new Date().toISOString(),
+          });
+        }
       }
     });
   };
@@ -46,6 +86,7 @@ export function GpsCleanupView() {
     if (selected.has("accuracy")) result.badAccuracy.forEach((p) => ids.add(p.id));
     if (selected.has("speed")) result.badSpeed.forEach((p) => ids.add(p.id));
     if (selected.has("place_drift")) result.badPlaceDrift.forEach((p) => ids.add(p.id));
+    if (selected.has("out_of_israel")) result.badOutOfIsrael.forEach((p) => ids.add(p.id));
     return [...ids];
   };
 
@@ -62,8 +103,7 @@ export function GpsCleanupView() {
         setDel({ kind: "error", message: res.error });
       } else {
         setDel({ kind: "done", deleted: res.deleted });
-        // Re-scan so the user sees the post-delete state
-        const after = await scanBadGpsPoints();
+        const after = await scanBadGpsPoints(timeRange);
         if (after.ok) {
           setScan({
             kind: "scanned",
@@ -75,7 +115,7 @@ export function GpsCleanupView() {
     });
   };
 
-  const toggleCategory = (cat: "accuracy" | "speed" | "place_drift") => {
+  const toggleCategory = (cat: BadReason) => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(cat)) next.delete(cat);
@@ -89,38 +129,53 @@ export function GpsCleanupView() {
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-gray-700">
         <p className="font-semibold">About this tool</p>
         <p className="mt-1">
-          Scans <code className="rounded bg-amber-100 px-1">ll5_awareness_locations</code> for
-          points that <em>would have been rejected</em> by the gateway filters, had the bugs
-          fixed on 2026-04-23 been working. Three criteria:
+          Scans <code className="rounded bg-amber-100 px-1">ll5_awareness_locations</code> for bad
+          points that the pre-2026-04-23 broken filters let through, plus an out-of-bounds check.
         </p>
         <ul className="ml-5 mt-2 list-disc space-y-0.5">
-          <li>
-            <strong>Accuracy</strong> — accuracy field &gt; 100 m (the broken{" "}
-            <code>item.accuracy</code>/<code>accuracy_m</code> check never fired)
-          </li>
-          <li>
-            <strong>Implausible speed</strong> — &gt; 150 km/h between consecutive points within
-            10 min (broken haversine call)
-          </li>
-          <li>
-            <strong>Place drift</strong> — previous point at a known place, current point &gt;500 m
-            away within 5 min (same broken filter)
-          </li>
+          <li><strong>Accuracy</strong> — accuracy &gt; 100 m</li>
+          <li><strong>Implausible speed</strong> — &gt; 150 km/h between consecutive points within 10 min</li>
+          <li><strong>Place drift</strong> — &gt; 500 m from a known-place point within 5 min</li>
+          <li><strong>Outside Israel</strong> — lat/lon outside 29.4°–33.4°N, 34.2°–35.9°E (Eilat to Hermon, Mediterranean to Dead Sea)</li>
         </ul>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-end gap-3 rounded-md border border-gray-200 bg-white p-3">
+        <div>
+          <label className="block text-xs text-gray-500">Time range</label>
+          <select
+            value={timeRange}
+            onChange={(e) => setTimeRange(e.target.value as TimeRange)}
+            className="mt-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+          >
+            {TIME_RANGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1" />
         <button
           type="button"
           onClick={runScan}
           disabled={isPending}
           className="rounded-md bg-admin px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-admin-600 disabled:opacity-50"
         >
-          {scan.kind === "scanning" ? "Scanning…" : "Scan"}
+          {scan.kind === "scanning" ? "Scanning…" : "Scan (preview)"}
+        </button>
+        <button
+          type="button"
+          onClick={runOneClick}
+          disabled={isPending || selected.size === 0}
+          className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
+          title={`Runs scan + delete for selected criteria in one call`}
+        >
+          {del.kind === "deleting" && scan.kind !== "scanned" ? "Running…" : "Scan & delete"}
         </button>
         {scan.kind === "scanned" && (
           <span className="text-xs text-gray-500">
-            Last scan {new Date(scan.scannedAt).toLocaleTimeString()}
+            Last scan {new Date(scan.scannedAt).toLocaleTimeString()} · {humanRange(scan.result.timeRange)}
           </span>
         )}
       </div>
@@ -131,9 +186,25 @@ export function GpsCleanupView() {
         </div>
       )}
 
+      {del.kind === "done" && (
+        <div className="rounded-md border border-green-300 bg-green-50 p-3 text-sm text-green-800">
+          Deleted {del.deleted} points.
+          {del.perCriterion && (
+            <>
+              {" "}Breakdown: accuracy={del.perCriterion.accuracy}, speed={del.perCriterion.speed}, place_drift={del.perCriterion.place_drift}, out_of_israel={del.perCriterion.out_of_israel}.
+            </>
+          )}
+        </div>
+      )}
+      {del.kind === "error" && (
+        <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+          Delete failed: {del.message}
+        </div>
+      )}
+
       {scan.kind === "scanned" && (
         <div className="space-y-4">
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-5 gap-3">
             <StatCard label="Total scanned" value={scan.result.totalScanned} />
             <CheckCard
               label="Accuracy > 100m"
@@ -153,12 +224,17 @@ export function GpsCleanupView() {
               checked={selected.has("place_drift")}
               onToggle={() => toggleCategory("place_drift")}
             />
+            <CheckCard
+              label="Outside Israel"
+              value={scan.result.badOutOfIsrael.length}
+              checked={selected.has("out_of_israel")}
+              onToggle={() => toggleCategory("out_of_israel")}
+            />
           </div>
 
           <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-white p-3">
             <div className="flex-1 text-sm">
-              <strong>{idsForSelection(scan.result).length}</strong> unique points selected for
-              deletion (
+              <strong>{idsForSelection(scan.result).length}</strong> unique points selected from this scan (
               {scan.result.uniqueBadIds.length} total flagged across all criteria).
             </div>
             <button
@@ -167,20 +243,9 @@ export function GpsCleanupView() {
               disabled={isPending || idsForSelection(scan.result).length === 0}
               className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-700 disabled:opacity-50"
             >
-              {del.kind === "deleting" ? "Deleting…" : "Delete selected"}
+              {del.kind === "deleting" ? "Deleting…" : "Delete selected (from preview)"}
             </button>
           </div>
-
-          {del.kind === "error" && (
-            <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-              Delete failed: {del.message}
-            </div>
-          )}
-          {del.kind === "done" && (
-            <div className="rounded-md border border-green-300 bg-green-50 p-3 text-sm text-green-800">
-              Deleted {del.deleted} points. Table below re-scanned.
-            </div>
-          )}
 
           {selected.has("accuracy") && (
             <Section title="Accuracy > 100m" points={scan.result.badAccuracy} />
@@ -191,10 +256,17 @@ export function GpsCleanupView() {
           {selected.has("place_drift") && (
             <Section title="Place drift" points={scan.result.badPlaceDrift} />
           )}
+          {selected.has("out_of_israel") && (
+            <Section title="Outside Israel" points={scan.result.badOutOfIsrael} />
+          )}
         </div>
       )}
     </div>
   );
+}
+
+function humanRange(r: TimeRange): string {
+  return TIME_RANGE_OPTIONS.find((o) => o.value === r)?.label ?? r;
 }
 
 function StatCard({ label, value }: { label: string; value: number }) {

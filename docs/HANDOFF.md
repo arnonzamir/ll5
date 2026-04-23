@@ -57,7 +57,7 @@ Dashboard (Next.js 15)
   ├── /people, /knowledge, /horizons — personal knowledge pages (people: server-side search, 24/page pagination, limit 200)
   ├── /export — full data backup download (JSON)
   ├── /profile — user settings
-  └── /admin — system health, users, tools, logs, audit, gps-cleanup
+  └── /admin — system health, users, tools, logs, audit, gps-cleanup (time-range + outside-Israel filter + one-click scan-and-delete)
 ```
 
 ## Repos

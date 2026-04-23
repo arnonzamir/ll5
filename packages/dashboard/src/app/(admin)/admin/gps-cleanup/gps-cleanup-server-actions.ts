@@ -17,6 +17,23 @@ const DRIFT_WINDOW_MS = 10 * 60 * 1000;
 const PLACE_DRIFT_DISTANCE_KM = 0.5;
 const PLACE_DRIFT_WINDOW_MS = 5 * 60 * 1000;
 
+// Israel bounding box (generous — includes Golan, Eilat, Dead Sea).
+const ISRAEL_BBOX = {
+  minLat: 29.4,
+  maxLat: 33.4,
+  minLon: 34.2,
+  maxLon: 35.9,
+};
+
+export type TimeRange = "1d" | "3d" | "7d" | "30d" | "all";
+
+const TIME_RANGE_MS: Record<Exclude<TimeRange, "all">, number> = {
+  "1d": 24 * 60 * 60 * 1000,
+  "3d": 3 * 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+};
+
 interface LocDoc {
   user_id?: string;
   location?: { lat: number; lon: number };
@@ -32,6 +49,8 @@ interface LocHit {
   sort?: unknown[];
 }
 
+export type BadReason = "accuracy" | "speed" | "place_drift" | "out_of_israel";
+
 export interface BadPoint {
   id: string;
   timestamp: string;
@@ -39,15 +58,17 @@ export interface BadPoint {
   lon: number;
   accuracy?: number;
   matched_place?: string;
-  reason: "accuracy" | "speed" | "place_drift";
+  reason: BadReason;
   detail: string;
 }
 
 export interface GpsScanResult {
   totalScanned: number;
+  timeRange: TimeRange;
   badAccuracy: BadPoint[];
   badSpeed: BadPoint[];
   badPlaceDrift: BadPoint[];
+  badOutOfIsrael: BadPoint[];
   uniqueBadIds: string[];
 }
 
@@ -77,16 +98,22 @@ async function getCurrentUserId(): Promise<string | null> {
   return typeof uid === "string" ? uid : null;
 }
 
-async function fetchAllPoints(userId: string): Promise<LocHit[]> {
+async function fetchAllPoints(userId: string, timeRange: TimeRange): Promise<LocHit[]> {
   const baseUrl = env.ELASTICSEARCH_URL;
   const points: LocHit[] = [];
   let searchAfter: unknown[] | null = null;
   const PAGE = 1000;
 
+  const filters: Record<string, unknown>[] = [{ term: { user_id: userId } }];
+  if (timeRange !== "all") {
+    const since = new Date(Date.now() - TIME_RANGE_MS[timeRange]).toISOString();
+    filters.push({ range: { timestamp: { gte: since } } });
+  }
+
   while (true) {
     const body: Record<string, unknown> = {
       size: PAGE,
-      query: { term: { user_id: userId } },
+      query: { bool: { filter: filters } },
       sort: [{ timestamp: { order: "asc" } }, { _id: { order: "asc" } }],
       _source: [
         "user_id",
@@ -121,17 +148,18 @@ async function fetchAllPoints(userId: string): Promise<LocHit[]> {
   return points;
 }
 
-export async function scanBadGpsPoints(): Promise<
-  { ok: true; result: GpsScanResult } | { ok: false; error: string }
-> {
+export async function scanBadGpsPoints(
+  timeRange: TimeRange = "all",
+): Promise<{ ok: true; result: GpsScanResult } | { ok: false; error: string }> {
   const userId = await getCurrentUserId();
   if (!userId) return { ok: false, error: "Not authenticated" };
 
   try {
-    const points = await fetchAllPoints(userId);
+    const points = await fetchAllPoints(userId, timeRange);
     const badAccuracy: BadPoint[] = [];
     const badSpeed: BadPoint[] = [];
     const badPlaceDrift: BadPoint[] = [];
+    const badOutOfIsrael: BadPoint[] = [];
 
     for (let i = 0; i < points.length; i++) {
       const cur = points[i];
@@ -149,6 +177,25 @@ export async function scanBadGpsPoints(): Promise<
           matched_place: src.matched_place,
           reason: "accuracy",
           detail: `accuracy=${Math.round(src.accuracy)}m (threshold ${MIN_ACCURACY_METERS}m)`,
+        });
+      }
+
+      // Criterion D — outside Israel bounding box
+      const outside =
+        src.location.lat < ISRAEL_BBOX.minLat ||
+        src.location.lat > ISRAEL_BBOX.maxLat ||
+        src.location.lon < ISRAEL_BBOX.minLon ||
+        src.location.lon > ISRAEL_BBOX.maxLon;
+      if (outside) {
+        badOutOfIsrael.push({
+          id: cur._id,
+          timestamp: src.timestamp,
+          lat: src.location.lat,
+          lon: src.location.lon,
+          accuracy: src.accuracy,
+          matched_place: src.matched_place,
+          reason: "out_of_israel",
+          detail: `(${src.location.lat.toFixed(3)}, ${src.location.lon.toFixed(3)}) outside IL bbox`,
         });
       }
 
@@ -203,6 +250,7 @@ export async function scanBadGpsPoints(): Promise<
         ...badAccuracy.map((p) => p.id),
         ...badSpeed.map((p) => p.id),
         ...badPlaceDrift.map((p) => p.id),
+        ...badOutOfIsrael.map((p) => p.id),
       ]),
     );
 
@@ -210,9 +258,11 @@ export async function scanBadGpsPoints(): Promise<
       ok: true,
       result: {
         totalScanned: points.length,
+        timeRange,
         badAccuracy,
         badSpeed,
         badPlaceDrift,
+        badOutOfIsrael,
         uniqueBadIds,
       },
     };
@@ -222,6 +272,68 @@ export async function scanBadGpsPoints(): Promise<
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/**
+ * One-click: scan by time range, immediately delete points matching the
+ * given criteria, return before/after counts. Use when you trust the filters
+ * and don't want to preview — e.g., routine cleanup of jumpy + out-of-country
+ * points in the recent window.
+ */
+export async function scanAndDelete(
+  timeRange: TimeRange,
+  criteria: BadReason[],
+): Promise<
+  | { ok: true; scanned: number; deleted: number; perCriterion: Record<BadReason, number> }
+  | { ok: false; error: string }
+> {
+  const scan = await scanBadGpsPoints(timeRange);
+  if (!scan.ok) return scan;
+
+  const wanted = new Set(criteria);
+  const ids = new Set<string>();
+  const perCriterion: Record<BadReason, number> = {
+    accuracy: 0,
+    speed: 0,
+    place_drift: 0,
+    out_of_israel: 0,
+  };
+
+  if (wanted.has("accuracy")) {
+    perCriterion.accuracy = scan.result.badAccuracy.length;
+    scan.result.badAccuracy.forEach((p) => ids.add(p.id));
+  }
+  if (wanted.has("speed")) {
+    perCriterion.speed = scan.result.badSpeed.length;
+    scan.result.badSpeed.forEach((p) => ids.add(p.id));
+  }
+  if (wanted.has("place_drift")) {
+    perCriterion.place_drift = scan.result.badPlaceDrift.length;
+    scan.result.badPlaceDrift.forEach((p) => ids.add(p.id));
+  }
+  if (wanted.has("out_of_israel")) {
+    perCriterion.out_of_israel = scan.result.badOutOfIsrael.length;
+    scan.result.badOutOfIsrael.forEach((p) => ids.add(p.id));
+  }
+
+  if (ids.size === 0) {
+    return {
+      ok: true,
+      scanned: scan.result.totalScanned,
+      deleted: 0,
+      perCriterion,
+    };
+  }
+
+  const del = await deleteGpsPoints([...ids]);
+  if (!del.ok) return del;
+
+  return {
+    ok: true,
+    scanned: scan.result.totalScanned,
+    deleted: del.deleted,
+    perCriterion,
+  };
 }
 
 export async function deleteGpsPoints(
