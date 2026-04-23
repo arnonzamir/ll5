@@ -17,6 +17,7 @@ import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
 import { ChannelLivenessMonitor } from './channel-liveness-monitor.js';
 import { AgentOutputMonitor } from './agent-output-monitor.js';
+import { CharacterRefreshScheduler } from './character-refresh.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MCPStatusPulseScheduler } from './mcp-status-pulse.js';
@@ -166,6 +167,16 @@ async function startSchedulersForUser(
   });
   channelLivenessMonitor.start();
   schedulers.push(channelLivenessMonitor);
+
+  // Character refresh — re-pushes the essence of the persona a few times a day
+  // so long-running sessions (days) don't drift off-character. Agent-internal
+  // signal; no FCM push.
+  const characterRefreshScheduler = new CharacterRefreshScheduler(pgPool, {
+    intervalHours: s('character_refresh_hours', 4),
+    startHour, endHour, timezone, userId,
+  });
+  characterRefreshScheduler.start();
+  schedulers.push(characterRefreshScheduler);
 
   // Agent-output monitor — catches the "channel drains but agent stays silent"
   // failure mode that channel-liveness and mcp-health don't see. If
