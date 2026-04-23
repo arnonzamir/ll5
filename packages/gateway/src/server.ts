@@ -6,7 +6,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { ZodError } from 'zod';
-import { initAppLog, initAudit, appLog, logAudit } from '@ll5/shared';
+import {
+  initAppLog,
+  initAudit,
+  appLog,
+  logAudit,
+  AWARENESS_INDICES,
+  KNOWLEDGE_NETWORKS_INDEX,
+  AWARENESS_INDEX_SETTINGS,
+  type IndexDefinition,
+} from '@ll5/shared';
 import { createAdminRouter } from './admin.js';
 import { createAuthRouter } from './auth.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
@@ -28,106 +37,11 @@ import type { EnvConfig } from './utils/env.js';
 import { logger } from './utils/logger.js';
 import { recordWebhookFailure } from './utils/webhook-stats.js';
 
-// --- Elasticsearch index definitions for awareness domain ---
+// --- Elasticsearch indices owned by the gateway (infra-level) ---
+// The 7 ll5_awareness_* indices and ll5_knowledge_networks live in @ll5/shared
+// so gateway and the MCPs cannot drift.
 
-const MULTILINGUAL_SETTINGS = {
-  analysis: {
-    analyzer: {
-      multilingual: {
-        type: 'custom' as const,
-        tokenizer: 'standard',
-        filter: ['lowercase', 'asciifolding'],
-      },
-    },
-  },
-};
-
-const INDEX_SETTINGS = {
-  number_of_shards: 1,
-  number_of_replicas: 1,
-  ...MULTILINGUAL_SETTINGS,
-};
-
-interface IndexDefinition {
-  index: string;
-  mappings: Record<string, unknown>;
-}
-
-const AWARENESS_INDICES: IndexDefinition[] = [
-  {
-    index: 'll5_awareness_locations',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        location: { type: 'geo_point' },
-        accuracy: { type: 'float' },
-        speed: { type: 'float' },
-        address: { type: 'text' },
-        matched_place_id: { type: 'keyword' },
-        matched_place: { type: 'keyword' },
-        battery_pct: { type: 'float' },
-        device_timezone: { type: 'keyword' },
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_messages',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        sender: { type: 'text', fields: { keyword: { type: 'keyword' } } },
-        app: { type: 'keyword' },
-        content: { type: 'text', analyzer: 'multilingual' },
-        is_group: { type: 'boolean' },
-        group_name: { type: 'keyword' },
-        processed: { type: 'boolean' },
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_entity_statuses',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        entity_name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
-        summary: { type: 'text' },
-        location: { type: 'text' },
-        activity: { type: 'text' },
-        source: { type: 'keyword' },
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_calendar_events',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        title: { type: 'text', analyzer: 'multilingual', fields: { keyword: { type: 'keyword' } } },
-        description: { type: 'text', analyzer: 'multilingual' },
-        start_time: { type: 'date' },
-        end_time: { type: 'date' },
-        location: { type: 'text' },
-        calendar_name: { type: 'keyword' },
-        calendar_id: { type: 'keyword' },
-        calendar_color: { type: 'keyword' },
-        google_event_id: { type: 'keyword' },
-        html_link: { type: 'keyword' },
-        source: { type: 'keyword' },
-        status: { type: 'keyword' },
-        all_day: { type: 'boolean' },
-        recurring: { type: 'boolean' },
-        is_free_busy: { type: 'boolean' },
-        is_tickler: { type: 'boolean' },
-        attendees: { type: 'keyword' },
-        attendees_detail: { type: 'object', enabled: false },
-        created_at: { type: 'date' },
-        updated_at: { type: 'date' },
-      },
-    },
-  },
+const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
   {
     index: 'll5_session_history',
     mappings: {
@@ -175,104 +89,17 @@ const AWARENESS_INDICES: IndexDefinition[] = [
       },
     },
   },
-  {
-    index: 'll5_awareness_notable_events',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        event_type: { type: 'keyword' },
-        place_id: { type: 'keyword' },
-        place_name: { type: 'keyword' },
-        location: { type: 'geo_point' },
-        details: { type: 'object', enabled: false },
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_phone_statuses',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        battery_pct: { type: 'float' },
-        is_charging: { type: 'boolean' },
-        plug_type: { type: 'keyword' },
-        battery_temp_c: { type: 'float' },
-        battery_health: { type: 'keyword' },
-        low_power_mode: { type: 'boolean' },
-        storage_used_bytes: { type: 'long' },
-        storage_total_bytes: { type: 'long' },
-        ram_used_bytes: { type: 'long' },
-        ram_total_bytes: { type: 'long' },
-        trigger: { type: 'keyword' },
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_wifi_connections',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        ssid: { type: 'text', fields: { keyword: { type: 'keyword' } } },
-        bssid: { type: 'keyword' },
-        rssi_dbm: { type: 'integer' },
-        frequency_mhz: { type: 'integer' },
-        link_speed_mbps: { type: 'integer' },
-        ip_address: { type: 'keyword' },
-        connected: { type: 'boolean' },
-        trigger: { type: 'keyword' },
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_knowledge_networks',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        bssid: { type: 'keyword' },
-        ssid: { type: 'text', fields: { keyword: { type: 'keyword' } } },
-        // Per-place observation counts. Auto-learned: each time a wifi push
-        // arrives and a recent GPS fix matches a known place, the gateway
-        // increments the matching entry. The dominant place above a confidence
-        // threshold becomes the inferred location for this BSSID.
-        place_observations: {
-          type: 'nested',
-          properties: {
-            place_id: { type: 'keyword' },
-            place_name: { type: 'keyword' },
-            count: { type: 'integer' },
-            last_seen: { type: 'date' },
-          },
-        },
-        // Optional manual override. If set, find_place_by_bssid returns this
-        // regardless of observation counts — user is the source of truth.
-        manual_place_id: { type: 'keyword' },
-        manual_place_name: { type: 'keyword' },
-        label: { type: 'text' },
-        total_observations: { type: 'integer' },
-        first_seen: { type: 'date' },
-        last_seen: { type: 'date' },
-        created_at: { type: 'date' },
-        updated_at: { type: 'date' },
-      },
-    },
-  },
 ];
 
-/**
- * Ensure all awareness indices exist in Elasticsearch.
- * Same pattern as personal-knowledge/src/setup/indices.ts.
- */
 async function ensureIndices(client: Client): Promise<void> {
-  for (const def of AWARENESS_INDICES) {
+  const all = [...AWARENESS_INDICES, KNOWLEDGE_NETWORKS_INDEX, ...GATEWAY_INFRA_INDICES];
+  for (const def of all) {
     const exists = await client.indices.exists({ index: def.index });
     if (!exists) {
       logger.info(`[ensureIndices][create] Creating index: ${def.index}`);
       await client.indices.create({
         index: def.index,
-        settings: INDEX_SETTINGS,
+        settings: AWARENESS_INDEX_SETTINGS,
         mappings: def.mappings,
       });
       logger.info(`[ensureIndices][create] Index created: ${def.index}`);
@@ -1129,6 +956,30 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Webhook rate limiter (per user, sliding window) ---
+  // Guards against misbehaving / looping clients hammering the ingestion pipeline.
+  // Typical expected rate is ~1 push/min; 120/min gives 2 orders of headroom.
+  const WEBHOOK_MAX_PER_WINDOW = 120;
+  const WEBHOOK_WINDOW_MS = 60_000;
+  const webhookCounters = new Map<string, { count: number; windowStart: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of webhookCounters) {
+      if (now - v.windowStart > WEBHOOK_WINDOW_MS) webhookCounters.delete(k);
+    }
+  }, WEBHOOK_WINDOW_MS);
+
+  function checkWebhookRate(userId: string): boolean {
+    const now = Date.now();
+    const entry = webhookCounters.get(userId);
+    if (!entry || now - entry.windowStart > WEBHOOK_WINDOW_MS) {
+      webhookCounters.set(userId, { count: 1, windowStart: now });
+      return true;
+    }
+    entry.count++;
+    return entry.count <= WEBHOOK_MAX_PER_WINDOW;
+  }
+
   // --- Webhook endpoint ---
   app.post('/webhook/:token', async (req: Request, res: Response) => {
     const token = req.params.token as string;
@@ -1188,6 +1039,12 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
     if (!userId) {
       res.status(401).json({ error: 'Invalid webhook token' });
+      return;
+    }
+
+    if (!checkWebhookRate(userId)) {
+      logger.warn('[startServer][webhook] Rate limit exceeded', { userId });
+      res.status(429).json({ error: 'Webhook rate limit exceeded. Try again shortly.' });
       return;
     }
 

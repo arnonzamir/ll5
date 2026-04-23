@@ -138,6 +138,12 @@ function formatDistance(km: number): string {
   return `${km.toFixed(1)}km`;
 }
 
+// Per-user last-notified movement state. In-memory dedup so GPS jitter between
+// two points doesn't fire a system message on every push — keyed by userId,
+// tracks the last destination label we already notified about.
+const lastMovementNotify = new Map<string, { destination: string; at: number }>();
+const MOVEMENT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
+
 /**
  * Detect meaningful movement and push a system chat message.
  * Non-blocking: runs as fire-and-forget, does not slow the webhook response.
@@ -145,6 +151,7 @@ function formatDistance(km: number): string {
  * Rules:
  * - Only triggers if distance > 200m
  * - Only triggers if previous point is within the last hour (not stale)
+ * - Dedups against the last notified destination within 10 min
  */
 function detectMovementAndNotify(
   es: Client,
@@ -206,6 +213,17 @@ function detectMovementAndNotify(
 
       const content = `Location change detected: User moved ${formatDistance(dist)} from [${prevLabel}] to [${newLabel}] at ${time}.${arrivalContext}`;
 
+      // Dedup: skip if we already notified about this destination recently
+      const last = lastMovementNotify.get(userId);
+      if (last && last.destination === newLabel && Date.now() - last.at < MOVEMENT_DEDUP_WINDOW_MS) {
+        logger.debug('[location][detectMovementAndNotify] Dedup — same destination within window', {
+          destination: newLabel,
+          ageSec: Math.round((Date.now() - last.at) / 1000),
+        });
+        return;
+      }
+      lastMovementNotify.set(userId, { destination: newLabel, at: Date.now() });
+
       await insertSystemMessage(pool, userId, content);
 
       logger.info('[location][detectMovementAndNotify] Movement detected, system message sent', {
@@ -238,9 +256,9 @@ export async function processLocation(
 ): Promise<void> {
   // Filter out low-accuracy GPS points (e.g. indoor drift, cell tower fallback)
   const MIN_ACCURACY_METERS = 100;
-  if (item.accuracy != null && item.accuracy > MIN_ACCURACY_METERS) {
+  if (item.accuracy_m != null && item.accuracy_m > MIN_ACCURACY_METERS) {
     logger.debug('[processLocation][handle] Skipping low-accuracy GPS point', {
-      accuracy: item.accuracy,
+      accuracy_m: item.accuracy_m,
       threshold: MIN_ACCURACY_METERS,
       lat: item.lat,
       lon: item.lon,
@@ -254,7 +272,7 @@ export async function processLocation(
   try {
     const prev = await getPreviousLocation(es, userId);
     if (prev?.location && prev.timestamp) {
-      const distKm = haversine(prev.location.lat, prev.location.lon, item.lat, item.lon);
+      const distKm = haversine(prev.location, { lat: item.lat, lon: item.lon });
       const timeDiffMs = new Date(item.timestamp).getTime() - new Date(prev.timestamp).getTime();
       const timeDiffMin = timeDiffMs / 60000;
 
@@ -346,14 +364,18 @@ export async function processLocation(
     matched_place: placeMatch?.place_name,
   });
 
-  // If place matched, write a notable event
+  // If place matched, write a notable event (canonical awareness-reader shape)
   if (placeMatch) {
     await writeNotableEvent(es, userId, {
-      event_type: 'arrived_at_place',
+      event_type: 'location_change',
       timestamp: item.timestamp,
-      place_id: placeMatch.place_id,
-      place_name: placeMatch.place_name,
-      location: { lat: item.lat, lon: item.lon },
+      summary: `Arrived at ${placeMatch.place_name}`,
+      severity: 'low',
+      payload: {
+        place_id: placeMatch.place_id,
+        place_name: placeMatch.place_name,
+        location: { lat: item.lat, lon: item.lon },
+      },
     });
   }
 }

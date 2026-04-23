@@ -7,6 +7,7 @@ import type { CalendarEventRepository } from '../repositories/interfaces/calenda
 import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
 import type { PhoneStatusRepository } from '../repositories/interfaces/phone-status.repository.js';
 import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
+import { LocationService } from '../services/location-service.js';
 import { registerLocationTools } from './location.js';
 import { registerMessageTools } from './messages.js';
 import { registerEntityStatusTools } from './entity-statuses.js';
@@ -38,7 +39,11 @@ export function registerAllTools(
   authSecret?: string,
   esClient?: Client,
 ): void {
-  registerLocationTools(server, repos.location, getUserId);
+  if (!esClient) {
+    throw new Error('esClient is required for LocationService');
+  }
+  const locationService = new LocationService(repos.location, repos.wifi, esClient);
+  registerLocationTools(server, repos.location, getUserId, locationService);
   registerMessageTools(server, repos.message, getUserId);
   registerEntityStatusTools(server, repos.entityStatus, getUserId);
   // Calendar tools retired — unified calendar reads/writes go through the calendar MCP

@@ -2,51 +2,62 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { LocationRepository } from '../repositories/interfaces/location.repository.js';
 import { computeFreshness } from '../types/location.js';
-import type { LocationWithFreshness } from '../types/location.js';
+import type { LocationService } from '../services/location-service.js';
 import { logAudit } from '@ll5/shared';
 
 export function registerLocationTools(
   server: McpServer,
   locationRepo: LocationRepository,
   getUserId: () => string,
+  locationService: LocationService,
 ): void {
   server.tool(
     'get_current_location',
-    'Returns the most recent GPS fix for the user, enriched with matched place name and a freshness indicator.',
+    'Fused current-location answer (GPS + wifi BSSID). Returns the inferred place with confidence and provenance. Also includes raw GPS fields for backward compatibility.',
     {},
     async () => {
       const userId = getUserId();
-      const latest = await locationRepo.getLatest(userId);
+      const fused = await locationService.getCurrentLocation(userId);
 
-      if (!latest) {
+      if (fused.source === 'none') {
         return {
           content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify({ error: 'No location data available' }),
-            },
+            { type: 'text' as const, text: JSON.stringify({ error: 'No location data available' }) },
           ],
           isError: true,
         };
       }
 
-      const result: LocationWithFreshness & { id: string } = {
-        id: latest.id,
-        lat: latest.location.lat,
-        lon: latest.location.lon,
-        accuracy: latest.accuracy,
-        timestamp: latest.timestamp,
-        freshness: computeFreshness(latest.timestamp),
-        place_name: latest.matchedPlace ?? null,
-        place_type: null,
-        address: latest.address ?? null,
-      };
+      // Preserve legacy shape: lat/lon/accuracy/timestamp/place_name/address/freshness
+      const gps = fused.gps;
+      const legacy = gps
+        ? {
+            lat: gps.lat,
+            lon: gps.lon,
+            accuracy: gps.accuracy_m ?? null,
+            timestamp: new Date(Date.now() - gps.age_s * 1000).toISOString(),
+            freshness: computeFreshness(new Date(Date.now() - gps.age_s * 1000).toISOString()),
+            place_name: fused.place,
+            place_type: null,
+            address: gps.address ?? null,
+          }
+        : null;
 
       return {
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({ location: result }),
+            text: JSON.stringify({
+              location: legacy,
+              fused: {
+                place: fused.place,
+                place_id: fused.place_id,
+                confidence: fused.confidence,
+                source: fused.source,
+                reasoning: fused.reasoning,
+                wifi: fused.wifi ?? null,
+              },
+            }),
           },
         ],
       };
@@ -54,13 +65,27 @@ export function registerLocationTools(
   );
 
   server.tool(
+    'where_is_user',
+    'Fused answer to "where is the user right now" from GPS + wifi signals. Returns place + confidence + reasoning. Preferred over get_current_location for decision-making.',
+    {},
+    async () => {
+      const userId = getUserId();
+      const fused = await locationService.getCurrentLocation(userId);
+      return {
+        content: [
+          { type: 'text' as const, text: JSON.stringify(fused) },
+        ],
+      };
+    },
+  );
+
+  server.tool(
     'query_location_history',
-    'Queries GPS history over a time range, with optional place filter. Returns location points sorted by timestamp descending.',
+    'Queries GPS history over a time range, with optional place filter by ID. Returns location points sorted by timestamp descending.',
     {
       from: z.string().describe('Start of time range (ISO 8601)'),
       to: z.string().describe('End of time range (ISO 8601)'),
-      place_filter: z.string().optional().describe('Filter by place name (fuzzy match)'),
-      place_type_filter: z.string().optional().describe('Filter by place type (exact match)'),
+      place_id: z.string().optional().describe('Filter by matched place ID (exact UUID). Use find_place_by_name in personal-knowledge to resolve a name first.'),
       limit: z.number().min(1).max(500).optional().describe('Max results. Default: 100'),
     },
     async (params) => {
@@ -68,7 +93,7 @@ export function registerLocationTools(
       const locations = await locationRepo.query(userId, {
         startTime: params.from,
         endTime: params.to,
-        placeId: params.place_filter,
+        placeId: params.place_id,
         limit: params.limit ?? 100,
       });
 

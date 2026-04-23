@@ -12,14 +12,14 @@ Claude Code is the agent. 5 MCP servers are the data layer. Gateway handles webh
 Claude Code (ll5-run workspace)
   ├── personal-knowledge MCP (ES) — facts, people, places, profile, data gaps, known_networks (BSSID→place bindings, manual + auto-learned)
   ├── gtd MCP (PG) — actions, projects, horizons, inbox, shopping, chat tools
-  ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation, journal, user model, geo search (POI/distance/geocode), phone_statuses, wifi_connections
+  ├── awareness MCP (ES) — GPS, IM, entity statuses, calendar, situation, journal, user model, geo search (POI/distance/geocode), phone_statuses, wifi_connections, LocationService (get_current_location + where_is_user fuse GPS + wifi BSSID)
   ├── calendar MCP (PG+ES) — Unified timeline (Google+phone+tickler), Gmail, OAuth
   ├── health MCP (ES+PG) — sleep, heart rate, daily stats, activities, body comp, stress, trends
   ├── messaging MCP (PG) — WhatsApp send/receive, contacts, auto-match
   └── system MCP (local stdio, no storage) — battery, cpu, memory, disk, system_health for THIS Mac. Source in ll5/packages/system; registered in ll5-run/.mcp.json (absolute path to ll5/packages/system/dist/index.js). Pull-only; not deployed remotely.
 
 Gateway (Express)
-  ├── POST /webhook/:token — phone push data (GPS, IM, calendar)
+  ├── POST /webhook/:token — phone push data (GPS, IM, calendar); rate-limited 120 req/min/user, sliding window
   ├── POST /auth/token — PIN login, returns signed token
   ├── /chat/* — message queue REST endpoints
   ├── GET /chat/listen — SSE for real-time notifications (PG LISTEN/NOTIFY, 30s keepalive ping)
@@ -136,8 +136,10 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - Legacy channels (`urgent`, `info`, `ll5_morning`, `ll5_tickler`, `ll5_urgent`, `ll5_general`) kept for backward compat
 
 **Elasticsearch** (8.15.0 on server, 8.17.0 in repo compose — server pinned to 8.15.0):
-- `ll5_knowledge_*` — facts, people (with `status`: full/contact-only), places, profile, data_gaps
-- `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events
+- **Canonical index definitions live in `packages/shared/src/indices/`** — the 7 `ll5_awareness_*` indices and `ll5_knowledge_networks` are imported from `@ll5/shared` by gateway, awareness MCP, and personal-knowledge MCP. Do NOT redefine these locally; writing to them through a drifted local mapping is what caused the pre-2026-04-23 `notable_events` invisibility bug (gateway wrote `{place_id, place_name, location, details, timestamp}` while the awareness reader expected `{summary, severity, payload, acknowledged, created_at}` — all gateway arrivals were silently unreadable). Gateway-owned infra indices (`ll5_session_history`, `ll5_app_log`, `ll5_audit_log`) stay in `gateway/src/server.ts`. Awareness-exclusive indices (`ll5_agent_journal`, `ll5_agent_user_model`, `ll5_media`, `ll5_media_links`) stay in `awareness/src/setup/indices.ts`. Personal-knowledge-exclusive indices (profile, places, facts, people, data_gaps) stay in `personal-knowledge/src/setup/indices.ts`.
+- **Notable event shape (authoritative):** `{user_id, event_type, summary, severity, payload, acknowledged, acknowledged_at, created_at}`. Writers that need to emit an arrival-style event use `event_type: 'location_change'` with place details inside `payload`.
+- `ll5_knowledge_*` — facts, people (with `status`: full/contact-only), places, profile, data_gaps, networks (BSSID→place, shared with gateway wifi processor)
+- `ll5_awareness_*` — locations, messages, entity_statuses, calendar_events (synced from Google + phone), notable_events, phone_statuses, wifi_connections
 - `ll5_agent_*` — journal (micro-entries), user_model (consolidated, versioned with history index), user_model_history (snapshots before overwrite)
 - `ll5_health_*` — sleep, heart_rate, daily_stats (stress, body battery, HRV, VO2 Max, respiration), activities, body_composition
 - `ll5_app_log` — all tool calls from all 6 MCPs (service, level, action, tool_name, duration_ms, user_id)
@@ -150,6 +152,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 
 - GitHub Actions: `.github/workflows/build-and-push.yml`
 - Builds changed packages on push to main, pushes to GHCR
+- **Typecheck gate (Apr 23)**: every package build runs `tsc --noEmit` before the actual build. Root `tsconfig.json` has `noEmitOnError: true`, so strict TS errors in any package now fail the build instead of silently emitting broken JS. Run `npm run typecheck` locally to check all 11 packages. `gateway/tsconfig.json` excludes `src/**/__tests__/**` (vitest transpiles tests independently); any non-test TS error is a build-blocker.
 - Auto-deploy: `appleboy/ssh-action@v1` SSHs to server, `docker login ghcr.io` using `GITHUB_TOKEN`, then `docker compose pull && up -d --remove-orphans`
 - Health check: curls mcp-knowledge.noninoni.click/health (4 retries, non-blocking)
 - Deploy only runs on main branch (skipped for workflow_dispatch)

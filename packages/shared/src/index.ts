@@ -1,6 +1,9 @@
 // Domain types
 export * from './types/index.js';
 
+// ES index definitions
+export * from './indices/index.js';
+
 // Repository interfaces
 export * from './repositories/index.js';
 

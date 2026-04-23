@@ -1,111 +1,15 @@
 import type { Client } from '@elastic/elasticsearch';
+import {
+  AWARENESS_INDICES,
+  AWARENESS_INDEX_SETTINGS,
+  type IndexDefinition,
+} from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
-const MULTILINGUAL_SETTINGS = {
-  analysis: {
-    analyzer: {
-      multilingual: {
-        type: 'custom' as const,
-        tokenizer: 'standard',
-        filter: ['lowercase', 'asciifolding'],
-      },
-    },
-  },
-};
-
-const INDEX_SETTINGS = {
-  number_of_shards: 1,
-  number_of_replicas: 1,
-  ...MULTILINGUAL_SETTINGS,
-};
-
-interface IndexDefinition {
-  index: string;
-  mappings: Record<string, unknown>;
-}
-
-const INDICES: IndexDefinition[] = [
-  {
-    index: 'll5_awareness_locations',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        location: { type: 'geo_point' },
-        accuracy: { type: 'float' },
-        speed: { type: 'float' },
-        address: { type: 'text' },
-        matched_place_id: { type: 'keyword' },
-        matched_place: { type: 'keyword' },
-        device_timezone: { type: 'keyword' },
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_messages',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        sender: { type: 'text', fields: { keyword: { type: 'keyword' } } },
-        app: { type: 'keyword' },
-        content: { type: 'text', analyzer: 'multilingual' },
-        conversation_id: { type: 'keyword' },
-        conversation_name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
-        is_group: { type: 'boolean' },
-        processed: { type: 'boolean' },
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_entity_statuses',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        entity_name: { type: 'text', analyzer: 'multilingual', fields: { keyword: { type: 'keyword' } } },
-        summary: { type: 'text', analyzer: 'multilingual' },
-        location: { type: 'text' },
-        activity: { type: 'text' },
-        source: { type: 'keyword' },
-        source_message_id: { type: 'keyword' },
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_calendar_events',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        title: { type: 'text', analyzer: 'multilingual', fields: { keyword: { type: 'keyword' } } },
-        description: { type: 'text', analyzer: 'multilingual' },
-        start_time: { type: 'date' },
-        end_time: { type: 'date' },
-        location: { type: 'text' },
-        calendar_name: { type: 'keyword' },
-        source: { type: 'keyword' },
-        all_day: { type: 'boolean' },
-        attendees: { type: 'keyword' },
-        created_at: { type: 'date' },
-        updated_at: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_notable_events',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        event_type: { type: 'keyword' },
-        summary: { type: 'text', analyzer: 'multilingual' },
-        severity: { type: 'keyword' },
-        payload: { type: 'object', enabled: false },
-        acknowledged: { type: 'boolean' },
-        acknowledged_at: { type: 'date' },
-        created_at: { type: 'date' },
-      },
-    },
-  },
+// Indices exclusively owned by the awareness MCP (not written to by the gateway).
+// The 7 ll5_awareness_* indices that the gateway also writes to are imported
+// from @ll5/shared to prevent schema drift.
+const AWARENESS_EXCLUSIVE_INDICES: IndexDefinition[] = [
   {
     index: 'll5_agent_journal',
     mappings: {
@@ -162,53 +66,17 @@ const INDICES: IndexDefinition[] = [
       },
     },
   },
-  {
-    index: 'll5_awareness_phone_statuses',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        battery_pct: { type: 'float' },
-        is_charging: { type: 'boolean' },
-        plug_type: { type: 'keyword' }, // none, ac, usb, wireless, dock, unknown
-        battery_temp_c: { type: 'float' },
-        battery_health: { type: 'keyword' },
-        low_power_mode: { type: 'boolean' },
-        storage_used_bytes: { type: 'long' },
-        storage_total_bytes: { type: 'long' },
-        ram_used_bytes: { type: 'long' },
-        ram_total_bytes: { type: 'long' },
-        trigger: { type: 'keyword' }, // why this push fired: change, plug, low, heartbeat
-        timestamp: { type: 'date' },
-      },
-    },
-  },
-  {
-    index: 'll5_awareness_wifi_connections',
-    mappings: {
-      properties: {
-        user_id: { type: 'keyword' },
-        ssid: { type: 'text', fields: { keyword: { type: 'keyword' } } },
-        bssid: { type: 'keyword' },
-        rssi_dbm: { type: 'integer' },
-        frequency_mhz: { type: 'integer' },
-        link_speed_mbps: { type: 'integer' },
-        ip_address: { type: 'keyword' },
-        connected: { type: 'boolean' }, // false on disconnect events
-        trigger: { type: 'keyword' }, // connect, disconnect, ssid_change, heartbeat
-        timestamp: { type: 'date' },
-      },
-    },
-  },
 ];
 
 export async function ensureIndices(client: Client): Promise<void> {
-  for (const def of INDICES) {
+  const all = [...AWARENESS_INDICES, ...AWARENESS_EXCLUSIVE_INDICES];
+  for (const def of all) {
     const exists = await client.indices.exists({ index: def.index });
     if (!exists) {
       logger.info(`[ensureIndices][create] Creating index: ${def.index}`);
       await client.indices.create({
         index: def.index,
-        settings: INDEX_SETTINGS,
+        settings: AWARENESS_INDEX_SETTINGS,
         mappings: def.mappings,
       });
       logger.info(`[ensureIndices][create] Index created: ${def.index}`);

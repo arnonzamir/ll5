@@ -79,6 +79,9 @@ jobs:
       - name: Build shared package
         run: npm run build --workspace=packages/shared
 
+      - name: Typecheck target package
+        run: npx tsc --noEmit --project packages/${{ matrix.package }}/tsconfig.json
+
       - name: Build target package
         run: npm run build --workspace=packages/${{ matrix.package }}
 

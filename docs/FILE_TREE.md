@@ -67,9 +67,10 @@ ll5/
 │       ├── coolify-setup.md          # Step-by-step Coolify guide
 │       └── mcp-client-config.md      # How to configure Claude Code for MCPs
 │
-├── packages/shared/                   # @ll5/shared — types, interfaces, utilities
+├── packages/shared/                   # @ll5/shared — types, interfaces, utilities, canonical ES index definitions
 │   └── src/
 │       ├── types/                    # 16 domain types (fact, person, place, horizon, etc.)
+│       ├── indices/                  # Canonical ES mappings for cross-package indices — awareness.ts (7 ll5_awareness_* indices + ensureAwarenessIndices helper), knowledge.ts (ll5_knowledge_networks; shared by personal-knowledge + gateway wifi processor). Prevents drift between gateway-writer and MCP-reader.
 │       ├── repositories/             # 13 repository interfaces
 │       ├── storage/                  # ES + PG client factories
 │       ├── auth/                     # Token generate/validate, Express middleware
@@ -99,8 +100,9 @@ ll5/
 ├── packages/awareness/                # @ll5/awareness — ES-backed MCP
 │   └── src/
 │       ├── repositories/elasticsearch/  # 7 ES repositories (location, message, entity-status, calendar, notable, phone-status, wifi)
-│       ├── tools/                       # 21 MCP tools (situation, location+delete, messages, journal, user model+versioning, geo search, media, phone_status x2, wifi x2)
-│       ├── setup/indices.ts             # 11 indices: locations, messages, entity_statuses, calendar_events, notable_events, journal, user_model, media, media_links, phone_statuses, wifi_connections
+│       ├── services/                    # LocationService — fuses GPS + wifi BSSID → CurrentLocation with provenance (used by get_current_location + where_is_user tools)
+│       ├── tools/                       # 22 MCP tools (situation, location+delete+where_is_user, messages, journal, user model+versioning, geo search, media, phone_status x2, wifi x2)
+│       ├── setup/indices.ts             # Shared 7 awareness indices imported from @ll5/shared + 4 awareness-exclusive (journal, user_model, media, media_links)
 │       └── server.ts
 │
 ├── packages/gateway/                  # @ll5/gateway — Express HTTP service

@@ -46,14 +46,16 @@ export async function exportUserData(
       const exists = await es.indices.exists({ index });
       if (!exists) continue;
 
-      const result = await es.search({
-        index,
-        query: { term: { user_id: userId } },
-        size: limit,
-        sort: [{ _doc: 'desc' }],
-        _source: { excludes: ['raw_data', 'readings', 'stress_readings'] },
-        request_timeout: 10000,
-      });
+      const result = await es.search(
+        {
+          index,
+          query: { term: { user_id: userId } },
+          size: limit,
+          sort: [{ _doc: { order: 'desc' } }],
+          _source: { excludes: ['raw_data', 'readings', 'stress_readings'] },
+        },
+        { requestTimeout: 10000 },
+      );
 
       const docs = result.hits.hits.map((h) => ({
         _id: h._id,
