@@ -85,7 +85,14 @@ export class WeeklyReviewReminder {
       await insertSystemMessage(
         this.pool,
         this.config.userId,
-        '[Weekly Review] Time for your weekly GTD review. Review all projects, process inbox to zero, review next actions, update waiting-for items, and scan the horizons of focus. Run the weekly review skill or get_gtd_health to start.',
+        `[Weekly Review] It's weekly review time. Don't just remind the user — actually run it WITH them.
+Steps to drive:
+1. Inbox → zero. Process every item; ask the user only when you can't decide.
+2. Next actions: which are stale? Pick the 2–3 worth pushing the user on.
+3. Waiting-for: what's gone cold? Draft a follow-up the user can send (don't send it yourself).
+4. Projects: any without a next action? Either define one or move them to someday.
+5. Horizons: surface anything that's drifting from the user's stated goals.
+Open the conversation by naming what you've already noticed before asking what they want to focus on.`,
         undefined,
         evt,
       );

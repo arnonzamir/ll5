@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
-import { logAudit } from '@ll5/shared';
+import { logAudit, formatTime, sessionTimezone } from '@ll5/shared';
 
 const INDEX = 'll5_agent_journal';
 const USER_MODEL_INDEX = 'll5_agent_user_model';
@@ -106,16 +106,24 @@ export function registerJournalTools(
         query: { bool: { must } },
       });
 
-      const entries = result.hits.hits.map((hit) => ({
-        id: hit._id,
-        ...(hit._source as Record<string, unknown>),
-      }));
+      const tz = sessionTimezone();
+      const entries = result.hits.hits.map((hit) => {
+        const src = hit._source as Record<string, unknown>;
+        const created = src.created_at as string | undefined;
+        const updated = src.updated_at as string | undefined;
+        return {
+          id: hit._id,
+          ...src,
+          created_at_local: created ? formatTime(created, tz).local : null,
+          updated_at_local: updated ? formatTime(updated, tz).local : null,
+        };
+      });
 
       return {
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({ entries, total: entries.length }),
+            text: JSON.stringify({ entries, total: entries.length, tz }),
           },
         ],
       };

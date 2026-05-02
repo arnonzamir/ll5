@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { LocationRepository } from '../repositories/interfaces/location.repository.js';
 import { computeFreshness } from '../types/location.js';
 import type { LocationService } from '../services/location-service.js';
-import { logAudit } from '@ll5/shared';
+import { logAudit, formatTime, sessionTimezone } from '@ll5/shared';
 
 export function registerLocationTools(
   server: McpServer,
@@ -97,12 +97,14 @@ export function registerLocationTools(
         limit: params.limit ?? 100,
       });
 
+      const tz = sessionTimezone();
       const results = locations.map((loc) => ({
         id: loc.id,
         lat: loc.location.lat,
         lon: loc.location.lon,
         accuracy: loc.accuracy,
         timestamp: loc.timestamp,
+        timestamp_local: loc.timestamp ? formatTime(loc.timestamp, tz).local : null,
         place_name: loc.matchedPlace ?? null,
         place_type: null,
         address: loc.address ?? null,
@@ -113,7 +115,7 @@ export function registerLocationTools(
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({ locations: results, total: results.length }),
+            text: JSON.stringify({ locations: results, total: results.length, tz }),
           },
         ],
       };

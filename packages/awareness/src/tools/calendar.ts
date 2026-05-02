@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CalendarEventRepository } from '../repositories/interfaces/calendar-event.repository.js';
+import { formatTime, sessionTimezone } from '@ll5/shared';
 
 export function registerCalendarTools(
   server: McpServer,
@@ -25,24 +26,31 @@ export function registerCalendarTools(
         include_all_day: params.include_all_day,
       });
 
-      const results = events.map((e) => ({
-        id: e.id,
-        title: e.title,
-        start: e.startTime,
-        end: e.endTime,
-        location: e.location ?? null,
-        description: e.description ?? null,
-        calendar_name: e.calendarId ?? null,
-        source: null,
-        all_day: e.allDay ?? false,
-        attendees: [],
-      }));
+      const tz = sessionTimezone();
+      const results = events.map((e) => {
+        const start = e.startTime ? formatTime(e.startTime, tz) : null;
+        const end = e.endTime ? formatTime(e.endTime, tz) : null;
+        return {
+          id: e.id,
+          title: e.title,
+          start: start?.utc ?? e.startTime,
+          start_local: start?.local ?? null,
+          end: end?.utc ?? e.endTime,
+          end_local: end?.local ?? null,
+          location: e.location ?? null,
+          description: e.description ?? null,
+          calendar_name: e.calendarId ?? null,
+          source: null,
+          all_day: e.allDay ?? false,
+          attendees: [],
+        };
+      });
 
       return {
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({ events: results, total: results.length }),
+            text: JSON.stringify({ events: results, total: results.length, tz }),
           },
         ],
       };

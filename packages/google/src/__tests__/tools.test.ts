@@ -11,6 +11,7 @@ import type { GoogleClientConfig } from '../utils/google-client.js';
 vi.mock('@ll5/shared', () => ({
   logAudit: vi.fn(),
   generateToken: vi.fn().mockReturnValue('mock-gw-token'),
+  sessionTimezone: vi.fn().mockReturnValue('Asia/Jerusalem'),
 }));
 
 // ---------------------------------------------------------------------------

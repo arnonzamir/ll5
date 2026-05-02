@@ -102,6 +102,8 @@ export class TicklerAlertScheduler {
         lines.push(`- ${tickler.title} (due: ${due})`);
         this.alertedIds.add(tickler.event_id);
       }
+      lines.push('');
+      lines.push('Bring the most time-sensitive one to the user now with a concrete next step. Don\'t just acknowledge silently.');
 
       const evt = createSchedulerEvent('tickler_alert');
       await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), {

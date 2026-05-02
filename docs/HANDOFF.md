@@ -100,7 +100,7 @@ Dashboard (Next.js 15)
 | Redirect URI | `https://mcp-google.noninoni.click/oauth/callback` |
 | Encryption Key | Set in Coolify env `ENCRYPTION_KEY` (generate with `openssl rand -hex 32`) |
 | Scopes | calendar.readonly, calendar.events, gmail.readonly, gmail.send |
-| Timezone | Per-user via `set_timezone` tool, stored in `google_user_settings` table (default: Asia/Jerusalem) |
+| Timezone | Two layers: (1) per-user value in `google_user_settings.timezone` (set via `set_timezone`), used for calendar tools that need user-personalized rendering. (2) Session/process TZ from `process.env.TZ` (read via `sessionTimezone()` from `@ll5/shared`) — this is the canonical TZ for agent-facing time formatting (heartbeat banner, `formatTime` paired output, tickler creation default). All MCP services run with `TZ=Asia/Jerusalem` in Coolify env. Agent-facing tool responses include both `utc` and `local` paired with a top-level `tz` envelope so the agent never has to convert. |
 | Tickler Calendar | "LL5 System" (role=tickler). Found by searching Google Calendar list for "ll5"/"tickler" — never created programmatically. Defaults to 08:00, pass due_time for specific time. Supports `recurrence`: daily/weekly/weekdays/monthly/yearly or raw RRULE. `complete_tickler` deletes instance (series continues) or pass `delete_series=true` to stop the series. |
 | Calendar Access Modes | ignore, read, readwrite (CRUD enforced per mode) |
 | Availability Check | `check_availability` — 3 paths: google (server FreeBusy), device (phone CalendarProvider), device_freebusy (phone's Workspace OAuth → Google FreeBusy for same-domain coworkers) |

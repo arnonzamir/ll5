@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
+import { timeBanner } from '@ll5/shared';
 
 interface DailyReviewConfig {
   reviewHour: number;
@@ -78,14 +79,10 @@ export class DailyReviewScheduler {
         this.googleClient.getTicklers(startOfDay.toISOString(), endOfTomorrow.toISOString()),
       ]);
 
-      const dayName = now.toLocaleDateString('en-US', {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-        timeZone: this.config.timezone,
-      });
-
-      const lines: string[] = [`[Morning Briefing] Good morning! Today is ${dayName}.`];
+      const lines: string[] = [
+        `[Morning Briefing] ${timeBanner(now, this.config.timezone)}`,
+        'Good morning. Today\'s frame:',
+      ];
 
       if (todayEvents.length > 0) {
         lines.push('');
@@ -114,6 +111,9 @@ export class DailyReviewScheduler {
           lines.push(`- ${tickler.title} (due: ${due})`);
         }
       }
+
+      lines.push('');
+      lines.push('Open the day with the user. Greet them, name the one thing that matters most today, and ask the question that helps them lock in the first move. Don\'t list the briefing back at them — synthesize.');
 
       const evt = createSchedulerEvent('morning_briefing');
       await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), {

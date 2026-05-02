@@ -116,7 +116,7 @@ async function startSchedulersForUser(
   schedulers.push(messageBatchScheduler);
 
   const heartbeatScheduler = new HeartbeatScheduler(pgPool, es, {
-    silenceMinutes: s('heartbeat_silence_minutes', 60),
+    silenceMinutes: s('heartbeat_silence_minutes', 30),
     startHour, endHour, timezone, userId,
     lookbackHours: s('schedule_lookback_hours', 1),
     lookaheadHours: s('schedule_lookahead_hours', 3),

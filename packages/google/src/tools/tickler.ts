@@ -5,7 +5,7 @@ import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-toke
 import type { CalendarConfigRepository } from '../repositories/interfaces/calendar-config.repository.js';
 import type { ESCalendarEventRepository } from '../repositories/elasticsearch/calendar-event.repository.js';
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
-import { logAudit } from '@ll5/shared';
+import { logAudit, sessionTimezone } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
 const TICKLER_CALENDAR_NAME = 'LL5 System';
@@ -104,6 +104,7 @@ export function registerTicklerTools(
       const calendarId = await findTicklerCalendar(config, tokenRepo, calendarConfigRepo, userId);
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
+      const tz = sessionTimezone();
 
       const fullTitle = category ? `[${category}] ${title}` : title;
       const effectiveTime = (!due_time || due_time === 'all_day') ? null : due_time;
@@ -127,8 +128,8 @@ export function registerTicklerTools(
         const startDateTime = `${due_date}T${resolvedTime}:00`;
         const endDate = new Date(startDateTime);
         endDate.setMinutes(endDate.getMinutes() + 30); // 30-min default duration
-        eventBody.start = { dateTime: startDateTime, timeZone: 'Asia/Jerusalem' };
-        eventBody.end = { dateTime: endDate.toISOString(), timeZone: 'Asia/Jerusalem' };
+        eventBody.start = { dateTime: startDateTime, timeZone: tz };
+        eventBody.end = { dateTime: endDate.toISOString(), timeZone: tz };
       }
 
       // Add a popup reminder

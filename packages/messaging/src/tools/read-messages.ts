@@ -6,6 +6,7 @@ import type { ConversationRepository } from '../repositories/interfaces/conversa
 import { EvolutionClient } from '../clients/evolution.client.js';
 import { TelegramClient } from '../clients/telegram.client.js';
 import { getConversationPriority } from '../utils/permission-checker.js';
+import { formatTime, sessionTimezone } from '@ll5/shared';
 
 export function registerReadMessagesTool(
   server: McpServer,
@@ -94,10 +95,12 @@ async function readWhatsAppMessages(
       const timestamp = msg.messageTimestamp
         ? new Date(msg.messageTimestamp * 1000)
         : new Date();
+      const t = formatTime(timestamp, sessionTimezone());
 
       return {
         message_id: msg.key?.id ?? '',
-        timestamp: timestamp.toISOString(),
+        timestamp: t.utc,
+        local_time: t.local,
         sender_name: msg.pushName ?? (msg.key?.fromMe ? 'Me' : 'Unknown'),
         sender_id: msg.key?.remoteJid ?? '',
         content: text,
@@ -113,7 +116,7 @@ async function readWhatsAppMessages(
     .slice(0, limit);
 
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify({ messages }, null, 2) }],
+    content: [{ type: 'text' as const, text: JSON.stringify({ messages, tz: sessionTimezone() }, null, 2) }],
   };
 }
 
@@ -149,13 +152,15 @@ async function readTelegramMessages(
     .map((u) => {
       const msg = u.message!;
       const timestamp = new Date(msg.date * 1000);
+      const t = formatTime(timestamp, sessionTimezone());
       const senderName = msg.from
         ? [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ')
         : 'Unknown';
 
       return {
         message_id: msg.message_id.toString(),
-        timestamp: timestamp.toISOString(),
+        timestamp: t.utc,
+        local_time: t.local,
         sender_name: senderName,
         sender_id: msg.from?.id.toString() ?? '',
         content: msg.text ?? '',
@@ -171,6 +176,6 @@ async function readTelegramMessages(
     .slice(0, limit);
 
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify({ messages }, null, 2) }],
+    content: [{ type: 'text' as const, text: JSON.stringify({ messages, tz: sessionTimezone() }, null, 2) }],
   };
 }

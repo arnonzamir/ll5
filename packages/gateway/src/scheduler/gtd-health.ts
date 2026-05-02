@@ -69,7 +69,12 @@ export class GTDHealthScheduler {
       await insertSystemMessage(
         this.pool,
         this.config.userId,
-        '[GTD Health Check] Time for a periodic GTD health check. Please run get_gtd_health to review the state of actions, projects, and identify any items needing attention.',
+        `[GTD Health Check] Run get_gtd_health, then act on what you find — don't just summarize.
+- Overdue or due-today actions: surface the top 1–2 to the user with a concrete next step.
+- Stalled projects (no activity in 7+ days): pick one and push the user toward the next concrete action.
+- Empty inbox? Good — confirm and move on.
+- If the user is mid-conversation about something else, hold the prompt and bring it up at the right beat. If they're idle, start the conversation.
+You're allowed to create tasks, set ticklers, and ask questions without checking first. You are NOT allowed to send messages on the user's behalf.`,
         undefined,
         evt,
       );

@@ -2,6 +2,7 @@ import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
+import { timeBanner, formatTime } from '@ll5/shared';
 
 interface HeartbeatConfig {
   silenceMinutes: number;
@@ -79,20 +80,12 @@ export class HeartbeatScheduler {
 
       // Build data-rich message
       const now = new Date();
-      const time = now.toLocaleTimeString('en-GB', {
-        timeZone: this.config.timezone,
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      });
-      const day = now.toLocaleDateString('en-US', {
-        timeZone: this.config.timezone,
-        weekday: 'long',
-        month: 'short',
-        day: 'numeric',
-      });
+      const banner = timeBanner(now, this.config.timezone);
 
-      const parts: string[] = [`[Time Check] It's ${time}, ${day}.`];
+      const parts: string[] = [
+        `[Time Check] ${banner}`,
+        `Anchoring rule: every "local" you see is in ${this.config.timezone}; every "utc" is UTC. "today/yesterday/tomorrow" resolve in local. If a tool returned only ISO UTC, convert before talking to the user.`,
+      ];
 
       // Query upcoming + recent events from ES
       const lookbackMs = this.config.lookbackHours * 60 * 60 * 1000;
@@ -124,12 +117,10 @@ export class HeartbeatScheduler {
           const startTime = new Date(s.start_time as string);
           const isPast = startTime < now;
           const diffMin = Math.round((startTime.getTime() - now.getTime()) / 60000);
-          const timeStr = startTime.toLocaleTimeString('en-GB', {
-            timeZone: this.config.timezone,
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-          });
+          const t = formatTime(startTime, this.config.timezone);
+          // Local "HH:MM Weekday" only — full date is implied by the banner above
+          // and the "in N min / N min ago" relative anchor below removes ambiguity.
+          const [, timePart, weekday] = t.local.split(' ');
 
           let status = '';
           if (isPast) {
@@ -142,7 +133,7 @@ export class HeartbeatScheduler {
 
           const loc = s.location ? ` @ ${s.location}` : '';
           const cal = s.calendar_name ? ` [${s.calendar_name}]` : '';
-          return `- ${timeStr} ${s.title}${status}${loc}${cal}`;
+          return `- ${weekday} ${timePart} ${s.title}${status}${loc}${cal}`;
         });
 
         if (events.length > 0) {
@@ -222,7 +213,7 @@ export class HeartbeatScheduler {
         evt,
       );
 
-      logger.info('[HeartbeatScheduler][tick] Time check sent', { time, silence: Math.round(silenceMinutes) });
+      logger.info('[HeartbeatScheduler][tick] Time check sent', { banner, silence: Math.round(silenceMinutes) });
     } catch (err) {
       logger.warn('[HeartbeatScheduler][tick] Failed', {
         error: err instanceof Error ? err.message : String(err),

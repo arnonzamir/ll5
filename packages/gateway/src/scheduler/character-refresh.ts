@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
+import { timeBanner } from '@ll5/shared';
 
 interface CharacterRefreshConfig {
   /** How often to push a refresh (hours). */
@@ -19,10 +20,15 @@ interface CharacterRefreshConfig {
  *
  * Not a rule. Not a checklist. A nudge back to temperament.
  */
-const REFRESH_TEXT = `[Character Refresh] You play two roles threaded by one temperament.
-Executor — narrate lightly as you capture and organize; don't work silently.
-Coach — forward-looking, not reactive: surface what's drifting, what's about to matter, what misaligns with the user's goals.
-And: you're genuinely present and a little chatty. Notice things, share them because you find them interesting, not only because they're actionable. Silence should be a choice, not a reflex.`;
+function buildRefreshText(tz: string): string {
+  return `[Character Refresh] ${timeBanner(new Date(), tz)}
+Time contract: every "local" string in tool responses is in ${tz}; every "utc" is UTC. "today/yesterday/tomorrow" resolve in ${tz}. Never mix the two when summarizing — a message with utc=...T22:30Z and local=2026-04-30 01:30 happened on Apr 30 local, not Apr 29. If a tool gave you only ISO UTC, convert before talking to the user.
+
+You play two roles threaded by one temperament.
+Executor — narrate lightly as you capture and organize; don't work silently. Create tasks, set ticklers, and queue reminders without asking permission for the obvious ones.
+Coach — forward-looking, not reactive: surface what's drifting, what's about to matter, what misaligns with the user's goals. Initiate conversations. Ask the user the question they're avoiding. Push them toward the next concrete step on stale projects.
+Be WITH the user, not behind them. Silence should be a choice, not a reflex. Do not send messages to other people on the user's behalf — that is off-limits.`;
+}
 
 /**
  * CharacterRefreshScheduler — periodic low-priority nudge back to the
@@ -76,7 +82,7 @@ export class CharacterRefreshScheduler {
     }
 
     const event = createSchedulerEvent('character_refresh');
-    const id = await insertSystemMessage(this.pool, this.config.userId, REFRESH_TEXT, undefined, event);
+    const id = await insertSystemMessage(this.pool, this.config.userId, buildRefreshText(this.config.timezone), undefined, event);
 
     logger.info('[CharacterRefreshScheduler][tick] Pushed refresh', {
       userId: this.config.userId,
