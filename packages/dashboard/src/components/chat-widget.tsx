@@ -221,6 +221,15 @@ function ReactionPicker({
 // ---------------------------------------------------------------------------
 
 function CompactRow({ m }: { m: Message }) {
+  const isThinking = m.metadata?.kind === "thinking";
+  if (isThinking) {
+    return (
+      <div className="flex items-start gap-2 py-0.5 px-1 text-xs text-gray-400 italic">
+        <span className="text-gray-300 shrink-0 select-none">*</span>
+        <span className="flex-1 leading-snug whitespace-pre-wrap break-words">{m.content ?? ""}</span>
+      </div>
+    );
+  }
   const Icon = compactIcon(m);
   const time = new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
@@ -535,11 +544,6 @@ export function ChatWidget() {
         if (seenIds.current.has(data.id)) return;
         seenIds.current.add(data.id);
 
-        // Don't show our own user messages twice (optimistic add covers it).
-        if (data.role === "user" && data.direction !== "outbound" && !data.reaction) {
-          // Inbound user message from another surface (android/cli) — show it.
-        }
-
         const newMsg: Message = {
           id: data.id,
           role: data.role,
@@ -551,6 +555,33 @@ export function ChatWidget() {
           display_compact: !!data.display_compact,
           metadata: data.metadata,
         };
+
+        // Race fix: SSE may deliver our just-sent user message before the POST
+        // response has set up the pendingIdMap mapping. In that case, find the
+        // matching temp echo by content and reconcile in-place instead of
+        // appending a duplicate.
+        if (newMsg.role === "user" && typeof newMsg.id === "string" && !newMsg.id.startsWith("temp-")) {
+          let reconciled = false;
+          setMessages((prev) => {
+            const matchIdx = prev.findIndex(
+              (cand) =>
+                cand.id.startsWith("temp-") &&
+                cand.role === "user" &&
+                (cand.content ?? "") === (newMsg.content ?? "") &&
+                (cand.reply_to_id ?? null) === (newMsg.reply_to_id ?? null) &&
+                Math.abs(new Date(cand.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 30_000,
+            );
+            if (matchIdx < 0) return prev;
+            reconciled = true;
+            const tempId = prev[matchIdx].id;
+            pendingIdMap.current.set(newMsg.id, tempId);
+            const next = prev.slice();
+            next[matchIdx] = { ...next[matchIdx], ...newMsg };
+            return next;
+          });
+          if (reconciled) return;
+        }
+
         setMessages((prev) => [...prev, newMsg]);
 
         // Mark assistant/system messages as delivered.

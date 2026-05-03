@@ -125,6 +125,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
           continue;
         }
 
+        // Race fix: SSE can deliver the user's just-sent message BEFORE the
+        // POST response has had a chance to call promoteTemp(). Without this,
+        // the temp echo and the SSE row both stay in the array (later
+        // promoteTemp creates two rows sharing the real id). Detect by
+        // matching role + content + reply_to_id with a recent temp echo.
+        if (m.role === "user" && typeof m.id === "string" && !m.id.startsWith("temp-")) {
+          const matchIdx = msgs.findIndex(
+            (cand) =>
+              cand.id.startsWith("temp-") &&
+              cand.role === "user" &&
+              (cand.content ?? "") === (m.content ?? "") &&
+              (cand.reply_to_id ?? null) === (m.reply_to_id ?? null) &&
+              Math.abs(new Date(cand.created_at).getTime() - new Date(m.created_at).getTime()) < 30_000,
+          );
+          if (matchIdx >= 0) {
+            const tempId = msgs[matchIdx].id;
+            msgs[matchIdx] = mergeMessage({ ...msgs[matchIdx], id: m.id }, m);
+            byId.delete(tempId);
+            byId.set(m.id, matchIdx);
+            continue;
+          }
+        }
+
         // Fresh message. Binary-insert by created_at.
         const inserted = insertSorted(msgs, m);
         msgs.length = 0;

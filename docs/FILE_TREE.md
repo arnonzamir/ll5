@@ -20,6 +20,7 @@ ll5/
 │ (every 10min, exposes `check_mcp_connectivity` tool, rate-limited system notifications on failure.)
 │ (Apr 19: simplified push_to_user (drops channel heuristic), added new_conversation + react tools,)
 │ (passes reply_to_id/reaction/display_compact through SSE meta, handles conversation_archived/_created events.)
+│ (May 3: added `narrate` tool — writes display_compact + metadata.kind="thinking" so web/android render asterisk-prefixed italic lines as the agent's internal voice.)
 │
 │ (ll5-android repo — Android app — is a separate git repo.)
 │ (data/remote/ChatApi.kt: chat/conversations/active, /new, PATCH /chat/messages/{id} for reactions.)

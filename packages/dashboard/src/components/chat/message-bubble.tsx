@@ -138,11 +138,30 @@ export function ReplyQuote({ parent }: { parent: Message }) {
 // ---------------------------------------------------------------------------
 
 function CompactRow({ m }: { m: Message }) {
-  const Icon: LucideIcon = pickCompactIcon(m);
+  const isThinking = m.metadata?.kind === "thinking";
   const time = new Date(m.created_at).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
   });
+
+  if (isThinking) {
+    // Thinking lines render asterisk-prefix-italic, like Claude Code's
+    // narration. No icon, no time chip — just the line, dimmer than system
+    // rows so it visually recedes.
+    return (
+      <div
+        className="flex items-start gap-2 py-0.5 px-1 text-[13px] text-ink-400 italic"
+        dir="auto"
+      >
+        <span className="text-ink-300 shrink-0 select-none">*</span>
+        <span className="flex-1 leading-snug whitespace-pre-wrap break-words">
+          {m.content ?? ""}
+        </span>
+      </div>
+    );
+  }
+
+  const Icon: LucideIcon = pickCompactIcon(m);
   return (
     <div
       className="flex items-start gap-2 py-0.5 px-1 text-[13px] text-ink-400 font-mono"
