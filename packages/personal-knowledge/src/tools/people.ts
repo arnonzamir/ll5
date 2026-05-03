@@ -16,7 +16,7 @@ export function registerPeopleTools(
       tags: z.array(z.string()).optional().describe('Filter by tags (AND logic)'),
       query: z.string().optional().describe('Free-text search across name, aliases, notes'),
       status: z.enum(['full', 'contact-only']).optional().describe('Filter by status. full = KB persons, contact-only = auto-created from messaging contacts'),
-      limit: z.number().min(1).max(200).optional().describe('Max results. Default: 50'),
+      limit: z.number().min(1).max(5000).optional().describe('Max results. Default: 50. Cap raised to 5000 because the dashboard /settings/contacts page needs the full set to categorize contacts.'),
       offset: z.number().min(0).optional().describe('Pagination offset. Default: 0'),
     },
     async (params) => {

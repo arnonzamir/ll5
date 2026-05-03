@@ -23,7 +23,7 @@ ll5/
 │ (May 3: added `narrate` tool — writes display_compact + metadata.kind="thinking" so web/android render asterisk-prefixed italic lines as the agent's internal voice.)
 │ (May 3: dashboard chat — inline reaction strip in the hover/long-press bar (8 icons: 6 reactions + reply + copy), drops the popover. /settings/contacts column labels become Authority + Delivery, with column-specific button labels (Blocked/Read/Reply for Authority; Drop/Batch/Notify for Delivery) and a paired-bump rule that lifts the silent twin off ignore when the user opens the other column.)
 │ (May 3: WhatsApp messages now carry conversation_id + conversation_name in ES; MessageBatchReviewScheduler clusters by sender|app|conversation and surfaces group name + first/last snippet per cluster in its summary.)
-│ (May 3: /settings/contacts categorization hardened — tab counts use filtered values; @g.us / Telegram-negative IDs excluded from Contacts tab regardless of the is_group column; list_people limit raised to 5000 to stop People↔Contacts flapping when there are >200 KB people.)
+│ (May 3: /settings/contacts categorization hardened — tab counts use filtered values; @g.us / Telegram-negative IDs excluded from Contacts tab regardless of the is_group column; list_people limit raised to 5000 to stop People↔Contacts flapping when there are >200 KB people. Personal-knowledge MCP list_people Zod max raised 200→5000 to allow this.)
 │
 │ (ll5-android repo — Android app — is a separate git repo.)
 │ (data/remote/ChatApi.kt: chat/conversations/active, /new, PATCH /chat/messages/{id} for reactions.)
