@@ -26,6 +26,21 @@ import {
 const ROUTING_OPTIONS = ["ignore", "batch", "immediate", "agent"] as const;
 const PERMISSION_OPTIONS = ["ignore", "input", "agent"] as const;
 
+// Distinct labels per column so no two cells share the same word, even
+// though the underlying enum values overlap (both have `ignore` and `agent`).
+const ROUTING_LABELS: Record<string, string> = {
+  ignore: "Drop",        // drop the message; agent never sees it
+  batch: "Batch",        // collect for periodic review
+  immediate: "Notify",   // surface to agent now
+  agent: "Auto",         // surface + agent acts unprompted
+};
+
+const PERMISSION_LABELS: Record<string, string> = {
+  ignore: "Blocked",     // agent cannot read this contact at all
+  input: "Read",         // agent reads but does not reply unprompted
+  agent: "Reply",        // agent reads and replies unprompted
+};
+
 const ROUTING_COLORS: Record<string, string> = {
   ignore: "text-gray-400",
   batch: "text-gray-600",
@@ -38,6 +53,29 @@ const PERMISSION_COLORS: Record<string, string> = {
   input: "text-blue-600",
   agent: "text-green-600",
 };
+
+/**
+ * Couple-out-of-ignore helper. When user clicks one column off `ignore` and
+ * the other column is also currently `ignore`, return a second field/value
+ * to bump the other column to its first non-ignore level. Returns null if
+ * no coupling fires. Callers apply both updates so a single click opens
+ * the contact end-to-end instead of leaving the silent twin.
+ */
+function pairedBump(
+  field: "routing" | "permission",
+  newValue: string,
+  currentRouting: string,
+  currentPermission: string,
+): { field: "routing" | "permission"; value: string } | null {
+  if (newValue === "ignore") return null;
+  if (field === "routing" && currentPermission === "ignore") {
+    return { field: "permission", value: "input" };
+  }
+  if (field === "permission" && currentRouting === "ignore") {
+    return { field: "routing", value: "batch" };
+  }
+  return null;
+}
 
 type TabId = "people" | "contacts" | "groups";
 
@@ -70,11 +108,13 @@ function ToggleGroup({
   value,
   onChange,
   colors,
+  labels,
 }: {
   options: readonly string[];
   value: string;
   onChange: (v: string) => void;
   colors: Record<string, string>;
+  labels?: Record<string, string>;
 }) {
   return (
     <div className="flex items-center rounded-md border border-gray-200 p-0.5 shrink-0">
@@ -82,11 +122,12 @@ function ToggleGroup({
         <button
           key={opt}
           onClick={() => onChange(opt)}
+          title={opt.charAt(0).toUpperCase() + opt.slice(1)}
           className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
             value === opt ? `bg-gray-100 ${colors[opt]}` : "text-gray-400 hover:text-gray-600"
           }`}
         >
-          {opt.charAt(0).toUpperCase() + opt.slice(1)}
+          {labels?.[opt] ?? opt.charAt(0).toUpperCase() + opt.slice(1)}
         </button>
       ))}
     </div>
@@ -573,15 +614,25 @@ function PersonRow({
       <ToggleGroup
         options={PERMISSION_OPTIONS}
         value={permission}
-        onChange={(v) => onUpdate(person.id, "permission", v)}
+        onChange={(v) => {
+          onUpdate(person.id, "permission", v);
+          const bump = pairedBump("permission", v, routing, permission);
+          if (bump) onUpdate(person.id, bump.field, bump.value);
+        }}
         colors={PERMISSION_COLORS}
+        labels={PERMISSION_LABELS}
       />
 
       <ToggleGroup
         options={ROUTING_OPTIONS}
         value={routing}
-        onChange={(v) => onUpdate(person.id, "routing", v)}
+        onChange={(v) => {
+          onUpdate(person.id, "routing", v);
+          const bump = pairedBump("routing", v, routing, permission);
+          if (bump) onUpdate(person.id, bump.field, bump.value);
+        }}
         colors={ROUTING_COLORS}
+        labels={ROUTING_LABELS}
       />
     </div>
   );
@@ -633,15 +684,25 @@ function ContactRow({
       <ToggleGroup
         options={PERMISSION_OPTIONS}
         value={permission}
-        onChange={(v) => onUpdate(contact.contactId, "permission", v)}
+        onChange={(v) => {
+          onUpdate(contact.contactId, "permission", v);
+          const bump = pairedBump("permission", v, routing, permission);
+          if (bump) onUpdate(contact.contactId, bump.field, bump.value);
+        }}
         colors={PERMISSION_COLORS}
+        labels={PERMISSION_LABELS}
       />
 
       <ToggleGroup
         options={ROUTING_OPTIONS}
         value={routing}
-        onChange={(v) => onUpdate(contact.contactId, "routing", v)}
+        onChange={(v) => {
+          onUpdate(contact.contactId, "routing", v);
+          const bump = pairedBump("routing", v, routing, permission);
+          if (bump) onUpdate(contact.contactId, bump.field, bump.value);
+        }}
         colors={ROUTING_COLORS}
+        labels={ROUTING_LABELS}
       />
     </div>
   );
@@ -675,15 +736,25 @@ function GroupRow({
       <ToggleGroup
         options={PERMISSION_OPTIONS}
         value={permission}
-        onChange={(v) => onUpdate(group.conversation_id, "permission", v)}
+        onChange={(v) => {
+          onUpdate(group.conversation_id, "permission", v);
+          const bump = pairedBump("permission", v, routing, permission);
+          if (bump) onUpdate(group.conversation_id, bump.field, bump.value);
+        }}
         colors={PERMISSION_COLORS}
+        labels={PERMISSION_LABELS}
       />
 
       <ToggleGroup
         options={ROUTING_OPTIONS}
         value={routing}
-        onChange={(v) => onUpdate(group.conversation_id, "routing", v)}
+        onChange={(v) => {
+          onUpdate(group.conversation_id, "routing", v);
+          const bump = pairedBump("routing", v, routing, permission);
+          if (bump) onUpdate(group.conversation_id, bump.field, bump.value);
+        }}
         colors={ROUTING_COLORS}
+        labels={ROUTING_LABELS}
       />
     </div>
   );
