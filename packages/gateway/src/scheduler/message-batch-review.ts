@@ -19,6 +19,8 @@ interface MessageHit {
     content?: string;
     is_group?: boolean;
     group_name?: string;
+    conversation_id?: string;
+    conversation_name?: string;
     timestamp?: string;
   };
 }
@@ -100,34 +102,72 @@ export class MessageBatchReviewScheduler {
         return;
       }
 
-      // Group by sender+app
-      const groups = new Map<string, { sender: string; app: string; count: number }>();
+      // Group by sender+app+conversation so the agent can tell apart "John in
+      // group X" from "John 1:1" and from "John in group Y". Conversation
+      // attribution is the load-bearing context for whether/how to respond.
+      interface Cluster {
+        sender: string;
+        app: string;
+        is_group: boolean;
+        conversation_name: string | null;
+        conversation_id: string | null;
+        count: number;
+        firstSnippet: string | null;
+        lastSnippet: string | null;
+      }
+      const groups = new Map<string, Cluster>();
       const docIds: string[] = [];
 
       for (const hit of hits) {
         if (!hit._source) continue;
         docIds.push(hit._id);
-        const key = `${hit._source.sender ?? 'unknown'}|${hit._source.app ?? 'unknown'}`;
+        const s = hit._source;
+        const sender = s.sender ?? 'unknown';
+        const app = s.app ?? 'unknown';
+        const conv = s.conversation_id ?? (s.is_group ? (s.group_name ?? 'unknown-group') : 'direct');
+        const key = `${sender}|${app}|${conv}`;
+        const snippet = s.content ? (s.content.length > 80 ? s.content.slice(0, 80) + '…' : s.content) : null;
         const existing = groups.get(key);
         if (existing) {
           existing.count++;
+          if (snippet) existing.lastSnippet = snippet;
         } else {
           groups.set(key, {
-            sender: hit._source.sender ?? 'unknown',
-            app: hit._source.app ?? 'unknown',
+            sender,
+            app,
+            is_group: !!s.is_group,
+            conversation_name: s.conversation_name ?? s.group_name ?? null,
+            conversation_id: s.conversation_id ?? null,
             count: 1,
+            firstSnippet: snippet,
+            lastSnippet: null,
           });
         }
       }
 
-      // Build summary message
+      // Build summary message — one line per (sender, conversation), with
+      // group context inline and a snippet so the agent can decide whether
+      // it needs to fetch more via read_messages.
       const lines: string[] = [
-        `[Message Batch Review] ${hits.length} unprocessed message${hits.length > 1 ? 's' : ''} from ${groups.size} sender${groups.size > 1 ? 's' : ''}:`,
+        `[Message Batch Review] ${hits.length} unprocessed message${hits.length > 1 ? 's' : ''} across ${groups.size} thread${groups.size > 1 ? 's' : ''}:`,
       ];
 
-      for (const group of groups.values()) {
-        lines.push(`- ${group.sender} (${group.app}): ${group.count} message${group.count > 1 ? 's' : ''}`);
+      for (const c of groups.values()) {
+        const where = c.is_group
+          ? ` in "${c.conversation_name ?? c.conversation_id ?? 'unknown group'}"`
+          : '';
+        const idTail = c.conversation_id ? ` [conv:${c.conversation_id}]` : '';
+        const head = `- ${c.sender} (${c.app})${where}: ${c.count} message${c.count > 1 ? 's' : ''}${idTail}`;
+        lines.push(head);
+        if (c.firstSnippet) {
+          lines.push(`    └ first: "${c.firstSnippet}"`);
+        }
+        if (c.count > 1 && c.lastSnippet && c.lastSnippet !== c.firstSnippet) {
+          lines.push(`    └ last:  "${c.lastSnippet}"`);
+        }
       }
+      lines.push('');
+      lines.push('Use read_messages with the platform + conversation_id to pull the full thread when something looks worth engaging.');
 
       const evt = createSchedulerEvent('message_batch');
       await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), undefined, evt);

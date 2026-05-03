@@ -310,6 +310,8 @@ export async function processWhatsAppWebhook(
     content: text || (hasImage ? '[image]' : ''),
     is_group: isGroup,
     group_name: groupName,
+    conversation_id: remoteJid,
+    conversation_name: conversationName ?? groupName,
     processed: fromMe,
     from_me: fromMe,
     timestamp,
