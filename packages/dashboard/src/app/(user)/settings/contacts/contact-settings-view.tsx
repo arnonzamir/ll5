@@ -964,9 +964,9 @@ export function ContactSettingsView() {
   );
 
   const tabs: { id: TabId; label: string; count: number; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: "people", label: "People", count: people.length, icon: User },
+    { id: "people", label: "People", count: filteredPeople.length, icon: User },
     { id: "contacts", label: "Contacts", count: filteredContacts.length, icon: UserPlus },
-    { id: "groups", label: "Groups", count: groups.length, icon: MessageSquare },
+    { id: "groups", label: "Groups", count: filteredGroups.length, icon: MessageSquare },
   ];
 
   return (

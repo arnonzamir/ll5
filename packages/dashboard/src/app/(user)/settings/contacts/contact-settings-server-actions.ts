@@ -118,7 +118,7 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
   // Get people from knowledge MCP — call directly to avoid internal URL issues
   try {
     const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
-    const result = await callMcpTool(knowledgeUrl, "list_people", { limit: 200 }, token);
+    const result = await callMcpTool(knowledgeUrl, "list_people", { limit: 5000 }, token);
     const parsed = extractJson<Record<string, unknown>>(result);
     if (parsed && typeof parsed === "object") {
       for (const val of Object.values(parsed)) {
@@ -212,7 +212,7 @@ export async function fetchContactsForTab(): Promise<ContactEntry[]> {
     (async () => {
       try {
         const knowledgeUrl = "https://mcp-knowledge.noninoni.click";
-        return await callMcpTool(knowledgeUrl, "list_people", { limit: 200 }, token);
+        return await callMcpTool(knowledgeUrl, "list_people", { limit: 5000 }, token);
       } catch { return null; }
     })(),
     fetchContactSettings({ target_type: "person" }),
@@ -242,9 +242,19 @@ export async function fetchContactsForTab(): Promise<ContactEntry[]> {
 
   const settingsMap = new Map(settings.map((s) => [s.target_id, s]));
 
-  // Contacts tab: contacts NOT linked to a full person
+  // Contacts tab: contacts NOT linked to a full person AND not a group.
+  // The is_group column has been observed to be wrong on some legacy rows
+  // (groups synced as contacts with is_group=false). Treat any WhatsApp
+  // platform_id that ends with @g.us as a group regardless of the column,
+  // and any Telegram chat_id with a `-` prefix (Telegram groups are negative).
   const unlinked = allContacts
-    .filter((c) => !c.is_group && (!c.person_id || !fullPersonIds.has(c.person_id)));
+    .filter((c) => {
+      if (c.is_group) return false;
+      const pid = c.platform_id ?? "";
+      if (pid.endsWith("@g.us")) return false;
+      if (c.platform === "telegram" && pid.startsWith("-")) return false;
+      return !c.person_id || !fullPersonIds.has(c.person_id);
+    });
 
   // Deduplicate @lid contacts: hide @lid entries when a @s.whatsapp.net contact with the same name exists
   const phoneNames = new Set(
@@ -608,7 +618,7 @@ export async function fetchNextMatchSuggestion(
 
     // Fetch all people and all unlinked named contacts in parallel
     const [peopleResult, contactsRaw] = await Promise.all([
-      callMcpTool(knowledgeUrl, "list_people", { limit: 200 }, token),
+      callMcpTool(knowledgeUrl, "list_people", { limit: 5000 }, token),
       mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "auto_match_contacts", { limit: 500 }),
     ]);
 
