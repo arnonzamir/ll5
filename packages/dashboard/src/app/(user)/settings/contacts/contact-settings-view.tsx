@@ -23,16 +23,21 @@ import {
   type MatchSuggestion,
 } from "./contact-settings-server-actions";
 
-const ROUTING_OPTIONS = ["ignore", "batch", "immediate", "agent"] as const;
+// `agent` is intentionally absent from the routing UI — in current code it
+// behaves identically to `immediate` (every processor checks them together
+// as `priority === 'immediate' || priority === 'agent'`). Keeping the value
+// in the DB enum is harmless; if a legacy row has routing='agent' we
+// normalize for display to `immediate` so the active button stays visible.
+// TECH DEBT: drop the value from the contact_settings + notification_rules
+// CHECK constraints when there's appetite for a migration.
+const ROUTING_OPTIONS = ["ignore", "batch", "immediate"] as const;
 const PERMISSION_OPTIONS = ["ignore", "input", "agent"] as const;
 
-// Distinct labels per column so no two cells share the same word, even
-// though the underlying enum values overlap (both have `ignore` and `agent`).
+// Distinct labels per column so no two cells share the same word.
 const ROUTING_LABELS: Record<string, string> = {
   ignore: "Drop",        // drop the message; agent never sees it
   batch: "Batch",        // collect for periodic review
   immediate: "Notify",   // surface to agent now
-  agent: "Auto",         // surface + agent acts unprompted
 };
 
 const PERMISSION_LABELS: Record<string, string> = {
@@ -45,8 +50,14 @@ const ROUTING_COLORS: Record<string, string> = {
   ignore: "text-gray-400",
   batch: "text-gray-600",
   immediate: "text-amber-600",
-  agent: "text-green-600",
 };
+
+/** Legacy rows may carry routing='agent'; normalize for display so the
+ *  active button stays highlighted. The processor treats `agent` and
+ *  `immediate` identically, so the user sees the correct effective state. */
+function displayRouting(v: string): string {
+  return v === "agent" ? "immediate" : v;
+}
 
 const PERMISSION_COLORS: Record<string, string> = {
   ignore: "text-gray-400",
@@ -569,7 +580,7 @@ function PersonRow({
   onUnlink: (contactId: string) => void;
   onLinkContact: (personId: string) => void;
 }) {
-  const routing = person.settings?.routing ?? "batch";
+  const routing = displayRouting(person.settings?.routing ?? "batch");
   const permission = person.settings?.permission ?? "input";
   const downloadMedia = person.settings?.download_media ?? false;
 
@@ -649,7 +660,7 @@ function ContactRow({
   onPromote: (contactId: string) => void;
   onLinked: () => void;
 }) {
-  const routing = contact.settings?.routing ?? "batch";
+  const routing = displayRouting(contact.settings?.routing ?? "batch");
   const permission = contact.settings?.permission ?? "input";
   const downloadMedia = contact.settings?.download_media ?? false;
   const displayName = contact.displayName || contact.phoneNumber || contact.platformId.split("@")[0];
@@ -715,7 +726,7 @@ function GroupRow({
   group: GroupWithSettings;
   onUpdate: (targetId: string, field: string, value: unknown) => void;
 }) {
-  const routing = group.settings?.routing ?? "batch";
+  const routing = displayRouting(group.settings?.routing ?? "batch");
   const permission = group.settings?.permission ?? "input";
   const downloadMedia = group.settings?.download_media ?? false;
   const displayName = group.name && !group.name.includes("@") ? group.name : group.conversation_id.split("@")[0];
