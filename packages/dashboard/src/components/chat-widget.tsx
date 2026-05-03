@@ -16,7 +16,6 @@ import {
   MessageSquareReply,
   Send,
   ShieldAlert,
-  SmilePlus,
   ThumbsDown,
   ThumbsUp,
   Wrench,
@@ -73,9 +72,9 @@ const REACTION_LABELS: Record<Reaction, string> = {
 };
 
 const REACTION_ORDER: Reaction[] = [
-  "acknowledge",
   "agree",
   "disagree",
+  "acknowledge",
   "reject",
   "confused",
   "thinking",
@@ -180,39 +179,6 @@ function NewConversationDialog({
         </div>
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Reaction popover
-// ---------------------------------------------------------------------------
-
-function ReactionPicker({
-  onPick,
-  onClose,
-}: {
-  onPick: (r: Reaction) => void;
-  onClose: () => void;
-}) {
-  return (
-    <>
-      <div className="fixed inset-0 z-20" onClick={onClose} />
-      <div className="absolute z-30 bottom-full mb-1 bg-white rounded-lg shadow-lg border border-gray-200 px-1.5 py-1 flex gap-0.5">
-        {REACTION_ORDER.map((r) => {
-          const Icon = REACTION_ICONS[r];
-          return (
-            <button
-              key={r}
-              title={REACTION_LABELS[r]}
-              onClick={() => onPick(r)}
-              className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
-            >
-              <Icon className="w-4 h-4" />
-            </button>
-          );
-        })}
-      </div>
-    </>
   );
 }
 
@@ -344,7 +310,6 @@ interface BubbleProps {
 }
 
 function MessageBubble({ m, parent, reactions, onReply, onReact, onRemoveReaction }: BubbleProps) {
-  const [showPicker, setShowPicker] = useState(false);
   const isUser = m.role === "user";
   const images = m.metadata?.attachments?.filter((a) => a.type === "image") ?? [];
   const isSummary = m.metadata?.kind === "conversation_summary";
@@ -352,10 +317,28 @@ function MessageBubble({ m, parent, reactions, onReply, onReact, onRemoveReactio
   return (
     <div className={`group flex flex-col ${isUser ? "items-end" : "items-start"}`}>
       <div className="relative max-w-[85%]">
-        {/* Hover action bar */}
+        {/* Hover action bar — inline reactions + reply + copy in one row.
+            Sits above the bubble (translate-y-full) so the wider strip
+            doesn't crash into bubble content on the side. */}
         <div
-          className={`absolute ${isUser ? "-left-[88px]" : "-right-[88px]"} top-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity`}
+          className={`absolute z-10 top-0 -translate-y-full bg-white/95 rounded shadow-sm border border-gray-200 px-1
+            ${isUser ? "right-0" : "left-0"}
+            flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity`}
         >
+          {REACTION_ORDER.map((r) => {
+            const Icon = REACTION_ICONS[r];
+            return (
+              <button
+                key={r}
+                onClick={() => onReact(m, r)}
+                title={REACTION_LABELS[r]}
+                className="p-1 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+              >
+                <Icon className="w-3.5 h-3.5" />
+              </button>
+            );
+          })}
+          <span className="w-px h-4 bg-gray-300 mx-0.5" aria-hidden />
           <button
             onClick={() => onReply(m)}
             className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
@@ -363,24 +346,6 @@ function MessageBubble({ m, parent, reactions, onReply, onReact, onRemoveReactio
           >
             <MessageSquareReply className="w-3.5 h-3.5" />
           </button>
-          <div className="relative">
-            <button
-              onClick={() => setShowPicker((v) => !v)}
-              className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
-              title="React"
-            >
-              <SmilePlus className="w-3.5 h-3.5" />
-            </button>
-            {showPicker && (
-              <ReactionPicker
-                onPick={(r) => {
-                  setShowPicker(false);
-                  onReact(m, r);
-                }}
-                onClose={() => setShowPicker(false)}
-              />
-            )}
-          </div>
           <button
             onClick={() => navigator.clipboard.writeText(m.content ?? "")}
             className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"

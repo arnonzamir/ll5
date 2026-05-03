@@ -958,9 +958,19 @@ export function ContactSettingsView() {
         <div className="flex-1">Name</div>
         {activeTab === "contacts" && <div className="w-8 text-center" title="Link to KB person">Link</div>}
         {activeTab === "contacts" && <div className="w-8 text-center" title="Promote to full person">Up</div>}
-        <div className="w-8 text-center">Media</div>
-        <div className="w-[140px] text-center">Permission</div>
-        <div className="w-[185px] text-center">Routing</div>
+        <div className="w-8 text-center" title="Auto-download images and audio attachments">Media</div>
+        <div
+          className="w-[140px] text-center"
+          title="Agent authority: can the agent read messages from this contact (input) or also reply on your behalf (agent)? `ignore` blocks reads."
+        >
+          Authority
+        </div>
+        <div
+          className="w-[185px] text-center"
+          title="Inbound delivery: what happens when a message lands. `ignore` drops, `batch` collects for periodic review, `immediate` wakes the agent now, `agent` wakes + lets agent act unprompted."
+        >
+          Delivery
+        </div>
       </div>
 
       {/* Content */}

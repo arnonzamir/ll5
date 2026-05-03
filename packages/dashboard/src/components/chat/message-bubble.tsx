@@ -4,7 +4,6 @@ import { useState } from "react";
 import {
   Copy,
   MessageSquareReply,
-  SmilePlus,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
@@ -18,39 +17,6 @@ import {
 } from "@/lib/chat/constants";
 import type { Message, Reaction } from "@/lib/chat/types";
 import { uploadsUrl } from "@/lib/chat/format";
-
-// ---------------------------------------------------------------------------
-// Reaction picker (hover popover)
-// ---------------------------------------------------------------------------
-
-function ReactionPicker({
-  onPick,
-  onClose,
-}: {
-  onPick: (r: Reaction) => void;
-  onClose: () => void;
-}) {
-  return (
-    <>
-      <div className="fixed inset-0 z-20" onClick={onClose} />
-      <div className="absolute z-30 bottom-full mb-1 bg-white rounded-lg shadow-lg border border-ink-300/60 px-1.5 py-1 flex gap-0.5">
-        {REACTION_ORDER.map((r) => {
-          const Icon = REACTION_ICONS[r];
-          return (
-            <button
-              key={r}
-              title={REACTION_LABELS[r]}
-              onClick={() => onPick(r)}
-              className="p-1.5 text-ink-500 hover:text-ink-900 hover:bg-surface-sunken rounded"
-            >
-              <Icon className="w-4 h-4" />
-            </button>
-          );
-        })}
-      </div>
-    </>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Reaction strip under a parent bubble
@@ -235,7 +201,6 @@ export function MessageBubble({
   onRemoveReaction,
   isLastUser,
 }: BubbleProps) {
-  const [showPicker, setShowPicker] = useState(false);
   const isUser = m.role === "user";
   const images = m.metadata?.attachments?.filter((a) => a.type === "image") ?? [];
   const isSummary = m.metadata?.kind === "conversation_summary";
@@ -278,19 +243,8 @@ export function MessageBubble({
             <HoverBar
               align="left"
               onReply={onReply ? () => onReply(m) : undefined}
-              onReactToggle={() => setShowPicker((v) => !v)}
+              onReact={onReact ? (r) => onReact(m, r) : undefined}
               onCopy={() => navigator.clipboard.writeText(m.content ?? "")}
-              picker={
-                showPicker && onReact ? (
-                  <ReactionPicker
-                    onPick={(r) => {
-                      setShowPicker(false);
-                      onReact(m, r);
-                    }}
-                    onClose={() => setShowPicker(false)}
-                  />
-                ) : null
-              }
             />
           </div>
         </div>
@@ -308,19 +262,8 @@ export function MessageBubble({
         <HoverBar
           align={isUser ? "right" : "left"}
           onReply={onReply ? () => onReply(m) : undefined}
-          onReactToggle={() => setShowPicker((v) => !v)}
+          onReact={onReact ? (r) => onReact(m, r) : undefined}
           onCopy={() => navigator.clipboard.writeText(m.content ?? "")}
-          picker={
-            showPicker && onReact ? (
-              <ReactionPicker
-                onPick={(r) => {
-                  setShowPicker(false);
-                  onReact(m, r);
-                }}
-                onClose={() => setShowPicker(false)}
-              />
-            ) : null
-          }
         />
         <div
           className={
@@ -369,24 +312,42 @@ export function MessageBubble({
 function HoverBar({
   align,
   onReply,
-  onReactToggle,
+  onReact,
   onCopy,
-  picker,
 }: {
   align: "left" | "right";
   onReply?: () => void;
-  onReactToggle?: () => void;
+  /** When provided, the bar inlines all 6 reaction icons (no picker popover).
+   *  Saves the extra click of opening a sub-menu. */
+  onReact?: (r: Reaction) => void;
   onCopy?: () => void;
-  picker?: React.ReactNode;
 }) {
   return (
     <div
       className={
-        "absolute top-0 " +
-        (align === "right" ? "-left-[92px]" : "-right-[92px]") +
+        "absolute top-0 z-10 bg-white/95 rounded shadow-sm border border-ink-300/40 px-1 " +
+        // Bar is wider than before (8 icons) — pin it to the bubble edge with
+        // generous offset so it doesn't crash into the message content.
+        (align === "right" ? "right-0 -translate-y-full" : "left-0 -translate-y-full") +
         " flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
       }
     >
+      {onReact && REACTION_ORDER.map((r) => {
+        const Icon = REACTION_ICONS[r];
+        return (
+          <button
+            key={r}
+            onClick={() => onReact(r)}
+            title={REACTION_LABELS[r]}
+            className="p-1 text-ink-500 hover:text-ink-900 hover:bg-surface-sunken rounded"
+          >
+            <Icon className="w-3.5 h-3.5" />
+          </button>
+        );
+      })}
+      {onReact && (onReply || onCopy) && (
+        <span className="w-px h-4 bg-ink-300/60 mx-0.5" aria-hidden />
+      )}
       {onReply && (
         <button
           onClick={onReply}
@@ -395,18 +356,6 @@ function HoverBar({
         >
           <MessageSquareReply className="w-3.5 h-3.5" />
         </button>
-      )}
-      {onReactToggle && (
-        <div className="relative">
-          <button
-            onClick={onReactToggle}
-            className="p-1 text-ink-400 hover:text-ink-900 hover:bg-surface-sunken rounded"
-            title="React (e)"
-          >
-            <SmilePlus className="w-3.5 h-3.5" />
-          </button>
-          {picker}
-        </div>
       )}
       {onCopy && (
         <button

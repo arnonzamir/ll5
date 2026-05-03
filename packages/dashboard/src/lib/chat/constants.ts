@@ -33,11 +33,12 @@ export const REACTION_LABELS: Record<Reaction, string> = {
   thinking: "Thinking",
 };
 
-/** Display order in the reaction picker popover — stable across surfaces. */
+/** Display order in the inline reaction strip — stable across surfaces.
+ *  Order: positive vote, negative vote, ack, hard reject, confused, thinking. */
 export const REACTION_ORDER: Reaction[] = [
-  "acknowledge",
   "agree",
   "disagree",
+  "acknowledge",
   "reject",
   "confused",
   "thinking",
