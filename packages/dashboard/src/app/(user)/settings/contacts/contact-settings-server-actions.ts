@@ -170,33 +170,65 @@ export async function fetchPeopleWithPlatforms(): Promise<PersonWithPlatforms[]>
 }
 
 export async function fetchGroupsWithSettings(): Promise<GroupWithSettings[]> {
-  // Get conversations from messaging MCP
+  // Two sources, both incomplete on their own:
+  //   - messaging_conversations (via list_conversations) — has is_archived +
+  //     last_message_at, but only contains groups Evolution returned in
+  //     findChats (its active-chat cache, partial — Baileys decides).
+  //   - messaging_contacts where is_group=true (via list_contacts) — has the
+  //     full address-book set Evolution returned in findContacts, but no
+  //     archive/activity metadata.
+  // Real-world gap: 150 vs 203 groups for arnonzamir's account on May 3.
+  // Union both, prefer conversation data when present.
+  const [convsRaw, contactsRaw] = await Promise.all([
+    mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_conversations", { is_group: true, limit: 5000 }).catch(() => null),
+    mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_contacts", { is_group: true, limit: 10000 }).catch(() => null),
+  ]);
+
   let conversations: Array<{ conversation_id: string; name: string | null; platform: string; is_group: boolean; is_archived: boolean }> = [];
-  try {
-    const raw = await mcpCallJsonSafe<Record<string, unknown>>("ll5-messaging", "list_conversations", { is_group: true, limit: 500 });
-    if (raw && typeof raw === "object") {
-      for (const val of Object.values(raw)) {
-        if (Array.isArray(val)) {
-          conversations = val as typeof conversations;
-          break;
-        }
-      }
+  if (convsRaw && typeof convsRaw === "object") {
+    for (const val of Object.values(convsRaw)) {
+      if (Array.isArray(val)) { conversations = val as typeof conversations; break; }
     }
-  } catch (err) {
-    console.error("[contacts] Failed to fetch conversations:", err instanceof Error ? err.message : String(err));
+  }
+  let contacts: Array<{ platform_id: string; platform: string; display_name: string | null; is_group: boolean }> = [];
+  if (contactsRaw && typeof contactsRaw === "object") {
+    for (const val of Object.values(contactsRaw)) {
+      if (Array.isArray(val)) { contacts = val as typeof contacts; break; }
+    }
   }
 
-  // Get current contact settings for groups
   const { settings } = await fetchContactSettings({ target_type: "group" });
   const settingsMap = new Map(settings.map((s) => [s.target_id, s]));
 
-  return conversations.map((c) => ({
-    conversation_id: c.conversation_id,
-    name: c.name,
-    platform: c.platform,
-    is_archived: c.is_archived ?? false,
-    settings: settingsMap.get(c.conversation_id),
-  }));
+  // Build a map keyed by conversation_id; conversations win when both sources
+  // have an entry, so we keep is_archived and any richer metadata.
+  const merged = new Map<string, GroupWithSettings>();
+  for (const c of contacts) {
+    if (!c.platform_id) continue;
+    // Defensive: skip rows that aren't actually group JIDs even if is_group=true
+    // (the column has been observed to be wrong on some legacy rows).
+    if (c.platform === "whatsapp" && !c.platform_id.endsWith("@g.us")) continue;
+    if (c.platform === "telegram" && !c.platform_id.startsWith("-")) continue;
+    merged.set(c.platform_id, {
+      conversation_id: c.platform_id,
+      name: c.display_name,
+      platform: c.platform,
+      is_archived: false,
+      settings: settingsMap.get(c.platform_id),
+    });
+  }
+  for (const c of conversations) {
+    if (!c.conversation_id) continue;
+    merged.set(c.conversation_id, {
+      conversation_id: c.conversation_id,
+      name: c.name,
+      platform: c.platform,
+      is_archived: c.is_archived ?? false,
+      settings: settingsMap.get(c.conversation_id),
+    });
+  }
+
+  return Array.from(merged.values());
 }
 
 export async function fetchContactsForTab(): Promise<ContactEntry[]> {
