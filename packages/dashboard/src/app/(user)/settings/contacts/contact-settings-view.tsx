@@ -66,19 +66,34 @@ const PERMISSION_COLORS: Record<string, string> = {
 };
 
 /**
- * Couple-out-of-ignore helper. When user clicks one column off `ignore` and
- * the other column is also currently `ignore`, return a second field/value
- * to bump the other column to its first non-ignore level. Returns null if
- * no coupling fires. Callers apply both updates so a single click opens
- * the contact end-to-end instead of leaving the silent twin.
+ * Coupled adjustment helper. Two symmetric rules:
+ *   - Bump out of ignore: if both columns are at `ignore` and the user moves
+ *     one off ignore, lift the other to its first non-ignore level
+ *     (permission→input, routing→batch). The user is opening the contact;
+ *     the silent twin shouldn't quietly veto.
+ *   - Drop to ignore: if the user moves one column TO `ignore` and the other
+ *     is currently active, also drop it. Blocking authority and dropping
+ *     delivery go hand in hand — neither alone fully silences a contact.
+ *
+ * Returns null if no coupling fires. Callers apply both updates.
  */
-function pairedBump(
+function pairedAdjust(
   field: "routing" | "permission",
   newValue: string,
   currentRouting: string,
   currentPermission: string,
 ): { field: "routing" | "permission"; value: string } | null {
-  if (newValue === "ignore") return null;
+  if (newValue === "ignore") {
+    // Drop to ignore: silence the active twin too.
+    if (field === "routing" && currentPermission !== "ignore") {
+      return { field: "permission", value: "ignore" };
+    }
+    if (field === "permission" && currentRouting !== "ignore") {
+      return { field: "routing", value: "ignore" };
+    }
+    return null;
+  }
+  // Bump out of ignore: lift the silent twin only if it's currently at ignore.
   if (field === "routing" && currentPermission === "ignore") {
     return { field: "permission", value: "input" };
   }
@@ -627,7 +642,7 @@ function PersonRow({
         value={permission}
         onChange={(v) => {
           onUpdate(person.id, "permission", v);
-          const bump = pairedBump("permission", v, routing, permission);
+          const bump = pairedAdjust("permission", v, routing, permission);
           if (bump) onUpdate(person.id, bump.field, bump.value);
         }}
         colors={PERMISSION_COLORS}
@@ -639,7 +654,7 @@ function PersonRow({
         value={routing}
         onChange={(v) => {
           onUpdate(person.id, "routing", v);
-          const bump = pairedBump("routing", v, routing, permission);
+          const bump = pairedAdjust("routing", v, routing, permission);
           if (bump) onUpdate(person.id, bump.field, bump.value);
         }}
         colors={ROUTING_COLORS}
@@ -697,7 +712,7 @@ function ContactRow({
         value={permission}
         onChange={(v) => {
           onUpdate(contact.contactId, "permission", v);
-          const bump = pairedBump("permission", v, routing, permission);
+          const bump = pairedAdjust("permission", v, routing, permission);
           if (bump) onUpdate(contact.contactId, bump.field, bump.value);
         }}
         colors={PERMISSION_COLORS}
@@ -709,7 +724,7 @@ function ContactRow({
         value={routing}
         onChange={(v) => {
           onUpdate(contact.contactId, "routing", v);
-          const bump = pairedBump("routing", v, routing, permission);
+          const bump = pairedAdjust("routing", v, routing, permission);
           if (bump) onUpdate(contact.contactId, bump.field, bump.value);
         }}
         colors={ROUTING_COLORS}
@@ -749,7 +764,7 @@ function GroupRow({
         value={permission}
         onChange={(v) => {
           onUpdate(group.conversation_id, "permission", v);
-          const bump = pairedBump("permission", v, routing, permission);
+          const bump = pairedAdjust("permission", v, routing, permission);
           if (bump) onUpdate(group.conversation_id, bump.field, bump.value);
         }}
         colors={PERMISSION_COLORS}
@@ -761,7 +776,7 @@ function GroupRow({
         value={routing}
         onChange={(v) => {
           onUpdate(group.conversation_id, "routing", v);
-          const bump = pairedBump("routing", v, routing, permission);
+          const bump = pairedAdjust("routing", v, routing, permission);
           if (bump) onUpdate(group.conversation_id, bump.field, bump.value);
         }}
         colors={ROUTING_COLORS}
