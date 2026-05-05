@@ -5,3 +5,5 @@ export { ElasticsearchPersonRepository } from './person.repository.js';
 export { ElasticsearchPlaceRepository } from './place.repository.js';
 export { ElasticsearchDataGapRepository } from './data-gap.repository.js';
 export { ElasticsearchNetworkRepository } from './network.repository.js';
+export { ElasticsearchObservationRepository } from './observation.repository.js';
+export { ElasticsearchNarrativeRepository } from './narrative.repository.js';

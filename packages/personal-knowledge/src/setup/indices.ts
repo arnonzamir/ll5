@@ -1,5 +1,5 @@
 import type { Client } from '@elastic/elasticsearch';
-import { KNOWLEDGE_NETWORKS_INDEX } from '@ll5/shared';
+import { KNOWLEDGE_NETWORKS_INDEX, KNOWLEDGE_OBSERVATIONS_INDEX, KNOWLEDGE_NARRATIVES_INDEX } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
 const MULTILINGUAL_SETTINGS = {
@@ -110,6 +110,8 @@ const INDICES: IndexDefinition[] = [
     },
   },
   KNOWLEDGE_NETWORKS_INDEX,
+  KNOWLEDGE_OBSERVATIONS_INDEX,
+  KNOWLEDGE_NARRATIVES_INDEX,
 ];
 
 export async function ensureIndices(client: Client): Promise<void> {

@@ -5,3 +5,4 @@ export * from './profile.js';
 export * from './data-gap.js';
 export * from './search.js';
 export * from './user-context.js';
+export * from './narrative.js';

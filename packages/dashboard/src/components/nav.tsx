@@ -33,6 +33,7 @@ import {
   HeartPulse,
   Clock,
   ToggleLeft,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logoutAction } from "@/app/(user)/logout-action";
@@ -88,6 +89,7 @@ function buildNavGroups(): NavGroup[] {
       icon: Users,
       items: [
         { href: "/people", label: "People", icon: Users },
+        { href: "/narratives", label: "Narratives", icon: Sparkles },
         { href: "/settings/contacts", label: "Contacts & Routing", icon: BookUser },
         { href: "/locations", label: "Locations", icon: Navigation },
         { href: "/places", label: "Places", icon: MapPin },

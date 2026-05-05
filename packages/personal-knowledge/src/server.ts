@@ -16,6 +16,8 @@ import { ElasticsearchPersonRepository } from './repositories/elasticsearch/pers
 import { ElasticsearchPlaceRepository } from './repositories/elasticsearch/place.repository.js';
 import { ElasticsearchDataGapRepository } from './repositories/elasticsearch/data-gap.repository.js';
 import { ElasticsearchNetworkRepository } from './repositories/elasticsearch/network.repository.js';
+import { ElasticsearchObservationRepository } from './repositories/elasticsearch/observation.repository.js';
+import { ElasticsearchNarrativeRepository } from './repositories/elasticsearch/narrative.repository.js';
 import { registerAllTools } from './tools/index.js';
 
 // Per-request userId storage using AsyncLocalStorage for proper request isolation.
@@ -65,6 +67,8 @@ export async function startServer(): Promise<void> {
     place: new ElasticsearchPlaceRepository(esClient),
     dataGap: new ElasticsearchDataGapRepository(esClient),
     network: new ElasticsearchNetworkRepository(esClient),
+    observation: new ElasticsearchObservationRepository(esClient),
+    narrative: new ElasticsearchNarrativeRepository(esClient),
   };
 
   logger.info('[startServer][init] Repositories initialized');

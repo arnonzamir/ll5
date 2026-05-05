@@ -12,6 +12,7 @@ import { MessageBatchReviewScheduler } from './message-batch-review.js';
 import { HeartbeatScheduler } from './heartbeat.js';
 import { JournalHealthScheduler } from './journal-health.js';
 import { JournalConsolidationScheduler } from './journal-consolidation.js';
+import { NarrativeConsolidationScheduler } from './narrative-consolidation.js';
 import { HealthPollingScheduler } from './health-polling.js';
 import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
@@ -144,6 +145,18 @@ async function startSchedulersForUser(
   });
   journalConsolidationScheduler.start();
   schedulers.push(journalConsolidationScheduler);
+
+  // Narrative consolidation — default OFF. Enable via
+  // user_settings.scheduler.narrative_consolidation_enabled = true.
+  // When enabled, fires once a day at configured hour (default 3am, an hour
+  // after journal consolidation so the agent has rested user_model first).
+  const narrativeConsolidationScheduler = new NarrativeConsolidationScheduler(pgPool, {
+    enabled: (sched['narrative_consolidation_enabled'] as unknown as boolean) ?? false,
+    consolidationHour: s('narrative_consolidation_hour', 3),
+    timezone, userId,
+  });
+  narrativeConsolidationScheduler.start();
+  schedulers.push(narrativeConsolidationScheduler);
 
   // MCP health + tool-error-rate monitor — cluster-wide, not user-specific,
   // but tied to a user for FCM routing.
