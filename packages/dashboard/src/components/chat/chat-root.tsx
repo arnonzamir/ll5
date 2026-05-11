@@ -19,31 +19,18 @@ import { MessageStream } from "./message-stream";
 import { CommandPalette } from "./command-palette";
 import { NewConversationDialog } from "./new-conversation-dialog";
 
-interface Props {
-  initialConvId: string | null;
-  initialMessages: Message[];
-}
-
 /**
  * Top-level client shell for /chat. Owns:
- *   - installing the chat session (SSE + sweep) once
- *   - seeding the store with server-rendered initial data
+ *   - installing the chat session (cache hydration + SSE + sweep) once
  *   - keyboard shortcuts (cmd+k, cmd+n, cmd+b, cmd+enter, esc)
  *   - layout between sidebar / stream / composer
  *   - new-conversation dialog + command palette
+ *
+ * Initial state hydrates from localStorage cache inside useChatSession() —
+ * the page renders the shell instantly and messages appear in <50ms when
+ * cache hits. Server fetch happens in parallel and merges as it lands.
  */
-export function ChatRoot({ initialConvId, initialMessages }: Props) {
-  // Seed the store on mount (once). Subsequent mounts won't reseed —
-  // SSE + history fetches keep it fresh.
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => {
-    if (hydrated) return;
-    const store = useChatStore.getState();
-    if (initialConvId) store.setConv(initialConvId);
-    if (initialMessages.length > 0) store.ingest("history", initialMessages);
-    setHydrated(true);
-  }, [initialConvId, initialMessages, hydrated]);
-
+export function ChatRoot() {
   useChatSession();
 
   const convId = useConvId();
@@ -79,20 +66,30 @@ export function ChatRoot({ initialConvId, initialMessages }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [paletteOpen, newDialogOpen, replyTo]);
 
-  // Load fresh history whenever the active conversation id changes (e.g.
-  // after a grace-window reroute or a conversation_archived pivot).
+  // When the active conversation pivots mid-session (grace-window reroute
+  // or conversation_archived → new active), pull fresh history for the new
+  // conv. Bootstrap fetch in useChatSession handles the initial mount; this
+  // effect only fires on subsequent convId changes.
+  const [bootstrappedConvId, setBootstrappedConvId] = useState<string | null>(null);
   useEffect(() => {
     if (!convId) return;
+    if (bootstrappedConvId === null) {
+      // First convId hydration — useChatSession handled it.
+      setBootstrappedConvId(convId);
+      return;
+    }
+    if (convId === bootstrappedConvId) return;
+    setBootstrappedConvId(convId);
     (async () => {
       try {
-        const res = await fetch(`/api/chat/messages?conversation_id=${convId}&limit=200`);
+        const res = await fetch(`/api/chat/messages?conversation_id=${convId}&limit=30`);
         if (res.ok) {
           const data = (await res.json()) as { messages?: Message[] };
           if (data.messages) useChatStore.getState().ingest("history", data.messages);
         }
       } catch { /* noop */ }
     })();
-  }, [convId]);
+  }, [convId, bootstrappedConvId]);
 
   const handleSend = useCallback(
     async (args: { text: string; imageUrl?: string; imageFilename?: string }) => {

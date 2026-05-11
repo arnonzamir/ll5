@@ -6,6 +6,46 @@ import { useShallow } from "zustand/react/shallow";
 import type { Message, Reaction } from "@/lib/chat/types";
 
 // ---------------------------------------------------------------------------
+// localStorage cache — render-instantly substrate.
+// ---------------------------------------------------------------------------
+
+const CACHE_KEY = "ll5_chat_cache_v1";
+const CACHE_LIMIT = 30; // tail kept per conv; first paint feels instant
+const FIRST_FETCH_LIMIT = 30; // initial server fetch; older paginate on scroll
+
+interface ChatCache {
+  convId: string | null;
+  messages: Message[];
+}
+
+function loadCache(): ChatCache | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ChatCache;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!Array.isArray(parsed.messages)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(convId: string | null, messages: Message[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    // Persist only the tail — large histories belong on the server, not in
+    // localStorage (5MB quota and slow parse on read).
+    const tail = messages.slice(-CACHE_LIMIT);
+    const payload: ChatCache = { convId, messages: tail };
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // Quota exceeded or other write failure — silently skip; cache is best-effort.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Store shape
 // ---------------------------------------------------------------------------
 
@@ -214,8 +254,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 // ---------------------------------------------------------------------------
 
 /**
- * Install the session side effects (SSE + safety sweep) for the chat
- * store. Call once at the top of the chat route. Returns nothing.
+ * Install the session side effects (SSE + safety sweep + bootstrap) for the
+ * chat store. Call once at the top of the chat route. Returns nothing.
+ *
+ * Bootstrap is render-instantly: hydrate from localStorage cache first
+ * (<50ms), then in parallel fetch the active convId + fresh tail from the
+ * server and merge. The cache is the user-visible state during the cold-load
+ * window; the server reconciles in the background.
  *
  * SSE is the primary delivery path. The sweep runs every 15s but only
  * when the tab is visible AND no SSE event has landed in the last 10s
@@ -224,6 +269,56 @@ export const useChatStore = create<ChatState>((set, get) => ({
  */
 export function useChatSession(): void {
   const convId = useChatStore((s) => s.convId);
+
+  // Bootstrap (cache-then-fetch). Runs once per mount.
+  useEffect(() => {
+    let cancelled = false;
+
+    // 1) Paint cache immediately if available.
+    const cached = loadCache();
+    if (cached) {
+      const store = useChatStore.getState();
+      if (cached.convId) store.setConv(cached.convId);
+      if (cached.messages.length > 0) store.ingest("history", cached.messages);
+    }
+
+    // 2) Refresh from server in parallel. Active convId + tail in two fetches;
+    //    don't wait sequentially — kick both off and merge as they land.
+    (async () => {
+      try {
+        const activeRes = await fetch("/api/chat/conversations/active");
+        if (cancelled || !activeRes.ok) return;
+        const activeData = (await activeRes.json()) as { conversation_id?: string };
+        const fresh = activeData.conversation_id ?? null;
+        if (!fresh) return;
+
+        const store = useChatStore.getState();
+        if (fresh !== store.convId) store.setConv(fresh);
+
+        const histRes = await fetch(
+          `/api/chat/messages?conversation_id=${fresh}&limit=${FIRST_FETCH_LIMIT}`,
+        );
+        if (cancelled || !histRes.ok) return;
+        const histData = (await histRes.json()) as { messages?: Message[] };
+        if (histData.messages && histData.messages.length > 0) {
+          useChatStore.getState().ingest("history", histData.messages);
+        }
+      } catch {
+        // Network blip — cache stays visible; SSE/sweep will catch up.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist on every store change (debounced via the version counter — store
+  // mutations bump version, this hook re-runs to write the tail).
+  const messages = useChatStore((s) => s.messages);
+  useEffect(() => {
+    saveCache(convId, messages);
+  }, [convId, messages]);
 
   // SSE
   useEffect(() => {
@@ -318,7 +413,9 @@ export function useChatSession(): void {
       if (since < 10_000) return; // SSE recently active — trust it.
 
       try {
-        const res = await fetch(`/api/chat/messages?conversation_id=${convId}&limit=200`);
+        // Sweep only catches what SSE missed — last 50 is plenty for a
+        // reconciliation pass. Older messages don't change underneath us.
+        const res = await fetch(`/api/chat/messages?conversation_id=${convId}&limit=50`);
         if (!res.ok) return;
         const data = (await res.json()) as { messages?: Message[] };
         if (data.messages) useChatStore.getState().ingest("sweep", data.messages);
