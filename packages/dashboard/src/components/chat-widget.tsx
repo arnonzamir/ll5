@@ -400,6 +400,48 @@ function MessageBubble({ m, parent, reactions, onReply, onReact, onRemoveReactio
 }
 
 // ---------------------------------------------------------------------------
+// localStorage cache — render-instantly substrate.
+// Same key as the /chat full-screen view so writes from one surface
+// warm the other on next open. Capped at last 30 messages.
+// ---------------------------------------------------------------------------
+
+const CACHE_KEY = "ll5_chat_cache_v1";
+const CACHE_LIMIT = 30;
+const FIRST_FETCH_LIMIT = 30;
+
+interface ChatCache {
+  convId: string | null;
+  messages: Message[];
+}
+
+function loadCache(): ChatCache | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ChatCache;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!Array.isArray(parsed.messages)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(convId: string | null, messages: Message[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    const tail = messages.slice(-CACHE_LIMIT);
+    window.localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({ convId, messages: tail }),
+    );
+  } catch {
+    /* quota or write failure — best-effort */
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main widget
 // ---------------------------------------------------------------------------
 
@@ -424,8 +466,23 @@ export function ChatWidget() {
   };
   useEffect(scrollToBottom, [messages]);
 
-  // ---- Load active conversation on mount -------------------------------
+  // ---- Bootstrap: render-cached-then-refresh ---------------------------
+  // Phase 1: paint cached state (<50ms). Phase 2: fetch fresh active and
+  // merge if it differs. The convId-change effect below pulls fresh
+  // history when convId lands; we leave that alone — it'll fire either
+  // from the cache hydration or from the server response.
   useEffect(() => {
+    const cached = loadCache();
+    if (cached) {
+      if (cached.convId) setConvId(cached.convId);
+      if (cached.messages.length > 0) {
+        seenIds.current.clear();
+        for (const m of cached.messages) seenIds.current.add(m.id);
+        setMessages(cached.messages);
+      }
+      // Cache present — render is already done, no spinner.
+      setInitialized(true);
+    }
     (async () => {
       try {
         const res = await fetch("/api/chat/conversations/active");
@@ -445,7 +502,9 @@ export function ChatWidget() {
     if (!convId) return;
     (async () => {
       try {
-        const res = await fetch(`/api/chat/messages?conversation_id=${convId}&limit=200`);
+        const res = await fetch(
+          `/api/chat/messages?conversation_id=${convId}&limit=${FIRST_FETCH_LIMIT}`,
+        );
         if (!res.ok) return;
         const data = await res.json();
         seenIds.current.clear();
@@ -461,6 +520,11 @@ export function ChatWidget() {
       }
     })();
   }, [convId]);
+
+  // ---- Persist cache on every messages/convId change ------------------
+  useEffect(() => {
+    saveCache(convId, messages);
+  }, [convId, messages]);
 
   // ---- SSE subscription ------------------------------------------------
   useEffect(() => {
@@ -574,7 +638,9 @@ export function ChatWidget() {
     if (!convId) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/chat/messages?conversation_id=${convId}&limit=200`);
+        // Sweep is reconciliation, not first paint — pull a small window
+        // of recent rows. Older messages don't change underneath us.
+        const res = await fetch(`/api/chat/messages?conversation_id=${convId}&limit=50`);
         if (!res.ok) return;
         const data = await res.json();
         const serverMsgs = (data.messages ?? []) as Message[];
