@@ -171,11 +171,23 @@ async function startSchedulersForUser(
   mcpHealthMonitor.start();
   schedulers.push(mcpHealthMonitor);
 
-  // Channel bridge liveness — detects pending inbound messages piling up
-  // because the client-side channel MCP has gone silent.
+  // Channel bridge liveness — DEPRECATED for the server-agent topology.
+  // Originally designed to catch the Mac case where the channel MCP's SSE
+  // socket goes half-open and the bridge looks alive but isn't delivering.
+  // On the server-agent topology (since 2026-05-12 ghcr.io/arnonzamir/ll5-agent)
+  // the channel MCP throttles deliveries by design (1 event / 5s, see
+  // ll5-run/channel/ll5-channel.mjs::enqueueNotification), so pending
+  // messages legitimately age past the old 5-min staleness threshold during
+  // any burst — causing false-positive "agent disconnected" critical FCM
+  // alerts. The gateway has no way to tell "stuck in our throttle queue"
+  // from "channel MCP is dead". Default raised to 1h (effectively-off) so
+  // the monitor only fires for truly stuck bridges. The real signal we want
+  // — "events arrived recently, none got answered" — is covered by
+  // agent-output-monitor below. Set channel_stale_seconds in user_settings
+  // to a lower value (e.g. 600) if a Mac-style bridge is ever brought back.
   const channelLivenessMonitor = new ChannelLivenessMonitor(pgPool, {
     intervalMinutes: s('channel_liveness_minutes', 2),
-    stalenessSeconds: s('channel_stale_seconds', 300), // 5 min
+    stalenessSeconds: s('channel_stale_seconds', 3600),
     startHour, endHour, timezone, userId,
   });
   channelLivenessMonitor.start();
@@ -195,10 +207,15 @@ async function startSchedulersForUser(
   // failure mode that channel-liveness and mcp-health don't see. If
   // scheduler-triggered system rows are landing but no assistant-outbound is
   // being emitted during active hours, FCM-critical the user.
+  // Default silence raised from 2h → 0.5h (30min): with channel-liveness
+  // effectively disabled (see comment above), this is now the primary
+  // "agent isn't keeping up" signal during active hours. 30min strikes the
+  // balance between catching real hangs quickly and tolerating long
+  // tool-call clusters (narrative consolidation, weekly review, etc.).
   const agentOutputMonitor = new AgentOutputMonitor(pgPool, {
     intervalMinutes: s('agent_output_minutes', 15),
     minSystemInbound: s('agent_output_min_triggers', 2),
-    silenceHours: s('agent_output_silence_hours', 2),
+    silenceHours: s('agent_output_silence_hours', 0.5),
     lookbackHours: s('agent_output_lookback_hours', 3),
     startHour, endHour, timezone, userId,
   });
