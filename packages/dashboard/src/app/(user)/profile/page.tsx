@@ -14,8 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Shield, LogOut, Check, Globe, Clock } from "lucide-react";
-import { getUserInfo, getDisplayName, updateDisplayName, getUserSettings, updateUserSettings, logout, type UserSettings } from "./profile-server-actions";
+import { Shield, LogOut, Check, Globe, Clock, Languages } from "lucide-react";
+import { getUserInfo, getDisplayName, updateDisplayName, getPrimaryLanguage, updatePrimaryLanguage, getUserSettings, updateUserSettings, logout, type UserSettings } from "./profile-server-actions";
 
 interface UserInfo {
   userId: string;
@@ -28,6 +28,8 @@ export default function ProfilePage() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [displayNameSaved, setDisplayNameSaved] = useState(false);
+  const [primaryLanguage, setPrimaryLanguage] = useState<string>("");
+  const [primaryLanguageSaved, setPrimaryLanguageSaved] = useState(false);
   const [settings, setSettings] = useState<UserSettings>({
     timezone: "Asia/Jerusalem",
     work_week: { start_day: 0, start_hour: "09:00", end_hour: "17:00" },
@@ -38,9 +40,15 @@ export default function ProfilePage() {
 
   useEffect(() => {
     startTransition(async () => {
-      const [info, name, us] = await Promise.all([getUserInfo(), getDisplayName(), getUserSettings()]);
+      const [info, name, lang, us] = await Promise.all([
+        getUserInfo(),
+        getDisplayName(),
+        getPrimaryLanguage(),
+        getUserSettings(),
+      ]);
       setUser(info);
       setDisplayName(name);
+      setPrimaryLanguage(lang);
       if (us.error) setSettingsError(us.error);
       else setSettings(us.settings);
     });
@@ -52,6 +60,18 @@ export default function ProfilePage() {
       if (result.success) {
         setDisplayNameSaved(true);
         setTimeout(() => setDisplayNameSaved(false), 2000);
+      }
+    });
+  }
+
+  function handleSavePrimaryLanguage(value: string) {
+    setPrimaryLanguage(value);
+    setPrimaryLanguageSaved(false);
+    startTransition(async () => {
+      const result = await updatePrimaryLanguage(value);
+      if (result.success) {
+        setPrimaryLanguageSaved(true);
+        setTimeout(() => setPrimaryLanguageSaved(false), 2000);
       }
     });
   }
@@ -148,6 +168,41 @@ export default function ProfilePage() {
           </div>
           <p className="text-xs text-gray-400">
             This name is shown in the navigation bar and used across the system.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Response Language */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
+            <Languages className="h-4 w-4" /> Response Language
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Select
+              value={primaryLanguage || "auto"}
+              onValueChange={(v) => handleSavePrimaryLanguage(v === "auto" ? "" : v)}
+            >
+              <SelectTrigger className="flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Automatic (match my message language; English by default)</SelectItem>
+                <SelectItem value="English">Always English</SelectItem>
+                <SelectItem value="Hebrew">Always Hebrew</SelectItem>
+                <SelectItem value="Spanish">Always Spanish</SelectItem>
+              </SelectContent>
+            </Select>
+            {primaryLanguageSaved && (
+              <span className="text-xs text-green-600 flex items-center gap-1">
+                <Check className="h-4 w-4" /> Saved
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-400">
+            Sets the language the agent uses in its responses. <em>Automatic</em> defaults to English and switches to Hebrew only when your message is written in Hebrew script. The other options force one language regardless of your input. Verbatim quotes from messages always stay in their original language.
           </p>
         </CardContent>
       </Card>

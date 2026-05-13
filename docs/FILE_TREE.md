@@ -86,7 +86,7 @@ ll5/
 │
 ├── packages/personal-knowledge/       # @ll5/personal-knowledge — ES-backed MCP
 │   └── src/
-│       ├── repositories/elasticsearch/  # 8 ES repositories (fact, person, place, profile, data-gap, network, observation, narrative)
+│       ├── repositories/elasticsearch/  # 8 ES repositories (fact, person, place, profile [May 13: + primary_language field for agent response-language override], data-gap, network, observation, narrative)
 │       ├── repositories/interfaces/     # Repository interfaces
 │       ├── tools/                       # 28 MCP tools (all logged via withToolLogging) — includes networks (find_place_by_bssid, label_network, unlabel_network, list_known_networks) and narratives (note_observation, recall, list_narratives, get_narrative, upsert_narrative, delete_observation, consolidate_narrative — narratives.ts)
 │       ├── __tests__/                   # 77 tests: person repo, people tools, observation repo (recall/stats/listForSubject/delete), narrative repo (deterministic id, sensitivity OR-bump, status filters, stale_for_days)

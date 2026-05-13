@@ -37,6 +37,7 @@ const INDICES: IndexDefinition[] = [
         bio: { type: 'text', analyzer: 'multilingual' },
         birth_date: { type: 'date', format: 'yyyy-MM-dd||strict_date_optional_time' },
         languages: { type: 'keyword' },
+        primary_language: { type: 'keyword' },
         created_at: { type: 'date' },
         updated_at: { type: 'date' },
       },

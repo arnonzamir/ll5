@@ -11,6 +11,7 @@ interface ProfileDoc {
   bio?: string;
   birth_date?: string;
   languages?: string[];
+  primary_language?: string;
   created_at: string;
   updated_at: string;
 }
@@ -24,6 +25,7 @@ function docToProfile(doc: ProfileDoc, userId: string): Profile {
     bio: doc.bio,
     birthDate: doc.birth_date,
     languages: doc.languages,
+    primaryLanguage: doc.primary_language,
     createdAt: doc.created_at,
     updatedAt: doc.updated_at,
   };
@@ -65,6 +67,7 @@ export class ElasticsearchProfileRepository
       bio: data.bio ?? existing?.bio,
       birth_date: data.birthDate ?? existing?.birthDate,
       languages: data.languages ?? existing?.languages,
+      primary_language: data.primaryLanguage ?? existing?.primaryLanguage,
       created_at: existing?.createdAt ?? now,
       updated_at: now,
     };

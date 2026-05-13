@@ -10,7 +10,7 @@ export function registerProfileTools(
 ): void {
   server.tool(
     'get_profile',
-    'Retrieve the user profile including name, timezone, location, bio, languages.',
+    'Retrieve the user profile including name, timezone, location, bio, languages, primary_language.',
     {},
     async () => {
       const userId = getUserId();
@@ -35,7 +35,8 @@ export function registerProfileTools(
       location: z.string().optional().describe('Free-text current location'),
       bio: z.string().optional().describe('Short biography'),
       birth_date: z.string().optional().describe('ISO 8601 date (YYYY-MM-DD)'),
-      languages: z.array(z.string()).optional().describe('Spoken languages'),
+      languages: z.array(z.string()).optional().describe('Languages the user speaks (informational; not the response-language preference)'),
+      primary_language: z.string().optional().describe('Preferred language for agent responses (e.g. "English", "Hebrew"). When set, agent uses this regardless of the language of the user\'s current message (except verbatim quotes). Empty/undefined falls back to the default-English-with-Hebrew-match heuristic in CLAUDE.md.'),
     },
     async (params) => {
       const userId = getUserId();
@@ -46,6 +47,7 @@ export function registerProfileTools(
         bio: params.bio,
         birthDate: params.birth_date,
         languages: params.languages,
+        primaryLanguage: params.primary_language,
       });
 
       logAudit({

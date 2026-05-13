@@ -35,6 +35,7 @@ interface KnowledgeProfile {
   timezone?: string;
   location?: string;
   bio?: string;
+  primaryLanguage?: string;
 }
 
 export async function getDisplayName(): Promise<string> {
@@ -61,6 +62,35 @@ export async function updateDisplayName(name: string): Promise<{ success: boolea
   } catch (err) {
     console.error("[profile] updateDisplayName failed:", err instanceof Error ? err.message : String(err));
     return { success: false, name };
+  }
+}
+
+export async function getPrimaryLanguage(): Promise<string> {
+  try {
+    const data = await mcpCallJsonSafe<{ profile: KnowledgeProfile | null }>(
+      "knowledge",
+      "get_profile"
+    );
+    return data?.profile?.primaryLanguage ?? "";
+  } catch (err) {
+    console.error("[profile] getPrimaryLanguage failed:", err instanceof Error ? err.message : String(err));
+    return "";
+  }
+}
+
+export async function updatePrimaryLanguage(language: string): Promise<{ success: boolean; language: string }> {
+  try {
+    // Empty string clears the override → falls back to the default-English-with-
+    // Hebrew-match rule in CLAUDE.md.
+    const data = await mcpCallJsonSafe<{ profile: KnowledgeProfile }>(
+      "knowledge",
+      "update_profile",
+      { primary_language: language }
+    );
+    return { success: true, language: data?.profile?.primaryLanguage ?? language };
+  } catch (err) {
+    console.error("[profile] updatePrimaryLanguage failed:", err instanceof Error ? err.message : String(err));
+    return { success: false, language };
   }
 }
 
