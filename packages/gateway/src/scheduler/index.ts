@@ -13,6 +13,7 @@ import { HeartbeatScheduler } from './heartbeat.js';
 import { JournalHealthScheduler } from './journal-health.js';
 import { JournalConsolidationScheduler } from './journal-consolidation.js';
 import { NarrativeConsolidationScheduler } from './narrative-consolidation.js';
+import { StuckMessageSweep } from './stuck-message-sweep.js';
 import { HealthPollingScheduler } from './health-polling.js';
 import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
@@ -157,6 +158,19 @@ async function startSchedulersForUser(
   });
   narrativeConsolidationScheduler.start();
   schedulers.push(narrativeConsolidationScheduler);
+
+  // Stuck-message sweep — flips long-pending/processing system rows to
+  // delivered so the channel-liveness monitor isn't fooled by handled-but-
+  // unmarked rows. Channel MCP now marks system rows delivered directly on
+  // delivery (ll5-run side); this is the safety net.
+  const stuckMessageSweep = new StuckMessageSweep(pgPool, {
+    intervalMinutes: s('stuck_message_sweep_minutes', 10),
+    stuckAfterMinutes: s('stuck_message_after_minutes', 30),
+    channels: ['system'],
+    userId,
+  });
+  stuckMessageSweep.start();
+  schedulers.push(stuckMessageSweep);
 
   // MCP health + tool-error-rate monitor — cluster-wide, not user-specific,
   // but tied to a user for FCM routing.
