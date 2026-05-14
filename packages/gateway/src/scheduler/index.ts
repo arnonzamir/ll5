@@ -22,7 +22,6 @@ import { AgentOutputMonitor } from './agent-output-monitor.js';
 import { CharacterRefreshScheduler } from './character-refresh.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
-import { MCPStatusPulseScheduler } from './mcp-status-pulse.js';
 import { ChatSearchIndexer } from './chat-search-indexer.js';
 import { logger } from '../utils/logger.js';
 
@@ -173,7 +172,9 @@ async function startSchedulersForUser(
   schedulers.push(stuckMessageSweep);
 
   // MCP health + tool-error-rate monitor — cluster-wide, not user-specific,
-  // but tied to a user for FCM routing.
+  // but tied to a user for FCM routing. Probes both /health (HTTP) and
+  // tools/list (streamable-HTTP MCP) on every cycle — the latter catches the
+  // "connected but cannot list tools" ghost mode that /health alone misses.
   const mcpHealthMonitor = new MCPHealthMonitorScheduler(pgPool, es, {
     intervalMinutes: s('mcp_health_monitor_minutes', 2),
     mcpUrls: config.mcpHealthUrls,
@@ -181,6 +182,7 @@ async function startSchedulersForUser(
     failureThreshold: s('mcp_health_failure_threshold', 2),
     errorRateThreshold: 0.25,
     errorRateMinSamples: 10,
+    authSecret: config.authSecret,
   });
   mcpHealthMonitor.start();
   schedulers.push(mcpHealthMonitor);
@@ -255,18 +257,6 @@ async function startSchedulersForUser(
   });
   phoneLivenessMonitor.start();
   schedulers.push(phoneLivenessMonitor);
-
-  // Temporary 2h status pulse — fires through 2026-04-21 so the user gets
-  // regular visibility while the new monitors stabilise. Self-expires; no
-  // cleanup commit needed once the date passes.
-  const mcpStatusPulse = new MCPStatusPulseScheduler(pgPool, {
-    intervalMinutes: s('mcp_status_pulse_minutes', 120),
-    expiresAt: sched['mcp_status_pulse_expires_at'] as unknown as string
-      ?? '2026-04-21T18:00:00Z',
-    startHour, endHour, timezone, userId,
-  });
-  mcpStatusPulse.start();
-  schedulers.push(mcpStatusPulse);
 
   // --- Google-dependent schedulers (only start if googleClient exists) ---
 

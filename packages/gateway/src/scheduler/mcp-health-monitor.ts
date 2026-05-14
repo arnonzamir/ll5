@@ -1,5 +1,8 @@
 import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { generateToken } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 import { sendFCMNotification } from '../utils/fcm-sender.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
@@ -14,6 +17,11 @@ export interface ServiceHealth {
   consecutive_failures: number;
   last_healthy_at: string | null;
   last_checked_at: string;
+  /** Number of tools reported by the MCP's tools/list call on this cycle.
+   *  null = not probed (e.g. gateway entry has no MCP endpoint). */
+  tool_count: number | null;
+  /** Error from the tools/list probe (null = success or not probed). */
+  tools_probe_error: string | null;
 }
 
 export interface MCPErrorRateSample {
@@ -33,9 +41,12 @@ interface MCPHealthMonitorConfig {
   errorRateThreshold: number;
   /** Minimum tool-call sample size before an error rate is actionable. */
   errorRateMinSamples: number;
+  /** Shared auth secret used to mint short-lived probe tokens for tools/list calls. */
+  authSecret: string;
 }
 
 const CACHED_STATE: Map<string, ServiceHealth> = new Map();
+const PROBE_TIMEOUT_MS = 5000;
 
 /** Snapshot of the latest health state — used by /admin/health endpoint. */
 export function getHealthSnapshot(): ServiceHealth[] {
@@ -44,14 +55,32 @@ export function getHealthSnapshot(): ServiceHealth[] {
 
 /**
  * Pings all MCPs and the gateway /health endpoint on an interval and reports
- * via audit log + FCM on state transitions (healthy ↔ unhealthy). Also sweeps
- * the ll5_app_log index for elevated tool error rates per service — a service
- * that responds 200 on /health but whose tool calls are failing is still broken.
+ * via audit log + FCM on state transitions (healthy ↔ unhealthy).
+ *
+ * Two checks per service per cycle:
+ *   1. HTTP GET /health    — catches process-down / TLS / routing failures.
+ *   2. MCP tools/list call — catches the "connected but cannot list tools"
+ *      ghost mode (observed 2026-05-13 on awareness: /health 200 for 22h
+ *      while Claude Code's tool picker reported the MCP as failed).
+ *
+ * A cycle counts as failed if EITHER probe fails or tool_count is 0.
+ * Failure-tracking, FCM-critical, and recovery-notify logic is shared so we
+ * don't bolt on a parallel alerter.
+ *
+ * Also sweeps `ll5_app_log` for elevated tool error rates per service — a
+ * service that responds 200 on /health AND lists tools but whose tool calls
+ * are erroring on the inside is still broken; that path is independent of
+ * the per-service consecutive-failure escalation.
  *
  * Keyed by user_id so alerts respect notification-level routing, but the
  * checks themselves are user-independent.
  */
 const MAX_ALERTS_PER_EPISODE = 2;
+
+/** Services we should NOT probe via MCP tools/list — the gateway is a plain
+ *  HTTP service and exposes /health but no /mcp endpoint. Anything not in
+ *  this set is assumed to be a real MCP server. */
+const NON_MCP_SERVICES = new Set(['gateway']);
 
 export class MCPHealthMonitorScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -82,23 +111,107 @@ export class MCPHealthMonitorScheduler {
     }
   }
 
+  /**
+   * MCP tools/list probe via streamable-HTTP, mirroring the approach used by
+   * the channel bridge's `check_mcp_connectivity` (ll5-run/channel). The MCP
+   * endpoint lives at `${url}/mcp` and accepts a Bearer token minted by the
+   * same `generateToken` helper used by every other gateway → MCP call.
+   *
+   * Returns the tool count on success, or an error string on failure. Always
+   * resolves within ~5s (PROBE_TIMEOUT_MS).
+   */
+  private async probeTools(url: string): Promise<{ tool_count: number; error: string | null }> {
+    // Probe runs as the configured monitor user so the MCP's auth layer
+    // accepts the token; the probe doesn't actually read user data.
+    const token = generateToken(this.config.userId, this.config.authSecret, 1, 'user');
+    const mcpUrl = `${url.replace(/\/$/, '')}/mcp`;
+
+    let client: McpClient | null = null;
+    try {
+      const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), {
+        requestInit: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      client = new McpClient({ name: 'll5-gateway-health-probe', version: '0.1.0' }, { capabilities: {} });
+      await Promise.race([
+        client.connect(transport),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error(`tools_list_timeout_${PROBE_TIMEOUT_MS}ms`)), PROBE_TIMEOUT_MS),
+        ),
+      ]);
+      const tools = await Promise.race([
+        client.listTools(),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error(`tools_list_timeout_${PROBE_TIMEOUT_MS}ms`)), PROBE_TIMEOUT_MS),
+        ),
+      ]);
+      return { tool_count: tools.tools?.length ?? 0, error: null };
+    } catch (err) {
+      return {
+        tool_count: 0,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      // Best-effort close; ignore errors so a stuck close can't poison the cycle.
+      try { await client?.close(); } catch { /* noop */ }
+    }
+  }
+
   private async checkOne(name: string, url: string): Promise<ServiceHealth> {
     const start = Date.now();
     const prev = CACHED_STATE.get(name);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    let healthy = false;
+    const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+    let healthOk = false;
     let statusCode: number | null = null;
-    let error: string | null = null;
+    let healthError: string | null = null;
     try {
       const res = await fetch(`${url}/health`, { signal: controller.signal });
       statusCode = res.status;
-      healthy = res.ok;
-      if (!res.ok) error = `http_${res.status}`;
+      healthOk = res.ok;
+      if (!res.ok) healthError = `http_${res.status}`;
     } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
+      healthError = err instanceof Error ? err.message : String(err);
     } finally {
       clearTimeout(timeout);
+    }
+
+    // Tools/list probe — skipped for non-MCP services (gateway).
+    let tool_count: number | null = null;
+    let tools_probe_error: string | null = null;
+    if (!NON_MCP_SERVICES.has(name)) {
+      const probe = await this.probeTools(url);
+      tool_count = probe.tool_count;
+      tools_probe_error = probe.error;
+    }
+
+    // Composite health: BOTH probes must pass (where applicable). A non-MCP
+    // service is healthy iff /health is ok. An MCP service is healthy iff
+    // /health is ok AND tools/list returned >0 tools.
+    const toolsOk =
+      NON_MCP_SERVICES.has(name) ||
+      (tools_probe_error === null && (tool_count ?? 0) > 0);
+    const healthy = healthOk && toolsOk;
+
+    // Build a precise error string for FCM/log surfacing. Both probes can
+    // fail in the same cycle, and the distinction matters for triage.
+    let error: string | null = null;
+    if (!healthy) {
+      const parts: string[] = [];
+      if (!healthOk) {
+        parts.push(`/health ${healthError ?? 'failed'}`);
+      } else {
+        parts.push(`/health ok`);
+      }
+      if (!NON_MCP_SERVICES.has(name)) {
+        if (tools_probe_error) {
+          parts.push(`tools/list ${tools_probe_error}`);
+        } else if ((tool_count ?? 0) === 0) {
+          parts.push(`tools/list returned 0 tools`);
+        } else {
+          parts.push(`tools/list ok (${tool_count})`);
+        }
+      }
+      error = parts.join(', ');
     }
 
     const consecutive_failures = healthy ? 0 : (prev?.consecutive_failures ?? 0) + 1;
@@ -116,6 +229,8 @@ export class MCPHealthMonitorScheduler {
       consecutive_failures,
       last_healthy_at,
       last_checked_at: new Date().toISOString(),
+      tool_count,
+      tools_probe_error,
     };
   }
 
@@ -174,15 +289,22 @@ export class MCPHealthMonitorScheduler {
           service: next.name,
           url: next.url,
           error: next.error,
+          tool_count: next.tool_count,
+          tools_probe_error: next.tools_probe_error,
           consecutive_failures: next.consecutive_failures,
           alert_number: count + 1,
         });
         await sendFCMNotification(this.pool, this.config.userId, {
           title: 'LL5 service down',
-          body: `${next.name} is failing: ${next.error ?? 'unhealthy'} (${next.consecutive_failures}× in a row, alert ${count + 1}/${MAX_ALERTS_PER_EPISODE})`,
+          body: `${next.name}: ${next.error ?? 'unhealthy'} (${next.consecutive_failures}× in a row, alert ${count + 1}/${MAX_ALERTS_PER_EPISODE})`,
           type: 'mcp_health',
           notification_level: 'critical',
-          data: { service: next.name, error: next.error ?? '' },
+          data: {
+            service: next.name,
+            error: next.error ?? '',
+            tool_count: String(next.tool_count ?? ''),
+            tools_probe_error: next.tools_probe_error ?? '',
+          },
         });
       }
     } else if (isHealthy && !wasHealthy) {
@@ -193,6 +315,7 @@ export class MCPHealthMonitorScheduler {
       logger.info('[MCPHealthMonitor][alert] Service recovered', {
         service: next.name,
         downtime_seconds: downtimeSec,
+        tool_count: next.tool_count,
       });
       await sendFCMNotification(this.pool, this.config.userId, {
         title: 'LL5 service recovered',
@@ -206,7 +329,7 @@ export class MCPHealthMonitorScheduler {
 
   private async tick(): Promise<void> {
     try { await withSchedulerHealth('mcp_health_monitor', async () => {
-    // 1. Concurrent /health probes for all services
+    // 1. Concurrent /health + tools/list probes for all services
     const entries = Object.entries(this.config.mcpUrls);
     const results = await Promise.all(entries.map(([name, url]) => this.checkOne(name, url)));
 
@@ -248,11 +371,14 @@ export class MCPHealthMonitorScheduler {
       });
     }
 
-    const unhealthy = results.filter((r) => !r.healthy).map((r) => r.name);
+    const unhealthy = results.filter((r) => !r.healthy).map((r) => `${r.name}(${r.error ?? 'unknown'})`);
     if (unhealthy.length > 0) {
       logger.warn('[MCPHealthMonitor][tick] Unhealthy services', { unhealthy });
     } else {
-      logger.debug('[MCPHealthMonitor][tick] All services healthy', { count: results.length });
+      logger.debug('[MCPHealthMonitor][tick] All services healthy', {
+        count: results.length,
+        tools: results.map((r) => `${r.name}:${r.tool_count ?? 'n/a'}`).join(','),
+      });
     }
     }); } catch { /* withSchedulerHealth already recorded + logged */ }
   }
