@@ -15,16 +15,6 @@ interface ServiceHealth {
   lastCheckedAt?: string | null;
 }
 
-export interface ChannelLiveness {
-  userId: string;
-  pending_inbound: number;
-  oldest_pending_age_seconds: number | null;
-  last_outbound_at: string | null;
-  last_delivered_at: string | null;
-  stale: boolean;
-  checked_at: string;
-}
-
 export interface WhatsAppFlowSnapshot {
   userId: string;
   account_count: number;
@@ -55,7 +45,6 @@ export interface AgentOutputSnapshot {
 
 export interface HealthSnapshot {
   services: ServiceHealth[];
-  channels: ChannelLiveness[];
   whatsapp: WhatsAppFlowSnapshot[];
   phones: PhoneLivenessSnapshot[];
   agent_output: AgentOutputSnapshot[];
@@ -63,7 +52,6 @@ export interface HealthSnapshot {
   summary: {
     services_total: number;
     services_unhealthy: number;
-    channels_stale: number;
     whatsapp_stale: number;
     phones_stale: number;
     agent_output_stale: number;
@@ -96,7 +84,6 @@ export async function pollHealth(): Promise<HealthSnapshot> {
             last_healthy_at?: string | null;
             last_checked_at?: string | null;
           }>;
-          channels: ChannelLiveness[];
           whatsapp?: WhatsAppFlowSnapshot[];
           phones?: PhoneLivenessSnapshot[];
           agent_output?: AgentOutputSnapshot[];
@@ -115,7 +102,6 @@ export async function pollHealth(): Promise<HealthSnapshot> {
             lastHealthyAt: s.last_healthy_at ?? null,
             lastCheckedAt: s.last_checked_at ?? null,
           })),
-          channels: data.channels,
           whatsapp: data.whatsapp ?? [],
           phones: data.phones ?? [],
           agent_output: data.agent_output ?? [],
@@ -123,7 +109,6 @@ export async function pollHealth(): Promise<HealthSnapshot> {
           summary: {
             services_total: data.summary?.services_total ?? data.services.length,
             services_unhealthy: data.summary?.services_unhealthy ?? 0,
-            channels_stale: data.summary?.channels_stale ?? 0,
             whatsapp_stale: data.summary?.whatsapp_stale ?? 0,
             phones_stale: data.summary?.phones_stale ?? 0,
             agent_output_stale: data.summary?.agent_output_stale ?? 0,
@@ -146,7 +131,6 @@ export async function pollHealth(): Promise<HealthSnapshot> {
   );
   return {
     services: results,
-    channels: [],
     whatsapp: [],
     phones: [],
     agent_output: [],
@@ -154,7 +138,6 @@ export async function pollHealth(): Promise<HealthSnapshot> {
     summary: {
       services_total: results.length,
       services_unhealthy: results.filter((r) => !r.healthy).length,
-      channels_stale: 0,
       whatsapp_stale: 0,
       phones_stale: 0,
       agent_output_stale: 0,

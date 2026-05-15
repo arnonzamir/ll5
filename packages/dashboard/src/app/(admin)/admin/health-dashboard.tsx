@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, AlertTriangle, MessageSquare, Smartphone, Database, Server, Radio, Bot } from "lucide-react";
+import { RefreshCw, AlertTriangle, MessageSquare, Smartphone, Database, Server, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { pollHealth, type HealthSnapshot } from "./health-actions";
 
@@ -60,7 +60,6 @@ export function HealthDashboard() {
   }, [refresh]);
 
   const services = snapshot?.services ?? [];
-  const channels = snapshot?.channels ?? [];
   const whatsapp = snapshot?.whatsapp ?? [];
   const phones = snapshot?.phones ?? [];
   const agentOutput = snapshot?.agent_output ?? [];
@@ -70,7 +69,6 @@ export function HealthDashboard() {
 
   const totalIssues =
     (summary?.services_unhealthy ?? 0) +
-    (summary?.channels_stale ?? 0) +
     (summary?.whatsapp_stale ?? 0) +
     (summary?.phones_stale ?? 0) +
     (summary?.agent_output_stale ?? 0) +
@@ -89,7 +87,6 @@ export function HealthDashboard() {
             <div className="flex flex-wrap items-center gap-3 mt-1 text-sm text-red-600">
               <AlertTriangle className="h-4 w-4" />
               {(summary?.services_unhealthy ?? 0) > 0 && <span>{summary?.services_unhealthy} service(s) down</span>}
-              {(summary?.channels_stale ?? 0) > 0 && <span>{summary?.channels_stale} channel(s) stalled</span>}
               {(summary?.whatsapp_stale ?? 0) > 0 && <span>{summary?.whatsapp_stale} WhatsApp stalled</span>}
               {(summary?.phones_stale ?? 0) > 0 && <span>{summary?.phones_stale} phone(s) silent</span>}
               {(summary?.agent_output_stale ?? 0) > 0 && <span>{summary?.agent_output_stale} agent silent</span>}
@@ -175,41 +172,6 @@ export function HealthDashboard() {
             </CardContent>
           </Card>
         </div>
-      </section>
-
-      {/* Channel bridge liveness */}
-      <section>
-        <h2 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-          <Radio className="h-4 w-4" /> Channel bridge liveness
-        </h2>
-        {channels.length === 0 ? (
-          <p className="text-sm text-gray-500">
-            No liveness snapshots yet — the monitor runs every 2 min.
-          </p>
-        ) : (
-          <div className="grid sm:grid-cols-2 gap-4">
-            {channels.map((c) => (
-              <Card key={c.userId}>
-                <CardContent className="p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">User {c.userId.slice(0, 8)}…</span>
-                    <Badge variant={c.stale ? "destructive" : "success"}>
-                      {c.stale ? "Stalled" : "Delivering"}
-                    </Badge>
-                  </div>
-                  <div className="text-xs text-gray-500 space-y-0.5">
-                    <div>Pending inbound: <span className="font-mono">{c.pending_inbound}</span></div>
-                    <div>
-                      Oldest pending: <span className="font-mono">{fmtAgeSeconds(c.oldest_pending_age_seconds)}</span>
-                    </div>
-                    <div>Last assistant reply: {fmtSince(c.last_outbound_at)}</div>
-                    <div>Last delivered inbound: {fmtSince(c.last_delivered_at)}</div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
       </section>
 
       {/* WhatsApp flow */}

@@ -5,7 +5,6 @@ import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 import { logger } from './utils/logger.js';
 import { getHealthSnapshot } from './scheduler/mcp-health-monitor.js';
-import { getAllLivenessSnapshots } from './scheduler/channel-liveness-monitor.js';
 import { getAllWhatsAppFlowSnapshots } from './scheduler/whatsapp-flow-monitor.js';
 import { getAllPhoneLivenessSnapshots } from './scheduler/phone-liveness-monitor.js';
 import { getAllAgentOutputSnapshots } from './scheduler/agent-output-monitor.js';
@@ -116,14 +115,13 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
   const admin = requireAdmin(authSecret);
 
   // ---------------------------------------------------------------------------
-  // GET /admin/health — aggregate health of all MCPs, gateway, DBs, channel bridge
-  // Returns the cached snapshot from the MCPHealthMonitor + ChannelLivenessMonitor,
-  // so there's no fan-out penalty per request. Falls back to live DB pings on empty cache.
+  // GET /admin/health — aggregate health of all MCPs, gateway, DBs, agent flow
+  // Returns the cached snapshot from the failsafe monitors so there's no
+  // fan-out penalty per request. Falls back to live DB pings on empty cache.
   // ---------------------------------------------------------------------------
   router.get('/health', admin, async (_req: Request, res: Response) => {
     try {
       const services = getHealthSnapshot();
-      const channels = getAllLivenessSnapshots();
       const whatsapp = getAllWhatsAppFlowSnapshots();
       const phones = getAllPhoneLivenessSnapshots();
       const agentOutput = getAllAgentOutputSnapshots();
@@ -149,7 +147,6 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
 
       res.json({
         services,
-        channels,
         whatsapp,
         phones,
         agent_output: agentOutput,
@@ -164,7 +161,6 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
         summary: {
           services_total: services.length,
           services_unhealthy: services.filter((s) => !s.healthy).length,
-          channels_stale: channels.filter((c) => c.stale).length,
           whatsapp_stale: whatsapp.filter((w) => w.stale).length,
           phones_stale: phones.filter((p) => p.stale).length,
           agent_output_stale: agentOutput.filter((a) => a.stale).length,

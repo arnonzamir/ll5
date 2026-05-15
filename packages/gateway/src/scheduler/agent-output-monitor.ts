@@ -52,11 +52,14 @@ export function getAllAgentOutputSnapshots(): AgentOutputSnapshot[] {
 }
 
 /**
- * Agent-output monitor — catches the blind spot that channel-liveness and
- * mcp-health can't see: the laptop-side agent is connected and draining
- * pending system messages (so nothing is stale), but it isn't actually
- * producing any outbound replies that reach the user. All other monitors
- * report green while the user's phone stays silent for hours.
+ * Agent-output monitor — the sole "is the agent keeping up" signal on the
+ * server-agent topology. Catches the blind spot mcp-health can't see: the
+ * agent is connected and draining pending system messages (so nothing is
+ * stale) but isn't actually producing any outbound replies that reach the
+ * user. All other monitors report green while the user's phone stays silent
+ * for hours. Throttle-aware by design: watches outbound flow, not pending
+ * queue depth, so the channel MCP's intentional 1-event/5s delivery throttle
+ * doesn't trigger false positives.
  *
  * Trips when, during active hours, the user received ≥ minSystemInbound
  * scheduler-triggered system rows in the last lookbackHours but the agent

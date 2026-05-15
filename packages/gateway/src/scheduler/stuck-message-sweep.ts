@@ -22,8 +22,9 @@ interface StuckMessageSweepConfig {
  * never gets a chance to mark `delivered`, and the row pins at
  * `processing` (or `pending` if the PATCH to processing failed first).
  *
- * On 2026-05-12 this leaked 15+ rows pinned for 30+ hours that the
- * pending-age channel-liveness monitor read as "agent disconnected".
+ * On 2026-05-12 this leaked 15+ rows pinned for 30+ hours (caught only
+ * incidentally — the then-extant channel-liveness monitor read them as
+ * "agent disconnected" and false-paged before it was retired 2026-05-15).
  * Channel MCP now marks system rows `delivered` directly on delivery
  * (ll5-run commit f56a..), but this sweep is the safety net for any row
  * that slips through (network blip on the PATCH, future code path that

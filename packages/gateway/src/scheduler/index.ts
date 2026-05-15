@@ -17,7 +17,6 @@ import { StuckMessageSweep } from './stuck-message-sweep.js';
 import { HealthPollingScheduler } from './health-polling.js';
 import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
-import { ChannelLivenessMonitor } from './channel-liveness-monitor.js';
 import { AgentOutputMonitor } from './agent-output-monitor.js';
 import { CharacterRefreshScheduler } from './character-refresh.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
@@ -159,9 +158,9 @@ async function startSchedulersForUser(
   schedulers.push(narrativeConsolidationScheduler);
 
   // Stuck-message sweep — flips long-pending/processing system rows to
-  // delivered so the channel-liveness monitor isn't fooled by handled-but-
-  // unmarked rows. Channel MCP now marks system rows delivered directly on
-  // delivery (ll5-run side); this is the safety net.
+  // delivered so the table doesn't accumulate handled-but-unmarked rows.
+  // Channel MCP marks system rows delivered directly on delivery (ll5-run
+  // side); this is the safety net.
   const stuckMessageSweep = new StuckMessageSweep(pgPool, {
     intervalMinutes: s('stuck_message_sweep_minutes', 10),
     stuckAfterMinutes: s('stuck_message_after_minutes', 30),
@@ -187,28 +186,6 @@ async function startSchedulersForUser(
   mcpHealthMonitor.start();
   schedulers.push(mcpHealthMonitor);
 
-  // Channel bridge liveness — DEPRECATED for the server-agent topology.
-  // Originally designed to catch the Mac case where the channel MCP's SSE
-  // socket goes half-open and the bridge looks alive but isn't delivering.
-  // On the server-agent topology (since 2026-05-12 ghcr.io/arnonzamir/ll5-agent)
-  // the channel MCP throttles deliveries by design (1 event / 5s, see
-  // ll5-run/channel/ll5-channel.mjs::enqueueNotification), so pending
-  // messages legitimately age past the old 5-min staleness threshold during
-  // any burst — causing false-positive "agent disconnected" critical FCM
-  // alerts. The gateway has no way to tell "stuck in our throttle queue"
-  // from "channel MCP is dead". Default raised to 1h (effectively-off) so
-  // the monitor only fires for truly stuck bridges. The real signal we want
-  // — "events arrived recently, none got answered" — is covered by
-  // agent-output-monitor below. Set channel_stale_seconds in user_settings
-  // to a lower value (e.g. 600) if a Mac-style bridge is ever brought back.
-  const channelLivenessMonitor = new ChannelLivenessMonitor(pgPool, {
-    intervalMinutes: s('channel_liveness_minutes', 2),
-    stalenessSeconds: s('channel_stale_seconds', 3600),
-    startHour, endHour, timezone, userId,
-  });
-  channelLivenessMonitor.start();
-  schedulers.push(channelLivenessMonitor);
-
   // Character refresh — re-pushes the essence of the persona a few times a day
   // so long-running sessions (days) don't drift off-character. Agent-internal
   // signal; no FCM push.
@@ -219,15 +196,14 @@ async function startSchedulersForUser(
   characterRefreshScheduler.start();
   schedulers.push(characterRefreshScheduler);
 
-  // Agent-output monitor — catches the "channel drains but agent stays silent"
-  // failure mode that channel-liveness and mcp-health don't see. If
-  // scheduler-triggered system rows are landing but no assistant-outbound is
-  // being emitted during active hours, FCM-critical the user.
-  // Default silence raised from 2h → 0.5h (30min): with channel-liveness
-  // effectively disabled (see comment above), this is now the primary
-  // "agent isn't keeping up" signal during active hours. 30min strikes the
-  // balance between catching real hangs quickly and tolerating long
-  // tool-call clusters (narrative consolidation, weekly review, etc.).
+  // Agent-output monitor — primary "agent isn't keeping up" signal on the
+  // server-agent topology. Catches the "channel drains but agent stays silent"
+  // failure mode that mcp-health alone can't see. If scheduler-triggered
+  // system rows are landing but no assistant-outbound is being emitted during
+  // active hours, FCM-critical the user. Throttle-aware by design (watches
+  // outbound flow, not pending queue depth). Default silence 0.5h (30min)
+  // strikes the balance between catching real hangs quickly and tolerating
+  // long tool-call clusters (narrative consolidation, weekly review, etc.).
   const agentOutputMonitor = new AgentOutputMonitor(pgPool, {
     intervalMinutes: s('agent_output_minutes', 15),
     minSystemInbound: s('agent_output_min_triggers', 2),
