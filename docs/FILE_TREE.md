@@ -182,7 +182,7 @@ ll5/
 │
 ├── packages/shared/src/__tests__/      # 21 tests: auth token generation, validation, expiry
 ├── packages/gateway/src/__tests__/     # 174 tests: whatsapp webhook, whatsapp webhook route (auth + no-fallback), uploads-route (ownership), notification rules, chat, chat-conversations, admin API, phone contacts, getOrCreateActiveConversation retry loop
-├── packages/personal-knowledge/src/__tests__/ # 75 tests: person repo, people tools (rewritten May 18, real handlers via captureTools), observation repo, narrative repo
+├── packages/personal-knowledge/src/__tests__/ # 77 tests: person repo (rewrote May 18 to import real ElasticsearchPersonRepository — was last theater test), people tools (real handlers via captureTools), observation repo, narrative repo
 ├── packages/{gtd,awareness,health,messaging,google}/src/__tests__/ # Rewritten May 18 (Phase 0): real tool-handler tests via captureTools helper. 32 gtd, 46 awareness, 35 health, 39 messaging, 27 google.
 │   Each package has its own __tests__/_helpers.ts with the captureTools/parseToolResponse pattern.
 │   Standard documented in docs/testing.md.
