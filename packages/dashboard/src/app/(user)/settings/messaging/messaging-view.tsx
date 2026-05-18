@@ -24,6 +24,8 @@ import {
   Power,
   RotateCw,
   X,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import {
   Dialog,
@@ -538,6 +540,9 @@ function ConversationsSection({
   const [filter, setFilter] = useState<"all" | "direct" | "group">("all");
   const [namedOnly, setNamedOnly] = useState(false);
   const [sortBy, setSortBy] = useState<"permission" | "name">("permission");
+  // Conversations list is collapsed by default — most of the time the user
+  // is here to manage accounts, not flip 500 conversation toggles.
+  const [collapsed, setCollapsed] = useState(true);
 
   const filtered = conversations
     .filter((c) => {
@@ -574,16 +579,32 @@ function ConversationsSection({
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader
+        className="pb-3 cursor-pointer select-none"
+        onClick={() => setCollapsed((v) => !v)}
+        role="button"
+        aria-expanded={!collapsed}
+      >
         <CardTitle className="text-base flex items-center gap-2">
+          {collapsed ? (
+            <ChevronRight className="h-4 w-4 text-gray-400" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-gray-400" />
+          )}
           <MessageSquare className="h-4 w-4" />
           Conversations
+          <span className="ml-1 text-xs font-normal text-gray-400">
+            ({conversations.length})
+          </span>
         </CardTitle>
-        <CardDescription>
-          Control how the agent interacts with each conversation. Agent = full
-          access, Input = read only, Ignore = skip entirely.
-        </CardDescription>
+        {!collapsed && (
+          <CardDescription>
+            Control how the agent interacts with each conversation. Agent = full
+            access, Input = read only, Ignore = skip entirely.
+          </CardDescription>
+        )}
       </CardHeader>
+      {!collapsed && (
       <CardContent>
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -694,6 +715,7 @@ function ConversationsSection({
           </div>
         )}
       </CardContent>
+      )}
     </Card>
   );
 }
@@ -730,6 +752,18 @@ export function MessagingView() {
     text: string;
   } | null>(null);
 
+  // Helper: refresh each account's live status from Evolution (writes back to
+  // DB via the MCP), then re-fetch the rows so local state reflects truth.
+  // Without this, the DB column stays at whatever the last CONNECTION_UPDATE
+  // webhook wrote — which can lag Evolution by minutes or be flat-out wrong
+  // after a pairing flow. See incident notes 2026-05-18 PM.
+  const refreshAccountsLive = useCallback(async (accs: Account[]) => {
+    if (accs.length === 0) return;
+    await Promise.all(accs.map((a) => getAccountStatus(a.account_id)));
+    const fresh = await fetchAccounts();
+    setAccounts(fresh);
+  }, []);
+
   const loadData = useCallback(() => {
     startTransition(async () => {
       const [accountsData, conversationsData] = await Promise.all([
@@ -738,22 +772,24 @@ export function MessagingView() {
       ]);
       setAccounts(accountsData);
       setConversations(conversationsData);
+      // Fire-and-forget live refresh — paints DB-state immediately, replaces
+      // it with Evolution-truth a few seconds later.
+      void refreshAccountsLive(accountsData);
     });
-  }, []);
+  }, [refreshAccountsLive]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Live-status poll for the accounts list (every 10s)
+  // Every 15s: pull live status from Evolution (writes DB), then re-read DB.
   useEffect(() => {
     if (accounts.length === 0) return;
-    const interval = setInterval(async () => {
-      const fresh = await fetchAccounts();
-      setAccounts(fresh);
-    }, 10_000);
+    const interval = setInterval(() => {
+      void refreshAccountsLive(accounts);
+    }, 15_000);
     return () => clearInterval(interval);
-  }, [accounts.length]);
+  }, [accounts, refreshAccountsLive]);
 
   // While the pairing dialog is open, poll get_account_status every 5s and
   // auto-close when the account flips to connected. Also re-fetch the QR
