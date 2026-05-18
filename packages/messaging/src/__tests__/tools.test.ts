@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { ContactRepository, ContactRecord, ContactListResult } from '../repositories/interfaces/contact.repository.js';
+import type { ContactRepository, ContactRecord } from '../repositories/interfaces/contact.repository.js';
 import type { AccountRepository, WhatsAppAccountRecord } from '../repositories/interfaces/account.repository.js';
 import type { ConversationRepository, ConversationRecord } from '../repositories/interfaces/conversation.repository.js';
+import { captureTools, parseToolResponse } from './_helpers.js';
 
 // ---------------------------------------------------------------------------
 // Mock: @ll5/shared (logAudit is called in send_whatsapp, sync_whatsapp)
@@ -100,434 +101,472 @@ function makeConversation(overrides: Partial<ConversationRecord> = {}): Conversa
   };
 }
 
-/** Helper to invoke a registered MCP tool handler by simulating the registration. */
-function createMockServer() {
-  const tools = new Map<string, { handler: (params: Record<string, unknown>) => Promise<unknown> }>();
+function makeContactRepo(overrides: Partial<ContactRepository> = {}): ContactRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`ContactRepository.${name} not stubbed for this test`);
+  });
   return {
-    tool: (name: string, _desc: string, _schema: unknown, handler: (params: Record<string, unknown>) => Promise<unknown>) => {
-      tools.set(name, { handler });
-    },
-    call: async (name: string, params: Record<string, unknown> = {}) => {
-      const tool = tools.get(name);
-      if (!tool) throw new Error(`Tool ${name} not registered`);
-      return tool.handler(params);
-    },
-  };
+    upsert: unimpl('upsert'),
+    bulkUpsert: unimpl('bulkUpsert'),
+    list: unimpl('list'),
+    resolve: unimpl('resolve'),
+    linkPerson: unimpl('linkPerson'),
+    unlinkPerson: unimpl('unlinkPerson'),
+    ...overrides,
+  } as ContactRepository;
 }
 
-// ---------------------------------------------------------------------------
+function makeAccountRepo(overrides: Partial<AccountRepository> = {}): AccountRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`AccountRepository.${name} not stubbed for this test`);
+  });
+  return {
+    listWhatsApp: unimpl('listWhatsApp'),
+    listTelegram: unimpl('listTelegram'),
+    getWhatsApp: unimpl('getWhatsApp'),
+    getTelegram: unimpl('getTelegram'),
+    findAccountPlatform: unimpl('findAccountPlatform'),
+    updateStatus: unimpl('updateStatus'),
+    touchLastSeen: unimpl('touchLastSeen'),
+    getMessageCountToday: unimpl('getMessageCountToday'),
+    logSentMessage: unimpl('logSentMessage'),
+    createWhatsApp: unimpl('createWhatsApp'),
+    ...overrides,
+  } as AccountRepository;
+}
+
+function makeConversationRepo(overrides: Partial<ConversationRepository> = {}): ConversationRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`ConversationRepository.${name} not stubbed for this test`);
+  });
+  return {
+    list: unimpl('list'),
+    get: unimpl('get'),
+    upsert: unimpl('upsert'),
+    updatePermission: unimpl('updatePermission'),
+    touchLastMessage: unimpl('touchLastMessage'),
+    ...overrides,
+  } as ConversationRepository;
+}
+
+// ===========================================================================
 // list_contacts
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
-describe('list_contacts', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let contactRepo: ContactRepository;
+describe('list_contacts tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    contactRepo = {
-      upsert: vi.fn(),
-      bulkUpsert: vi.fn(),
-      list: vi.fn(),
-      resolve: vi.fn(),
-      linkPerson: vi.fn(),
-      unlinkPerson: vi.fn(),
-    };
+  it('forwards user_id and filters to the repo and returns contacts envelope', async () => {
+    const list = vi.fn(async () => ({
+      contacts: [makeContact(), makeContact({ id: 'contact-2', display_name: 'Another' })],
+      total: 2,
+    }));
+    const repo = makeContactRepo({ list });
 
     const { registerListContactsTool } = await import('../tools/list-contacts.js');
-    registerListContactsTool(server as any, contactRepo, getUserId);
-  });
+    const tools = captureTools((s) => registerListContactsTool(s, repo, getUserId));
+    const handler = tools.get('list_contacts');
+    expect(handler).toBeDefined();
 
-  it('returns contacts with total count', async () => {
-    const contacts = [makeContact(), makeContact({ id: 'contact-2', display_name: 'Another' })];
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts, total: 2 });
+    const response = await handler!({});
 
-    const result = await server.call('list_contacts', {});
-    const parsed = JSON.parse((result as any).content[0].text);
+    // Multi-tenancy: handler must forward USER_ID to the repo
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(list.mock.calls[0][0]).toBe(USER_ID);
 
+    const parsed = parseToolResponse<{ contacts: Array<{ id: string }>; total: number; count: number }>(response);
     expect(parsed.contacts).toHaveLength(2);
     expect(parsed.total).toBe(2);
     expect(parsed.count).toBe(2);
   });
 
-  it('passes platform filter to repo', async () => {
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts: [], total: 0 });
+  it('passes platform filter to repo, scoped to user_id', async () => {
+    const list = vi.fn(async () => ({ contacts: [], total: 0 }));
+    const repo = makeContactRepo({ list });
 
-    await server.call('list_contacts', { platform: 'whatsapp' });
+    const { registerListContactsTool } = await import('../tools/list-contacts.js');
+    const tools = captureTools((s) => registerListContactsTool(s, repo, getUserId));
 
-    expect(contactRepo.list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      platform: 'whatsapp',
-    }));
+    await tools.get('list_contacts')!({ platform: 'whatsapp' });
+
+    expect(list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ platform: 'whatsapp' }));
   });
 
-  it('passes query filter to repo', async () => {
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts: [], total: 0 });
+  it('passes query filter to repo, scoped to user_id', async () => {
+    const list = vi.fn(async () => ({ contacts: [], total: 0 }));
+    const repo = makeContactRepo({ list });
 
-    await server.call('list_contacts', { query: 'john' });
+    const { registerListContactsTool } = await import('../tools/list-contacts.js');
+    const tools = captureTools((s) => registerListContactsTool(s, repo, getUserId));
 
-    expect(contactRepo.list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      query: 'john',
-    }));
+    await tools.get('list_contacts')!({ query: 'john' });
+
+    expect(list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ query: 'john' }));
   });
 
-  it('passes is_group filter to repo', async () => {
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts: [], total: 0 });
+  it('passes is_group filter to repo, scoped to user_id', async () => {
+    const list = vi.fn(async () => ({ contacts: [], total: 0 }));
+    const repo = makeContactRepo({ list });
 
-    await server.call('list_contacts', { is_group: true });
+    const { registerListContactsTool } = await import('../tools/list-contacts.js');
+    const tools = captureTools((s) => registerListContactsTool(s, repo, getUserId));
 
-    expect(contactRepo.list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      is_group: true,
-    }));
+    await tools.get('list_contacts')!({ is_group: true });
+
+    expect(list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ is_group: true }));
   });
 
-  it('passes linked_only as hasPersonLink', async () => {
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts: [], total: 0 });
+  it('maps linked_only param to hasPersonLink, scoped to user_id', async () => {
+    const list = vi.fn(async () => ({ contacts: [], total: 0 }));
+    const repo = makeContactRepo({ list });
 
-    await server.call('list_contacts', { linked_only: false });
+    const { registerListContactsTool } = await import('../tools/list-contacts.js');
+    const tools = captureTools((s) => registerListContactsTool(s, repo, getUserId));
 
-    expect(contactRepo.list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      hasPersonLink: false,
-    }));
+    await tools.get('list_contacts')!({ linked_only: false });
+
+    expect(list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ hasPersonLink: false }));
   });
 
-  it('serializes last_seen_at as ISO string', async () => {
+  it('serializes last_seen_at as ISO string in response envelope', async () => {
     const date = new Date('2026-04-06T10:00:00Z');
-    vi.mocked(contactRepo.list).mockResolvedValue({
+    const list = vi.fn(async () => ({
       contacts: [makeContact({ last_seen_at: date })],
       total: 1,
-    });
+    }));
+    const repo = makeContactRepo({ list });
 
-    const result = await server.call('list_contacts', {});
-    const parsed = JSON.parse((result as any).content[0].text);
+    const { registerListContactsTool } = await import('../tools/list-contacts.js');
+    const tools = captureTools((s) => registerListContactsTool(s, repo, getUserId));
 
+    const response = await tools.get('list_contacts')!({});
+
+    expect(list.mock.calls[0][0]).toBe(USER_ID);
+    const parsed = parseToolResponse<{ contacts: Array<{ last_seen_at: string | null }> }>(response);
     expect(parsed.contacts[0].last_seen_at).toBe('2026-04-06T10:00:00.000Z');
   });
 
   it('serializes null last_seen_at as null', async () => {
-    vi.mocked(contactRepo.list).mockResolvedValue({
+    const list = vi.fn(async () => ({
       contacts: [makeContact({ last_seen_at: null })],
       total: 1,
-    });
+    }));
+    const repo = makeContactRepo({ list });
 
-    const result = await server.call('list_contacts', {});
-    const parsed = JSON.parse((result as any).content[0].text);
+    const { registerListContactsTool } = await import('../tools/list-contacts.js');
+    const tools = captureTools((s) => registerListContactsTool(s, repo, getUserId));
 
+    const response = await tools.get('list_contacts')!({});
+
+    expect(list.mock.calls[0][0]).toBe(USER_ID);
+    const parsed = parseToolResponse<{ contacts: Array<{ last_seen_at: string | null }> }>(response);
     expect(parsed.contacts[0].last_seen_at).toBeNull();
   });
 });
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // link_contact_to_person / unlink_contact_from_person
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
-describe('link_contact_to_person', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let contactRepo: ContactRepository;
+describe('link_contact_to_person tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    contactRepo = {
-      upsert: vi.fn(),
-      bulkUpsert: vi.fn(),
-      list: vi.fn(),
-      resolve: vi.fn(),
-      linkPerson: vi.fn(),
-      unlinkPerson: vi.fn(),
-    };
+  it('forwards user_id, contact_id, person_id to repo.linkPerson', async () => {
+    const linkPerson = vi.fn(async () => undefined);
+    const repo = makeContactRepo({ linkPerson });
 
-    const { registerLinkContactTool, registerUnlinkContactTool } = await import('../tools/link-contact.js');
-    registerLinkContactTool(server as any, contactRepo, getUserId);
-    registerUnlinkContactTool(server as any, contactRepo, getUserId);
-  });
+    const { registerLinkContactTool } = await import('../tools/link-contact.js');
+    const tools = captureTools((s) => registerLinkContactTool(s, repo, getUserId));
 
-  it('calls contactRepo.linkPerson with correct arguments', async () => {
-    vi.mocked(contactRepo.linkPerson).mockResolvedValue(undefined);
-
-    const result = await server.call('link_contact_to_person', {
+    const response = await tools.get('link_contact_to_person')!({
       contact_id: 'contact-1',
       person_id: 'person-abc',
     });
 
-    expect(contactRepo.linkPerson).toHaveBeenCalledWith(USER_ID, 'contact-1', 'person-abc');
-    const parsed = JSON.parse((result as any).content[0].text);
+    // Multi-tenancy: USER_ID is the first positional arg
+    expect(linkPerson).toHaveBeenCalledWith(USER_ID, 'contact-1', 'person-abc');
+
+    const parsed = parseToolResponse<{ success: boolean }>(response);
     expect(parsed.success).toBe(true);
   });
 
-  it('returns CONTACT_NOT_FOUND error when contact missing', async () => {
-    vi.mocked(contactRepo.linkPerson).mockRejectedValue(new Error('CONTACT_NOT_FOUND'));
+  it('returns CONTACT_NOT_FOUND isError envelope when repo throws CONTACT_NOT_FOUND', async () => {
+    const linkPerson = vi.fn(async () => { throw new Error('CONTACT_NOT_FOUND'); });
+    const repo = makeContactRepo({ linkPerson });
 
-    const result = await server.call('link_contact_to_person', {
+    const { registerLinkContactTool } = await import('../tools/link-contact.js');
+    const tools = captureTools((s) => registerLinkContactTool(s, repo, getUserId));
+
+    const response = await tools.get('link_contact_to_person')!({
       contact_id: 'nonexistent',
       person_id: 'person-abc',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(linkPerson).toHaveBeenCalledWith(USER_ID, 'nonexistent', 'person-abc');
+    expect(response.isError).toBe(true);
+    const parsed = parseToolResponse<{ error: string }>(response);
     expect(parsed.error).toBe('CONTACT_NOT_FOUND');
-    expect((result as any).isError).toBe(true);
   });
 
   it('re-throws unexpected errors', async () => {
-    vi.mocked(contactRepo.linkPerson).mockRejectedValue(new Error('DB_CONNECTION_LOST'));
+    const linkPerson = vi.fn(async () => { throw new Error('DB_CONNECTION_LOST'); });
+    const repo = makeContactRepo({ linkPerson });
 
-    await expect(server.call('link_contact_to_person', {
-      contact_id: 'contact-1',
-      person_id: 'person-abc',
-    })).rejects.toThrow('DB_CONNECTION_LOST');
+    const { registerLinkContactTool } = await import('../tools/link-contact.js');
+    const tools = captureTools((s) => registerLinkContactTool(s, repo, getUserId));
+
+    await expect(
+      tools.get('link_contact_to_person')!({ contact_id: 'contact-1', person_id: 'person-abc' }),
+    ).rejects.toThrow('DB_CONNECTION_LOST');
+    expect(linkPerson).toHaveBeenCalledWith(USER_ID, 'contact-1', 'person-abc');
   });
 });
 
-describe('unlink_contact_from_person', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let contactRepo: ContactRepository;
+describe('unlink_contact_from_person tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    contactRepo = {
-      upsert: vi.fn(),
-      bulkUpsert: vi.fn(),
-      list: vi.fn(),
-      resolve: vi.fn(),
-      linkPerson: vi.fn(),
-      unlinkPerson: vi.fn(),
-    };
+  it('forwards user_id and contact_id to repo.unlinkPerson', async () => {
+    const unlinkPerson = vi.fn(async () => undefined);
+    const repo = makeContactRepo({ unlinkPerson });
 
     const { registerUnlinkContactTool } = await import('../tools/link-contact.js');
-    registerUnlinkContactTool(server as any, contactRepo, getUserId);
-  });
+    const tools = captureTools((s) => registerUnlinkContactTool(s, repo, getUserId));
 
-  it('calls contactRepo.unlinkPerson with correct arguments', async () => {
-    vi.mocked(contactRepo.unlinkPerson).mockResolvedValue(undefined);
-
-    const result = await server.call('unlink_contact_from_person', {
+    const response = await tools.get('unlink_contact_from_person')!({
       contact_id: 'contact-1',
     });
 
-    expect(contactRepo.unlinkPerson).toHaveBeenCalledWith(USER_ID, 'contact-1');
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(unlinkPerson).toHaveBeenCalledWith(USER_ID, 'contact-1');
+    const parsed = parseToolResponse<{ success: boolean }>(response);
     expect(parsed.success).toBe(true);
   });
 
-  it('returns CONTACT_NOT_FOUND error when contact missing', async () => {
-    vi.mocked(contactRepo.unlinkPerson).mockRejectedValue(new Error('CONTACT_NOT_FOUND'));
+  it('returns CONTACT_NOT_FOUND isError envelope when repo throws CONTACT_NOT_FOUND', async () => {
+    const unlinkPerson = vi.fn(async () => { throw new Error('CONTACT_NOT_FOUND'); });
+    const repo = makeContactRepo({ unlinkPerson });
 
-    const result = await server.call('unlink_contact_from_person', {
+    const { registerUnlinkContactTool } = await import('../tools/link-contact.js');
+    const tools = captureTools((s) => registerUnlinkContactTool(s, repo, getUserId));
+
+    const response = await tools.get('unlink_contact_from_person')!({
       contact_id: 'nonexistent',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(unlinkPerson).toHaveBeenCalledWith(USER_ID, 'nonexistent');
+    expect(response.isError).toBe(true);
+    const parsed = parseToolResponse<{ error: string }>(response);
     expect(parsed.error).toBe('CONTACT_NOT_FOUND');
-    expect((result as any).isError).toBe(true);
   });
 });
 
-// ---------------------------------------------------------------------------
-// auto_match_contacts
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// auto_match_contacts (kept — previously passing real tests)
+// ===========================================================================
 
-describe('auto_match_contacts', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let contactRepo: ContactRepository;
+describe('auto_match_contacts tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    contactRepo = {
-      upsert: vi.fn(),
-      bulkUpsert: vi.fn(),
-      list: vi.fn(),
-      resolve: vi.fn(),
-      linkPerson: vi.fn(),
-      unlinkPerson: vi.fn(),
-    };
+  it('filters out groups and unnamed contacts; forwards user_id', async () => {
+    const list = vi.fn(async () => ({
+      contacts: [
+        makeContact({ id: 'c1', display_name: 'Alice', is_group: false }),
+        makeContact({ id: 'c2', display_name: null, is_group: false }),
+        makeContact({ id: 'c3', display_name: 'Group Chat', is_group: true }),
+        makeContact({ id: 'c4', display_name: 'Bob', is_group: false }),
+      ],
+      total: 4,
+    }));
+    const repo = makeContactRepo({ list });
 
     const { registerAutoMatchContactsTool } = await import('../tools/auto-match-contacts.js');
-    registerAutoMatchContactsTool(server as any, contactRepo, getUserId);
-  });
+    const tools = captureTools((s) => registerAutoMatchContactsTool(s, repo, getUserId));
 
-  it('filters out groups and unnamed contacts', async () => {
-    const contacts = [
-      makeContact({ id: 'c1', display_name: 'Alice', is_group: false }),
-      makeContact({ id: 'c2', display_name: null, is_group: false }),
-      makeContact({ id: 'c3', display_name: 'Group Chat', is_group: true }),
-      makeContact({ id: 'c4', display_name: 'Bob', is_group: false }),
-    ];
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts, total: 4 });
+    const response = await tools.get('auto_match_contacts')!({});
 
-    const result = await server.call('auto_match_contacts', {});
-    const parsed = JSON.parse((result as any).content[0].text);
-
-    // Only Alice and Bob should pass (have display_name, not a group)
+    expect(list.mock.calls[0][0]).toBe(USER_ID);
+    const parsed = parseToolResponse<{ unlinked_contacts: Array<{ contact_name: string }>; count: number }>(response);
     expect(parsed.unlinked_contacts).toHaveLength(2);
     expect(parsed.count).toBe(2);
     expect(parsed.unlinked_contacts[0].contact_name).toBe('Alice');
     expect(parsed.unlinked_contacts[1].contact_name).toBe('Bob');
   });
 
-  it('queries for unlinked contacts only (hasPersonLink: false)', async () => {
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts: [], total: 0 });
+  it('queries for unlinked contacts only (hasPersonLink: false), scoped to user_id', async () => {
+    const list = vi.fn(async () => ({ contacts: [], total: 0 }));
+    const repo = makeContactRepo({ list });
 
-    await server.call('auto_match_contacts', {});
+    const { registerAutoMatchContactsTool } = await import('../tools/auto-match-contacts.js');
+    const tools = captureTools((s) => registerAutoMatchContactsTool(s, repo, getUserId));
 
-    expect(contactRepo.list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      hasPersonLink: false,
-    }));
+    await tools.get('auto_match_contacts')!({});
+
+    expect(list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ hasPersonLink: false }));
   });
 
-  it('respects platform filter', async () => {
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts: [], total: 0 });
+  it('respects platform filter, scoped to user_id', async () => {
+    const list = vi.fn(async () => ({ contacts: [], total: 0 }));
+    const repo = makeContactRepo({ list });
 
-    await server.call('auto_match_contacts', { platform: 'telegram' });
+    const { registerAutoMatchContactsTool } = await import('../tools/auto-match-contacts.js');
+    const tools = captureTools((s) => registerAutoMatchContactsTool(s, repo, getUserId));
 
-    expect(contactRepo.list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      platform: 'telegram',
-    }));
+    await tools.get('auto_match_contacts')!({ platform: 'telegram' });
+
+    expect(list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ platform: 'telegram' }));
   });
 
-  it('uses default limit of 200', async () => {
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts: [], total: 0 });
+  it('uses default limit of 200, scoped to user_id', async () => {
+    const list = vi.fn(async () => ({ contacts: [], total: 0 }));
+    const repo = makeContactRepo({ list });
 
-    await server.call('auto_match_contacts', {});
+    const { registerAutoMatchContactsTool } = await import('../tools/auto-match-contacts.js');
+    const tools = captureTools((s) => registerAutoMatchContactsTool(s, repo, getUserId));
 
-    expect(contactRepo.list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      limit: 200,
-    }));
+    await tools.get('auto_match_contacts')!({});
+
+    expect(list).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ limit: 200 }));
   });
 
-  it('includes instructions for linking', async () => {
-    vi.mocked(contactRepo.list).mockResolvedValue({ contacts: [], total: 0 });
+  it('includes instructions for linking in response envelope', async () => {
+    const list = vi.fn(async () => ({ contacts: [], total: 0 }));
+    const repo = makeContactRepo({ list });
 
-    const result = await server.call('auto_match_contacts', {});
-    const parsed = JSON.parse((result as any).content[0].text);
+    const { registerAutoMatchContactsTool } = await import('../tools/auto-match-contacts.js');
+    const tools = captureTools((s) => registerAutoMatchContactsTool(s, repo, getUserId));
 
+    const response = await tools.get('auto_match_contacts')!({});
+
+    const parsed = parseToolResponse<{ instructions: string }>(response);
     expect(parsed.instructions).toContain('link_contact_to_person');
   });
 });
 
-// ---------------------------------------------------------------------------
-// send_whatsapp
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// send_whatsapp (kept — previously passing real tests, with multi-tenancy)
+// ===========================================================================
 
-describe('send_whatsapp', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let accountRepo: AccountRepository;
-  let conversationRepo: ConversationRepository;
-  const mockPool = {} as any;
+describe('send_whatsapp tool handler', () => {
+  const mockPool = {} as never;
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
+  beforeEach(() => vi.clearAllMocks());
 
-    accountRepo = {
-      listWhatsApp: vi.fn(),
-      listTelegram: vi.fn(),
-      getWhatsApp: vi.fn(),
-      getTelegram: vi.fn(),
-      findAccountPlatform: vi.fn(),
-      updateStatus: vi.fn(),
-      touchLastSeen: vi.fn(),
-      getMessageCountToday: vi.fn(),
-      logSentMessage: vi.fn(),
-      createWhatsApp: vi.fn(),
-    };
-
-    conversationRepo = {
-      list: vi.fn(),
-      get: vi.fn(),
-      upsert: vi.fn(),
-      updatePermission: vi.fn(),
-      touchLastMessage: vi.fn(),
-    };
+  it('returns ACCOUNT_NOT_FOUND when account does not exist; scoped to user_id', async () => {
+    const getWhatsApp = vi.fn(async () => null);
+    const accountRepo = makeAccountRepo({ getWhatsApp });
+    const conversationRepo = makeConversationRepo();
 
     const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
-    registerSendWhatsAppTool(server as any, accountRepo, conversationRepo, mockPool, getUserId);
-  });
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
 
-  it('returns ACCOUNT_NOT_FOUND when account does not exist', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(null);
-
-    const result = await server.call('send_whatsapp', {
+    const response = await tools.get('send_whatsapp')!({
       account_id: 'nonexistent',
       to: '972501234567',
       message: 'hello',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(getWhatsApp).toHaveBeenCalledWith(USER_ID, 'nonexistent');
+    expect(response.isError).toBe(true);
+    const parsed = parseToolResponse<{ error: string }>(response);
     expect(parsed.error).toBe('ACCOUNT_NOT_FOUND');
-    expect((result as any).isError).toBe(true);
   });
 
   it('returns ACCOUNT_DISCONNECTED when account is not connected', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(
-      makeWhatsAppAccount({ status: 'disconnected' }),
-    );
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount({ status: 'disconnected' }));
+    const accountRepo = makeAccountRepo({ getWhatsApp });
+    const conversationRepo = makeConversationRepo();
 
-    const result = await server.call('send_whatsapp', {
+    const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
       message: 'hello',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(getWhatsApp).toHaveBeenCalledWith(USER_ID, 'account-1');
+    const parsed = parseToolResponse<{ error: string }>(response);
     expect(parsed.error).toBe('ACCOUNT_DISCONNECTED');
   });
 
   it('returns PERMISSION_DENIED when priority is not agent', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
+    const accountRepo = makeAccountRepo({ getWhatsApp });
+    const conversationRepo = makeConversationRepo();
     mockGetConversationPriority.mockResolvedValue('batch');
 
-    const result = await server.call('send_whatsapp', {
+    const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
       message: 'hello',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(getWhatsApp).toHaveBeenCalledWith(USER_ID, 'account-1');
+    const parsed = parseToolResponse<{ error: string; priority: string }>(response);
     expect(parsed.error).toBe('PERMISSION_DENIED');
     expect(parsed.priority).toBe('batch');
   });
 
   it('returns PERMISSION_DENIED when no rule exists (null priority)', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
+    const accountRepo = makeAccountRepo({ getWhatsApp });
+    const conversationRepo = makeConversationRepo();
     mockGetConversationPriority.mockResolvedValue(null);
 
-    const result = await server.call('send_whatsapp', {
+    const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
       message: 'hello',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = parseToolResponse<{ error: string; priority: string }>(response);
     expect(parsed.error).toBe('PERMISSION_DENIED');
     expect(parsed.priority).toBe('no-rule');
   });
 
-  it('sends message when priority is agent', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
+  it('sends message when priority is agent; logs send under user_id', async () => {
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
+    const logSentMessage = vi.fn(async () => undefined);
+    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage });
+    const get = vi.fn(async () => makeConversation());
+    const conversationRepo = makeConversationRepo({ get, touchLastMessage: vi.fn(async () => undefined) });
     mockGetConversationPriority.mockResolvedValue('agent');
-    vi.mocked(conversationRepo.get).mockResolvedValue(makeConversation());
     mockSendText.mockResolvedValue({ success: true, message_id: 'msg-123' });
 
-    const result = await server.call('send_whatsapp', {
+    const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
       message: 'hello',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = parseToolResponse<{ success: boolean; message_id: string }>(response);
     expect(parsed.success).toBe(true);
     expect(parsed.message_id).toBe('msg-123');
+    expect(logSentMessage).toHaveBeenCalledWith(USER_ID, 'account-1', 'whatsapp', '972501234567', 'msg-123');
   });
 
-  it('appends @s.whatsapp.net to phone number for conversation lookup', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
+  it('appends @s.whatsapp.net for conversation lookup and forwards user_id to permission check', async () => {
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
+    const logSentMessage = vi.fn(async () => undefined);
+    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage });
+    const get = vi.fn(async () => null);
+    const conversationRepo = makeConversationRepo({ get, touchLastMessage: vi.fn(async () => undefined) });
     mockGetConversationPriority.mockResolvedValue('agent');
-    vi.mocked(conversationRepo.get).mockResolvedValue(null);
     mockSendText.mockResolvedValue({ success: true, message_id: 'msg-456' });
 
-    await server.call('send_whatsapp', {
+    const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
       message: 'hello',
@@ -539,12 +578,18 @@ describe('send_whatsapp', () => {
   });
 
   it('preserves existing JID suffix in to field', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
+    const logSentMessage = vi.fn(async () => undefined);
+    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage });
+    const get = vi.fn(async () => null);
+    const conversationRepo = makeConversationRepo({ get, touchLastMessage: vi.fn(async () => undefined) });
     mockGetConversationPriority.mockResolvedValue('agent');
-    vi.mocked(conversationRepo.get).mockResolvedValue(null);
     mockSendText.mockResolvedValue({ success: true, message_id: 'msg-789' });
 
-    await server.call('send_whatsapp', {
+    const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567@s.whatsapp.net',
       message: 'hello',
@@ -555,114 +600,80 @@ describe('send_whatsapp', () => {
     );
   });
 
-  it('logs sent message after successful send', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
-    mockGetConversationPriority.mockResolvedValue('agent');
-    vi.mocked(conversationRepo.get).mockResolvedValue(makeConversation());
-    mockSendText.mockResolvedValue({ success: true, message_id: 'msg-log' });
-
-    await server.call('send_whatsapp', {
-      account_id: 'account-1',
-      to: '972501234567',
-      message: 'hello',
-    });
-
-    expect(accountRepo.logSentMessage).toHaveBeenCalledWith(
-      USER_ID, 'account-1', 'whatsapp', '972501234567', 'msg-log',
-    );
-  });
-
   it('returns SEND_FAILED when Evolution API returns failure', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
+    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage: vi.fn() });
+    const get = vi.fn(async () => makeConversation());
+    const conversationRepo = makeConversationRepo({ get, touchLastMessage: vi.fn(async () => undefined) });
     mockGetConversationPriority.mockResolvedValue('agent');
-    vi.mocked(conversationRepo.get).mockResolvedValue(makeConversation());
     mockSendText.mockResolvedValue({ success: false, message_id: null });
 
-    const result = await server.call('send_whatsapp', {
+    const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
       message: 'hello',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = parseToolResponse<{ error: string }>(response);
     expect(parsed.error).toBe('SEND_FAILED');
   });
 });
 
-// ---------------------------------------------------------------------------
-// sync_whatsapp_conversations
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// sync_whatsapp_conversations (kept — previously passing real tests)
+// ===========================================================================
 
-describe('sync_whatsapp_conversations', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let accountRepo: AccountRepository;
-  let conversationRepo: ConversationRepository;
-  let contactRepo: ContactRepository;
+describe('sync_whatsapp_conversations tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-
-    accountRepo = {
-      listWhatsApp: vi.fn(),
-      listTelegram: vi.fn(),
-      getWhatsApp: vi.fn(),
-      getTelegram: vi.fn(),
-      findAccountPlatform: vi.fn(),
-      updateStatus: vi.fn(),
-      touchLastSeen: vi.fn(),
-      getMessageCountToday: vi.fn(),
-      logSentMessage: vi.fn(),
-      createWhatsApp: vi.fn(),
-    };
-
-    conversationRepo = {
-      list: vi.fn(),
-      get: vi.fn(),
-      upsert: vi.fn(),
-      updatePermission: vi.fn(),
-      touchLastMessage: vi.fn(),
-    };
-
-    contactRepo = {
-      upsert: vi.fn(),
-      bulkUpsert: vi.fn(),
-      list: vi.fn(),
-      resolve: vi.fn(),
-      linkPerson: vi.fn(),
-      unlinkPerson: vi.fn(),
-    };
+  it('returns ACCOUNT_NOT_FOUND when account does not exist; user_id scoped', async () => {
+    const getWhatsApp = vi.fn(async () => null);
+    const accountRepo = makeAccountRepo({ getWhatsApp });
+    const conversationRepo = makeConversationRepo();
+    const contactRepo = makeContactRepo();
 
     const { registerSyncWhatsAppTool } = await import('../tools/sync-whatsapp.js');
-    registerSyncWhatsAppTool(server as any, accountRepo, conversationRepo, contactRepo, getUserId);
-  });
+    const tools = captureTools((s) => registerSyncWhatsAppTool(s, accountRepo, conversationRepo, contactRepo, getUserId));
 
-  it('returns ACCOUNT_NOT_FOUND when account does not exist', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(null);
-
-    const result = await server.call('sync_whatsapp_conversations', {
+    const response = await tools.get('sync_whatsapp_conversations')!({
       account_id: 'nonexistent',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(getWhatsApp).toHaveBeenCalledWith(USER_ID, 'nonexistent');
+    const parsed = parseToolResponse<{ error: string }>(response);
     expect(parsed.error).toBe('ACCOUNT_NOT_FOUND');
   });
 
   it('returns ACCOUNT_DISCONNECTED when account is not connected', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(
-      makeWhatsAppAccount({ status: 'qr_pending' }),
-    );
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount({ status: 'qr_pending' }));
+    const accountRepo = makeAccountRepo({ getWhatsApp });
+    const conversationRepo = makeConversationRepo();
+    const contactRepo = makeContactRepo();
 
-    const result = await server.call('sync_whatsapp_conversations', {
+    const { registerSyncWhatsAppTool } = await import('../tools/sync-whatsapp.js');
+    const tools = captureTools((s) => registerSyncWhatsAppTool(s, accountRepo, conversationRepo, contactRepo, getUserId));
+
+    const response = await tools.get('sync_whatsapp_conversations')!({
       account_id: 'account-1',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(getWhatsApp).toHaveBeenCalledWith(USER_ID, 'account-1');
+    const parsed = parseToolResponse<{ error: string }>(response);
     expect(parsed.error).toBe('ACCOUNT_DISCONNECTED');
   });
 
-  it('upserts conversations and contacts from chats', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
+  it('upserts conversations and contacts from chats; scoped to user_id', async () => {
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
+    const accountRepo = makeAccountRepo({ getWhatsApp });
+    const upsert = vi.fn(async () => ({ created: true }));
+    const list = vi.fn(async () => ({ conversations: [], total: 5 }));
+    const conversationRepo = makeConversationRepo({ upsert, list, touchLastMessage: vi.fn() });
+    const bulkUpsert = vi.fn(async () => 2);
+    const contactRepo = makeContactRepo({ bulkUpsert });
+
     mockFindChats.mockResolvedValue({
       chats: [
         { id: '972501234567@s.whatsapp.net', name: 'Alice', isGroup: false, isArchived: false, lastMessageTimestamp: 1700000000 },
@@ -672,22 +683,32 @@ describe('sync_whatsapp_conversations', () => {
         { remoteJid: '972501234567@s.whatsapp.net', pushName: 'Alice' },
       ],
     });
-    vi.mocked(conversationRepo.upsert).mockResolvedValue({ created: true });
-    vi.mocked(contactRepo.bulkUpsert).mockResolvedValue(2);
-    vi.mocked(conversationRepo.list).mockResolvedValue({ conversations: [], total: 5 });
 
-    const result = await server.call('sync_whatsapp_conversations', {
+    const { registerSyncWhatsAppTool } = await import('../tools/sync-whatsapp.js');
+    const tools = captureTools((s) => registerSyncWhatsAppTool(s, accountRepo, conversationRepo, contactRepo, getUserId));
+
+    const response = await tools.get('sync_whatsapp_conversations')!({
       account_id: 'account-1',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(upsert.mock.calls[0][0]).toBe(USER_ID);
+    expect(bulkUpsert).toHaveBeenCalled();
+    expect(bulkUpsert.mock.calls[0][0]).toBe(USER_ID);
+    const parsed = parseToolResponse<{ total_conversations: number; new_conversations: number }>(response);
     expect(parsed.total_conversations).toBe(5);
     expect(parsed.new_conversations).toBe(2);
-    expect(contactRepo.bulkUpsert).toHaveBeenCalled();
   });
 
   it('counts new vs updated conversations correctly', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
+    const accountRepo = makeAccountRepo({ getWhatsApp });
+    const upsert = vi.fn()
+      .mockResolvedValueOnce({ created: true })
+      .mockResolvedValueOnce({ created: false });
+    const list = vi.fn(async () => ({ conversations: [], total: 10 }));
+    const conversationRepo = makeConversationRepo({ upsert, list, touchLastMessage: vi.fn() });
+    const contactRepo = makeContactRepo({ bulkUpsert: vi.fn(async () => 0) });
+
     mockFindChats.mockResolvedValue({
       chats: [
         { id: 'chat-1@s.whatsapp.net', name: 'New Chat', isGroup: false, isArchived: false },
@@ -695,36 +716,43 @@ describe('sync_whatsapp_conversations', () => {
       ],
       contacts: [],
     });
-    vi.mocked(conversationRepo.upsert)
-      .mockResolvedValueOnce({ created: true })
-      .mockResolvedValueOnce({ created: false });
-    vi.mocked(contactRepo.bulkUpsert).mockResolvedValue(0);
-    vi.mocked(conversationRepo.list).mockResolvedValue({ conversations: [], total: 10 });
 
-    const result = await server.call('sync_whatsapp_conversations', {
+    const { registerSyncWhatsAppTool } = await import('../tools/sync-whatsapp.js');
+    const tools = captureTools((s) => registerSyncWhatsAppTool(s, accountRepo, conversationRepo, contactRepo, getUserId));
+
+    const response = await tools.get('sync_whatsapp_conversations')!({
       account_id: 'account-1',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = parseToolResponse<{ new_conversations: number; updated_conversations: number }>(response);
     expect(parsed.new_conversations).toBe(1);
     expect(parsed.updated_conversations).toBe(1);
   });
 
-  it('updates last_message_at when timestamp provided', async () => {
-    vi.mocked(accountRepo.getWhatsApp).mockResolvedValue(makeWhatsAppAccount());
+  it('updates last_message_at via touchLastMessage when timestamp provided; scoped to user_id', async () => {
+    const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
+    const accountRepo = makeAccountRepo({ getWhatsApp });
+    const touchLastMessage = vi.fn(async () => undefined);
+    const conversationRepo = makeConversationRepo({
+      upsert: vi.fn(async () => ({ created: true })),
+      list: vi.fn(async () => ({ conversations: [], total: 1 })),
+      touchLastMessage,
+    });
+    const contactRepo = makeContactRepo({ bulkUpsert: vi.fn(async () => 0) });
+
     mockFindChats.mockResolvedValue({
       chats: [
         { id: 'chat-1@s.whatsapp.net', name: 'Chat', isGroup: false, isArchived: false, lastMessageTimestamp: 1700000000 },
       ],
       contacts: [],
     });
-    vi.mocked(conversationRepo.upsert).mockResolvedValue({ created: true });
-    vi.mocked(contactRepo.bulkUpsert).mockResolvedValue(0);
-    vi.mocked(conversationRepo.list).mockResolvedValue({ conversations: [], total: 1 });
 
-    await server.call('sync_whatsapp_conversations', { account_id: 'account-1' });
+    const { registerSyncWhatsAppTool } = await import('../tools/sync-whatsapp.js');
+    const tools = captureTools((s) => registerSyncWhatsAppTool(s, accountRepo, conversationRepo, contactRepo, getUserId));
 
-    expect(conversationRepo.touchLastMessage).toHaveBeenCalledWith(
+    await tools.get('sync_whatsapp_conversations')!({ account_id: 'account-1' });
+
+    expect(touchLastMessage).toHaveBeenCalledWith(
       USER_ID, 'whatsapp', 'chat-1@s.whatsapp.net',
       new Date(1700000000 * 1000),
     );

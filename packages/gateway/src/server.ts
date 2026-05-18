@@ -26,13 +26,12 @@ import { NotificationRuleMatcher } from './processors/notification-rules.js';
 import { processPhoneContacts } from './processors/phone-contacts.js';
 import { processPhoneStatus } from './processors/phone-status.js';
 import { processWifi } from './processors/wifi.js';
-import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
-import { processWhatsAppContactWebhook } from './processors/whatsapp-contact-webhook.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
 import { isSourceEnabled } from './utils/data-source-config.js';
-import { resolveWhatsAppUserId } from './utils/whatsapp-user-resolver.js';
+import { createWhatsappWebhookRouter } from './whatsapp-webhook-route.js';
+import { createUploadsRouter, resolveUploadsDir } from './uploads-route.js';
 import type { EnvConfig } from './utils/env.js';
 import { logger } from './utils/logger.js';
 import { recordWebhookFailure } from './utils/webhook-stats.js';
@@ -200,10 +199,11 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // Mount admin routes
   app.use('/admin', createAdminRouter(pgPool, config.authSecret));
 
-  // Serve uploaded files
-  const uploadsDir = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
+  // Serve uploaded files — auth + per-file ownership check enforced.
+  // See uploads-route.ts for the filename → owner mapping.
+  const uploadsDir = resolveUploadsDir();
   fs.mkdirSync(uploadsDir, { recursive: true });
-  app.use('/uploads', express.static(uploadsDir));
+  app.use('/uploads', createUploadsRouter({ authSecret: config.authSecret, uploadsDir }));
 
   // Mount chat routes
   app.use('/chat', createChatRouter(pgPool, config.authSecret, esClient));
@@ -878,83 +878,19 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
-  // --- WhatsApp webhook from Evolution API (internal, no auth required) ---
-  app.post('/webhook/whatsapp*', async (req: Request, res: Response) => {
-    try {
-      const payload = req.body;
-
-      // Resolve user from the instance name in the webhook payload
-      const instanceName = payload?.instance as string | undefined;
-      const fallbackUserId = Object.values(config.webhookTokens)[0];
-
-      const userId = instanceName
-        ? await resolveWhatsAppUserId(pgPool, instanceName, fallbackUserId)
-        : fallbackUserId;
-
-      if (!userId) {
-        res.status(500).json({ error: 'No user configured' });
-        return;
-      }
-
-      // Check if WhatsApp data source is enabled
-      if (!await isSourceEnabled(pgPool, userId, 'whatsapp')) {
-        res.json({ status: 'ok' }); // 200 to Evolution API, but skip processing
-        return;
-      }
-
-      // Route contact events to dedicated processor
-      const event = payload?.event as string | undefined;
-      if (event === 'contacts.upsert' || event === 'contacts.update') {
-        const contacts = Array.isArray(payload?.data) ? payload.data : [];
-        await processWhatsAppContactWebhook(pgPool, userId, contacts);
-        res.json({ status: 'ok' });
-        return;
-      }
-
-      // Route chat events (archive/unarchive/mute changes)
-      if (event === 'chats.upsert' || event === 'chats.update') {
-        const chats = Array.isArray(payload?.data) ? payload.data : [];
-        for (const chat of chats) {
-          const jid = chat.remoteJid ?? chat.id;
-          if (!jid) continue;
-          const archived = chat.archive ?? chat.archived ?? null;
-          const unreadCount = chat.unreadCount ?? null;
-          if (archived !== null || unreadCount !== null) {
-            const updates: string[] = [];
-            const values: unknown[] = [];
-            let pi = 1;
-            if (archived !== null) {
-              updates.push(`is_archived = $${pi++}`);
-              values.push(archived);
-            }
-            if (unreadCount !== null) {
-              updates.push(`unread_count = $${pi++}`);
-              values.push(unreadCount);
-            }
-            updates.push('updated_at = now()');
-            values.push(userId, jid);
-            await pgPool.query(
-              `UPDATE messaging_conversations SET ${updates.join(', ')} WHERE user_id = $${pi++} AND conversation_id = $${pi}`,
-              values,
-            ).catch((err) => {
-              logger.warn('[server][chatsWebhook] Failed to update conversation', {
-                error: err instanceof Error ? err.message : String(err), jid,
-              });
-            });
-          }
-        }
-        res.json({ status: 'ok' });
-        return;
-      }
-
-      await processWhatsAppWebhook(esClient, pgPool, notificationMatcher, userId, payload, config.encryptionKey);
-      res.json({ status: 'ok' });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error('[server][whatsappWebhook] Processing failed', { error: message });
-      res.status(500).json({ error: message });
-    }
+  // --- WhatsApp webhook from Evolution API ---
+  // Authenticated via shared X-Webhook-Secret header (see whatsapp-webhook-route.ts).
+  // Mounted at both /webhook/whatsapp and /webhook/whatsapp/* so existing Evolution
+  // API configs with sub-paths continue to work.
+  const whatsappRouter = createWhatsappWebhookRouter({
+    pgPool,
+    esClient,
+    notificationMatcher,
+    webhookSecret: config.whatsappWebhookSecret,
+    encryptionKey: config.encryptionKey,
   });
+  app.use('/webhook/whatsapp', whatsappRouter);
+  app.use('/webhook/whatsapp/*', whatsappRouter);
 
   // --- Webhook rate limiter (per user, sliding window) ---
   // Guards against misbehaving / looping clients hammering the ingestion pipeline.
@@ -981,8 +917,28 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   }
 
   // --- Webhook endpoint ---
-  app.post('/webhook/:token', async (req: Request, res: Response) => {
-    const token = req.params.token as string;
+  //
+  // Path-token form `POST /webhook/:token` is DEPRECATED: the credential ends
+  // up in every nginx/CDN/proxy access log, browser referrer, and stack trace.
+  // Clients should migrate to `POST /webhook` with an `Authorization: Bearer
+  // ll5.<token>` header instead. Both paths share the same handler below; when
+  // the path-token form is used, we attach a `Deprecation` + `Sunset` header
+  // and emit a warning log so operators can see who is still on the old form.
+  const handleWebhook = async (req: Request, res: Response): Promise<void> => {
+    const pathToken = (req.params as { token?: string }).token;
+    const usedPathToken = typeof pathToken === 'string' && pathToken.length > 0;
+
+    if (usedPathToken) {
+      // Visible to clients in dev tools / logs so they know to migrate.
+      res.setHeader('Deprecation', 'true');
+      res.setHeader('Sunset', 'Wed, 31 Dec 2026 23:59:59 GMT');
+      res.setHeader('Link', '</webhook>; rel="successor-version"');
+      logger.warn('[startServer][webhook] Deprecated path-token form used', {
+        userAgent: req.headers['user-agent'],
+      });
+    }
+
+    const token = (usedPathToken ? pathToken : '') as string;
 
     // Validate token: try webhook token first, then auth token, then Bearer header
     let userId = config.webhookTokens[token];
@@ -1185,7 +1141,12 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     } else {
       res.status(200).json(response);
     }
-  });
+  };
+
+  // Canonical bearer-header form. Use this from new clients.
+  app.post('/webhook', handleWebhook);
+  // Deprecated path-token form — kept working for existing clients.
+  app.post('/webhook/:token', handleWebhook);
 
   return { app, esClient, pgPool };
 }

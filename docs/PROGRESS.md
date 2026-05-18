@@ -8,6 +8,52 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Hardening Phase 0 (2026-05-18): tests are now real
+
+Following a code review that found ~80 "theater" tests across the test suite — tests that didn't actually invoke the code they claimed to cover — Phase 0 rewrote the worst offenders against the new standard in [`docs/testing.md`](testing.md). Every rewritten test now imports the real handler/repo, mocks at the client boundary (`pg.Pool` / `@elastic/elasticsearch.Client`), and asserts on real return values plus mandatory `user_id` scoping.
+
+| Package | Before | After | Notes |
+|---------|--------|-------|-------|
+| gtd | 45 (mostly theater) | 32 real | dropped tests that re-derived defaults or called mocks then asserted on them |
+| awareness | 47 (mostly theater) | 46 real | deleted inline `haversineDistance` copy; geo-search now untested (follow-up) |
+| health | 30 (mostly theater) | 35 real | covers PG sources, ES queries, sync orchestration |
+| personal-knowledge / people-tools | 8 (all theater) | 14 real | handlers captured via stub `McpServer` |
+| google | 11 (~55% theater) | 27 real | Google API mocked at boundary |
+| messaging | 11 (~45% theater) | 28 real | `encryption.test.ts` was already clean |
+| gateway / new retry test | 0 | 8 real | exercises 23505 retry loop in `getOrCreateActiveConversation` |
+
+**Total: 428 tests passing across all packages, all real.** Each package has its own `__tests__/_helpers.ts` with `captureTools()` for invoking MCP tool handlers. New helper standard documented in [`docs/testing.md`](testing.md).
+
+Follow-ups carried forward (tracked, not blocking):
+- Rewrite personal-knowledge repository tests — `person-repository.test.ts`, `observation-repository.test.ts`, `narrative-repository.test.ts` inline their own `docToPerson` etc. instead of importing the real class.
+- Add geo-search test coverage (deleted with the inline haversine).
+- Add tests for untested awareness tools (calendar, entity-statuses, location, media, notable-events, notification-rules, phone-status, wifi).
+- Move health `clients/registry.ts` out of process-global state.
+
+### Hardening Phase 1 — critical security (2026-05-18, partial)
+
+Three of the four code-level security gaps from the review are closed. The fourth (secret rotation) is operator action, not code.
+
+**1.2 WhatsApp webhook authenticated.** `POST /webhook/whatsapp[/*]` now requires `X-Webhook-Secret` header matching the new `WHATSAPP_WEBHOOK_SECRET` env var (32+ chars, fail-closed). The "first user" fallback when the instance is unknown is gone — unknown instance now returns 404. The inline route handler was extracted into `src/whatsapp-webhook-route.ts` with 10 dedicated tests.
+
+⚠️ **Deploy will fail on next restart until `WHATSAPP_WEBHOOK_SECRET` is set in Coolify env.** Generate via `openssl rand -hex 32`, set in Coolify, then configure Evolution API to send the same value in `X-Webhook-Secret` on its outbound webhook calls.
+
+**1.3 `/uploads` gated behind auth + ownership.** New `src/uploads-route.ts` enforces:
+- Bearer / query-token auth via the existing `chatAuthMiddleware`.
+- Per-file ownership check: filename must begin with the requester's userId (chat uploads) or contain the matching `userId.slice(0,8)` (WhatsApp media). Path traversal, separator-collision attacks, and dotfiles all rejected.
+- Filename randomness bumped from 4 bytes (8 hex, scannable in ~minutes) to 16 bytes (32 hex) in both `chat.ts` and `whatsapp-webhook.ts`.
+- Dashboard proxy `app/api/uploads/[...path]/route.ts` now forwards the `ll5_token` cookie as a bearer header, requires it, and switched cache header from `public` to `private`. 11 tests cover the ownership logic including prefix-collision and traversal attacks.
+
+**1.4 Path-token webhook deprecated.** `POST /webhook/:token` now emits `Deprecation: true`, `Sunset: Wed, 31 Dec 2026 23:59:59 GMT`, and `Link: </webhook>; rel="successor-version"` headers, plus a warning log with the User-Agent. Canonical bearer-only form `POST /webhook` mounted. Existing Android-app clients keep working; can be removed once they migrate.
+
+**Test suite: 449 passing across all packages** (+21 from Phase 0's 428). Full typecheck clean.
+
+Still outstanding for the operator (not code):
+- Rotate leaked secrets in `HANDOFF.md` (admin PIN `1234`, AUTH_SECRET, Postgres `changeme123`, Coolify API token). Scrub the file, add `docs/SECRETS.md` pointing to where they actually live, add `gitleaks` pre-commit hook.
+
+Next: Phase 2 — auth consolidation (the four reimplementations of token validation in `chat.ts`, `admin.ts`, and `server.ts`×2 → single `validateLl5Token()` helper in `@ll5/shared`; bcrypt timing leak in `auth.ts:101`).
+
+
 ### Deployed Services (Coolify @ 95.216.23.208)
 
 | Service | Status | URL |

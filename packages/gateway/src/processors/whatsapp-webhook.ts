@@ -264,7 +264,7 @@ export async function processWhatsAppWebhook(
         if (buf && buf.length > 0) {
           const ext = mediaMimetype.split('/')[1]?.replace('codecs', '').replace(/[^a-z0-9]/g, '') || 'bin';
           const prefix = mediaType === 'voice_note' ? 'vn' : mediaType ?? 'media';
-          const filename = `wa_${prefix}_${userId.slice(0, 8)}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          const filename = `wa_${prefix}_${userId.slice(0, 8)}_${Date.now()}_${crypto.randomBytes(16).toString('hex')}.${ext}`;
           const filePath = path.join(UPLOAD_DIR, filename);
           fs.writeFileSync(filePath, buf);
           mediaUrl = `/uploads/${filename}`;

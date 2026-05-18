@@ -1,105 +1,79 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Mock logAudit before importing anything that uses it
+// Mock @ll5/shared.logAudit before importing tool modules.
 // ---------------------------------------------------------------------------
 vi.mock('@ll5/shared', () => ({
   logAudit: vi.fn(),
 }));
 
 import { logAudit } from '@ll5/shared';
+import { registerPeopleTools } from '../tools/people.js';
+import { captureTools, parseToolResponse } from './_helpers.js';
+import type { PersonRepository } from '../repositories/interfaces/person.repository.js';
+import type { Person } from '../types/person.js';
+
+const USER_ID = 'user-test-1';
+const getUserId = () => USER_ID;
 
 // ---------------------------------------------------------------------------
-// Types
+// Repository stub factory — every method throws "not stubbed" by default so
+// tests cannot silently rely on a method they didn't intend to exercise.
 // ---------------------------------------------------------------------------
 
-interface Person {
-  id: string;
-  userId: string;
-  name: string;
-  aliases: string[];
-  relationship: string;
-  contactInfo?: Record<string, string>;
-  tags: string[];
-  notes?: string;
-  status: 'full' | 'contact-only';
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface PersonRepository {
-  list: ReturnType<typeof vi.fn>;
-  get: ReturnType<typeof vi.fn>;
-  upsert: ReturnType<typeof vi.fn>;
-  delete: ReturnType<typeof vi.fn>;
-  search: ReturnType<typeof vi.fn>;
-}
-
-// ---------------------------------------------------------------------------
-// Simulate tool handler logic (extracted from people.ts)
-// ---------------------------------------------------------------------------
-
-function makePersonRepo(): PersonRepository {
+function makePersonRepo(overrides: Partial<PersonRepository> = {}): PersonRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`PersonRepository.${name} not stubbed for this test`);
+  });
   return {
-    list: vi.fn(),
-    get: vi.fn(),
-    upsert: vi.fn(),
-    delete: vi.fn(),
-    search: vi.fn(),
-  };
+    list: unimpl('list'),
+    get: unimpl('get'),
+    upsert: unimpl('upsert'),
+    delete: unimpl('delete'),
+    search: unimpl('search'),
+    ...overrides,
+  } as PersonRepository;
 }
 
-function makePerson(overrides: Partial<Person> = {}): Person {
+function fakePerson(over: Partial<Person> = {}): Person {
   return {
-    id: 'p-1',
-    userId: 'user-1',
-    name: 'Test Person',
+    id: 'p-stub',
+    userId: USER_ID,
+    name: 'Stub Person',
     aliases: [],
     relationship: 'friend',
     tags: [],
     status: 'full',
     createdAt: '2025-01-01T00:00:00Z',
     updatedAt: '2025-01-01T00:00:00Z',
-    ...overrides,
+    ...over,
   };
 }
 
-const USER_ID = 'user-test-1';
-
-// ---------------------------------------------------------------------------
-// list_people handler logic
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// list_people
+// ===========================================================================
 
 describe('list_people tool handler', () => {
-  let repo: PersonRepository;
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(() => {
-    repo = makePersonRepo();
-    vi.clearAllMocks();
-  });
+  it('forwards user_id and every filter param to repo.list', async () => {
+    const list = vi.fn(async () => ({ items: [], total: 0 }));
+    const repo = makePersonRepo({ list });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
 
-  it('calls list with all filter params', async () => {
-    repo.list.mockResolvedValue({ items: [], total: 0 });
-
-    const params = {
+    await tools.get('list_people')!({
       relationship: 'family',
       tags: ['vip'],
       query: 'alice',
-      status: 'full' as const,
+      status: 'full',
       limit: 10,
       offset: 5,
-    };
-
-    await repo.list(USER_ID, {
-      relationship: params.relationship,
-      tags: params.tags,
-      query: params.query,
-      status: params.status,
-      limit: params.limit,
-      offset: params.offset,
     });
 
-    expect(repo.list).toHaveBeenCalledWith(USER_ID, {
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(list.mock.calls[0][0]).toBe(USER_ID);
+    expect(list.mock.calls[0][1]).toEqual({
       relationship: 'family',
       tags: ['vip'],
       query: 'alice',
@@ -109,295 +83,256 @@ describe('list_people tool handler', () => {
     });
   });
 
-  it('returns people and total in expected format', async () => {
-    const people = [makePerson({ id: 'p-1', name: 'Alice' }), makePerson({ id: 'p-2', name: 'Bob' })];
-    repo.list.mockResolvedValue({ items: people, total: 2 });
+  it('omits missing keys as undefined (handler does not invent defaults)', async () => {
+    const list = vi.fn(async () => ({ items: [], total: 0 }));
+    const repo = makePersonRepo({ list });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
 
-    const result = await repo.list(USER_ID, {});
-    const response = { people: result.items, total: result.total };
+    await tools.get('list_people')!({});
 
-    expect(response.people).toHaveLength(2);
-    expect(response.total).toBe(2);
-    expect(response.people[0].name).toBe('Alice');
+    expect(list.mock.calls[0][0]).toBe(USER_ID);
+    const params = list.mock.calls[0][1] as Record<string, unknown>;
+    expect(params.relationship).toBeUndefined();
+    expect(params.tags).toBeUndefined();
+    expect(params.query).toBeUndefined();
+    expect(params.status).toBeUndefined();
+    expect(params.limit).toBeUndefined();
+    expect(params.offset).toBeUndefined();
   });
 
-  it('passes status=contact-only filter correctly', async () => {
-    repo.list.mockResolvedValue({ items: [], total: 0 });
+  it('forwards status=contact-only to the repository', async () => {
+    const list = vi.fn(async () => ({ items: [], total: 0 }));
+    const repo = makePersonRepo({ list });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
 
-    await repo.list(USER_ID, { status: 'contact-only' });
+    await tools.get('list_people')!({ status: 'contact-only' });
 
-    expect(repo.list).toHaveBeenCalledWith(USER_ID, { status: 'contact-only' });
+    expect(list.mock.calls[0][0]).toBe(USER_ID);
+    expect((list.mock.calls[0][1] as Record<string, unknown>).status).toBe('contact-only');
   });
 
-  it('passes status=full filter correctly', async () => {
-    repo.list.mockResolvedValue({ items: [], total: 0 });
-
-    await repo.list(USER_ID, { status: 'full' });
-
-    expect(repo.list).toHaveBeenCalledWith(USER_ID, { status: 'full' });
-  });
-
-  it('omits undefined optional params', async () => {
-    repo.list.mockResolvedValue({ items: [], total: 0 });
-
-    await repo.list(USER_ID, {
-      relationship: undefined,
-      tags: undefined,
-      query: undefined,
-      status: undefined,
-      limit: undefined,
-      offset: undefined,
+  it('returns people and total in the response envelope', async () => {
+    const items = [fakePerson({ id: 'p-1', name: 'Alice' }), fakePerson({ id: 'p-2', name: 'Bob' })];
+    const repo = makePersonRepo({
+      list: vi.fn(async () => ({ items, total: 2 })),
     });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
 
-    const callArgs = repo.list.mock.calls[0][1];
-    expect(callArgs.relationship).toBeUndefined();
-    expect(callArgs.tags).toBeUndefined();
-    expect(callArgs.query).toBeUndefined();
-    expect(callArgs.status).toBeUndefined();
+    const response = await tools.get('list_people')!({});
+
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ people: Array<{ id: string; name: string }>; total: number }>(response);
+    expect(parsed.total).toBe(2);
+    expect(parsed.people.map((p) => p.id)).toEqual(['p-1', 'p-2']);
+    expect(parsed.people[0].name).toBe('Alice');
   });
 });
 
-// ---------------------------------------------------------------------------
-// get_person handler logic
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// get_person
+// ===========================================================================
 
 describe('get_person tool handler', () => {
-  let repo: PersonRepository;
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(() => {
-    repo = makePersonRepo();
-    vi.clearAllMocks();
+  it('calls repo.get with user_id and id, returns the person', async () => {
+    const get = vi.fn(async () => fakePerson({ id: 'p-100', name: 'Found' }));
+    const repo = makePersonRepo({ get });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
+
+    const response = await tools.get('get_person')!({ id: 'p-100' });
+
+    expect(get).toHaveBeenCalledWith(USER_ID, 'p-100');
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ person: { id: string; name: string } }>(response);
+    expect(parsed.person.id).toBe('p-100');
+    expect(parsed.person.name).toBe('Found');
   });
 
-  it('returns person when found', async () => {
-    const person = makePerson({ id: 'p-100', name: 'Found Person' });
-    repo.get.mockResolvedValue(person);
+  it('returns isError envelope when person not found (null)', async () => {
+    const get = vi.fn(async () => null);
+    const repo = makePersonRepo({ get });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
 
-    const result = await repo.get(USER_ID, 'p-100');
-    expect(result).toBeTruthy();
-    expect(result.name).toBe('Found Person');
-  });
+    const response = await tools.get('get_person')!({ id: 'nonexistent' });
 
-  it('returns error when person not found', async () => {
-    repo.get.mockResolvedValue(null);
-
-    const result = await repo.get(USER_ID, 'nonexistent');
-    expect(result).toBeNull();
-
-    // Simulate the tool handler logic
-    if (!result) {
-      const response = {
-        content: [{ type: 'text', text: JSON.stringify({ error: 'Person not found' }) }],
-        isError: true,
-      };
-      expect(response.isError).toBe(true);
-      expect(JSON.parse(response.content[0].text).error).toBe('Person not found');
-    }
+    expect(get).toHaveBeenCalledWith(USER_ID, 'nonexistent');
+    expect(response.isError).toBe(true);
+    expect(parseToolResponse<{ error: string }>(response).error).toBe('Person not found');
   });
 });
 
-// ---------------------------------------------------------------------------
-// upsert_person handler logic
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// upsert_person
+// ===========================================================================
 
 describe('upsert_person tool handler', () => {
-  let repo: PersonRepository;
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(() => {
-    repo = makePersonRepo();
-    vi.clearAllMocks();
-  });
+  it('maps snake_case contact_info to camelCase contactInfo on create', async () => {
+    const upsert = vi.fn(async () => ({
+      person: fakePerson({ id: 'p-new', name: 'New Person' }),
+      created: true,
+    }));
+    const repo = makePersonRepo({ upsert });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
 
-  it('calls upsert with mapped params for create', async () => {
-    const person = makePerson({ id: 'p-new' });
-    repo.upsert.mockResolvedValue({ person, created: true });
-
-    const params = {
+    const response = await tools.get('upsert_person')!({
       name: 'New Person',
       aliases: ['NP'],
       relationship: 'friend',
       contact_info: { phone: '123' },
       tags: ['test'],
       notes: 'Test notes',
-      status: 'full' as const,
-    };
-
-    const result = await repo.upsert(USER_ID, {
-      name: params.name,
-      aliases: params.aliases,
-      relationship: params.relationship,
-      contactInfo: params.contact_info,
-      tags: params.tags,
-      notes: params.notes,
-      status: params.status,
+      status: 'full',
     });
 
-    expect(result.created).toBe(true);
-    expect(repo.upsert).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][0]).toBe(USER_ID);
+    expect(upsert.mock.calls[0][1]).toEqual({
+      id: undefined,
       name: 'New Person',
+      aliases: ['NP'],
+      relationship: 'friend',
       contactInfo: { phone: '123' },
-    }));
-  });
-
-  it('calls upsert with id for update', async () => {
-    const person = makePerson({ id: 'p-existing', name: 'Updated' });
-    repo.upsert.mockResolvedValue({ person, created: false });
-
-    await repo.upsert(USER_ID, {
-      id: 'p-existing',
-      name: 'Updated',
+      tags: ['test'],
+      notes: 'Test notes',
+      status: 'full',
     });
 
-    expect(repo.upsert).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      id: 'p-existing',
-      name: 'Updated',
-    }));
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ person: { id: string }; created: boolean }>(response);
+    expect(parsed.person.id).toBe('p-new');
+    expect(parsed.created).toBe(true);
   });
 
-  it('logs audit on create', async () => {
-    const person = makePerson({ id: 'p-new', name: 'Created' });
-    repo.upsert.mockResolvedValue({ person, created: true });
+  it('forwards id for update (created=false)', async () => {
+    const upsert = vi.fn(async () => ({
+      person: fakePerson({ id: 'p-existing', name: 'Updated' }),
+      created: false,
+    }));
+    const repo = makePersonRepo({ upsert });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
 
-    const result = await repo.upsert(USER_ID, { name: 'Created' });
+    const response = await tools.get('upsert_person')!({ id: 'p-existing', name: 'Updated' });
 
-    // Simulate the audit logging from the tool handler
-    logAudit({
+    expect(upsert.mock.calls[0][0]).toBe(USER_ID);
+    const payload = upsert.mock.calls[0][1] as Record<string, unknown>;
+    expect(payload.id).toBe('p-existing');
+    expect(payload.name).toBe('Updated');
+
+    const parsed = parseToolResponse<{ created: boolean }>(response);
+    expect(parsed.created).toBe(false);
+  });
+
+  it('emits audit action=create when repo signals created=true', async () => {
+    const repo = makePersonRepo({
+      upsert: vi.fn(async () => ({
+        person: fakePerson({ id: 'p-99', name: 'Audited' }),
+        created: true,
+      })),
+    });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
+
+    await tools.get('upsert_person')!({ name: 'Audited', relationship: 'friend' });
+
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
       user_id: USER_ID,
       source: 'knowledge',
-      action: result.created ? 'create' : 'update',
+      action: 'create',
       entity_type: 'person',
-      entity_id: result.person.id,
-      summary: `${result.created ? 'Created' : 'Updated'} person: Created`,
-      metadata: { relationship: undefined },
-    });
-
-    expect(logAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'create',
-        entity_type: 'person',
-        entity_id: 'p-new',
-        source: 'knowledge',
-      }),
-    );
+      entity_id: 'p-99',
+      summary: 'Created person: Audited',
+      metadata: { relationship: 'friend' },
+    }));
   });
 
-  it('logs audit on update', async () => {
-    const person = makePerson({ id: 'p-existing', name: 'Updated' });
-    repo.upsert.mockResolvedValue({ person, created: false });
+  it('emits audit action=update when repo signals created=false', async () => {
+    const repo = makePersonRepo({
+      upsert: vi.fn(async () => ({
+        person: fakePerson({ id: 'p-1', name: 'Renamed' }),
+        created: false,
+      })),
+    });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
 
-    const result = await repo.upsert(USER_ID, { id: 'p-existing', name: 'Updated' });
+    await tools.get('upsert_person')!({ id: 'p-1', name: 'Renamed' });
 
-    logAudit({
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
       user_id: USER_ID,
       source: 'knowledge',
-      action: result.created ? 'create' : 'update',
+      action: 'update',
       entity_type: 'person',
-      entity_id: result.person.id,
-      summary: `${result.created ? 'Created' : 'Updated'} person: Updated`,
-      metadata: { relationship: undefined },
-    });
-
-    expect(logAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'update',
-        entity_type: 'person',
-        entity_id: 'p-existing',
-      }),
-    );
+      entity_id: 'p-1',
+      summary: 'Updated person: Renamed',
+    }));
   });
 
-  it('passes status through to repository', async () => {
-    const person = makePerson({ status: 'contact-only' });
-    repo.upsert.mockResolvedValue({ person, created: true });
-
-    await repo.upsert(USER_ID, {
-      name: 'Contact',
-      status: 'contact-only',
-    });
-
-    expect(repo.upsert).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      status: 'contact-only',
+  it('forwards status=contact-only to the repository', async () => {
+    const upsert = vi.fn(async () => ({
+      person: fakePerson({ status: 'contact-only' }),
+      created: true,
     }));
+    const repo = makePersonRepo({ upsert });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
+
+    await tools.get('upsert_person')!({ name: 'Contact', status: 'contact-only' });
+
+    expect(upsert.mock.calls[0][0]).toBe(USER_ID);
+    expect((upsert.mock.calls[0][1] as Record<string, unknown>).status).toBe('contact-only');
+  });
+
+  it('propagates repository errors (does not swallow on upsert)', async () => {
+    const repo = makePersonRepo({
+      upsert: vi.fn(async () => { throw new Error('es down'); }),
+    });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
+
+    await expect(tools.get('upsert_person')!({ name: 'X' })).rejects.toThrow('es down');
+    // Audit must not be emitted on failure
+    expect(logAudit).not.toHaveBeenCalled();
   });
 });
 
-// ---------------------------------------------------------------------------
-// delete_person handler logic
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// delete_person
+// ===========================================================================
 
 describe('delete_person tool handler', () => {
-  let repo: PersonRepository;
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(() => {
-    repo = makePersonRepo();
-    vi.clearAllMocks();
+  it('returns {deleted: true} and audits when repo.delete succeeds', async () => {
+    const del = vi.fn(async () => true);
+    const repo = makePersonRepo({ delete: del });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
+
+    const response = await tools.get('delete_person')!({ id: 'p-del' });
+
+    expect(del).toHaveBeenCalledWith(USER_ID, 'p-del');
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ deleted: boolean }>(response);
+    expect(parsed.deleted).toBe(true);
+
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      user_id: USER_ID,
+      source: 'knowledge',
+      action: 'delete',
+      entity_type: 'person',
+      entity_id: 'p-del',
+      summary: 'Deleted person p-del',
+    }));
   });
 
-  it('returns deleted:true when person exists', async () => {
-    repo.delete.mockResolvedValue(true);
+  it('returns isError envelope and does NOT audit when repo.delete returns false', async () => {
+    const del = vi.fn(async () => false);
+    const repo = makePersonRepo({ delete: del });
+    const tools = captureTools((s) => registerPeopleTools(s, repo, getUserId));
 
-    const result = await repo.delete(USER_ID, 'p-del');
-    expect(result).toBe(true);
-  });
+    const response = await tools.get('delete_person')!({ id: 'nonexistent' });
 
-  it('returns error when person not found', async () => {
-    repo.delete.mockResolvedValue(false);
-
-    const deleted = await repo.delete(USER_ID, 'nonexistent');
-    expect(deleted).toBe(false);
-
-    // Simulate the tool handler
-    if (!deleted) {
-      const response = {
-        content: [{ type: 'text', text: JSON.stringify({ error: 'Person not found' }) }],
-        isError: true,
-      };
-      expect(response.isError).toBe(true);
-    }
-  });
-
-  it('logs audit on successful delete', async () => {
-    repo.delete.mockResolvedValue(true);
-
-    const deleted = await repo.delete(USER_ID, 'p-del');
-
-    if (deleted) {
-      logAudit({
-        user_id: USER_ID,
-        source: 'knowledge',
-        action: 'delete',
-        entity_type: 'person',
-        entity_id: 'p-del',
-        summary: `Deleted person p-del`,
-      });
-    }
-
-    expect(logAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'delete',
-        entity_type: 'person',
-        entity_id: 'p-del',
-        source: 'knowledge',
-      }),
-    );
-  });
-
-  it('does not log audit when delete fails', async () => {
-    repo.delete.mockResolvedValue(false);
-
-    const deleted = await repo.delete(USER_ID, 'nonexistent');
-
-    if (deleted) {
-      logAudit({
-        user_id: USER_ID,
-        source: 'knowledge',
-        action: 'delete',
-        entity_type: 'person',
-        entity_id: 'nonexistent',
-        summary: 'Deleted person nonexistent',
-      });
-    }
-
+    expect(del).toHaveBeenCalledWith(USER_ID, 'nonexistent');
+    expect(response.isError).toBe(true);
+    expect(parseToolResponse<{ error: string }>(response).error).toBe('Person not found');
     expect(logAudit).not.toHaveBeenCalled();
   });
 });

@@ -37,7 +37,7 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     const userId = (req as AuthenticatedRequest).userId;
     const ext = path.extname(file.originalname).slice(1) || 'bin';
-    const randomHex = crypto.randomBytes(4).toString('hex');
+    const randomHex = crypto.randomBytes(16).toString('hex');
     cb(null, `${userId}_${Date.now()}_${randomHex}.${ext}`);
   },
 });
@@ -131,7 +131,7 @@ export function chatAuthMiddleware(authSecret: string) {
  *  outside this helper — hand-rolled INSERTs will either race against the
  *  unique-partial-index or miss the "archived writes reroute" logic at the
  *  POST /messages layer. */
-async function getOrCreateActiveConversation(
+export async function getOrCreateActiveConversation(
   client: PoolClient | Pool,
   userId: string,
 ): Promise<string> {

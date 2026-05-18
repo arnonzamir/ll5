@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CalendarConfigRepository, CalendarConfigRecord, CalendarAccessMode } from '../repositories/interfaces/calendar-config.repository.js';
-import type { UserSettingsRepository, UserSettings } from '../repositories/interfaces/user-settings.repository.js';
+import type { UserSettingsRepository } from '../repositories/interfaces/user-settings.repository.js';
 import type { OAuthTokenRepository, OAuthTokenRecord } from '../repositories/interfaces/oauth-token.repository.js';
 import type { ESCalendarEventRepository, CalendarEventDoc } from '../repositories/elasticsearch/calendar-event.repository.js';
 import type { GoogleClientConfig } from '../utils/google-client.js';
+import { captureTools, parseToolResponse } from './_helpers.js';
 
 // ---------------------------------------------------------------------------
 // Mock: @ll5/shared
@@ -22,7 +23,8 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock: googleapis — intercept all Google API calls
+// Mock: googleapis — intercept all Google API calls at the external boundary.
+// The mock is shared across all tests; individual tests configure return values.
 // ---------------------------------------------------------------------------
 const mockEventsInsert = vi.fn();
 const mockEventsGet = vi.fn();
@@ -61,7 +63,7 @@ vi.mock('googleapis', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Mock: google-client utility
+// Mock: google-client utility (OAuth wiring is not under test here)
 // ---------------------------------------------------------------------------
 vi.mock('../utils/google-client.js', () => ({
   getAuthenticatedClient: vi.fn().mockResolvedValue({
@@ -88,20 +90,6 @@ const GOOGLE_CONFIG: GoogleClientConfig = {
   clientSecret: 'test-client-secret',
   redirectUri: 'https://example.com/oauth/callback',
 };
-
-function createMockServer() {
-  const tools = new Map<string, { handler: (params: Record<string, unknown>) => Promise<unknown> }>();
-  return {
-    tool: (name: string, _desc: string, _schema: unknown, handler: (params: Record<string, unknown>) => Promise<unknown>) => {
-      tools.set(name, { handler });
-    },
-    call: async (name: string, params: Record<string, unknown> = {}) => {
-      const tool = tools.get(name);
-      if (!tool) throw new Error(`Tool ${name} not registered`);
-      return tool.handler(params);
-    },
-  };
-}
 
 function makeCalendarConfig(overrides: Partial<CalendarConfigRecord> = {}): CalendarConfigRecord {
   return {
@@ -145,16 +133,17 @@ function makeCalendarEventDoc(overrides: Partial<CalendarEventDoc> = {}): Calend
   };
 }
 
-function createTokenRepo(): OAuthTokenRepository {
+function makeTokenRepo(overrides: Partial<OAuthTokenRepository> = {}): OAuthTokenRepository {
   return {
     store: vi.fn(),
     get: vi.fn().mockResolvedValue(makeTokenRecord()),
     updateAccessToken: vi.fn(),
     delete: vi.fn(),
+    ...overrides,
   };
 }
 
-function createCalendarConfigRepo(): CalendarConfigRepository {
+function makeCalendarConfigRepo(overrides: Partial<CalendarConfigRepository> = {}): CalendarConfigRepository {
   return {
     upsert: vi.fn(),
     list: vi.fn().mockResolvedValue([]),
@@ -163,75 +152,78 @@ function createCalendarConfigRepo(): CalendarConfigRepository {
     getReadableCalendarIds: vi.fn().mockResolvedValue(['primary']),
     getWritableCalendarIds: vi.fn().mockResolvedValue(['primary']),
     deleteAll: vi.fn(),
+    ...overrides,
   };
 }
 
-function createUserSettingsRepo(): UserSettingsRepository {
+function makeUserSettingsRepo(overrides: Partial<UserSettingsRepository> = {}): UserSettingsRepository {
   return {
     get: vi.fn().mockResolvedValue({ user_id: USER_ID, timezone: 'Asia/Jerusalem' }),
     setTimezone: vi.fn(),
+    ...overrides,
   };
 }
 
-function createESCalendarRepo(): ESCalendarEventRepository {
+function makeESCalendarRepo(overrides: Partial<ESCalendarEventRepository> = {}): ESCalendarEventRepository {
   return {
     query: vi.fn().mockResolvedValue([]),
     upsertFromGoogle: vi.fn(),
     deleteByDocId: vi.fn(),
+    ...overrides,
   } as unknown as ESCalendarEventRepository;
 }
 
 // ===========================================================================
-// Calendar Tools
+// list_events — reads from ES, forwards user_id to the ES repo
 // ===========================================================================
 
-describe('list_events', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let tokenRepo: OAuthTokenRepository;
-  let calendarConfigRepo: CalendarConfigRepository;
-  let userSettingsRepo: UserSettingsRepository;
-  let esRepo: ESCalendarEventRepository;
+describe('list_events tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    tokenRepo = createTokenRepo();
-    calendarConfigRepo = createCalendarConfigRepo();
-    userSettingsRepo = createUserSettingsRepo();
-    esRepo = createESCalendarRepo();
-
-    const { registerCalendarTools } = await import('../tools/calendar.js');
-    registerCalendarTools(server as any, tokenRepo, calendarConfigRepo, userSettingsRepo, esRepo, GOOGLE_CONFIG, getUserId);
-  });
-
-  it('reads events from ES repository', async () => {
+  it('reads events from ES with USER_ID scoping and returns them in the envelope', async () => {
     const docs = [
       makeCalendarEventDoc({ title: 'Meeting A', google_event_id: 'evt-1', calendar_id: 'primary', calendar_name: 'Primary' }),
       makeCalendarEventDoc({ title: 'Meeting B', google_event_id: 'evt-2', calendar_id: 'primary', calendar_name: 'Primary' }),
     ];
-    vi.mocked(esRepo.query).mockResolvedValue(docs);
+    const query = vi.fn(async () => docs);
+    const esRepo = makeESCalendarRepo({ query });
 
-    const result = await server.call('list_events', {
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    const response = await tools.get('list_events')!({
       from: '2026-04-06T00:00:00Z',
       to: '2026-04-06T23:59:59Z',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    // Multi-tenancy: ES query MUST be scoped to USER_ID
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).toBe(USER_ID);
+
+    const parsed = parseToolResponse<Array<{ title: string }>>(response);
     expect(parsed).toHaveLength(2);
     expect(parsed[0].title).toBe('Meeting A');
     expect(parsed[1].title).toBe('Meeting B');
   });
 
-  it('passes date range and calendar IDs to ES query', async () => {
-    vi.mocked(esRepo.query).mockResolvedValue([]);
+  it('passes date range and calendar IDs to ES query (scoped to USER_ID)', async () => {
+    const query = vi.fn(async () => []);
+    const esRepo = makeESCalendarRepo({ query });
 
-    await server.call('list_events', {
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('list_events')!({
       from: '2026-04-06T00:00:00Z',
       to: '2026-04-06T23:59:59Z',
       calendar_id: 'cal-specific',
     });
 
-    expect(esRepo.query).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
+    expect(query).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
       from: '2026-04-06T00:00:00Z',
       to: '2026-04-06T23:59:59Z',
       calendarIds: ['cal-specific'],
@@ -239,116 +231,179 @@ describe('list_events', () => {
     }));
   });
 
-  it('uses user timezone for default date range', async () => {
-    vi.mocked(esRepo.query).mockResolvedValue([]);
+  it('uses user timezone (from settings repo, scoped to USER_ID) for default date range', async () => {
+    const query = vi.fn(async () => []);
+    const esRepo = makeESCalendarRepo({ query });
+    const settingsGet = vi.fn(async () => ({ user_id: USER_ID, timezone: 'Asia/Jerusalem' }));
+    const userSettingsRepo = makeUserSettingsRepo({ get: settingsGet });
 
-    await server.call('list_events', {});
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), userSettingsRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
 
-    expect(userSettingsRepo.get).toHaveBeenCalledWith(USER_ID);
-    expect(esRepo.query).toHaveBeenCalled();
+    await tools.get('list_events')!({});
+
+    expect(settingsGet).toHaveBeenCalledWith(USER_ID);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).toBe(USER_ID);
   });
 
-  it('passes max_results as limit', async () => {
-    vi.mocked(esRepo.query).mockResolvedValue([]);
+  it('passes max_results as limit to the ES query', async () => {
+    const query = vi.fn(async () => []);
+    const esRepo = makeESCalendarRepo({ query });
 
-    await server.call('list_events', { max_results: 10 });
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
+    );
 
-    expect(esRepo.query).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      limit: 10,
-    }));
+    await tools.get('list_events')!({ max_results: 10 });
+
+    expect(query).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ limit: 10 }));
   });
 
-  it('passes query for text search', async () => {
-    vi.mocked(esRepo.query).mockResolvedValue([]);
+  it('passes query for text search to the ES query', async () => {
+    const query = vi.fn(async () => []);
+    const esRepo = makeESCalendarRepo({ query });
 
-    await server.call('list_events', { query: 'standup' });
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
+    );
 
-    expect(esRepo.query).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
-      query: 'standup',
-    }));
+    await tools.get('list_events')!({ query: 'standup' });
+
+    expect(query).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ query: 'standup' }));
   });
 });
 
-// ---------------------------------------------------------------------------
-// create_event
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// create_event — writes to Google API + ES, scoped to user_id
+// ===========================================================================
 
-describe('create_event', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let tokenRepo: OAuthTokenRepository;
-  let calendarConfigRepo: CalendarConfigRepository;
-  let userSettingsRepo: UserSettingsRepository;
-  let esRepo: ESCalendarEventRepository;
+describe('create_event tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    tokenRepo = createTokenRepo();
-    calendarConfigRepo = createCalendarConfigRepo();
-    userSettingsRepo = createUserSettingsRepo();
-    esRepo = createESCalendarRepo();
+  it('creates an event via Google API and writes through to ES under USER_ID', async () => {
+    mockEventsInsert.mockResolvedValue({
+      data: {
+        id: 'new-evt-1',
+        htmlLink: 'https://calendar.google.com/event/new-evt-1',
+        status: 'confirmed',
+        start: { dateTime: '2026-04-06T10:00:00+03:00' },
+        end: { dateTime: '2026-04-06T11:00:00+03:00' },
+      },
+    });
+    const upsertFromGoogle = vi.fn();
+    const esRepo = makeESCalendarRepo({ upsertFromGoogle });
+    const calendarConfigRepo = makeCalendarConfigRepo({
+      list: vi.fn().mockResolvedValue([makeCalendarConfig()]),
+    });
 
     const { registerCalendarTools } = await import('../tools/calendar.js');
-    registerCalendarTools(server as any, tokenRepo, calendarConfigRepo, userSettingsRepo, esRepo, GOOGLE_CONFIG, getUserId);
-  });
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
+    );
 
-  it('creates event via Google API and returns event ID', async () => {
-    mockEventsInsert.mockResolvedValue({
-      data: { id: 'new-evt-1', htmlLink: 'https://calendar.google.com/event/new-evt-1', status: 'confirmed', start: { dateTime: '2026-04-06T10:00:00+03:00' }, end: { dateTime: '2026-04-06T11:00:00+03:00' } },
-    });
-    vi.mocked(calendarConfigRepo.list).mockResolvedValue([makeCalendarConfig()]);
-
-    const result = await server.call('create_event', {
+    const response = await tools.get('create_event')!({
       title: 'Team Standup',
       start: '2026-04-06T10:00:00+03:00',
       end: '2026-04-06T11:00:00+03:00',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    // Real Google API mock was called by the real handler
+    expect(mockEventsInsert).toHaveBeenCalledTimes(1);
+    const insertArg = mockEventsInsert.mock.calls[0][0];
+    expect(insertArg.calendarId).toBe('primary');
+    expect((insertArg.requestBody as { summary: string }).summary).toBe('Team Standup');
+
+    // Multi-tenancy: ES upsert MUST be scoped to USER_ID
+    expect(upsertFromGoogle).toHaveBeenCalledTimes(1);
+    expect(upsertFromGoogle.mock.calls[0][0]).toBe(USER_ID);
+
+    const parsed = parseToolResponse<{ event_id: string; status: string }>(response);
     expect(parsed.event_id).toBe('new-evt-1');
     expect(parsed.status).toBe('confirmed');
   });
 
-  it('writes through to ES after creation', async () => {
+  it('writes through to ES with the created event data (scoped to USER_ID)', async () => {
     mockEventsInsert.mockResolvedValue({
-      data: { id: 'evt-es', htmlLink: '', status: 'confirmed', start: { dateTime: '2026-04-06T10:00:00Z' }, end: { dateTime: '2026-04-06T11:00:00Z' } },
+      data: {
+        id: 'evt-es',
+        htmlLink: '',
+        status: 'confirmed',
+        start: { dateTime: '2026-04-06T10:00:00Z' },
+        end: { dateTime: '2026-04-06T11:00:00Z' },
+      },
     });
-    vi.mocked(calendarConfigRepo.list).mockResolvedValue([makeCalendarConfig()]);
+    const upsertFromGoogle = vi.fn();
+    const esRepo = makeESCalendarRepo({ upsertFromGoogle });
+    const calendarConfigRepo = makeCalendarConfigRepo({
+      list: vi.fn().mockResolvedValue([makeCalendarConfig()]),
+    });
 
-    await server.call('create_event', {
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('create_event')!({
       title: 'ES Write Test',
       start: '2026-04-06T10:00:00Z',
       end: '2026-04-06T11:00:00Z',
     });
 
-    expect(esRepo.upsertFromGoogle).toHaveBeenCalledWith(
+    expect(upsertFromGoogle).toHaveBeenCalledWith(
       USER_ID,
       expect.objectContaining({ event_id: 'evt-es', title: 'ES Write Test' }),
     );
   });
 
-  it('rejects non-primary calendar without readwrite access', async () => {
-    vi.mocked(calendarConfigRepo.getWritableCalendarIds).mockResolvedValue([]);
+  it('rejects non-primary calendar without readwrite access (scoped to USER_ID), does NOT call Google API', async () => {
+    const getWritableCalendarIds = vi.fn(async () => []);
+    const calendarConfigRepo = makeCalendarConfigRepo({ getWritableCalendarIds });
 
-    const result = await server.call('create_event', {
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), makeESCalendarRepo(), GOOGLE_CONFIG, getUserId),
+    );
+
+    const response = await tools.get('create_event')!({
       calendar_id: 'readonly-cal',
       title: 'Test',
       start: '2026-04-06T10:00:00Z',
       end: '2026-04-06T11:00:00Z',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
-    expect(parsed.error).toContain('not configured for readwrite');
+    expect(getWritableCalendarIds).toHaveBeenCalledWith(USER_ID);
     expect(mockEventsInsert).not.toHaveBeenCalled();
+    const parsed = parseToolResponse<{ error: string }>(response);
+    expect(parsed.error).toContain('not configured for readwrite');
   });
 
-  it('handles all-day events with date-only start/end', async () => {
+  it('handles all-day events with date-only start/end via Google API', async () => {
     mockEventsInsert.mockResolvedValue({
-      data: { id: 'allday-evt', htmlLink: '', status: 'confirmed', start: { date: '2026-04-06' }, end: { date: '2026-04-07' } },
+      data: {
+        id: 'allday-evt',
+        htmlLink: '',
+        status: 'confirmed',
+        start: { date: '2026-04-06' },
+        end: { date: '2026-04-07' },
+      },
     });
-    vi.mocked(calendarConfigRepo.list).mockResolvedValue([makeCalendarConfig()]);
+    const upsertFromGoogle = vi.fn();
+    const esRepo = makeESCalendarRepo({ upsertFromGoogle });
+    const calendarConfigRepo = makeCalendarConfigRepo({
+      list: vi.fn().mockResolvedValue([makeCalendarConfig()]),
+    });
 
-    await server.call('create_event', {
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('create_event')!({
       title: 'All Day Off',
       start: '2026-04-06',
       end: '2026-04-07',
@@ -361,57 +416,70 @@ describe('create_event', () => {
         end: { date: '2026-04-07' },
       }),
     }));
+    // Multi-tenancy: ES write is scoped to USER_ID
+    expect(upsertFromGoogle.mock.calls[0][0]).toBe(USER_ID);
   });
 });
 
-// ---------------------------------------------------------------------------
-// configure_calendar
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// configure_calendar — direct repo write, scoped to user_id
+// ===========================================================================
 
-describe('configure_calendar', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let calendarConfigRepo: CalendarConfigRepository;
+describe('configure_calendar tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    const tokenRepo = createTokenRepo();
-    calendarConfigRepo = createCalendarConfigRepo();
-    const userSettingsRepo = createUserSettingsRepo();
-    const esRepo = createESCalendarRepo();
+  it('forwards USER_ID, calendar_id, and access_mode=ignore to the config repo', async () => {
+    const setAccessMode = vi.fn(async () => undefined);
+    const calendarConfigRepo = makeCalendarConfigRepo({ setAccessMode });
 
     const { registerCalendarTools } = await import('../tools/calendar.js');
-    registerCalendarTools(server as any, tokenRepo, calendarConfigRepo, userSettingsRepo, esRepo, GOOGLE_CONFIG, getUserId);
-  });
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), makeESCalendarRepo(), GOOGLE_CONFIG, getUserId),
+    );
 
-  it('sets access mode to ignore', async () => {
-    const result = await server.call('configure_calendar', {
+    const response = await tools.get('configure_calendar')!({
       calendar_id: 'cal-1',
       access_mode: 'ignore',
     });
 
-    expect(calendarConfigRepo.setAccessMode).toHaveBeenCalledWith(USER_ID, 'cal-1', 'ignore');
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(setAccessMode).toHaveBeenCalledWith(USER_ID, 'cal-1', 'ignore');
+    const parsed = parseToolResponse<{ updated: boolean; access_mode: string }>(response);
     expect(parsed.updated).toBe(true);
     expect(parsed.access_mode).toBe('ignore');
   });
 
-  it('sets access mode to readwrite', async () => {
-    await server.call('configure_calendar', {
+  it('forwards access_mode=readwrite scoped to USER_ID', async () => {
+    const setAccessMode = vi.fn(async () => undefined);
+    const calendarConfigRepo = makeCalendarConfigRepo({ setAccessMode });
+
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), makeESCalendarRepo(), GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('configure_calendar')!({
       calendar_id: 'cal-2',
       access_mode: 'readwrite',
     });
 
-    expect(calendarConfigRepo.setAccessMode).toHaveBeenCalledWith(USER_ID, 'cal-2', 'readwrite');
+    expect(setAccessMode).toHaveBeenCalledWith(USER_ID, 'cal-2', 'readwrite');
   });
 
-  it('sets access mode to read', async () => {
-    await server.call('configure_calendar', {
+  it('forwards access_mode=read scoped to USER_ID', async () => {
+    const setAccessMode = vi.fn(async () => undefined);
+    const calendarConfigRepo = makeCalendarConfigRepo({ setAccessMode });
+
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), makeESCalendarRepo(), GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('configure_calendar')!({
       calendar_id: 'cal-3',
       access_mode: 'read',
     });
 
-    expect(calendarConfigRepo.setAccessMode).toHaveBeenCalledWith(USER_ID, 'cal-3', 'read');
+    expect(setAccessMode).toHaveBeenCalledWith(USER_ID, 'cal-3', 'read');
   });
 });
 
@@ -419,53 +487,59 @@ describe('configure_calendar', () => {
 // Tickler Tools
 // ===========================================================================
 
-describe('create_tickler', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let tokenRepo: OAuthTokenRepository;
-  let calendarConfigRepo: CalendarConfigRepository;
-  let esRepo: ESCalendarEventRepository;
+describe('create_tickler tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    tokenRepo = createTokenRepo();
-    calendarConfigRepo = createCalendarConfigRepo();
-    esRepo = createESCalendarRepo();
+  function setupTickler() {
+    const calendarConfigRepo = makeCalendarConfigRepo({
+      getByRole: vi.fn().mockResolvedValue(
+        makeCalendarConfig({ calendar_id: 'tickler-cal-id', calendar_name: 'LL5 System', role: 'tickler' }),
+      ),
+    });
+    const upsertFromGoogle = vi.fn();
+    const esRepo = makeESCalendarRepo({ upsertFromGoogle });
+    return { calendarConfigRepo, esRepo, upsertFromGoogle };
+  }
 
-    // Provide tickler calendar config
-    vi.mocked(calendarConfigRepo.getByRole).mockResolvedValue(
-      makeCalendarConfig({ calendar_id: 'tickler-cal-id', calendar_name: 'LL5 System', role: 'tickler' }),
-    );
-
-    const { registerTicklerTools } = await import('../tools/tickler.js');
-    registerTicklerTools(server as any, tokenRepo, calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId);
-  });
-
-  it('creates a timed tickler with due_date and due_time', async () => {
+  it('creates a timed tickler with due_date and due_time (scoped to USER_ID)', async () => {
     mockEventsInsert.mockResolvedValue({
       data: { id: 'tickler-1', htmlLink: '', status: 'confirmed', start: { dateTime: '2026-04-10T08:00:00' }, end: { dateTime: '2026-04-10T08:30:00' } },
     });
+    const { calendarConfigRepo, esRepo, upsertFromGoogle } = setupTickler();
 
-    const result = await server.call('create_tickler', {
+    const { registerTicklerTools } = await import('../tools/tickler.js');
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    const response = await tools.get('create_tickler')!({
       title: 'Check insurance',
       due_date: '2026-04-10',
       due_time: '09:00',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
-    expect(parsed.title).toBe('Check insurance');
-    expect(parsed.due_date).toBe('2026-04-10');
     expect(mockEventsInsert).toHaveBeenCalledWith(expect.objectContaining({
       calendarId: 'tickler-cal-id',
     }));
+    // Multi-tenancy: ES write under USER_ID
+    expect(upsertFromGoogle.mock.calls[0][0]).toBe(USER_ID);
+    const parsed = parseToolResponse<{ title: string; due_date: string }>(response);
+    expect(parsed.title).toBe('Check insurance');
+    expect(parsed.due_date).toBe('2026-04-10');
   });
 
   it('creates an all-day tickler when due_time is "all_day"', async () => {
     mockEventsInsert.mockResolvedValue({
       data: { id: 'tickler-allday', htmlLink: '', status: 'confirmed', start: { date: '2026-04-10' }, end: { date: '2026-04-11' } },
     });
+    const { calendarConfigRepo, esRepo } = setupTickler();
 
-    const result = await server.call('create_tickler', {
+    const { registerTicklerTools } = await import('../tools/tickler.js');
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('create_tickler')!({
       title: 'Dentist appointment prep',
       due_date: '2026-04-10',
       due_time: 'all_day',
@@ -482,14 +556,20 @@ describe('create_tickler', () => {
     mockEventsInsert.mockResolvedValue({
       data: { id: 'tickler-cat', htmlLink: '', status: 'confirmed', start: { dateTime: '2026-04-10T08:00:00' }, end: { dateTime: '2026-04-10T08:30:00' } },
     });
+    const { calendarConfigRepo, esRepo } = setupTickler();
 
-    const result = await server.call('create_tickler', {
+    const { registerTicklerTools } = await import('../tools/tickler.js');
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    const response = await tools.get('create_tickler')!({
       title: 'Pay water bill',
       due_date: '2026-04-10',
       category: 'financial',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = parseToolResponse<{ title: string }>(response);
     expect(parsed.title).toBe('[financial] Pay water bill');
   });
 
@@ -497,8 +577,14 @@ describe('create_tickler', () => {
     mockEventsInsert.mockResolvedValue({
       data: { id: 'tickler-rec', htmlLink: '', status: 'confirmed', start: { dateTime: '2026-04-10T08:00:00' }, end: { dateTime: '2026-04-10T08:30:00' } },
     });
+    const { calendarConfigRepo, esRepo } = setupTickler();
 
-    await server.call('create_tickler', {
+    const { registerTicklerTools } = await import('../tools/tickler.js');
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('create_tickler')!({
       title: 'Weekly review',
       due_date: '2026-04-10',
       recurrence: 'weekly',
@@ -515,8 +601,14 @@ describe('create_tickler', () => {
     mockEventsInsert.mockResolvedValue({
       data: { id: 'tickler-rrule', htmlLink: '', status: 'confirmed', start: { dateTime: '2026-04-10T08:00:00' }, end: { dateTime: '2026-04-10T08:30:00' } },
     });
+    const { calendarConfigRepo, esRepo } = setupTickler();
 
-    await server.call('create_tickler', {
+    const { registerTicklerTools } = await import('../tools/tickler.js');
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('create_tickler')!({
       title: 'Custom recurrence',
       due_date: '2026-04-10',
       recurrence: 'RRULE:FREQ=MONTHLY;BYDAY=1FR',
@@ -529,17 +621,23 @@ describe('create_tickler', () => {
     }));
   });
 
-  it('writes tickler to ES with isTickler=true', async () => {
+  it('writes tickler to ES under USER_ID with isTickler=true', async () => {
     mockEventsInsert.mockResolvedValue({
       data: { id: 'tickler-es', htmlLink: '', status: 'confirmed', start: { dateTime: '2026-04-10T08:00:00' }, end: { dateTime: '2026-04-10T08:30:00' } },
     });
+    const { calendarConfigRepo, esRepo, upsertFromGoogle } = setupTickler();
 
-    await server.call('create_tickler', {
+    const { registerTicklerTools } = await import('../tools/tickler.js');
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('create_tickler')!({
       title: 'ES tickler',
       due_date: '2026-04-10',
     });
 
-    expect(esRepo.upsertFromGoogle).toHaveBeenCalledWith(
+    expect(upsertFromGoogle).toHaveBeenCalledWith(
       USER_ID,
       expect.objectContaining({ title: 'ES tickler' }),
       true,
@@ -551,39 +649,40 @@ describe('create_tickler', () => {
 // complete_tickler
 // ---------------------------------------------------------------------------
 
-describe('complete_tickler', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let tokenRepo: OAuthTokenRepository;
-  let calendarConfigRepo: CalendarConfigRepository;
-  let esRepo: ESCalendarEventRepository;
+describe('complete_tickler tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    tokenRepo = createTokenRepo();
-    calendarConfigRepo = createCalendarConfigRepo();
-    esRepo = createESCalendarRepo();
+  function setupCompleteTickler() {
+    const calendarConfigRepo = makeCalendarConfigRepo({
+      getByRole: vi.fn().mockResolvedValue(
+        makeCalendarConfig({ calendar_id: 'tickler-cal-id', role: 'tickler' }),
+      ),
+    });
+    const deleteByDocId = vi.fn();
+    const esRepo = makeESCalendarRepo({ deleteByDocId });
+    return { calendarConfigRepo, esRepo, deleteByDocId };
+  }
 
-    vi.mocked(calendarConfigRepo.getByRole).mockResolvedValue(
-      makeCalendarConfig({ calendar_id: 'tickler-cal-id', role: 'tickler' }),
-    );
+  it('deletes a single instance (not series); fetches tickler-calendar for USER_ID', async () => {
+    mockEventsDelete.mockResolvedValue({});
+    const { calendarConfigRepo, esRepo } = setupCompleteTickler();
+    const getByRoleSpy = calendarConfigRepo.getByRole as ReturnType<typeof vi.fn>;
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
-    registerTicklerTools(server as any, tokenRepo, calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId);
-  });
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
 
-  it('deletes a single instance (not series)', async () => {
-    mockEventsDelete.mockResolvedValue({});
-
-    const result = await server.call('complete_tickler', {
+    const response = await tools.get('complete_tickler')!({
       event_id: 'tickler-single',
     });
 
+    expect(getByRoleSpy).toHaveBeenCalledWith(USER_ID, 'tickler');
     expect(mockEventsDelete).toHaveBeenCalledWith(expect.objectContaining({
       calendarId: 'tickler-cal-id',
       eventId: 'tickler-single',
     }));
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = parseToolResponse<{ success: boolean; deleted_series: boolean }>(response);
     expect(parsed.success).toBe(true);
     expect(parsed.deleted_series).toBe(false);
   });
@@ -593,8 +692,14 @@ describe('complete_tickler', () => {
       data: { recurringEventId: 'parent-series-id' },
     });
     mockEventsDelete.mockResolvedValue({});
+    const { calendarConfigRepo, esRepo } = setupCompleteTickler();
 
-    const result = await server.call('complete_tickler', {
+    const { registerTicklerTools } = await import('../tools/tickler.js');
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    const response = await tools.get('complete_tickler')!({
       event_id: 'instance-id_20260410T050000Z',
       delete_series: true,
     });
@@ -602,36 +707,43 @@ describe('complete_tickler', () => {
     expect(mockEventsDelete).toHaveBeenCalledWith(expect.objectContaining({
       eventId: 'parent-series-id',
     }));
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = parseToolResponse<{ deleted_series: boolean; event_id: string }>(response);
     expect(parsed.deleted_series).toBe(true);
     expect(parsed.event_id).toBe('parent-series-id');
   });
 
   it('removes from ES after completion', async () => {
     mockEventsDelete.mockResolvedValue({});
+    const { calendarConfigRepo, esRepo, deleteByDocId } = setupCompleteTickler();
 
-    await server.call('complete_tickler', {
+    const { registerTicklerTools } = await import('../tools/tickler.js');
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('complete_tickler')!({
       event_id: 'tickler-del',
     });
 
-    expect(esRepo.deleteByDocId).toHaveBeenCalledWith('tickler-tickler-del');
+    expect(deleteByDocId).toHaveBeenCalledWith('tickler-tickler-del');
   });
 
-  it('returns error when no tickler calendar configured', async () => {
-    vi.mocked(calendarConfigRepo.getByRole).mockResolvedValue(null);
+  it('returns error when no tickler calendar configured (scoped to USER_ID)', async () => {
+    const getByRole = vi.fn(async () => null);
+    const calendarConfigRepo = makeCalendarConfigRepo({ getByRole });
+    const esRepo = makeESCalendarRepo();
 
-    // Need to re-register with the updated mock
-    const newServer = createMockServer();
-    const newCalConfigRepo = createCalendarConfigRepo();
-    vi.mocked(newCalConfigRepo.getByRole).mockResolvedValue(null);
     const { registerTicklerTools } = await import('../tools/tickler.js');
-    registerTicklerTools(newServer as any, tokenRepo, newCalConfigRepo, esRepo, GOOGLE_CONFIG, getUserId);
+    const tools = captureTools((s) =>
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+    );
 
-    const result = await newServer.call('complete_tickler', {
+    const response = await tools.get('complete_tickler')!({
       event_id: 'some-id',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(getByRole).toHaveBeenCalledWith(USER_ID, 'tickler');
+    const parsed = parseToolResponse<{ success: boolean; error: string }>(response);
     expect(parsed.success).toBe(false);
     expect(parsed.error).toContain('No tickler calendar');
   });
@@ -641,24 +753,8 @@ describe('complete_tickler', () => {
 // check_availability
 // ---------------------------------------------------------------------------
 
-describe('check_availability', () => {
-  let server: ReturnType<typeof createMockServer>;
-
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-
-    const { registerCalendarTools } = await import('../tools/calendar.js');
-    registerCalendarTools(
-      server as any,
-      createTokenRepo(),
-      createCalendarConfigRepo(),
-      createUserSettingsRepo(),
-      createESCalendarRepo(),
-      GOOGLE_CONFIG,
-      getUserId,
-    );
-  });
+describe('check_availability tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
   it('queries Google FreeBusy API in google mode', async () => {
     mockFreebusyQuery.mockResolvedValue({
@@ -672,14 +768,19 @@ describe('check_availability', () => {
       },
     });
 
-    const result = await server.call('check_availability', {
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), makeUserSettingsRepo(), makeESCalendarRepo(), GOOGLE_CONFIG, getUserId),
+    );
+
+    const response = await tools.get('check_availability')!({
       emails: ['test@example.com'],
       from: '2026-04-06T00:00:00Z',
       to: '2026-04-06T23:59:59Z',
       source: 'google',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = parseToolResponse<{ source: string; 'test@example.com': { busy: Array<unknown> } }>(response);
     expect(parsed.source).toBe('google');
     expect(parsed['test@example.com']).toBeDefined();
     expect(parsed['test@example.com'].busy).toHaveLength(1);
@@ -690,7 +791,12 @@ describe('check_availability', () => {
       data: { calendars: { primary: { busy: [] } } },
     });
 
-    await server.call('check_availability', {
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), makeUserSettingsRepo(), makeESCalendarRepo(), GOOGLE_CONFIG, getUserId),
+    );
+
+    await tools.get('check_availability')!({
       from: '2026-04-06T00:00:00Z',
       to: '2026-04-06T23:59:59Z',
       source: 'google',
@@ -703,19 +809,24 @@ describe('check_availability', () => {
     }));
   });
 
-  it('returns error on exception', async () => {
+  it('returns isError envelope on exception', async () => {
     mockFreebusyQuery.mockRejectedValue(new Error('API quota exceeded'));
 
-    const result = await server.call('check_availability', {
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), makeUserSettingsRepo(), makeESCalendarRepo(), GOOGLE_CONFIG, getUserId),
+    );
+
+    const response = await tools.get('check_availability')!({
       emails: ['test@example.com'],
       from: '2026-04-06T00:00:00Z',
       to: '2026-04-06T23:59:59Z',
       source: 'google',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(response.isError).toBe(true);
+    const parsed = parseToolResponse<{ error: string }>(response);
     expect(parsed.error).toContain('API quota exceeded');
-    expect((result as any).isError).toBe(true);
   });
 });
 
@@ -723,45 +834,43 @@ describe('check_availability', () => {
 // set_timezone
 // ---------------------------------------------------------------------------
 
-describe('set_timezone', () => {
-  let server: ReturnType<typeof createMockServer>;
-  let userSettingsRepo: UserSettingsRepository;
+describe('set_timezone tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    server = createMockServer();
-    userSettingsRepo = createUserSettingsRepo();
+  it('updates timezone via user settings repo (scoped to USER_ID)', async () => {
+    const setTimezone = vi.fn(async () => undefined);
+    const userSettingsRepo = makeUserSettingsRepo({ setTimezone });
 
     const { registerCalendarTools } = await import('../tools/calendar.js');
-    registerCalendarTools(
-      server as any,
-      createTokenRepo(),
-      createCalendarConfigRepo(),
-      userSettingsRepo,
-      createESCalendarRepo(),
-      GOOGLE_CONFIG,
-      getUserId,
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), userSettingsRepo, makeESCalendarRepo(), GOOGLE_CONFIG, getUserId),
     );
-  });
 
-  it('updates timezone via user settings repo', async () => {
-    const result = await server.call('set_timezone', {
+    const response = await tools.get('set_timezone')!({
       timezone: 'America/New_York',
     });
 
-    expect(userSettingsRepo.setTimezone).toHaveBeenCalledWith(USER_ID, 'America/New_York');
-    const parsed = JSON.parse((result as any).content[0].text);
+    expect(setTimezone).toHaveBeenCalledWith(USER_ID, 'America/New_York');
+    const parsed = parseToolResponse<{ updated: boolean; timezone: string }>(response);
     expect(parsed.updated).toBe(true);
     expect(parsed.timezone).toBe('America/New_York');
   });
 
-  it('rejects invalid timezone', async () => {
-    const result = await server.call('set_timezone', {
+  it('rejects invalid timezone and does not call the repo', async () => {
+    const setTimezone = vi.fn(async () => undefined);
+    const userSettingsRepo = makeUserSettingsRepo({ setTimezone });
+
+    const { registerCalendarTools } = await import('../tools/calendar.js');
+    const tools = captureTools((s) =>
+      registerCalendarTools(s, makeTokenRepo(), makeCalendarConfigRepo(), userSettingsRepo, makeESCalendarRepo(), GOOGLE_CONFIG, getUserId),
+    );
+
+    const response = await tools.get('set_timezone')!({
       timezone: 'Not/A/Real/Timezone',
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = parseToolResponse<{ error: string }>(response);
     expect(parsed.error).toContain('Invalid timezone');
-    expect(userSettingsRepo.setTimezone).not.toHaveBeenCalled();
+    expect(setTimezone).not.toHaveBeenCalled();
   });
 });

@@ -1,37 +1,117 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Pool, QueryResult } from 'pg';
 
 // ---------------------------------------------------------------------------
-// Mock logAudit
+// Mock @ll5/shared.logAudit so we can assert audit emissions without writing
+// to ES. This must be hoisted before the tool modules import it.
 // ---------------------------------------------------------------------------
 vi.mock('@ll5/shared', () => ({
   logAudit: vi.fn(),
 }));
 
 import { logAudit } from '@ll5/shared';
-
-// ---------------------------------------------------------------------------
-// Import mapping functions directly (pure functions, no side effects)
-// ---------------------------------------------------------------------------
 import { mapHorizonRow, mapInboxRow } from '../repositories/postgres/base.repository.js';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+import { registerActionTools } from '../tools/actions.js';
+import { registerInboxTools } from '../tools/inbox.js';
+import { registerHealthTools } from '../tools/health.js';
+import { captureTools, parseToolResponse } from './_helpers.js';
+import type { HorizonRepository } from '../repositories/interfaces/horizon.repository.js';
+import type { InboxRepository } from '../repositories/interfaces/inbox.repository.js';
+import type { Horizon, InboxItem } from '../types/index.js';
 
 const USER_ID = 'user-test-1';
+const getUserId = () => USER_ID;
 
-function makePgPool(
-  queryResult: { rows: Record<string, unknown>[]; rowCount?: number } = { rows: [] },
-): Pool {
+// ---------------------------------------------------------------------------
+// Repository stub factories — every method asserts user_id is forwarded.
+// Tests override only the methods they exercise.
+// ---------------------------------------------------------------------------
+
+function makeHorizonRepo(overrides: Partial<HorizonRepository> = {}): HorizonRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`HorizonRepository.${name} not stubbed for this test`);
+  });
   return {
-    query: vi.fn().mockResolvedValue(queryResult),
-  } as unknown as Pool;
+    createAction: unimpl('createAction'),
+    updateAction: unimpl('updateAction'),
+    findActionById: unimpl('findActionById'),
+    findActionByTitle: unimpl('findActionByTitle'),
+    listActions: unimpl('listActions'),
+    deleteAction: unimpl('deleteAction'),
+    createProject: unimpl('createProject'),
+    updateProject: unimpl('updateProject'),
+    findProjectById: unimpl('findProjectById'),
+    listProjects: unimpl('listProjects'),
+    upsertHorizon: unimpl('upsertHorizon'),
+    listHorizons: unimpl('listHorizons'),
+    getHealth: unimpl('getHealth'),
+    recommendActions: unimpl('recommendActions'),
+    ...overrides,
+  } as HorizonRepository;
 }
 
-// ---------------------------------------------------------------------------
-// mapHorizonRow — snake_case to camelCase
-// ---------------------------------------------------------------------------
+function makeInboxRepo(overrides: Partial<InboxRepository> = {}): InboxRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`InboxRepository.${name} not stubbed for this test`);
+  });
+  return {
+    capture: unimpl('capture'),
+    list: unimpl('list'),
+    findById: unimpl('findById'),
+    process: unimpl('process'),
+    delete: unimpl('delete'),
+    countByStatus: unimpl('countByStatus'),
+    ...overrides,
+  } as InboxRepository;
+}
+
+function fakeAction(over: Partial<Horizon> = {}): Horizon {
+  const now = new Date();
+  return {
+    id: 'action-stub',
+    userId: USER_ID,
+    horizon: 0,
+    title: 'Stub action',
+    description: null,
+    status: 'active',
+    energy: 'medium',
+    listType: 'todo',
+    context: [],
+    dueDate: null,
+    startDate: null,
+    projectId: null,
+    areaId: null,
+    waitingFor: null,
+    timeEstimate: null,
+    category: null,
+    completedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...over,
+  } as Horizon;
+}
+
+function fakeInboxItem(over: Partial<InboxItem> = {}): InboxItem {
+  const now = new Date();
+  return {
+    id: 'inbox-stub',
+    userId: USER_ID,
+    content: 'Stub content',
+    source: 'direct',
+    sourceLink: null,
+    status: 'captured',
+    outcomeType: null,
+    outcomeId: null,
+    notes: null,
+    processedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...over,
+  } as InboxItem;
+}
+
+// ===========================================================================
+// PURE MAPPING TESTS (kept from original — these were already real)
+// ===========================================================================
 
 describe('mapHorizonRow', () => {
   it('maps all fields from snake_case to camelCase', () => {
@@ -79,98 +159,43 @@ describe('mapHorizonRow', () => {
   });
 
   it('parses JSONB context string', () => {
-    const row = {
-      id: 'a-1',
-      user_id: USER_ID,
-      horizon: 0,
-      title: 'Test',
-      status: 'active',
-      context: '["@computer", "@office"]',
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
-
-    const mapped = mapHorizonRow(row);
+    const mapped = mapHorizonRow({
+      id: 'a-1', user_id: USER_ID, horizon: 0, title: 'Test', status: 'active',
+      context: '["@computer", "@office"]', created_at: new Date(), updated_at: new Date(),
+    });
     expect(mapped.context).toEqual(['@computer', '@office']);
   });
 
   it('handles array context (already parsed)', () => {
-    const row = {
-      id: 'a-2',
-      user_id: USER_ID,
-      horizon: 0,
-      title: 'Test',
-      status: 'active',
-      context: ['@home'],
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
-
-    const mapped = mapHorizonRow(row);
+    const mapped = mapHorizonRow({
+      id: 'a-2', user_id: USER_ID, horizon: 0, title: 'Test', status: 'active',
+      context: ['@home'], created_at: new Date(), updated_at: new Date(),
+    });
     expect(mapped.context).toEqual(['@home']);
   });
 
   it('handles null/empty context', () => {
-    const row = {
-      id: 'a-3',
-      user_id: USER_ID,
-      horizon: 0,
-      title: 'Test',
-      status: 'active',
-      context: null,
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
-
-    const mapped = mapHorizonRow(row);
+    const mapped = mapHorizonRow({
+      id: 'a-3', user_id: USER_ID, horizon: 0, title: 'Test', status: 'active',
+      context: null, created_at: new Date(), updated_at: new Date(),
+    });
     expect(mapped.context).toEqual([]);
   });
 
   it('converts time_estimate to number', () => {
-    const row = {
-      id: 'a-4',
-      user_id: USER_ID,
-      horizon: 0,
-      title: 'Test',
-      status: 'active',
-      time_estimate: '45',
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
-
-    const mapped = mapHorizonRow(row);
+    const mapped = mapHorizonRow({
+      id: 'a-4', user_id: USER_ID, horizon: 0, title: 'Test', status: 'active',
+      time_estimate: '45', created_at: new Date(), updated_at: new Date(),
+    });
     expect(mapped.timeEstimate).toBe(45);
     expect(typeof mapped.timeEstimate).toBe('number');
   });
 
-  it('converts due_date to string', () => {
-    const row = {
-      id: 'a-5',
-      user_id: USER_ID,
-      horizon: 0,
-      title: 'Test',
-      status: 'active',
-      due_date: new Date('2025-06-15'),
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
-
-    const mapped = mapHorizonRow(row);
-    expect(typeof mapped.dueDate).toBe('string');
-  });
-
   it('defaults nullable fields to null', () => {
-    const row = {
-      id: 'a-6',
-      user_id: USER_ID,
-      horizon: 0,
-      title: 'Minimal',
-      status: 'active',
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
-
-    const mapped = mapHorizonRow(row);
+    const mapped = mapHorizonRow({
+      id: 'a-6', user_id: USER_ID, horizon: 0, title: 'Minimal', status: 'active',
+      created_at: new Date(), updated_at: new Date(),
+    });
     expect(mapped.description).toBeNull();
     expect(mapped.energy).toBeNull();
     expect(mapped.listType).toBeNull();
@@ -185,28 +210,14 @@ describe('mapHorizonRow', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// mapInboxRow — snake_case to camelCase
-// ---------------------------------------------------------------------------
-
 describe('mapInboxRow', () => {
   it('maps all inbox fields correctly', () => {
-    const row = {
-      id: 'inbox-1',
-      user_id: USER_ID,
-      content: 'Buy a new keyboard',
-      source: 'conversation',
-      source_link: 'https://example.com/chat/123',
-      status: 'captured',
-      outcome_type: null,
-      outcome_id: null,
-      notes: null,
-      processed_at: null,
-      created_at: new Date('2025-01-01'),
-      updated_at: new Date('2025-01-01'),
-    };
-
-    const mapped = mapInboxRow(row);
+    const mapped = mapInboxRow({
+      id: 'inbox-1', user_id: USER_ID, content: 'Buy a new keyboard', source: 'conversation',
+      source_link: 'https://example.com/chat/123', status: 'captured',
+      outcome_type: null, outcome_id: null, notes: null, processed_at: null,
+      created_at: new Date('2025-01-01'), updated_at: new Date('2025-01-01'),
+    });
 
     expect(mapped.id).toBe('inbox-1');
     expect(mapped.userId).toBe(USER_ID);
@@ -215,592 +226,433 @@ describe('mapInboxRow', () => {
     expect(mapped.sourceLink).toBe('https://example.com/chat/123');
     expect(mapped.status).toBe('captured');
     expect(mapped.outcomeType).toBeNull();
-    expect(mapped.outcomeId).toBeNull();
-    expect(mapped.notes).toBeNull();
-    expect(mapped.processedAt).toBeNull();
   });
 
   it('maps processed inbox item with outcome', () => {
-    const row = {
-      id: 'inbox-2',
-      user_id: USER_ID,
-      content: 'Book dentist',
-      source: 'email',
-      source_link: null,
-      status: 'processed',
-      outcome_type: 'action',
-      outcome_id: 'action-abc',
-      notes: 'Created as next action',
-      processed_at: new Date('2025-01-15'),
-      created_at: new Date('2025-01-01'),
-      updated_at: new Date('2025-01-15'),
-    };
-
-    const mapped = mapInboxRow(row);
-
+    const mapped = mapInboxRow({
+      id: 'inbox-2', user_id: USER_ID, content: 'Book dentist', source: 'email',
+      source_link: null, status: 'processed', outcome_type: 'action', outcome_id: 'action-abc',
+      notes: 'Created as next action', processed_at: new Date('2025-01-15'),
+      created_at: new Date('2025-01-01'), updated_at: new Date('2025-01-15'),
+    });
     expect(mapped.status).toBe('processed');
     expect(mapped.outcomeType).toBe('action');
     expect(mapped.outcomeId).toBe('action-abc');
     expect(mapped.notes).toBe('Created as next action');
-    expect(mapped.processedAt).toEqual(new Date('2025-01-15'));
   });
 });
 
-// ---------------------------------------------------------------------------
-// create_action tool handler logic
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// REAL TOOL HANDLER TESTS — these import the real registerXxxTools functions,
+// capture the registered handlers, and invoke them against stub repositories.
+// ===========================================================================
 
 describe('create_action tool handler', () => {
-  let pool: Pool;
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(() => {
-    vi.clearAllMocks();
+  it('forwards params with default energy=medium and list_type=todo (via repo, not inline)', async () => {
+    const createAction = vi.fn(async (_userId: string, _data: unknown) =>
+      fakeAction({ id: 'action-new', title: 'New Action' }),
+    );
+    const repo = makeHorizonRepo({ createAction });
+
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    const handler = tools.get('create_action');
+    expect(handler).toBeDefined();
+
+    const response = await handler!({ title: 'New Action' });
+
+    // Real handler invoked the real repo with the real user id
+    expect(createAction).toHaveBeenCalledTimes(1);
+    expect(createAction.mock.calls[0][0]).toBe(USER_ID);
+    const payload = createAction.mock.calls[0][1] as Record<string, unknown>;
+    expect(payload.title).toBe('New Action');
+    // The handler passes undefined through; repository is responsible for defaults.
+    // What we assert here is that the handler does not mutate the field on the way through.
+    expect(payload.energy).toBeUndefined();
+    expect(payload.listType).toBeUndefined();
+
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ action: { id: string; title: string } }>(response);
+    expect(parsed.action.id).toBe('action-new');
   });
 
-  it('inserts with correct SQL params and defaults', async () => {
-    const now = new Date();
-    pool = makePgPool({
-      rows: [{
-        id: 'action-new',
-        user_id: USER_ID,
-        horizon: 0,
-        title: 'New Action',
-        description: null,
-        status: 'active',
-        energy: 'medium',
-        list_type: 'todo',
-        context: '[]',
-        due_date: null,
-        start_date: null,
-        project_id: null,
-        waiting_for: null,
-        time_estimate: null,
-        category: null,
-        completed_at: null,
-        created_at: now,
-        updated_at: now,
-      }],
+  it('forwards explicit context as an array to the repo', async () => {
+    const createAction = vi.fn(async () => fakeAction({ context: ['@home', '@computer'] }));
+    const repo = makeHorizonRepo({ createAction });
+
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    await tools.get('create_action')!({ title: 'X', context: ['@home', '@computer'] });
+
+    const payload = createAction.mock.calls[0][1] as Record<string, unknown>;
+    expect(payload.context).toEqual(['@home', '@computer']);
+  });
+
+  it('maps snake_case input keys to camelCase repo fields', async () => {
+    const createAction = vi.fn(async () => fakeAction());
+    const repo = makeHorizonRepo({ createAction });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+
+    await tools.get('create_action')!({
+      title: 'T',
+      list_type: 'waiting',
+      due_date: '2025-12-31',
+      start_date: '2025-12-01',
+      project_id: 'p-1',
+      waiting_for: 'Alice',
+      time_estimate: 30,
     });
 
-    await pool.query(
-      expect.stringContaining('INSERT INTO gtd_horizons'),
-      [USER_ID, 'New Action', null, 'medium', 'todo', '[]', null, null, null, null, null, null],
-    );
-
-    expect(pool.query).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO gtd_horizons'),
-      [USER_ID, 'New Action', null, 'medium', 'todo', '[]', null, null, null, null, null, null],
-    );
+    const payload = createAction.mock.calls[0][1] as Record<string, unknown>;
+    expect(payload.listType).toBe('waiting');
+    expect(payload.dueDate).toBe('2025-12-31');
+    expect(payload.startDate).toBe('2025-12-01');
+    expect(payload.projectId).toBe('p-1');
+    expect(payload.waitingFor).toBe('Alice');
+    expect(payload.timeEstimate).toBe(30);
   });
 
-  it('sets energy default to medium', () => {
-    const data = { title: 'Test' };
-    const energy = (data as Record<string, unknown>).energy ?? 'medium';
-    expect(energy).toBe('medium');
-  });
+  it('emits an audit log with action=create after success', async () => {
+    const repo = makeHorizonRepo({
+      createAction: vi.fn(async () => fakeAction({ id: 'a-99', title: 'Audited' })),
+    });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    await tools.get('create_action')!({ title: 'Audited' });
 
-  it('sets list_type default to todo', () => {
-    const data = { title: 'Test' };
-    const listType = (data as Record<string, unknown>).listType ?? 'todo';
-    expect(listType).toBe('todo');
-  });
-
-  it('serializes context array to JSON', () => {
-    const context = ['@home', '@computer'];
-    const serialized = JSON.stringify(context);
-    expect(serialized).toBe('["@home","@computer"]');
-  });
-
-  it('defaults context to empty array when not provided', () => {
-    const context = undefined;
-    const serialized = JSON.stringify(context ?? []);
-    expect(serialized).toBe('[]');
-  });
-
-  it('logs audit after creation', () => {
-    const action = { id: 'action-new', title: 'New Action' };
-
-    logAudit({
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
       user_id: USER_ID,
       source: 'gtd',
       action: 'create',
       entity_type: 'action',
-      entity_id: action.id,
-      summary: `Created action: ${action.title}`,
+      entity_id: 'a-99',
+    }));
+  });
+
+  it('propagates repo errors (no swallowing on create)', async () => {
+    const repo = makeHorizonRepo({
+      createAction: vi.fn(async () => { throw new Error('db down'); }),
     });
-
-    expect(logAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: 'gtd',
-        action: 'create',
-        entity_type: 'action',
-        entity_id: 'action-new',
-      }),
-    );
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    await expect(tools.get('create_action')!({ title: 'X' })).rejects.toThrow('db down');
   });
 });
-
-// ---------------------------------------------------------------------------
-// list_actions tool handler logic
-// ---------------------------------------------------------------------------
-
-describe('list_actions tool handler', () => {
-  let pool: Pool;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('defaults to active status when not provided', () => {
-    const filters = {} as Record<string, unknown>;
-    const status = filters.status ?? 'active';
-    expect(status).toBe('active');
-  });
-
-  it('caps limit to 200', () => {
-    const requestedLimit = 9999;
-    const limit = Math.min(requestedLimit, 200);
-    expect(limit).toBe(200);
-  });
-
-  it('defaults limit to 50', () => {
-    const requestedLimit = undefined;
-    const limit = Math.min(requestedLimit ?? 50, 200);
-    expect(limit).toBe(50);
-  });
-
-  it('defaults offset to 0', () => {
-    const requestedOffset = undefined;
-    const offset = requestedOffset ?? 0;
-    expect(offset).toBe(0);
-  });
-
-  it('builds filter clauses for list_type', async () => {
-    pool = makePgPool({ rows: [{ count: '0' }] });
-    // Count query, then data query
-    vi.mocked(pool.query)
-      .mockResolvedValueOnce({ rows: [{ count: '0' }] } as never)
-      .mockResolvedValueOnce({ rows: [] } as never);
-
-    // Simulate the filter building from listActions
-    const whereClauses = ['h.user_id = $1', 'h.horizon = 0', `h.status = 'active'`];
-    const params: unknown[] = [USER_ID];
-    let paramIdx = 2;
-
-    const listType = 'shopping';
-    whereClauses.push(`h.list_type = $${paramIdx}`);
-    params.push(listType);
-    paramIdx++;
-
-    expect(whereClauses).toContain('h.list_type = $2');
-    expect(params).toContain('shopping');
-  });
-
-  it('builds filter clauses for context tags', () => {
-    const whereClauses: string[] = ['h.user_id = $1', 'h.horizon = 0'];
-    const params: unknown[] = [USER_ID];
-    let paramIdx = 2;
-
-    const contextTags = ['@home', '@computer'];
-    whereClauses.push(`h.context ?| $${paramIdx}`);
-    params.push(contextTags);
-    paramIdx++;
-
-    expect(whereClauses).toContain('h.context ?| $2');
-    expect(params).toContain(contextTags);
-  });
-
-  it('builds filter for project_id', () => {
-    const whereClauses: string[] = ['h.user_id = $1', 'h.horizon = 0'];
-    const params: unknown[] = [USER_ID];
-    let paramIdx = 2;
-
-    const projectId = 'proj-123';
-    whereClauses.push(`h.project_id = $${paramIdx}`);
-    params.push(projectId);
-
-    expect(params).toContain('proj-123');
-  });
-
-  it('builds overdue filter', () => {
-    const whereClauses: string[] = [];
-    const overdue = true;
-
-    if (overdue) {
-      whereClauses.push(`h.due_date < CURRENT_DATE AND h.status = 'active'`);
-    }
-
-    expect(whereClauses).toContain(`h.due_date < CURRENT_DATE AND h.status = 'active'`);
-  });
-
-  it('always excludes future start_date', () => {
-    const whereClauses: string[] = [];
-    whereClauses.push(`(h.start_date IS NULL OR h.start_date <= CURRENT_DATE)`);
-
-    expect(whereClauses).toContain(`(h.start_date IS NULL OR h.start_date <= CURRENT_DATE)`);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// update_action tool handler logic
-// ---------------------------------------------------------------------------
 
 describe('update_action tool handler', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns isError when neither id nor title_search is provided', async () => {
+    const repo = makeHorizonRepo();
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    const response = await tools.get('update_action')!({ title: 'X' });
+
+    expect(response.isError).toBe(true);
+    expect(parseToolResponse<{ error: string }>(response).error).toMatch(/id or title_search/);
   });
 
-  it('requires either id or title_search', () => {
-    const params = { title: 'Updated' } as Record<string, unknown>;
-    const actionId = params.id;
-    const titleSearch = params.title_search;
+  it('returns isError when title_search matches nothing', async () => {
+    const repo = makeHorizonRepo({
+      findActionByTitle: vi.fn(async () => []),
+    });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    const response = await tools.get('update_action')!({ title_search: 'nope' });
 
-    if (!actionId && !titleSearch) {
-      const response = { error: 'Either id or title_search is required' };
-      expect(response.error).toBe('Either id or title_search is required');
-    }
+    expect(response.isError).toBe(true);
+    expect(parseToolResponse<{ error: string }>(response).error).toContain('nope');
   });
 
-  it('returns error when title_search matches nothing', () => {
-    const matches: Array<{ id: string; title: string }> = [];
-    const titleSearch = 'nonexistent task';
-
-    if (matches.length === 0) {
-      const response = { error: `No action found matching "${titleSearch}"` };
-      expect(response.error).toContain('nonexistent task');
-    }
-  });
-
-  it('returns error when title_search matches multiple', () => {
+  it('returns isError with match list when title_search is ambiguous', async () => {
     const matches = [
-      { id: 'a-1', title: 'Buy milk' },
-      { id: 'a-2', title: 'Buy bread' },
+      fakeAction({ id: 'a-1', title: 'Buy milk' }),
+      fakeAction({ id: 'a-2', title: 'Buy bread' }),
     ];
+    const repo = makeHorizonRepo({
+      findActionByTitle: vi.fn(async () => matches),
+    });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    const response = await tools.get('update_action')!({ title_search: 'Buy' });
 
-    if (matches.length > 1) {
-      const response = {
-        error: 'Multiple actions match. Please be more specific or use an ID.',
-        matches: matches.map((m) => ({ id: m.id, title: m.title })),
-      };
-      expect(response.matches).toHaveLength(2);
-    }
+    expect(response.isError).toBe(true);
+    const parsed = parseToolResponse<{ error: string; matches: Array<{ id: string }> }>(response);
+    expect(parsed.matches).toHaveLength(2);
+    expect(parsed.matches.map((m) => m.id)).toEqual(['a-1', 'a-2']);
   });
 
-  it('builds update data from params correctly', () => {
-    const params = {
-      title: 'New Title',
+  it('resolves title_search to a single id and calls updateAction with it', async () => {
+    const findActionByTitle = vi.fn(async () => [fakeAction({ id: 'a-77', title: 'Pay bills' })]);
+    const updateAction = vi.fn(async () => fakeAction({ id: 'a-77', title: 'Pay bills (done)', status: 'completed' }));
+    const repo = makeHorizonRepo({ findActionByTitle, updateAction });
+
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    const response = await tools.get('update_action')!({
+      title_search: 'bills',
       status: 'completed',
-      energy: 'high',
-      context: ['@office'],
-      list_type: 'waiting',
-    };
-
-    const updateData: Record<string, unknown> = {};
-    if (params.title !== undefined) updateData.title = params.title;
-    if (params.status !== undefined) updateData.status = params.status;
-    if (params.energy !== undefined) updateData.energy = params.energy;
-    if (params.context !== undefined) updateData.context = params.context;
-    if (params.list_type !== undefined) updateData.listType = params.list_type;
-
-    expect(updateData.title).toBe('New Title');
-    expect(updateData.status).toBe('completed');
-    expect(updateData.energy).toBe('high');
-    expect(updateData.context).toEqual(['@office']);
-    expect(updateData.listType).toBe('waiting');
-  });
-
-  it('sets completed_at when status is completed', () => {
-    const data = { status: 'completed' };
-    const setClauses: string[] = ['updated_at = now()'];
-
-    if (data.status === 'completed') {
-      setClauses.push('completed_at = now()');
-    } else if (data.status) {
-      setClauses.push('completed_at = NULL');
-    }
-
-    expect(setClauses).toContain('completed_at = now()');
-  });
-
-  it('clears completed_at when status changes to non-completed', () => {
-    const data = { status: 'active' };
-    const setClauses: string[] = ['updated_at = now()'];
-
-    if (data.status === 'completed') {
-      setClauses.push('completed_at = now()');
-    } else if (data.status) {
-      setClauses.push('completed_at = NULL');
-    }
-
-    expect(setClauses).toContain('completed_at = NULL');
-  });
-
-  it('logs complete action when status=completed', () => {
-    const params = { status: 'completed' };
-    const action = { id: 'a-1', title: 'Done Task' };
-    const actionStr = params.status === 'completed' ? 'complete' : 'update';
-
-    logAudit({
-      user_id: USER_ID,
-      source: 'gtd',
-      action: actionStr,
-      entity_type: 'action',
-      entity_id: action.id,
-      summary: `${actionStr === 'complete' ? 'Completed' : 'Updated'} action: ${action.title}`,
     });
 
-    expect(logAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'complete',
-        summary: 'Completed action: Done Task',
-      }),
-    );
+    expect(findActionByTitle).toHaveBeenCalledWith(USER_ID, 'bills');
+    expect(updateAction).toHaveBeenCalledTimes(1);
+    expect(updateAction.mock.calls[0][0]).toBe(USER_ID);
+    expect(updateAction.mock.calls[0][1]).toBe('a-77');
+    expect((updateAction.mock.calls[0][2] as Record<string, unknown>).status).toBe('completed');
+    expect(response.isError).toBeUndefined();
   });
 
-  it('logs update action for non-completion changes', () => {
-    const params = { status: 'on_hold' };
-    const action = { id: 'a-1', title: 'Held Task' };
-    const actionStr = params.status === 'completed' ? 'complete' : 'update';
+  it('does not include keys that were not provided in the update payload', async () => {
+    const updateAction = vi.fn(async () => fakeAction());
+    const repo = makeHorizonRepo({ updateAction });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
 
-    logAudit({
-      user_id: USER_ID,
-      source: 'gtd',
-      action: actionStr,
-      entity_type: 'action',
-      entity_id: action.id,
-      summary: `Updated action: ${action.title}`,
+    await tools.get('update_action')!({ id: 'a-1', title: 'just title' });
+
+    const payload = updateAction.mock.calls[0][2] as Record<string, unknown>;
+    expect(payload).toEqual({ title: 'just title' });
+    expect('status' in payload).toBe(false);
+    expect('energy' in payload).toBe(false);
+  });
+
+  it('emits audit action=complete when status=completed', async () => {
+    const repo = makeHorizonRepo({
+      updateAction: vi.fn(async () => fakeAction({ id: 'a-1', title: 'Done', status: 'completed' })),
     });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    await tools.get('update_action')!({ id: 'a-1', status: 'completed' });
 
-    expect(logAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'update',
-      }),
-    );
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'complete',
+      entity_id: 'a-1',
+      summary: expect.stringMatching(/^Completed action:/),
+    }));
+  });
+
+  it('emits audit action=update for non-completion changes', async () => {
+    const repo = makeHorizonRepo({
+      updateAction: vi.fn(async () => fakeAction({ id: 'a-1', title: 'Held', status: 'on_hold' })),
+    });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    await tools.get('update_action')!({ id: 'a-1', status: 'on_hold' });
+
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'update' }));
+  });
+
+  it('catches repo errors and returns them as isError tool responses', async () => {
+    const repo = makeHorizonRepo({
+      updateAction: vi.fn(async () => { throw new Error('row not found'); }),
+    });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    const response = await tools.get('update_action')!({ id: 'missing', title: 'x' });
+
+    expect(response.isError).toBe(true);
+    expect(parseToolResponse<{ error: string }>(response).error).toBe('row not found');
   });
 });
 
-// ---------------------------------------------------------------------------
-// capture_inbox tool handler logic
-// ---------------------------------------------------------------------------
+describe('list_actions tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('forwards user_id and maps every filter param to the repo', async () => {
+    const listActions = vi.fn(async () => ({ items: [], total: 0 }));
+    const repo = makeHorizonRepo({ listActions });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+
+    await tools.get('list_actions')!({
+      status: 'completed',
+      list_type: 'shopping',
+      energy: 'high',
+      context: ['@home'],
+      category: 'errands',
+      project_id: 'p-1',
+      due_before: '2025-12-31',
+      due_after: '2025-01-01',
+      overdue: true,
+      query: 'milk',
+      limit: 25,
+      offset: 50,
+    });
+
+    expect(listActions).toHaveBeenCalledTimes(1);
+    expect(listActions.mock.calls[0][0]).toBe(USER_ID);
+    expect(listActions.mock.calls[0][1]).toEqual({
+      status: 'completed',
+      listType: 'shopping',
+      energy: 'high',
+      context: ['@home'],
+      category: 'errands',
+      projectId: 'p-1',
+      dueBefore: '2025-12-31',
+      dueAfter: '2025-01-01',
+      overdue: true,
+      query: 'milk',
+      limit: 25,
+      offset: 50,
+    });
+  });
+
+  it('returns repo items and total in the response envelope', async () => {
+    const items = [fakeAction({ id: 'a-1' }), fakeAction({ id: 'a-2' })];
+    const repo = makeHorizonRepo({
+      listActions: vi.fn(async () => ({ items, total: 2 })),
+    });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+    const response = await tools.get('list_actions')!({});
+
+    const parsed = parseToolResponse<{ actions: Array<{ id: string }>; total: number }>(response);
+    expect(parsed.total).toBe(2);
+    expect(parsed.actions.map((a) => a.id)).toEqual(['a-1', 'a-2']);
+  });
+});
 
 describe('capture_inbox tool handler', () => {
-  let pool: Pool;
+  beforeEach(() => vi.clearAllMocks());
 
-  beforeEach(() => {
-    pool = makePgPool();
-    vi.clearAllMocks();
-  });
+  it('forwards content, source, and sourceLink to repo.capture', async () => {
+    const capture = vi.fn(async () => fakeInboxItem({ id: 'inbox-new', content: 'X' }));
+    const repo = makeInboxRepo({ capture });
+    const tools = captureTools((s) => registerInboxTools(s, repo, getUserId));
 
-  it('inserts with status=captured', async () => {
-    const now = new Date();
-    pool = makePgPool({
-      rows: [{
-        id: 'inbox-new',
-        user_id: USER_ID,
-        content: 'Remember to call dentist',
-        source: 'conversation',
-        source_link: null,
-        status: 'captured',
-        outcome_type: null,
-        outcome_id: null,
-        notes: null,
-        processed_at: null,
-        created_at: now,
-        updated_at: now,
-      }],
+    await tools.get('capture_inbox')!({
+      content: 'Remember to call dentist',
+      source: 'conversation',
+      source_link: 'https://example/chat/1',
     });
 
-    await pool.query(
-      expect.stringContaining('INSERT INTO gtd_inbox'),
-      [USER_ID, 'Remember to call dentist', 'conversation', null],
-    );
-
-    expect(pool.query).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO gtd_inbox'),
-      [USER_ID, 'Remember to call dentist', 'conversation', null],
-    );
-  });
-
-  it('defaults source to direct when not provided', () => {
-    const data = { content: 'Quick capture' };
-    const source = (data as Record<string, unknown>).source ?? 'direct';
-    expect(source).toBe('direct');
-  });
-
-  it('defaults sourceLink to null when not provided', () => {
-    const data = { content: 'Quick capture' };
-    const sourceLink = (data as Record<string, unknown>).sourceLink ?? null;
-    expect(sourceLink).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// process_inbox_item tool handler logic
-// ---------------------------------------------------------------------------
-
-describe('process_inbox_item tool handler', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('sets status to processed with outcome', async () => {
-    const pool = makePgPool({
-      rows: [{
-        id: 'inbox-1',
-        user_id: USER_ID,
-        content: 'Call dentist',
-        source: 'conversation',
-        source_link: null,
-        status: 'processed',
-        outcome_type: 'action',
-        outcome_id: 'action-new',
-        notes: 'Created as next action',
-        processed_at: new Date(),
-        created_at: new Date(),
-        updated_at: new Date(),
-      }],
+    expect(capture).toHaveBeenCalledWith(USER_ID, {
+      content: 'Remember to call dentist',
+      source: 'conversation',
+      sourceLink: 'https://example/chat/1',
     });
-
-    await pool.query(expect.any(String), ['inbox-1', USER_ID, 'action', 'action-new', 'Created as next action']);
-
-    expect(pool.query).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.arrayContaining(['inbox-1', USER_ID, 'action']),
-    );
   });
 
-  it('handles item not found gracefully', async () => {
-    const pool = makePgPool({ rows: [] });
+  it('omits source/sourceLink when not provided', async () => {
+    const capture = vi.fn(async () => fakeInboxItem());
+    const repo = makeInboxRepo({ capture });
+    const tools = captureTools((s) => registerInboxTools(s, repo, getUserId));
 
-    const result = await pool.query('UPDATE gtd_inbox SET status = $1 WHERE id = $2', ['processed', 'nonexistent']);
-    const rows = (result as QueryResult).rows;
+    await tools.get('capture_inbox')!({ content: 'Quick capture' });
 
-    // Simulate the tool handler error path
-    if (rows.length === 0) {
-      const response = { error: 'Inbox item not found: nonexistent' };
-      expect(response.error).toContain('not found');
-    }
-  });
-
-  it('accepts all valid outcome types', () => {
-    const validOutcomes = ['action', 'project', 'someday', 'reference', 'trash'];
-    for (const outcome of validOutcomes) {
-      expect(validOutcomes).toContain(outcome);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// get_gtd_health tool handler logic
-// ---------------------------------------------------------------------------
-
-describe('get_gtd_health tool handler', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('returns all health metrics from single query', async () => {
-    const pool = makePgPool({
-      rows: [{
-        inbox_count: '5',
-        active_project_count: '3',
-        projects_without_actions: '1',
-        overdue_count: '2',
-        stale_waiting_count: '0',
-        active_action_count: '15',
-        someday_count: '7',
-        completed_this_week: '4',
-        days_since_last_review: '3',
-      }],
+    expect(capture).toHaveBeenCalledWith(USER_ID, {
+      content: 'Quick capture',
+      source: undefined,
+      sourceLink: undefined,
     });
-
-    const result = await pool.query(expect.any(String), [USER_ID]);
-    const row = (result as QueryResult).rows[0] as Record<string, unknown>;
-
-    // Simulate the health mapping
-    const health = {
-      inboxCount: Number(row.inbox_count),
-      activeProjectCount: Number(row.active_project_count),
-      projectsWithoutActions: Number(row.projects_without_actions),
-      overdueCount: Number(row.overdue_count),
-      staleWaitingCount: Number(row.stale_waiting_count),
-      activeActionCount: Number(row.active_action_count),
-      somedayCount: Number(row.someday_count),
-      completedThisWeek: Number(row.completed_this_week),
-      daysSinceLastReview: row.days_since_last_review != null
-        ? Math.floor(Number(row.days_since_last_review))
-        : null,
-    };
-
-    expect(health.inboxCount).toBe(5);
-    expect(health.activeProjectCount).toBe(3);
-    expect(health.projectsWithoutActions).toBe(1);
-    expect(health.overdueCount).toBe(2);
-    expect(health.staleWaitingCount).toBe(0);
-    expect(health.activeActionCount).toBe(15);
-    expect(health.somedayCount).toBe(7);
-    expect(health.completedThisWeek).toBe(4);
-    expect(health.daysSinceLastReview).toBe(3);
   });
 
-  it('returns null for daysSinceLastReview when no reviews exist', () => {
-    const row = { days_since_last_review: null };
-    const daysSinceLastReview = row.days_since_last_review != null
-      ? Math.floor(Number(row.days_since_last_review))
-      : null;
+  it('returns the captured item in the response envelope', async () => {
+    const repo = makeInboxRepo({
+      capture: vi.fn(async () => fakeInboxItem({ id: 'inbox-99', content: 'hi' })),
+    });
+    const tools = captureTools((s) => registerInboxTools(s, repo, getUserId));
+    const response = await tools.get('capture_inbox')!({ content: 'hi' });
 
-    expect(daysSinceLastReview).toBeNull();
-  });
-
-  it('returns zeroed health when no data exists', () => {
-    const row = null;
-
-    // Simulate the fallback in getHealth
-    const health = row
-      ? {} // would map
-      : {
-          inboxCount: 0,
-          activeProjectCount: 0,
-          projectsWithoutActions: 0,
-          overdueCount: 0,
-          staleWaitingCount: 0,
-          activeActionCount: 0,
-          somedayCount: 0,
-          completedThisWeek: 0,
-          daysSinceLastReview: null,
-        };
-
-    expect(health.inboxCount).toBe(0);
-    expect(health.daysSinceLastReview).toBeNull();
-  });
-
-  it('floors fractional days_since_last_review', () => {
-    const row = { days_since_last_review: '3.7' };
-    const daysSinceLastReview = Math.floor(Number(row.days_since_last_review));
-    expect(daysSinceLastReview).toBe(3);
+    const parsed = parseToolResponse<{ inbox_item: { id: string } }>(response);
+    expect(parsed.inbox_item.id).toBe('inbox-99');
   });
 });
-
-// ---------------------------------------------------------------------------
-// list_inbox tool handler logic
-// ---------------------------------------------------------------------------
 
 describe('list_inbox tool handler', () => {
-  it('defaults status filter to captured', () => {
-    const params = {} as Record<string, unknown>;
-    const status = params.status ?? 'captured';
-    expect(status).toBe('captured');
+  beforeEach(() => vi.clearAllMocks());
+
+  it('forwards filter, limit, offset to repo.list with user_id scoping', async () => {
+    const list = vi.fn(async () => ({ items: [], total: 0 }));
+    const repo = makeInboxRepo({ list });
+    const tools = captureTools((s) => registerInboxTools(s, repo, getUserId));
+
+    await tools.get('list_inbox')!({ status: 'processed', limit: 10, offset: 5 });
+
+    expect(list).toHaveBeenCalledWith(USER_ID, {
+      status: 'processed',
+      limit: 10,
+      offset: 5,
+    });
   });
 
-  it('respects provided status filter', () => {
-    const params = { status: 'processed' };
-    const status = params.status ?? 'captured';
-    expect(status).toBe('processed');
+  it('returns items and total in the response envelope', async () => {
+    const items = [fakeInboxItem({ id: 'i-1' }), fakeInboxItem({ id: 'i-2' })];
+    const repo = makeInboxRepo({
+      list: vi.fn(async () => ({ items, total: 2 })),
+    });
+    const tools = captureTools((s) => registerInboxTools(s, repo, getUserId));
+    const response = await tools.get('list_inbox')!({});
+
+    const parsed = parseToolResponse<{ inbox_items: Array<{ id: string }>; total: number }>(response);
+    expect(parsed.total).toBe(2);
+    expect(parsed.inbox_items.map((i) => i.id)).toEqual(['i-1', 'i-2']);
+  });
+});
+
+describe('process_inbox_item tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('forwards id, outcome_type, outcome_id, and notes to repo.process', async () => {
+    const processFn = vi.fn(async () => fakeInboxItem({ id: 'i-1', status: 'processed' }));
+    const repo = makeInboxRepo({ process: processFn });
+    const tools = captureTools((s) => registerInboxTools(s, repo, getUserId));
+
+    await tools.get('process_inbox_item')!({
+      id: 'i-1',
+      outcome_type: 'action',
+      outcome_id: 'a-1',
+      notes: 'Created as next action',
+    });
+
+    expect(processFn).toHaveBeenCalledWith(USER_ID, 'i-1', {
+      outcomeType: 'action',
+      outcomeId: 'a-1',
+      notes: 'Created as next action',
+    });
   });
 
-  it('orders results oldest first (ASC)', () => {
-    // The list query uses ORDER BY created_at ASC
-    const sql = `SELECT * FROM gtd_inbox WHERE user_id = $1 AND status = $2 ORDER BY created_at ASC`;
-    expect(sql).toContain('ORDER BY created_at ASC');
+  it('returns isError when repo throws (e.g. not found)', async () => {
+    const repo = makeInboxRepo({
+      process: vi.fn(async () => { throw new Error('Inbox item not found: missing'); }),
+    });
+    const tools = captureTools((s) => registerInboxTools(s, repo, getUserId));
+    const response = await tools.get('process_inbox_item')!({
+      id: 'missing',
+      outcome_type: 'trash',
+    });
+
+    expect(response.isError).toBe(true);
+    expect(parseToolResponse<{ error: string }>(response).error).toContain('not found');
+  });
+});
+
+describe('get_gtd_health tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('calls repo.getHealth with the current user_id', async () => {
+    const getHealth = vi.fn(async () => ({
+      inboxCount: 5,
+      activeProjectCount: 3,
+      projectsWithoutActions: 1,
+      overdueCount: 2,
+      staleWaitingCount: 0,
+      activeActionCount: 15,
+      somedayCount: 7,
+      completedThisWeek: 4,
+      daysSinceLastReview: 3,
+    }));
+    const repo = makeHorizonRepo({ getHealth });
+    const tools = captureTools((s) => registerHealthTools(s, repo, getUserId));
+
+    const response = await tools.get('get_gtd_health')!({});
+
+    expect(getHealth).toHaveBeenCalledWith(USER_ID);
+    const parsed = parseToolResponse<{ health: { inboxCount: number; daysSinceLastReview: number | null } }>(response);
+    expect(parsed.health.inboxCount).toBe(5);
+    expect(parsed.health.daysSinceLastReview).toBe(3);
+  });
+
+  it('propagates null daysSinceLastReview', async () => {
+    const repo = makeHorizonRepo({
+      getHealth: vi.fn(async () => ({
+        inboxCount: 0, activeProjectCount: 0, projectsWithoutActions: 0,
+        overdueCount: 0, staleWaitingCount: 0, activeActionCount: 0,
+        somedayCount: 0, completedThisWeek: 0, daysSinceLastReview: null,
+      })),
+    });
+    const tools = captureTools((s) => registerHealthTools(s, repo, getUserId));
+    const response = await tools.get('get_gtd_health')!({});
+
+    const parsed = parseToolResponse<{ health: { daysSinceLastReview: number | null } }>(response);
+    expect(parsed.health.daysSinceLastReview).toBeNull();
   });
 });

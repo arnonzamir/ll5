@@ -1,4 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// ---------------------------------------------------------------------------
+// Mock @ll5/shared so logAudit / formatTime don't write to ES during tests.
+// Hoisted before any tool module imports it.
+// ---------------------------------------------------------------------------
+vi.mock('@ll5/shared', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('@ll5/shared');
+  return {
+    ...actual,
+    logAudit: vi.fn(),
+    // Deterministic, predictable formatter so tests don't depend on TZ.
+    formatTime: vi.fn((input: string | Date) => ({
+      utc: typeof input === 'string' ? input : input.toISOString(),
+      local: 'local-stub',
+      tz: 'UTC',
+    })),
+    sessionTimezone: vi.fn(() => 'UTC'),
+  };
+});
+
+import { logAudit } from '@ll5/shared';
 import {
   getTimePeriod,
   getDayType,
@@ -6,37 +27,75 @@ import {
   formatTimeUntil,
 } from '../types/situation.js';
 import { computeFreshness } from '../types/location.js';
+import { registerMessageTools } from '../tools/messages.js';
+import { registerSituationTools } from '../tools/situation.js';
+import { registerJournalTools } from '../tools/journal.js';
+import { captureTools, parseToolResponse, makeMockEsClient } from './_helpers.js';
+import type { MessageRepository } from '../repositories/interfaces/message.repository.js';
+import type { LocationRepository } from '../repositories/interfaces/location.repository.js';
+import type { CalendarEventRepository } from '../repositories/interfaces/calendar-event.repository.js';
+import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
+
+const USER_ID = 'user-test-1';
+const getUserId = () => USER_ID;
 
 // ---------------------------------------------------------------------------
-// Mock ES client factory
+// Repository stub factories — every method asserts user_id is forwarded.
+// Tests override only the methods they exercise.
 // ---------------------------------------------------------------------------
 
-function makeMockEsClient(overrides: Record<string, unknown> = {}) {
+function makeMessageRepo(overrides: Partial<MessageRepository> = {}): MessageRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`MessageRepository.${name} not stubbed for this test`);
+  });
   return {
-    index: vi.fn().mockResolvedValue({ _id: 'mock-id-1', result: 'created' }),
-    search: vi.fn().mockResolvedValue({ hits: { hits: [] } }),
-    get: vi.fn().mockResolvedValue({ _id: 'mock-id-1', _source: {} }),
-    update: vi.fn().mockResolvedValue({ result: 'updated' }),
-    updateByQuery: vi.fn().mockResolvedValue({ updated: 0 }),
+    query: unimpl('query'),
+    create: unimpl('create'),
+    countActiveConversations: unimpl('countActiveConversations'),
     ...overrides,
-  };
+  } as MessageRepository;
 }
 
-// ---------------------------------------------------------------------------
-// Mock logAudit to prevent ES writes
-// ---------------------------------------------------------------------------
-vi.mock('@ll5/shared', async () => {
-  const actual = await vi.importActual('@ll5/shared');
+function makeLocationRepo(overrides: Partial<LocationRepository> = {}): LocationRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`LocationRepository.${name} not stubbed for this test`);
+  });
   return {
-    ...(actual as Record<string, unknown>),
-    logAudit: vi.fn(),
-    generateToken: vi.fn().mockReturnValue('mock-token'),
-  };
-});
+    getLatest: unimpl('getLatest'),
+    query: unimpl('query'),
+    delete: unimpl('delete'),
+    create: unimpl('create'),
+    ...overrides,
+  } as LocationRepository;
+}
 
-// ---------------------------------------------------------------------------
-// Situation helper tests
-// ---------------------------------------------------------------------------
+function makeCalendarRepo(overrides: Partial<CalendarEventRepository> = {}): CalendarEventRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`CalendarEventRepository.${name} not stubbed for this test`);
+  });
+  return {
+    query: unimpl('query'),
+    getNext: unimpl('getNext'),
+    upsert: unimpl('upsert'),
+    ...overrides,
+  } as CalendarEventRepository;
+}
+
+function makeNotableRepo(overrides: Partial<NotableEventRepository> = {}): NotableEventRepository {
+  const unimpl = (name: string) => vi.fn(() => {
+    throw new Error(`NotableEventRepository.${name} not stubbed for this test`);
+  });
+  return {
+    create: unimpl('create'),
+    queryUnacknowledged: unimpl('queryUnacknowledged'),
+    acknowledge: unimpl('acknowledge'),
+    ...overrides,
+  } as NotableEventRepository;
+}
+
+// ===========================================================================
+// PURE HELPER TESTS (kept from original — these were already real)
+// ===========================================================================
 
 describe('situation helpers', () => {
   describe('getTimePeriod', () => {
@@ -125,10 +184,6 @@ describe('situation helpers', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Location freshness tests
-// ---------------------------------------------------------------------------
-
 describe('computeFreshness', () => {
   it('returns live for timestamps less than 5 minutes ago', () => {
     const recent = new Date(Date.now() - 2 * 60_000).toISOString();
@@ -151,589 +206,686 @@ describe('computeFreshness', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// query_im_messages tool logic tests (via repository)
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// REAL TOOL HANDLER TESTS — invoke registerXxxTools, capture the registered
+// handler, drive it against stub repos / mock ES clients.
+// ===========================================================================
 
-describe('query_im_messages filtering logic', () => {
-  it('passes sender filter to repository', async () => {
-    const mockQuery = vi.fn().mockResolvedValue([
-      { id: 'msg-1', sender: 'Alice', app: 'whatsapp', content: 'hello', timestamp: '2026-04-06T10:00:00Z', is_group: false, conversation_id: null, conversation_name: null, relevance_score: null },
-    ]);
-    const messageRepo = { query: mockQuery, create: vi.fn(), countActiveConversations: vi.fn() };
+describe('query_im_messages tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-    const messages = await messageRepo.query('user-1', { sender: 'Alice' });
+  it('forwards every filter param (and user_id) to repo.query', async () => {
+    const query = vi.fn(async () => []);
+    const repo = makeMessageRepo({ query });
+    const tools = captureTools((s) => registerMessageTools(s, repo, getUserId));
 
-    expect(mockQuery).toHaveBeenCalledWith('user-1', { sender: 'Alice' });
-    expect(messages).toHaveLength(1);
-    expect(messages[0].sender).toBe('Alice');
-  });
-
-  it('passes app filter to repository', async () => {
-    const mockQuery = vi.fn().mockResolvedValue([]);
-    const messageRepo = { query: mockQuery, create: vi.fn(), countActiveConversations: vi.fn() };
-
-    await messageRepo.query('user-1', { app: 'telegram' });
-
-    expect(mockQuery).toHaveBeenCalledWith('user-1', { app: 'telegram' });
-  });
-
-  it('passes time range to repository', async () => {
-    const mockQuery = vi.fn().mockResolvedValue([]);
-    const messageRepo = { query: mockQuery, create: vi.fn(), countActiveConversations: vi.fn() };
-
-    await messageRepo.query('user-1', {
+    await tools.get('query_im_messages')!({
       from: '2026-04-06T00:00:00Z',
       to: '2026-04-06T23:59:59Z',
+      sender: 'Alice',
+      app: 'whatsapp',
+      keyword: 'urgent',
+      conversation_id: 'conv-1',
+      is_group: false,
+      limit: 25,
     });
 
-    expect(mockQuery).toHaveBeenCalledWith('user-1', {
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).toBe(USER_ID);
+    expect(query.mock.calls[0][1]).toEqual({
       from: '2026-04-06T00:00:00Z',
       to: '2026-04-06T23:59:59Z',
-    });
-  });
-
-  it('passes is_group filter to repository', async () => {
-    const mockQuery = vi.fn().mockResolvedValue([]);
-    const messageRepo = { query: mockQuery, create: vi.fn(), countActiveConversations: vi.fn() };
-
-    await messageRepo.query('user-1', { is_group: true });
-
-    expect(mockQuery).toHaveBeenCalledWith('user-1', { is_group: true });
-  });
-
-  it('passes keyword for full-text search', async () => {
-    const mockQuery = vi.fn().mockResolvedValue([
-      { id: 'msg-2', sender: 'Bob', app: 'whatsapp', content: 'urgent meeting', timestamp: '2026-04-06T10:00:00Z', is_group: false, conversation_id: null, conversation_name: null, relevance_score: 1.5 },
-    ]);
-    const messageRepo = { query: mockQuery, create: vi.fn(), countActiveConversations: vi.fn() };
-
-    const messages = await messageRepo.query('user-1', { keyword: 'urgent' });
-
-    expect(mockQuery).toHaveBeenCalledWith('user-1', { keyword: 'urgent' });
-    expect(messages[0].relevance_score).toBe(1.5);
-  });
-
-  it('passes combined filters', async () => {
-    const mockQuery = vi.fn().mockResolvedValue([]);
-    const messageRepo = { query: mockQuery, create: vi.fn(), countActiveConversations: vi.fn() };
-
-    await messageRepo.query('user-1', {
       sender: 'Alice',
       app: 'whatsapp',
-      from: '2026-04-06T00:00:00Z',
+      keyword: 'urgent',
+      conversation_id: 'conv-1',
       is_group: false,
-      limit: 10,
-    });
-
-    expect(mockQuery).toHaveBeenCalledWith('user-1', {
-      sender: 'Alice',
-      app: 'whatsapp',
-      from: '2026-04-06T00:00:00Z',
-      is_group: false,
-      limit: 10,
+      limit: 25,
     });
   });
-});
 
-// ---------------------------------------------------------------------------
-// get_situation aggregation tests
-// ---------------------------------------------------------------------------
+  it('omits missing keys as undefined (handler does not invent defaults)', async () => {
+    const query = vi.fn(async () => []);
+    const repo = makeMessageRepo({ query });
+    const tools = captureTools((s) => registerMessageTools(s, repo, getUserId));
 
-describe('get_situation data aggregation', () => {
-  it('assembles situation from all repository data sources', async () => {
-    const mockLocation = {
-      location: { lat: 32.0853, lon: 34.7818 },
-      accuracy: 10,
-      timestamp: new Date(Date.now() - 2 * 60_000).toISOString(),
-      matchedPlace: 'Home',
-      address: 'Tel Aviv',
-    };
+    await tools.get('query_im_messages')!({ sender: 'Alice' });
 
-    const mockNextEvent = {
-      title: 'Team standup',
-      startTime: new Date(Date.now() + 30 * 60_000).toISOString(),
-      location: 'Zoom',
-    };
+    expect(query.mock.calls[0][0]).toBe(USER_ID);
+    const params = query.mock.calls[0][1];
+    expect(params.sender).toBe('Alice');
+    expect(params.app).toBeUndefined();
+    expect(params.keyword).toBeUndefined();
+    expect(params.limit).toBeUndefined();
+  });
 
-    const mockNotable = [
-      { id: 'n1', type: 'weather_alert', summary: 'Heat wave', timestamp: new Date().toISOString(), details: { severity: 'medium' } },
+  it('returns messages and total in the response envelope', async () => {
+    const messages = [
+      { id: 'msg-1', sender: 'Alice', app: 'whatsapp', content: 'hi', timestamp: '2026-04-06T10:00:00Z', is_group: false, conversation_id: null, conversation_name: null, relevance_score: null },
+      { id: 'msg-2', sender: 'Bob', app: 'telegram', content: 'urgent', timestamp: '2026-04-06T10:05:00Z', is_group: false, conversation_id: null, conversation_name: null, relevance_score: 1.5 },
     ];
+    const repo = makeMessageRepo({ query: vi.fn(async () => messages) });
+    const tools = captureTools((s) => registerMessageTools(s, repo, getUserId));
 
-    const repos = {
-      location: { getLatest: vi.fn().mockResolvedValue(mockLocation) },
-      calendar: { getNext: vi.fn().mockResolvedValue(mockNextEvent) },
-      notableEvent: { queryUnacknowledged: vi.fn().mockResolvedValue(mockNotable) },
-      message: { countActiveConversations: vi.fn().mockResolvedValue(3) },
+    const response = await tools.get('query_im_messages')!({});
+
+    const parsed = parseToolResponse<{ messages: Array<{ id: string }>; total: number }>(response);
+    expect(parsed.total).toBe(2);
+    expect(parsed.messages.map((m) => m.id)).toEqual(['msg-1', 'msg-2']);
+  });
+});
+
+describe('get_situation tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function buildRepos(over: {
+    location?: LocationRepository;
+    calendar?: CalendarEventRepository;
+    notableEvent?: NotableEventRepository;
+    message?: MessageRepository;
+  } = {}) {
+    return {
+      location: over.location ?? makeLocationRepo({ getLatest: vi.fn(async () => null) }),
+      calendar: over.calendar ?? makeCalendarRepo({ getNext: vi.fn(async () => null) }),
+      notableEvent: over.notableEvent ?? makeNotableRepo({ queryUnacknowledged: vi.fn(async () => []) }),
+      message: over.message ?? makeMessageRepo({ countActiveConversations: vi.fn(async () => 0) }),
     };
+  }
 
-    // Simulate what the situation tool does
-    const userId = 'user-1';
-    const currentLocation = mockLocation ? {
-      lat: mockLocation.location.lat,
-      lon: mockLocation.location.lon,
-      accuracy: mockLocation.accuracy,
-      timestamp: mockLocation.timestamp,
-      freshness: computeFreshness(mockLocation.timestamp),
-      place_name: mockLocation.matchedPlace ?? null,
-    } : null;
+  it('forwards user_id to every repository call', async () => {
+    const getLatest = vi.fn(async () => null);
+    const getNext = vi.fn(async () => null);
+    const queryUnacknowledged = vi.fn(async () => []);
+    const countActiveConversations = vi.fn(async () => 0);
 
-    const nextEvent = mockNextEvent ? {
-      title: mockNextEvent.title,
-      start: mockNextEvent.startTime,
-      location: mockNextEvent.location ?? null,
-    } : null;
+    const repos = buildRepos({
+      location: makeLocationRepo({ getLatest }),
+      calendar: makeCalendarRepo({ getNext }),
+      notableEvent: makeNotableRepo({ queryUnacknowledged }),
+      message: makeMessageRepo({ countActiveConversations }),
+    });
 
-    const notableRecentEvents = mockNotable.map((e) => ({
-      id: e.id,
-      event_type: e.type,
-      summary: e.summary,
-      severity: (e.details as Record<string, unknown>)?.severity ?? 'low',
-      created_at: e.timestamp,
+    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC'));
+    await tools.get('get_situation')!({});
+
+    expect(getLatest).toHaveBeenCalledWith(USER_ID);
+    expect(getNext).toHaveBeenCalledWith(USER_ID);
+    expect(queryUnacknowledged).toHaveBeenCalledWith(USER_ID, {});
+    expect(countActiveConversations).toHaveBeenCalledTimes(1);
+    expect(countActiveConversations.mock.calls[0][0]).toBe(USER_ID);
+    // The since arg is computed inside the handler — assert shape only.
+    expect(typeof countActiveConversations.mock.calls[0][1]).toBe('string');
+  });
+
+  it('assembles a complete situation from every data source', async () => {
+    const locationTs = new Date(Date.now() - 2 * 60_000).toISOString();
+    const eventStart = new Date(Date.now() + 30 * 60_000).toISOString();
+    const repos = buildRepos({
+      location: makeLocationRepo({
+        getLatest: vi.fn(async () => ({
+          id: 'loc-1', userId: USER_ID,
+          location: { lat: 32.0853, lon: 34.7818 },
+          accuracy: 10, timestamp: locationTs,
+          matchedPlace: 'Home', address: 'Tel Aviv',
+        })),
+      }),
+      calendar: makeCalendarRepo({
+        getNext: vi.fn(async () => ({
+          id: 'evt-1', userId: USER_ID, title: 'Team standup',
+          startTime: eventStart, endTime: eventStart,
+          location: 'Zoom',
+          createdAt: locationTs, updatedAt: locationTs,
+        })),
+      }),
+      notableEvent: makeNotableRepo({
+        queryUnacknowledged: vi.fn(async () => [{
+          id: 'n1', userId: USER_ID,
+          type: 'location_change',
+          summary: 'Arrived at home',
+          details: { severity: 'medium' },
+          acknowledged: false,
+          timestamp: locationTs,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any]),
+      }),
+      message: makeMessageRepo({ countActiveConversations: vi.fn(async () => 3) }),
+    });
+
+    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC'));
+    const response = await tools.get('get_situation')!({});
+
+    const parsed = parseToolResponse<{ situation: Record<string, unknown> }>(response);
+    const sit = parsed.situation;
+    expect(sit.timezone).toBe('UTC');
+    const loc = sit.current_location as Record<string, unknown>;
+    expect(loc.lat).toBe(32.0853);
+    expect(loc.lon).toBe(34.7818);
+    expect(loc.place_name).toBe('Home');
+    expect(loc.freshness).toBe('live');
+
+    const ev = sit.next_event as Record<string, unknown>;
+    expect(ev.title).toBe('Team standup');
+    expect(ev.location).toBe('Zoom');
+
+    const notable = sit.notable_recent_events as Array<Record<string, unknown>>;
+    expect(notable).toHaveLength(1);
+    expect(notable[0].event_type).toBe('location_change');
+    expect(notable[0].severity).toBe('medium');
+
+    expect(sit.active_conversations).toBe(3);
+  });
+
+  it('treats null location/event as missing, not as error', async () => {
+    const repos = buildRepos();
+    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC'));
+
+    const response = await tools.get('get_situation')!({});
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ situation: Record<string, unknown> }>(response);
+    expect(parsed.situation.current_location).toBeNull();
+    expect(parsed.situation.next_event).toBeNull();
+    expect(parsed.situation.notable_recent_events).toEqual([]);
+    expect(parsed.situation.active_conversations).toBe(0);
+  });
+
+  it('swallows per-source errors and still returns a partial situation', async () => {
+    const repos = buildRepos({
+      location: makeLocationRepo({ getLatest: vi.fn(async () => { throw new Error('es down'); }) }),
+      calendar: makeCalendarRepo({ getNext: vi.fn(async () => { throw new Error('cal down'); }) }),
+      notableEvent: makeNotableRepo({ queryUnacknowledged: vi.fn(async () => []) }),
+      message: makeMessageRepo({ countActiveConversations: vi.fn(async () => 7) }),
+    });
+
+    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC'));
+    const response = await tools.get('get_situation')!({});
+
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ situation: Record<string, unknown> }>(response);
+    // Failed sources -> nulls / empties; message source still got through.
+    expect(parsed.situation.current_location).toBeNull();
+    expect(parsed.situation.next_event).toBeNull();
+    expect(parsed.situation.active_conversations).toBe(7);
+  });
+});
+
+// ===========================================================================
+// Journal & user-model tool handler tests — these tools take a Client directly,
+// so we mock the ES verbs (index/search/get/update/updateByQuery) and assert
+// the calls forwarded user_id in the query DSL / document.
+// ===========================================================================
+
+describe('write_journal tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('indexes a journal entry scoped to user_id and returns the id', async () => {
+    const esClient = makeMockEsClient({
+      index: vi.fn().mockResolvedValue({ _id: 'j-new', result: 'created' }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('write_journal')!({
+      type: 'observation',
+      topic: 'Sleep pattern',
+      content: 'Slept late again',
+      signal: 'pattern',
+    });
+
+    expect(esClient.index).toHaveBeenCalledTimes(1);
+    const call = (esClient.index as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.index).toBe('ll5_agent_journal');
+    expect(call.refresh).toBe('wait_for');
+    expect(call.document).toMatchObject({
+      user_id: USER_ID,
+      type: 'observation',
+      topic: 'Sleep pattern',
+      content: 'Slept late again',
+      signal: 'pattern',
+      status: 'open',
+    });
+
+    const parsed = parseToolResponse<{ id: string; topic: string; status: string }>(response);
+    expect(parsed.id).toBe('j-new');
+    expect(parsed.topic).toBe('Sleep pattern');
+    expect(parsed.status).toBe('open');
+  });
+
+  it('defaults signal to null when not provided', async () => {
+    const esClient = makeMockEsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    await tools.get('write_journal')!({
+      type: 'thought',
+      topic: 'X',
+      content: 'Y',
+    });
+
+    const call = (esClient.index as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.document.signal).toBeNull();
+    expect(call.document.session_id).toBeNull();
+  });
+
+  it('emits an audit log entry on successful write', async () => {
+    const esClient = makeMockEsClient({
+      index: vi.fn().mockResolvedValue({ _id: 'j-77', result: 'created' }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    await tools.get('write_journal')!({ type: 'feedback', topic: 'T', content: 'C' });
+
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      user_id: USER_ID,
+      source: 'awareness',
+      action: 'create',
+      entity_type: 'journal',
+      entity_id: 'j-77',
     }));
-
-    expect(currentLocation).not.toBeNull();
-    expect(currentLocation!.lat).toBe(32.0853);
-    expect(currentLocation!.freshness).toBe('live');
-    expect(currentLocation!.place_name).toBe('Home');
-
-    expect(nextEvent).not.toBeNull();
-    expect(nextEvent!.title).toBe('Team standup');
-    expect(nextEvent!.location).toBe('Zoom');
-
-    expect(notableRecentEvents).toHaveLength(1);
-    expect(notableRecentEvents[0].event_type).toBe('weather_alert');
-    expect(notableRecentEvents[0].severity).toBe('medium');
-
-    // Verify repos were called (would be called in the real tool)
-    const latest = await repos.location.getLatest(userId);
-    expect(latest).toBe(mockLocation);
-    const next = await repos.calendar.getNext(userId);
-    expect(next).toBe(mockNextEvent);
-    const activeConvs = await repos.message.countActiveConversations(userId, new Date().toISOString());
-    expect(activeConvs).toBe(3);
-  });
-
-  it('handles missing location gracefully', () => {
-    const currentLocation = null;
-    expect(currentLocation).toBeNull();
-  });
-
-  it('handles missing next event gracefully', () => {
-    const nextEvent = null;
-    expect(nextEvent).toBeNull();
   });
 });
 
-// ---------------------------------------------------------------------------
-// Geo search: haversine distance calculation
-// ---------------------------------------------------------------------------
+describe('read_journal tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-// Re-implement haversine for testing (same as in geo-search.ts)
-function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+  it('queries ES with user_id and default status=open', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({ hits: { hits: [] } }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
 
-describe('geo search: haversine distance', () => {
-  it('calculates zero distance for same point', () => {
-    const d = haversineDistance(32.0853, 34.7818, 32.0853, 34.7818);
-    expect(d).toBe(0);
+    await tools.get('read_journal')!({});
+
+    expect(esClient.search).toHaveBeenCalledTimes(1);
+    const call = (esClient.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.index).toBe('ll5_agent_journal');
+    expect(call.size).toBe(20);
+    expect(call.query.bool.must).toEqual([
+      { term: { user_id: USER_ID } },
+      { term: { status: 'open' } },
+    ]);
   });
 
-  it('calculates reasonable distance for nearby points', () => {
-    // Tel Aviv to Herzliya: roughly 10-15 km
-    const d = haversineDistance(32.0853, 34.7818, 32.1633, 34.7947);
-    expect(d).toBeGreaterThan(8000);
-    expect(d).toBeLessThan(15000);
+  it('layers in optional filters (status, type, topic, since)', async () => {
+    const esClient = makeMockEsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    await tools.get('read_journal')!({
+      status: 'resolved',
+      type: 'decision',
+      topic: 'health',
+      since: '2026-04-01T00:00:00Z',
+      limit: 5,
+    });
+
+    const call = (esClient.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.size).toBe(5);
+    expect(call.query.bool.must).toEqual([
+      { term: { user_id: USER_ID } },
+      { term: { status: 'resolved' } },
+      { term: { type: 'decision' } },
+      { match: { topic: 'health' } },
+      { range: { created_at: { gte: '2026-04-01T00:00:00Z' } } },
+    ]);
   });
 
-  it('calculates long distance correctly', () => {
-    // Tel Aviv to New York: roughly 9,000 km
-    const d = haversineDistance(32.0853, 34.7818, 40.7128, -74.006);
-    expect(d).toBeGreaterThan(8_000_000);
-    expect(d).toBeLessThan(10_000_000);
-  });
-});
-
-describe('geo search: input validation', () => {
-  it('rejects requests without query or category', () => {
-    // The tool returns an error when neither query nor category is provided
-    const hasQuery = false;
-    const hasCategory = false;
-    const isValid = hasQuery || hasCategory;
-    expect(isValid).toBe(false);
-  });
-
-  it('accepts valid category', () => {
-    const OSM_CATEGORY_MAP: Record<string, string> = {
-      restaurant: 'amenity=restaurant',
-      cafe: 'amenity=cafe',
-      pharmacy: 'amenity=pharmacy',
-      supermarket: 'shop=supermarket',
-      gym: 'leisure=fitness_centre',
-      park: 'leisure=park',
-      dog_park: 'leisure=dog_park',
-    };
-
-    expect(OSM_CATEGORY_MAP['restaurant']).toBeDefined();
-    expect(OSM_CATEGORY_MAP['pharmacy']).toBeDefined();
-    expect(OSM_CATEGORY_MAP['nonexistent']).toBeUndefined();
-  });
-
-  it('clamps radius within bounds', () => {
-    const clampRadius = (r: number) => Math.max(100, Math.min(5000, r));
-    expect(clampRadius(50)).toBe(100);
-    expect(clampRadius(500)).toBe(500);
-    expect(clampRadius(10000)).toBe(5000);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Journal tools tests
-// ---------------------------------------------------------------------------
-
-describe('journal tools', () => {
-  describe('write_journal', () => {
-    it('indexes a journal entry to ES with correct fields', async () => {
-      const esClient = makeMockEsClient();
-      const userId = 'user-1';
-      const params = {
-        type: 'observation' as const,
-        topic: 'Sleep pattern',
-        content: 'User has been sleeping late consistently',
-        signal: 'pattern' as const,
-      };
-
-      // Simulate what write_journal does
-      const now = new Date().toISOString();
-      const doc = {
-        user_id: userId,
-        type: params.type,
-        topic: params.topic,
-        content: params.content,
-        signal: params.signal ?? null,
-        status: 'open',
-        session_id: null,
-        created_at: now,
-        updated_at: now,
-      };
-
-      await esClient.index({ index: 'll5_agent_journal', document: doc, refresh: 'wait_for' });
-
-      expect(esClient.index).toHaveBeenCalledWith({
-        index: 'll5_agent_journal',
-        document: expect.objectContaining({
-          user_id: 'user-1',
-          type: 'observation',
-          topic: 'Sleep pattern',
-          content: 'User has been sleeping late consistently',
-          signal: 'pattern',
-          status: 'open',
-        }),
-        refresh: 'wait_for',
-      });
-    });
-
-    it('sets signal to null when not provided', () => {
-      const params = { type: 'thought', topic: 'test', content: 'content' };
-      const signal = (params as Record<string, unknown>).signal ?? null;
-      expect(signal).toBeNull();
-    });
-  });
-
-  describe('read_journal', () => {
-    it('builds correct ES query for open entries with default status', () => {
-      const userId = 'user-1';
-      const params = { status: undefined, type: undefined, topic: undefined, since: undefined };
-      const must: Record<string, unknown>[] = [
-        { term: { user_id: userId } },
-        { term: { status: params.status ?? 'open' } },
-      ];
-
-      expect(must).toEqual([
-        { term: { user_id: 'user-1' } },
-        { term: { status: 'open' } },
-      ]);
-    });
-
-    it('adds type filter when provided', () => {
-      const must: Record<string, unknown>[] = [
-        { term: { user_id: 'user-1' } },
-        { term: { status: 'open' } },
-      ];
-      const type = 'decision';
-      must.push({ term: { type } });
-
-      expect(must).toHaveLength(3);
-      expect(must[2]).toEqual({ term: { type: 'decision' } });
-    });
-
-    it('adds topic match when provided', () => {
-      const must: Record<string, unknown>[] = [
-        { term: { user_id: 'user-1' } },
-        { term: { status: 'open' } },
-      ];
-      const topic = 'health';
-      must.push({ match: { topic } });
-
-      expect(must[2]).toEqual({ match: { topic: 'health' } });
-    });
-
-    it('adds date range filter when since is provided', () => {
-      const must: Record<string, unknown>[] = [
-        { term: { user_id: 'user-1' } },
-        { term: { status: 'open' } },
-      ];
-      const since = '2026-04-01T00:00:00Z';
-      must.push({ range: { created_at: { gte: since } } });
-
-      expect(must[2]).toEqual({ range: { created_at: { gte: '2026-04-01T00:00:00Z' } } });
-    });
-
-    it('returns entries from ES search results', async () => {
-      const esClient = makeMockEsClient({
-        search: vi.fn().mockResolvedValue({
-          hits: {
-            hits: [
-              { _id: 'j1', _source: { type: 'observation', topic: 'Sleep', content: 'Late', status: 'open', created_at: '2026-04-06T10:00:00Z' } },
-              { _id: 'j2', _source: { type: 'feedback', topic: 'Diet', content: 'Good', status: 'open', created_at: '2026-04-06T09:00:00Z' } },
-            ],
-          },
-        }),
-      });
-
-      const result = await esClient.search({
-        index: 'll5_agent_journal',
-        size: 20,
-        sort: [{ created_at: { order: 'desc' } }],
-        query: { bool: { must: [{ term: { user_id: 'user-1' } }, { term: { status: 'open' } }] } },
-      });
-
-      const entries = result.hits.hits.map((hit: { _id: string; _source: Record<string, unknown> }) => ({
-        id: hit._id,
-        ...hit._source,
-      }));
-
-      expect(entries).toHaveLength(2);
-      expect(entries[0].id).toBe('j1');
-      expect(entries[0].topic).toBe('Sleep');
-      expect(entries[1].id).toBe('j2');
-    });
-  });
-
-  describe('resolve_journal', () => {
-    it('updates specific entry by ID', async () => {
-      const esClient = makeMockEsClient();
-
-      await esClient.update({
-        index: 'll5_agent_journal',
-        id: 'j1',
-        doc: { status: 'resolved', updated_at: new Date().toISOString() },
-        refresh: 'wait_for',
-      });
-
-      expect(esClient.update).toHaveBeenCalledWith(expect.objectContaining({
-        index: 'll5_agent_journal',
-        id: 'j1',
-        doc: expect.objectContaining({ status: 'resolved' }),
-      }));
-    });
-
-    it('resolves entries by topic using updateByQuery', async () => {
-      const esClient = makeMockEsClient({
-        updateByQuery: vi.fn().mockResolvedValue({ updated: 3 }),
-      });
-
-      const result = await esClient.updateByQuery({
-        index: 'll5_agent_journal',
-        refresh: true,
-        query: {
-          bool: {
-            must: [
-              { term: { user_id: 'user-1' } },
-              { term: { status: 'open' } },
-              { term: { 'topic.keyword': 'Sleep' } },
-            ],
-          },
+  it('maps hits into the response envelope (id + source fields)', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({
+        hits: {
+          hits: [
+            { _id: 'j1', _source: { user_id: USER_ID, type: 'observation', topic: 'Sleep', content: 'Late', status: 'open', created_at: '2026-04-06T10:00:00Z', updated_at: '2026-04-06T10:00:00Z' } },
+            { _id: 'j2', _source: { user_id: USER_ID, type: 'feedback', topic: 'Diet', content: 'Good', status: 'open', created_at: '2026-04-06T09:00:00Z', updated_at: '2026-04-06T09:00:00Z' } },
+          ],
         },
-        script: {
-          source: "ctx._source.status = 'resolved'; ctx._source.updated_at = params.now;",
-          lang: 'painless',
-          params: { now: new Date().toISOString() },
-        },
-      });
-
-      expect(result.updated).toBe(3);
+      }),
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('read_journal')!({});
+
+    const parsed = parseToolResponse<{ entries: Array<{ id: string; topic: string }>; total: number }>(response);
+    expect(parsed.total).toBe(2);
+    expect(parsed.entries.map((e) => e.id)).toEqual(['j1', 'j2']);
+    expect(parsed.entries[0].topic).toBe('Sleep');
   });
 });
 
-// ---------------------------------------------------------------------------
-// User model tools tests
-// ---------------------------------------------------------------------------
+describe('resolve_journal tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
 
-describe('user model tools', () => {
-  describe('read_user_model', () => {
-    it('loads a single section by ID', async () => {
-      const esClient = makeMockEsClient({
-        get: vi.fn().mockResolvedValue({
-          _id: 'user-1_communication',
-          _source: {
-            user_id: 'user-1',
-            section: 'communication',
-            content: { preferred_channels: ['whatsapp'], style: 'casual' },
-            last_updated: '2026-04-06T10:00:00Z',
-          },
-        }),
-      });
-
-      const result = await esClient.get({
-        index: 'll5_agent_user_model',
-        id: 'user-1_communication',
-      });
-
-      const source = result._source as Record<string, unknown>;
-      expect(source.section).toBe('communication');
-      expect((source.content as Record<string, unknown>).preferred_channels).toEqual(['whatsapp']);
+  it('updates a single entry by entry_id', async () => {
+    const esClient = makeMockEsClient({
+      update: vi.fn().mockResolvedValue({ result: 'updated' }),
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
 
-    it('returns null section when not found (404)', async () => {
-      const notFoundError = new Error('Not Found');
-      Object.assign(notFoundError, { meta: { statusCode: 404 } });
+    const response = await tools.get('resolve_journal')!({ entry_id: 'j1' });
 
-      const esClient = makeMockEsClient({
-        get: vi.fn().mockRejectedValue(notFoundError),
-      });
+    expect(esClient.update).toHaveBeenCalledTimes(1);
+    const call = (esClient.update as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.index).toBe('ll5_agent_journal');
+    expect(call.id).toBe('j1');
+    expect(call.doc.status).toBe('resolved');
+    expect(typeof call.doc.updated_at).toBe('string');
 
-      try {
-        await esClient.get({ index: 'll5_agent_user_model', id: 'user-1_nonexistent' });
-        expect.fail('Should have thrown');
-      } catch (err: unknown) {
-        const isNotFound =
-          err instanceof Error &&
-          'meta' in err &&
-          (err as { meta?: { statusCode?: number } }).meta?.statusCode === 404;
-        expect(isNotFound).toBe(true);
-      }
-    });
-
-    it('loads all sections for a user', async () => {
-      const esClient = makeMockEsClient({
-        search: vi.fn().mockResolvedValue({
-          hits: {
-            hits: [
-              { _id: 'user-1_communication', _source: { section: 'communication', content: {}, last_updated: '2026-04-06' } },
-              { _id: 'user-1_routines', _source: { section: 'routines', content: {}, last_updated: '2026-04-06' } },
-            ],
-          },
-        }),
-      });
-
-      const result = await esClient.search({
-        index: 'll5_agent_user_model',
-        size: 20,
-        query: { term: { user_id: 'user-1' } },
-      });
-
-      const sections = result.hits.hits.map((hit: { _source: Record<string, unknown> }) => ({
-        section: hit._source.section,
-      }));
-
-      expect(sections).toHaveLength(2);
-      expect(sections[0].section).toBe('communication');
-      expect(sections[1].section).toBe('routines');
-    });
+    const parsed = parseToolResponse<{ resolved_count: number }>(response);
+    expect(parsed.resolved_count).toBe(1);
   });
 
-  describe('write_user_model', () => {
-    it('snapshots existing version before overwriting', async () => {
-      const existingDoc = {
+  it('resolves by topic using updateByQuery scoped to user_id', async () => {
+    const esClient = makeMockEsClient({
+      updateByQuery: vi.fn().mockResolvedValue({ updated: 3 }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('resolve_journal')!({ topic: 'Sleep' });
+
+    expect(esClient.updateByQuery).toHaveBeenCalledTimes(1);
+    const call = (esClient.updateByQuery as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.index).toBe('ll5_agent_journal');
+    expect(call.query.bool.must).toEqual([
+      { term: { user_id: USER_ID } },
+      { term: { status: 'open' } },
+      { term: { 'topic.keyword': 'Sleep' } },
+    ]);
+    expect(call.script.source).toContain("status = 'resolved'");
+
+    const parsed = parseToolResponse<{ resolved_count: number }>(response);
+    expect(parsed.resolved_count).toBe(3);
+  });
+
+  it('returns resolved_count=0 when neither entry_id nor topic is provided', async () => {
+    const esClient = makeMockEsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('resolve_journal')!({});
+
+    expect(esClient.update).not.toHaveBeenCalled();
+    expect(esClient.updateByQuery).not.toHaveBeenCalled();
+    const parsed = parseToolResponse<{ resolved_count: number }>(response);
+    expect(parsed.resolved_count).toBe(0);
+  });
+
+  it('emits an audit log even when nothing was resolved', async () => {
+    const esClient = makeMockEsClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    await tools.get('resolve_journal')!({ entry_id: 'j1' });
+
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      user_id: USER_ID,
+      source: 'awareness',
+      action: 'update',
+      entity_type: 'journal',
+      entity_id: 'j1',
+    }));
+  });
+});
+
+describe('read_user_model tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('fetches one section by composite id (user_id + section)', async () => {
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockResolvedValue({
+        _id: `${USER_ID}_communication`,
         _source: {
-          user_id: 'user-1',
+          user_id: USER_ID,
+          section: 'communication',
+          content: { preferred_channels: ['whatsapp'] },
+          last_updated: '2026-04-06T10:00:00Z',
+        },
+      }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('read_user_model')!({ section: 'communication' });
+
+    expect(esClient.get).toHaveBeenCalledWith({
+      index: 'll5_agent_user_model',
+      id: `${USER_ID}_communication`,
+    });
+    const parsed = parseToolResponse<{ section: string; content: Record<string, unknown> }>(response);
+    expect(parsed.section).toBe('communication');
+    expect(parsed.content.preferred_channels).toEqual(['whatsapp']);
+  });
+
+  it('returns {section: null} on 404, not an error envelope', async () => {
+    const notFound = new Error('not found');
+    Object.assign(notFound, { meta: { statusCode: 404 } });
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockRejectedValue(notFound),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('read_user_model')!({ section: 'goals' });
+
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ section: null }>(response);
+    expect(parsed.section).toBeNull();
+  });
+
+  it('rethrows non-404 errors (e.g. ES down)', async () => {
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockRejectedValue(new Error('es down')),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    await expect(tools.get('read_user_model')!({ section: 'goals' })).rejects.toThrow('es down');
+  });
+
+  it('lists all sections scoped to user_id when no section is provided', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({
+        hits: {
+          hits: [
+            { _id: `${USER_ID}_communication`, _source: { user_id: USER_ID, section: 'communication', content: {}, last_updated: '2026-04-06' } },
+            { _id: `${USER_ID}_routines`,      _source: { user_id: USER_ID, section: 'routines',      content: {}, last_updated: '2026-04-06' } },
+          ],
+        },
+      }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('read_user_model')!({});
+
+    const call = (esClient.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.index).toBe('ll5_agent_user_model');
+    expect(call.query).toEqual({ term: { user_id: USER_ID } });
+
+    const parsed = parseToolResponse<{ sections: Array<{ section: string }> }>(response);
+    expect(parsed.sections.map((s) => s.section)).toEqual(['communication', 'routines']);
+  });
+});
+
+describe('write_user_model tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('snapshots existing version to history before overwriting', async () => {
+    const existingSource = {
+      user_id: USER_ID,
+      section: 'goals',
+      content: { short_term: ['exercise'] },
+      last_updated: '2026-04-05T10:00:00Z',
+    };
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockResolvedValue({ _source: existingSource }),
+      index: vi.fn().mockResolvedValue({ _id: 'whatever', result: 'created' }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    await tools.get('write_user_model')!({
+      section: 'goals',
+      content: { short_term: ['exercise', 'read'] },
+    });
+
+    expect(esClient.get).toHaveBeenCalledWith({ index: 'll5_agent_user_model', id: `${USER_ID}_goals` });
+    expect(esClient.index).toHaveBeenCalledTimes(2);
+
+    const indexCalls = (esClient.index as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    // First: history snapshot
+    expect(indexCalls[0].index).toBe('ll5_agent_user_model_history');
+    expect(indexCalls[0].document).toMatchObject({
+      user_id: USER_ID,
+      section: 'goals',
+      original_id: `${USER_ID}_goals`,
+    });
+    expect(typeof indexCalls[0].document.archived_at).toBe('string');
+
+    // Second: write new version
+    expect(indexCalls[1].index).toBe('ll5_agent_user_model');
+    expect(indexCalls[1].id).toBe(`${USER_ID}_goals`);
+    expect(indexCalls[1].document).toMatchObject({
+      user_id: USER_ID,
+      section: 'goals',
+      content: { short_term: ['exercise', 'read'] },
+    });
+  });
+
+  it('skips history snapshot when no existing version exists', async () => {
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockRejectedValue(new Error('Not found')),
+      index: vi.fn().mockResolvedValue({ _id: 'whatever', result: 'created' }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    await tools.get('write_user_model')!({
+      section: 'goals',
+      content: { short_term: ['exercise'] },
+    });
+
+    expect(esClient.index).toHaveBeenCalledTimes(1);
+    const call = (esClient.index as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.index).toBe('ll5_agent_user_model');
+    expect(call.document.user_id).toBe(USER_ID);
+  });
+
+  it('emits an audit log entry referencing the composite section id', async () => {
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockRejectedValue(new Error('Not found')),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    await tools.get('write_user_model')!({ section: 'goals', content: {} });
+
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      user_id: USER_ID,
+      source: 'awareness',
+      action: 'update',
+      entity_type: 'user_model',
+      entity_id: `${USER_ID}_goals`,
+    }));
+  });
+});
+
+describe('list_user_model_versions tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('searches history index scoped by user_id and section', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({
+        hits: {
+          hits: [
+            { _id: 'v1', _source: { section: 'goals', last_updated: '2026-04-05T10:00:00Z', archived_at: '2026-04-06T10:00:00Z' } },
+            { _id: 'v2', _source: { section: 'goals', last_updated: '2026-04-04T10:00:00Z', archived_at: '2026-04-05T10:00:00Z' } },
+          ],
+        },
+      }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('list_user_model_versions')!({ section: 'goals', limit: 5 });
+
+    const call = (esClient.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.index).toBe('ll5_agent_user_model_history');
+    expect(call.size).toBe(5);
+    expect(call.query.bool.filter).toEqual([
+      { term: { user_id: USER_ID } },
+      { term: { section: 'goals' } },
+    ]);
+
+    const parsed = parseToolResponse<{ versions: Array<{ id: string }>; count: number }>(response);
+    expect(parsed.count).toBe(2);
+    expect(parsed.versions.map((v) => v.id)).toEqual(['v1', 'v2']);
+  });
+});
+
+describe('get_user_model_version tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns the historical version when it belongs to the caller', async () => {
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockResolvedValue({
+        _id: 'v1',
+        _source: {
+          user_id: USER_ID,
           section: 'goals',
-          content: { short_term: ['exercise'] },
+          content: { x: 1 },
           last_updated: '2026-04-05T10:00:00Z',
+          archived_at: '2026-04-06T10:00:00Z',
         },
-      };
-
-      const esClient = makeMockEsClient({
-        get: vi.fn().mockResolvedValue(existingDoc),
-        index: vi.fn().mockResolvedValue({ _id: 'mock-id', result: 'created' }),
-      });
-
-      // Step 1: get existing
-      const existing = await esClient.get({ index: 'll5_agent_user_model', id: 'user-1_goals' });
-
-      // Step 2: archive to history
-      await esClient.index({
-        index: 'll5_agent_user_model_history',
-        document: {
-          ...existing._source,
-          archived_at: new Date().toISOString(),
-          original_id: 'user-1_goals',
-        },
-      });
-
-      // Step 3: write new version
-      await esClient.index({
-        index: 'll5_agent_user_model',
-        id: 'user-1_goals',
-        document: {
-          user_id: 'user-1',
-          section: 'goals',
-          content: { short_term: ['exercise', 'read'] },
-          last_updated: new Date().toISOString(),
-          created_at: new Date().toISOString(),
-        },
-        refresh: 'wait_for',
-      });
-
-      // Verify history snapshot was written
-      expect(esClient.index).toHaveBeenCalledTimes(2);
-      expect(esClient.index).toHaveBeenCalledWith(expect.objectContaining({
-        index: 'll5_agent_user_model_history',
-        document: expect.objectContaining({
-          original_id: 'user-1_goals',
-          section: 'goals',
-        }),
-      }));
+      }),
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
 
-    it('skips history snapshot on first write (no existing)', async () => {
-      const esClient = makeMockEsClient({
-        get: vi.fn().mockRejectedValue(new Error('Not found')),
-        index: vi.fn().mockResolvedValue({ _id: 'mock-id', result: 'created' }),
-      });
+    const response = await tools.get('get_user_model_version')!({ version_id: 'v1' });
 
-      // Simulate the write_user_model flow
-      try {
-        await esClient.get({ index: 'll5_agent_user_model', id: 'user-1_goals' });
-      } catch {
-        // No existing version — skip snapshot
-      }
+    expect(esClient.get).toHaveBeenCalledWith({ index: 'll5_agent_user_model_history', id: 'v1' });
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ section: string; content: Record<string, unknown> }>(response);
+    expect(parsed.section).toBe('goals');
+    expect(parsed.content.x).toBe(1);
+  });
 
-      await esClient.index({
-        index: 'll5_agent_user_model',
-        id: 'user-1_goals',
-        document: {
-          user_id: 'user-1',
+  it('refuses to return a version owned by another user (cross-tenant guard)', async () => {
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockResolvedValue({
+        _id: 'v1',
+        _source: {
+          user_id: 'someone-else',
           section: 'goals',
-          content: { short_term: ['exercise'] },
-          last_updated: new Date().toISOString(),
-          created_at: new Date().toISOString(),
+          content: { x: 1 },
+          last_updated: '2026-04-05T10:00:00Z',
+          archived_at: '2026-04-06T10:00:00Z',
         },
-        refresh: 'wait_for',
-      });
-
-      // Only 1 index call (the write), no history snapshot
-      expect(esClient.index).toHaveBeenCalledTimes(1);
-      expect(esClient.index).toHaveBeenCalledWith(expect.objectContaining({
-        index: 'll5_agent_user_model',
-      }));
+      }),
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('get_user_model_version')!({ version_id: 'v1' });
+
+    expect(response.isError).toBe(true);
+    expect(parseToolResponse<{ error: string }>(response).error).toMatch(/Not found/);
+  });
+
+  it('returns an error envelope when ES throws (e.g. not found)', async () => {
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockRejectedValue(new Error('not found')),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const response = await tools.get('get_user_model_version')!({ version_id: 'missing' });
+
+    expect(response.isError).toBe(true);
+    expect(parseToolResponse<{ error: string }>(response).error).toMatch(/Version not found/);
   });
 });

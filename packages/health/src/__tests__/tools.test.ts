@@ -1,76 +1,271 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Mock ES client factory
-// ---------------------------------------------------------------------------
-
-function makeMockEsClient(overrides: Record<string, unknown> = {}) {
-  return {
-    index: vi.fn().mockResolvedValue({ _id: 'mock-id', result: 'created' }),
-    search: vi.fn().mockResolvedValue({ hits: { hits: [] }, aggregations: {} }),
-    get: vi.fn().mockResolvedValue({ _id: 'mock-id', _source: {} }),
-    update: vi.fn().mockResolvedValue({ result: 'updated' }),
-    ...overrides,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Mock PG pool factory
-// ---------------------------------------------------------------------------
-
-function makeMockPool(rows: Record<string, unknown>[] = []) {
-  return {
-    query: vi.fn().mockResolvedValue({ rows }),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Mock logAudit to prevent ES writes
+// Mock @ll5/shared so logAudit doesn't write to ES during tests.
+// Hoisted before any tool module imports it.
 // ---------------------------------------------------------------------------
 vi.mock('@ll5/shared', async () => {
-  const actual = await vi.importActual('@ll5/shared');
+  const actual = await vi.importActual<Record<string, unknown>>('@ll5/shared');
   return {
-    ...(actual as Record<string, unknown>),
+    ...actual,
     logAudit: vi.fn(),
   };
 });
 
-// ---------------------------------------------------------------------------
-// Sleep summary parsing tests
-// ---------------------------------------------------------------------------
+import { logAudit } from '@ll5/shared';
+import { registerSourceTools } from '../tools/sources.js';
+import { registerSleepTools } from '../tools/sleep.js';
+import { registerHeartRateTools } from '../tools/heart-rate.js';
+import { registerDailyStatsTools } from '../tools/daily-stats.js';
+import { registerActivityTools } from '../tools/activities.js';
+import { registerBodyCompositionTools } from '../tools/body-composition.js';
+import { registerTrendTools } from '../tools/trends.js';
+import { registerSyncTools } from '../tools/sync.js';
+import { registerAdapter } from '../clients/registry.js';
+import { encrypt } from '../utils/encryption.js';
+import {
+  captureTools,
+  parseToolResponse,
+  makeMockEsClient,
+  makeMockPool,
+  makeMockAdapter,
+} from './_helpers.js';
+import type { HealthSourceAdapter } from '../clients/adapter.js';
 
-describe('sleep summary parsing', () => {
-  it('calculates duration in hours from seconds', () => {
-    const durationSeconds = 28800; // 8 hours
-    const durationHours = Math.round((durationSeconds / 3600) * 10) / 10;
-    expect(durationHours).toBe(8);
+const USER_ID = 'user-test-1';
+const ENCRYPTION_KEY = 'a'.repeat(64); // 32-byte hex
+const getUserId = () => USER_ID;
+
+// Shared mock adapter that individual tests override per case via `Object.assign`
+// on the instance returned by getAdapter('garmin'). To keep the registry global
+// while still allowing per-test stubbing, we install a single proxy adapter
+// whose handler methods are replaced before each test.
+let currentAdapter: HealthSourceAdapter;
+
+function installAdapter(adapter: HealthSourceAdapter): void {
+  currentAdapter = adapter;
+}
+
+const proxyAdapter: HealthSourceAdapter = {
+  sourceId: 'garmin',
+  displayName: 'Garmin',
+  connect: (userId, creds) => currentAdapter.connect(userId, creds),
+  disconnect: (userId) => currentAdapter.disconnect(userId),
+  getStatus: (userId) => currentAdapter.getStatus(userId),
+  fetchSleep: (userId, date) => currentAdapter.fetchSleep(userId, date),
+  fetchHeartRate: (userId, date) => currentAdapter.fetchHeartRate(userId, date),
+  fetchDailyStats: (userId, date) => currentAdapter.fetchDailyStats(userId, date),
+  fetchActivities: (userId, from, to) => currentAdapter.fetchActivities(userId, from, to),
+  fetchBodyComposition: (userId, date) => currentAdapter.fetchBodyComposition(userId, date),
+  fetchStress: (userId, date) => currentAdapter.fetchStress(userId, date),
+};
+
+beforeAll(() => {
+  registerAdapter(proxyAdapter);
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Default: every method throws if invoked without an explicit stub.
+  installAdapter(makeMockAdapter());
+});
+
+// ===========================================================================
+// Source management tools — back the proxy adapter + pg.Pool
+// ===========================================================================
+
+describe('connect_health_source tool handler', () => {
+  it('rejects unknown source ID with isError envelope', async () => {
+    const pool = makeMockPool();
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('connect_health_source')!({
+      source_id: 'fitbit',
+      credentials: { token: 'x' },
+    });
+
+    expect(response.isError).toBe(true);
+    const parsed = parseToolResponse<{ error: string }>(response);
+    expect(parsed.error).toMatch(/Unknown health source: fitbit/);
+    expect(pool.query).not.toHaveBeenCalled();
   });
 
-  it('calculates stage percentages correctly', () => {
-    const durationSeconds = 28800;
-    const deepSeconds = 5760;   // 20%
-    const lightSeconds = 14400; // 50%
-    const remSeconds = 5760;    // 20%
-    const awakeSeconds = 2880;  // 10%
+  it('invokes adapter.connect with userId + credentials and persists encrypted creds scoped to user_id', async () => {
+    const connect = vi.fn(async () => undefined);
+    installAdapter(makeMockAdapter({ connect }));
 
-    const deepPct = Math.round(deepSeconds / durationSeconds * 100);
-    const lightPct = Math.round(lightSeconds / durationSeconds * 100);
-    const remPct = Math.round(remSeconds / durationSeconds * 100);
-    const awakePct = Math.round(awakeSeconds / durationSeconds * 100);
+    const pool = makeMockPool();
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
 
-    expect(deepPct).toBe(20);
-    expect(lightPct).toBe(50);
-    expect(remPct).toBe(20);
-    expect(awakePct).toBe(10);
+    const creds = { email: 'me@example.com', password: 'secret' };
+    const response = await tools.get('connect_health_source')!({
+      source_id: 'garmin',
+      credentials: creds,
+    });
+
+    expect(response.isError).toBeUndefined();
+    expect(connect).toHaveBeenCalledWith(USER_ID, creds);
+
+    // Multi-tenancy: user_id is the first positional arg in the upsert
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    const [sql, values] = (pool.query as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(sql).toMatch(/INSERT INTO health_source_credentials/);
+    expect((values as unknown[])[0]).toBe(USER_ID);
+    expect((values as unknown[])[1]).toBe('garmin');
+    // (values[2] is the encrypted blob — not asserted)
+
+    const parsed = parseToolResponse<{ success: boolean; source: string }>(response);
+    expect(parsed.success).toBe(true);
+    expect(parsed.source).toBe('garmin');
+
+    // Audit log emitted for the connection
+    expect(logAudit).toHaveBeenCalledTimes(1);
+    const auditArg = (logAudit as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(auditArg.user_id).toBe(USER_ID);
+    expect(auditArg.action).toBe('create');
+    expect(auditArg.entity_type).toBe('health_source');
   });
 
-  it('handles zero duration without division error', () => {
-    const durationSeconds = 0;
-    const deepPct = durationSeconds > 0 ? Math.round(1000 / durationSeconds * 100) : 0;
-    expect(deepPct).toBe(0);
+  it('returns isError when adapter.connect throws', async () => {
+    installAdapter(makeMockAdapter({
+      connect: vi.fn(async () => { throw new Error('bad password'); }),
+    }));
+
+    const pool = makeMockPool();
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('connect_health_source')!({
+      source_id: 'garmin',
+      credentials: { email: 'x', password: 'y' },
+    });
+
+    expect(response.isError).toBe(true);
+    const parsed = parseToolResponse<{ error: string }>(response);
+    expect(parsed.error).toMatch(/bad password/);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+});
+
+describe('disconnect_health_source tool handler', () => {
+  it('deletes PG row scoped to user_id + source_id and invokes adapter.disconnect', async () => {
+    const disconnect = vi.fn(async () => undefined);
+    installAdapter(makeMockAdapter({ disconnect }));
+
+    const pool = makeMockPool();
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('disconnect_health_source')!({ source_id: 'garmin' });
+
+    expect(response.isError).toBeUndefined();
+    expect(disconnect).toHaveBeenCalledWith(USER_ID);
+
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    const [sql, values] = (pool.query as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(sql).toMatch(/DELETE FROM health_source_credentials WHERE user_id = \$1 AND source_id = \$2/);
+    expect(values).toEqual([USER_ID, 'garmin']);
+
+    const parsed = parseToolResponse<{ success: boolean }>(response);
+    expect(parsed.success).toBe(true);
+
+    expect(logAudit).toHaveBeenCalledTimes(1);
+    expect((logAudit as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0].action).toBe('delete');
   });
 
-  it('returns sleep summary from ES query', async () => {
+  it('rejects unknown source ID', async () => {
+    const pool = makeMockPool();
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('disconnect_health_source')!({ source_id: 'whoop' });
+    expect(response.isError).toBe(true);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+});
+
+describe('get_health_source_status tool handler', () => {
+  it('returns connected:false when no credentials are stored', async () => {
+    const pool = makeMockPool([]);
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('get_health_source_status')!({ source_id: 'garmin' });
+
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ connected: boolean; source: string }>(response);
+    expect(parsed.connected).toBe(false);
+    expect(parsed.source).toBe('garmin');
+
+    // user_id-scoped lookup
+    const [, values] = (pool.query as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(values).toEqual([USER_ID, 'garmin']);
+  });
+
+  it('decrypts stored credentials and forwards status from the adapter', async () => {
+    const creds = { email: 'me@example.com', password: 'secret' };
+    const encryptedCreds = encrypt(JSON.stringify(creds), ENCRYPTION_KEY);
+
+    const connect = vi.fn(async () => undefined);
+    const getStatus = vi.fn(async () => ({ connected: true, lastSync: '2026-04-06T00:00:00Z' }));
+    installAdapter(makeMockAdapter({ connect, getStatus }));
+
+    const pool = makeMockPool([{ credentials: encryptedCreds, updated_at: '2026-04-06T10:00:00Z' }]);
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('get_health_source_status')!({ source_id: 'garmin' });
+
+    expect(response.isError).toBeUndefined();
+    expect(connect).toHaveBeenCalledWith(USER_ID, creds);
+    expect(getStatus).toHaveBeenCalledWith(USER_ID);
+
+    const parsed = parseToolResponse<{ connected: boolean; lastSync: string; lastCredentialUpdate: string }>(response);
+    expect(parsed.connected).toBe(true);
+    expect(parsed.lastSync).toBe('2026-04-06T00:00:00Z');
+    expect(parsed.lastCredentialUpdate).toBe('2026-04-06T10:00:00Z');
+  });
+
+  it('rejects unknown source ID', async () => {
+    const pool = makeMockPool();
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('get_health_source_status')!({ source_id: 'oura' });
+    expect(response.isError).toBe(true);
+  });
+});
+
+describe('list_health_sources tool handler', () => {
+  it('queries PG scoped to user_id and marks adapters as connected accordingly', async () => {
+    const pool = makeMockPool([{ source_id: 'garmin', updated_at: '2026-04-06T10:00:00Z' }]);
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('list_health_sources')!({});
+
+    const [sql, values] = (pool.query as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(sql).toMatch(/SELECT source_id, updated_at FROM health_source_credentials WHERE user_id = \$1/);
+    expect(values).toEqual([USER_ID]);
+
+    const parsed = parseToolResponse<{ sources: Array<{ sourceId: string; connected: boolean; lastCredentialUpdate: string | null }> }>(response);
+    const garmin = parsed.sources.find((s) => s.sourceId === 'garmin');
+    expect(garmin).toBeDefined();
+    expect(garmin!.connected).toBe(true);
+    expect(garmin!.lastCredentialUpdate).toBe('2026-04-06T10:00:00Z');
+  });
+
+  it('returns connected:false for sources with no stored credentials', async () => {
+    const pool = makeMockPool([]);
+    const tools = captureTools((s) => registerSourceTools(s, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('list_health_sources')!({});
+
+    const parsed = parseToolResponse<{ sources: Array<{ sourceId: string; connected: boolean }> }>(response);
+    const garmin = parsed.sources.find((s) => s.sourceId === 'garmin');
+    expect(garmin!.connected).toBe(false);
+  });
+});
+
+// ===========================================================================
+// get_sleep_summary
+// ===========================================================================
+
+describe('get_sleep_summary tool handler', () => {
+  it('queries ES with user_id + date filter and returns derived stage percentages', async () => {
     const esClient = makeMockEsClient({
       search: vi.fn().mockResolvedValue({
         hits: {
@@ -80,12 +275,12 @@ describe('sleep summary parsing', () => {
               source: 'garmin',
               sleep_time: '2026-04-05T23:30:00Z',
               wake_time: '2026-04-06T07:15:00Z',
-              duration_seconds: 27900,
-              deep_seconds: 5580,
-              light_seconds: 13950,
-              rem_seconds: 5580,
-              awake_seconds: 2790,
-              quality_score: 78,
+              duration_seconds: 28800,
+              deep_seconds: 5760,
+              light_seconds: 14400,
+              rem_seconds: 5760,
+              awake_seconds: 2880,
+              quality_score: 82,
               average_hr: 55,
               lowest_hr: 48,
               highest_hr: 72,
@@ -96,47 +291,63 @@ describe('sleep summary parsing', () => {
       }),
     });
 
-    const result = await esClient.search({
-      index: 'll5_health_sleep',
-      query: { bool: { filter: [{ term: { user_id: 'user-1' } }, { term: { date: '2026-04-06' } }] } },
-      size: 1,
-      sort: [{ synced_at: 'desc' }],
-    });
+    const tools = captureTools((s) => registerSleepTools(s, esClient, getUserId));
+    const response = await tools.get('get_sleep_summary')!({ date: '2026-04-06' });
 
-    const hits = result.hits.hits;
-    expect(hits).toHaveLength(1);
+    // user_id-scoped ES query
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(searchCall.index).toBe('ll5_health_sleep');
+    expect(searchCall.query.bool.filter).toEqual(expect.arrayContaining([
+      { term: { user_id: USER_ID } },
+      { term: { date: '2026-04-06' } },
+    ]));
 
-    const doc = hits[0]._source as Record<string, unknown>;
-    const durationSeconds = (doc.duration_seconds as number) || 0;
-    const durationHours = Math.round((durationSeconds / 3600) * 10) / 10;
-
-    expect(durationHours).toBe(7.8);
-    expect(doc.quality_score).toBe(78);
-    expect(doc.average_hr).toBe(55);
-    expect(doc.lowest_hr).toBe(48);
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ sleep: Record<string, unknown> }>(response);
+    expect(parsed.sleep.durationHours).toBe(8);
+    expect(parsed.sleep.qualityScore).toBe(82);
+    const stages = parsed.sleep.stages as Record<string, number>;
+    expect(stages.deepPct).toBe(20);
+    expect(stages.lightPct).toBe(50);
+    expect(stages.remPct).toBe(20);
+    expect(stages.awakePct).toBe(10);
   });
 
-  it('returns error when no sleep data found', async () => {
+  it('returns isError when no sleep data exists for the date', async () => {
     const esClient = makeMockEsClient({
       search: vi.fn().mockResolvedValue({ hits: { hits: [] } }),
     });
+    const tools = captureTools((s) => registerSleepTools(s, esClient, getUserId));
 
-    const result = await esClient.search({
-      index: 'll5_health_sleep',
-      query: { bool: { filter: [{ term: { user_id: 'user-1' } }, { term: { date: '2026-04-06' } }] } },
-      size: 1,
+    const response = await tools.get('get_sleep_summary')!({ date: '2026-04-06' });
+    expect(response.isError).toBe(true);
+    const parsed = parseToolResponse<{ error: string }>(response);
+    expect(parsed.error).toMatch(/No sleep data found for 2026-04-06/);
+  });
+
+  it('falls back to today when date param is omitted', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({ hits: { hits: [] } }),
     });
+    const tools = captureTools((s) => registerSleepTools(s, esClient, getUserId));
+    await tools.get('get_sleep_summary')!({});
 
-    expect(result.hits.hits).toHaveLength(0);
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const dateFilter = (searchCall.query.bool.filter as Array<Record<string, unknown>>).find(
+      (f) => 'term' in f && (f.term as Record<string, unknown>).date != null,
+    );
+    expect(dateFilter).toBeDefined();
+    const today = new Date().toISOString().slice(0, 10);
+    expect(((dateFilter as Record<string, unknown>).term as Record<string, unknown>).date).toBe(today);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Daily stats extraction tests
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// get_heart_rate
+// ===========================================================================
 
-describe('daily stats extraction', () => {
-  it('extracts stress and energy levels from daily stats', async () => {
+describe('get_heart_rate tool handler', () => {
+  it('uses term filter for a single date and returns a single object', async () => {
     const esClient = makeMockEsClient({
       search: vi.fn().mockResolvedValue({
         hits: {
@@ -144,24 +355,7 @@ describe('daily stats extraction', () => {
             _source: {
               date: '2026-04-06',
               source: 'garmin',
-              steps: 8500,
-              distance_meters: 6200,
-              floors_climbed: 5,
-              active_calories: 450,
-              total_calories: 2100,
-              active_seconds: 3600,
-              stress_average: 32,
-              stress_max: 65,
-              energy_level: 72,
-              energy_min: 25,
-              energy_max: 95,
-              hrv_weekly_avg: 45,
-              hrv_last_night_avg: 52,
-              hrv_status: 'balanced',
-              vo2_max: 42,
-              respiration_average: 16,
-              respiration_min: 12,
-              respiration_max: 22,
+              resting_hr: 55, min_hr: 48, max_hr: 150, average_hr: 72,
               synced_at: '2026-04-06T20:00:00Z',
             },
           }],
@@ -169,531 +363,564 @@ describe('daily stats extraction', () => {
       }),
     });
 
-    const result = await esClient.search({
-      index: 'll5_health_daily_stats',
-      query: { bool: { filter: [{ term: { user_id: 'user-1' } }, { term: { date: '2026-04-06' } }] } },
-      size: 1,
-    });
+    const tools = captureTools((s) => registerHeartRateTools(s, esClient, getUserId));
+    const response = await tools.get('get_heart_rate')!({ date: '2026-04-06' });
 
-    const doc = result.hits.hits[0]._source as Record<string, unknown>;
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(searchCall.query.bool.filter).toEqual(expect.arrayContaining([
+      { term: { user_id: USER_ID } },
+      { term: { date: '2026-04-06' } },
+    ]));
+    // Readings excluded by default
+    expect(searchCall._source.excludes).toEqual(['readings', 'raw_data']);
 
-    // Build the stats object as the tool does
-    const stats = {
-      steps: doc.steps,
-      distanceKm: doc.distance_meters != null ? Math.round(((doc.distance_meters as number) / 1000) * 10) / 10 : null,
-      activeMinutes: doc.active_seconds != null ? Math.round((doc.active_seconds as number) / 60) : null,
-      stress: { average: doc.stress_average ?? null, max: doc.stress_max ?? null },
-      energy: { level: doc.energy_level ?? null, min: doc.energy_min ?? null, max: doc.energy_max ?? null },
-      hrv: { weeklyAvg: doc.hrv_weekly_avg ?? null, lastNightAvg: doc.hrv_last_night_avg ?? null, status: doc.hrv_status ?? null },
-      vo2Max: doc.vo2_max ?? null,
-    };
-
-    expect(stats.steps).toBe(8500);
-    expect(stats.distanceKm).toBe(6.2);
-    expect(stats.activeMinutes).toBe(60);
-    expect(stats.stress.average).toBe(32);
-    expect(stats.stress.max).toBe(65);
-    expect(stats.energy.level).toBe(72);
-    expect(stats.energy.min).toBe(25);
-    expect(stats.energy.max).toBe(95);
-    expect(stats.hrv.weeklyAvg).toBe(45);
-    expect(stats.hrv.lastNightAvg).toBe(52);
-    expect(stats.hrv.status).toBe('balanced');
-    expect(stats.vo2Max).toBe(42);
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ heartRate: { restingHr: number } }>(response);
+    expect(parsed.heartRate.restingHr).toBe(55);
   });
 
-  it('handles null optional fields with fallback', () => {
-    const doc: Record<string, unknown> = {
-      steps: 1000,
-      distance_meters: null,
-      active_seconds: null,
-      stress_average: null,
-      energy_level: null,
-      hrv_weekly_avg: null,
-      vo2_max: null,
-    };
-
-    const distanceKm = doc.distance_meters != null ? Math.round(((doc.distance_meters as number) / 1000) * 10) / 10 : null;
-    const activeMinutes = doc.active_seconds != null ? Math.round((doc.active_seconds as number) / 60) : null;
-    const stress = { average: doc.stress_average ?? null };
-    const energy = { level: doc.energy_level ?? null };
-
-    expect(distanceKm).toBeNull();
-    expect(activeMinutes).toBeNull();
-    expect(stress.average).toBeNull();
-    expect(energy.level).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Health trends aggregation tests
-// ---------------------------------------------------------------------------
-
-describe('health trends aggregation', () => {
-  const METRIC_CONFIG: Record<string, { index: string; field: string }> = {
-    sleep_duration: { index: 'll5_health_sleep', field: 'duration_seconds' },
-    sleep_quality: { index: 'll5_health_sleep', field: 'quality_score' },
-    resting_hr: { index: 'll5_health_heart_rate', field: 'resting_hr' },
-    steps: { index: 'll5_health_daily_stats', field: 'steps' },
-    stress: { index: 'll5_health_daily_stats', field: 'stress_average' },
-    energy: { index: 'll5_health_daily_stats', field: 'energy_level' },
-    weight: { index: 'll5_health_body_composition', field: 'weight_kg' },
-  };
-
-  const PERIOD_DAYS: Record<string, number> = {
-    week: 7,
-    month: 30,
-    quarter: 90,
-  };
-
-  it('maps metric names to correct ES indices and fields', () => {
-    expect(METRIC_CONFIG['sleep_duration'].index).toBe('ll5_health_sleep');
-    expect(METRIC_CONFIG['sleep_duration'].field).toBe('duration_seconds');
-    expect(METRIC_CONFIG['steps'].index).toBe('ll5_health_daily_stats');
-    expect(METRIC_CONFIG['steps'].field).toBe('steps');
-    expect(METRIC_CONFIG['weight'].index).toBe('ll5_health_body_composition');
-    expect(METRIC_CONFIG['weight'].field).toBe('weight_kg');
-  });
-
-  it('maps period names to correct day counts', () => {
-    expect(PERIOD_DAYS['week']).toBe(7);
-    expect(PERIOD_DAYS['month']).toBe(30);
-    expect(PERIOD_DAYS['quarter']).toBe(90);
-  });
-
-  it('calculates trend direction from current vs previous average', () => {
-    function getTrend(currentAvg: number, prevAvg: number): string {
-      if (prevAvg === 0) return 'stable';
-      const changePct = ((currentAvg - prevAvg) / Math.abs(prevAvg)) * 100;
-      return changePct > 1 ? 'up' : changePct < -1 ? 'down' : 'stable';
-    }
-
-    expect(getTrend(8000, 7000)).toBe('up');     // +14% steps
-    expect(getTrend(7000, 8000)).toBe('down');   // -12.5% steps
-    expect(getTrend(7000, 7000)).toBe('stable'); // 0% change
-    expect(getTrend(7050, 7000)).toBe('stable'); // +0.7%, within threshold
-  });
-
-  it('rounds aggregation values to one decimal place', () => {
-    const round1 = (v: number) => Math.round(v * 10) / 10;
-    expect(round1(7.849)).toBe(7.8);
-    expect(round1(7.851)).toBe(7.9);
-    expect(round1(8.0)).toBe(8);
-  });
-
-  it('queries ES with correct aggregation structure', async () => {
+  it('uses range filter for date range, returns array + count', async () => {
     const esClient = makeMockEsClient({
       search: vi.fn().mockResolvedValue({
-        hits: { hits: [] },
-        aggregations: {
-          avg_value: { value: 7500 },
-          min_value: { value: 3000 },
-          max_value: { value: 12000 },
-          daily: {
-            buckets: [
-              { key_as_string: '2026-04-01', value: { value: 8000 } },
-              { key_as_string: '2026-04-02', value: { value: 7000 } },
-            ],
-          },
-        },
-      }),
-    });
-
-    const metric = 'steps';
-    const config = METRIC_CONFIG[metric];
-
-    const result = await esClient.search({
-      index: config.index,
-      size: 0,
-      query: {
-        bool: {
-          filter: [
-            { term: { user_id: 'user-1' } },
-            { range: { date: { gte: '2026-03-30', lte: '2026-04-06' } } },
+        hits: {
+          hits: [
+            { _source: { date: '2026-04-07', resting_hr: 56 } },
+            { _source: { date: '2026-04-06', resting_hr: 55 } },
           ],
         },
-      },
-      aggs: {
-        avg_value: { avg: { field: config.field } },
-        min_value: { min: { field: config.field } },
-        max_value: { max: { field: config.field } },
-        daily: {
-          date_histogram: { field: 'date', calendar_interval: 'day' },
-          aggs: { value: { avg: { field: config.field } } },
-        },
-      },
-    });
-
-    const aggs = result.aggregations as Record<string, { value: number | null; buckets?: Array<{ key_as_string: string; value: { value: number | null } }> }>;
-    expect(aggs.avg_value.value).toBe(7500);
-    expect(aggs.min_value.value).toBe(3000);
-    expect(aggs.max_value.value).toBe(12000);
-    expect(aggs.daily.buckets).toHaveLength(2);
-  });
-
-  it('calculates change percentage between periods', () => {
-    const currentAvg = 8000;
-    const prevAvg = 7000;
-    const changePct = Math.round(((currentAvg - prevAvg) / Math.abs(prevAvg)) * 100 * 10) / 10;
-    expect(changePct).toBe(14.3);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Connect/disconnect health source tests
-// ---------------------------------------------------------------------------
-
-describe('health source management', () => {
-  describe('connect_health_source', () => {
-    it('rejects unknown source ID', () => {
-      const knownSources = ['garmin'];
-      const sourceId = 'fitbit';
-      const adapter = knownSources.includes(sourceId) ? sourceId : undefined;
-      expect(adapter).toBeUndefined();
-    });
-
-    it('stores encrypted credentials in PG after successful connect', async () => {
-      const pool = makeMockPool();
-
-      // Simulate the upsert
-      await pool.query(
-        `INSERT INTO health_source_credentials (user_id, source_id, credentials, updated_at)
-         VALUES ($1, $2, $3, now())
-         ON CONFLICT (user_id, source_id)
-         DO UPDATE SET credentials = $3, updated_at = now()`,
-        ['user-1', 'garmin', 'encrypted-creds-data'],
-      );
-
-      expect(pool.query).toHaveBeenCalledTimes(1);
-      expect(pool.query).toHaveBeenCalledWith(
-        expect.stringContaining('INSERT INTO health_source_credentials'),
-        ['user-1', 'garmin', 'encrypted-creds-data'],
-      );
-    });
-  });
-
-  describe('disconnect_health_source', () => {
-    it('deletes credentials from PG', async () => {
-      const pool = makeMockPool();
-
-      await pool.query(
-        'DELETE FROM health_source_credentials WHERE user_id = $1 AND source_id = $2',
-        ['user-1', 'garmin'],
-      );
-
-      expect(pool.query).toHaveBeenCalledWith(
-        'DELETE FROM health_source_credentials WHERE user_id = $1 AND source_id = $2',
-        ['user-1', 'garmin'],
-      );
-    });
-  });
-
-  describe('list_health_sources', () => {
-    it('builds connected sources map from PG query', async () => {
-      const pool = makeMockPool([
-        { source_id: 'garmin', updated_at: '2026-04-06T10:00:00Z' },
-      ]);
-
-      const result = await pool.query(
-        'SELECT source_id, updated_at FROM health_source_credentials WHERE user_id = $1',
-        ['user-1'],
-      );
-
-      const connectedSources = new Map(
-        result.rows.map((r: { source_id: string; updated_at: string }) => [r.source_id, r.updated_at]),
-      );
-
-      expect(connectedSources.has('garmin')).toBe(true);
-      expect(connectedSources.has('fitbit')).toBe(false);
-      expect(connectedSources.get('garmin')).toBe('2026-04-06T10:00:00Z');
-    });
-  });
-
-  describe('get_health_source_status', () => {
-    it('returns not connected when no credentials stored', async () => {
-      const pool = makeMockPool([]);
-
-      const result = await pool.query(
-        'SELECT credentials, updated_at FROM health_source_credentials WHERE user_id = $1 AND source_id = $2',
-        ['user-1', 'garmin'],
-      );
-
-      expect(result.rows).toHaveLength(0);
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// sync_health_data flow tests
-// ---------------------------------------------------------------------------
-
-describe('sync_health_data flow', () => {
-  it('generates correct date range', () => {
-    function dateRange(from: string, to: string): string[] {
-      const dates: string[] = [];
-      const current = new Date(from);
-      const end = new Date(to);
-      while (current <= end) {
-        dates.push(current.toISOString().slice(0, 10));
-        current.setDate(current.getDate() + 1);
-      }
-      return dates;
-    }
-
-    const dates = dateRange('2026-04-01', '2026-04-03');
-    expect(dates).toEqual(['2026-04-01', '2026-04-02', '2026-04-03']);
-  });
-
-  it('generates single date for same from/to', () => {
-    function dateRange(from: string, to: string): string[] {
-      const dates: string[] = [];
-      const current = new Date(from);
-      const end = new Date(to);
-      while (current <= end) {
-        dates.push(current.toISOString().slice(0, 10));
-        current.setDate(current.getDate() + 1);
-      }
-      return dates;
-    }
-
-    const dates = dateRange('2026-04-06', '2026-04-06');
-    expect(dates).toEqual(['2026-04-06']);
-  });
-
-  it('returns error when no sources connected', async () => {
-    const pool = makeMockPool([]);
-    const result = await pool.query(
-      'SELECT source_id, credentials FROM health_source_credentials WHERE user_id = $1',
-      ['user-1'],
-    );
-    expect(result.rows).toHaveLength(0);
-    // Tool would return isError: true with "No health sources connected"
-  });
-
-  it('writes sleep data to ES with correct document ID format', async () => {
-    const esClient = makeMockEsClient();
-    const userId = 'user-1';
-    const sourceId = 'garmin';
-    const date = '2026-04-06';
-    const docId = `${sourceId}-sleep-${userId}-${date}`;
-
-    await esClient.index({
-      index: 'll5_health_sleep',
-      id: docId,
-      document: {
-        user_id: userId,
-        source: sourceId,
-        date,
-        sleep_time: '2026-04-05T23:30:00Z',
-        wake_time: '2026-04-06T07:15:00Z',
-        duration_seconds: 27900,
-        deep_seconds: 5580,
-        light_seconds: 13950,
-        rem_seconds: 5580,
-        awake_seconds: 2790,
-        quality_score: 78,
-      },
-    });
-
-    expect(esClient.index).toHaveBeenCalledWith(expect.objectContaining({
-      index: 'll5_health_sleep',
-      id: 'garmin-sleep-user-1-2026-04-06',
-    }));
-  });
-
-  it('writes heart rate data with correct document ID format', async () => {
-    const esClient = makeMockEsClient();
-    const docId = `garmin-hr-user-1-2026-04-06`;
-
-    await esClient.index({
-      index: 'll5_health_heart_rate',
-      id: docId,
-      document: {
-        user_id: 'user-1',
-        source: 'garmin',
-        date: '2026-04-06',
-        resting_hr: 55,
-        min_hr: 48,
-        max_hr: 150,
-        average_hr: 72,
-      },
-    });
-
-    expect(esClient.index).toHaveBeenCalledWith(expect.objectContaining({
-      index: 'll5_health_heart_rate',
-      id: 'garmin-hr-user-1-2026-04-06',
-    }));
-  });
-
-  it('writes daily stats with correct document ID format', async () => {
-    const esClient = makeMockEsClient();
-    const docId = `garmin-daily-user-1-2026-04-06`;
-
-    await esClient.index({
-      index: 'll5_health_daily_stats',
-      id: docId,
-      document: {
-        user_id: 'user-1',
-        source: 'garmin',
-        date: '2026-04-06',
-        steps: 8500,
-      },
-    });
-
-    expect(esClient.index).toHaveBeenCalledWith(expect.objectContaining({
-      index: 'll5_health_daily_stats',
-      id: 'garmin-daily-user-1-2026-04-06',
-    }));
-  });
-
-  it('writes stress data via update to daily stats index', async () => {
-    const esClient = makeMockEsClient();
-    const docId = `garmin-daily-user-1-2026-04-06`;
-
-    await esClient.update({
-      index: 'll5_health_daily_stats',
-      id: docId,
-      doc: {
-        stress_average: 32,
-        stress_max: 65,
-        stress_readings: [{ timestamp: '2026-04-06T10:00:00Z', value: 30 }],
-        synced_at: new Date().toISOString(),
-      },
-      doc_as_upsert: true,
-    });
-
-    expect(esClient.update).toHaveBeenCalledWith(expect.objectContaining({
-      index: 'll5_health_daily_stats',
-      id: 'garmin-daily-user-1-2026-04-06',
-      doc: expect.objectContaining({
-        stress_average: 32,
-        stress_max: 65,
       }),
-      doc_as_upsert: true,
-    }));
+    });
+    const tools = captureTools((s) => registerHeartRateTools(s, esClient, getUserId));
+
+    const response = await tools.get('get_heart_rate')!({ from: '2026-04-06', to: '2026-04-07' });
+
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(searchCall.query.bool.filter).toEqual(expect.arrayContaining([
+      { term: { user_id: USER_ID } },
+      { range: { date: { gte: '2026-04-06', lte: '2026-04-07' } } },
+    ]));
+
+    const parsed = parseToolResponse<{ heartRate: unknown[]; count: number }>(response);
+    expect(parsed.count).toBe(2);
+    expect(parsed.heartRate).toHaveLength(2);
   });
 
-  it('writes activity with source activity ID in document ID', async () => {
-    const esClient = makeMockEsClient();
-    const sourceActivityId = 'garmin-act-12345';
-    const docId = `garmin-activity-${sourceActivityId}`;
+  it('does not exclude readings when include_readings is true', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({
+        hits: { hits: [{ _source: { date: '2026-04-06', resting_hr: 55, readings: [{ timestamp: 't', value: 60 }] } }] },
+      }),
+    });
+    const tools = captureTools((s) => registerHeartRateTools(s, esClient, getUserId));
+    await tools.get('get_heart_rate')!({ date: '2026-04-06', include_readings: true });
 
-    await esClient.index({
-      index: 'll5_health_activities',
-      id: docId,
-      document: {
-        user_id: 'user-1',
-        source: 'garmin',
-        source_id: sourceActivityId,
-        activity_type: 'running',
-        name: 'Morning Run',
-        duration_seconds: 1800,
-      },
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(searchCall._source.excludes).toEqual([]);
+  });
+
+  it('returns isError when no records are found', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({ hits: { hits: [] } }),
+    });
+    const tools = captureTools((s) => registerHeartRateTools(s, esClient, getUserId));
+
+    const response = await tools.get('get_heart_rate')!({ date: '2026-04-06' });
+    expect(response.isError).toBe(true);
+  });
+});
+
+// ===========================================================================
+// get_daily_stats
+// ===========================================================================
+
+describe('get_daily_stats tool handler', () => {
+  it('queries ES scoped to user_id + date and derives distanceKm / activeMinutes', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({
+        hits: {
+          hits: [{
+            _source: {
+              date: '2026-04-06', source: 'garmin',
+              steps: 8500, distance_meters: 6200,
+              floors_climbed: 5,
+              active_calories: 450, total_calories: 2100,
+              active_seconds: 3600,
+              stress_average: 32, stress_max: 65,
+              energy_level: 72, energy_min: 25, energy_max: 95,
+              hrv_weekly_avg: 45, hrv_last_night_avg: 52, hrv_status: 'balanced',
+              vo2_max: 42,
+              respiration_average: 16, respiration_min: 12, respiration_max: 22,
+              synced_at: '2026-04-06T20:00:00Z',
+            },
+          }],
+        },
+      }),
     });
 
-    expect(esClient.index).toHaveBeenCalledWith(expect.objectContaining({
-      index: 'll5_health_activities',
-      id: `garmin-activity-${sourceActivityId}`,
+    const tools = captureTools((s) => registerDailyStatsTools(s, esClient, getUserId));
+    const response = await tools.get('get_daily_stats')!({ date: '2026-04-06' });
+
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(searchCall.index).toBe('ll5_health_daily_stats');
+    expect(searchCall.query.bool.filter).toEqual(expect.arrayContaining([
+      { term: { user_id: USER_ID } },
+      { term: { date: '2026-04-06' } },
+    ]));
+
+    const parsed = parseToolResponse<{ dailyStats: Record<string, unknown> }>(response);
+    expect(parsed.dailyStats.steps).toBe(8500);
+    expect(parsed.dailyStats.distanceKm).toBe(6.2);
+    expect(parsed.dailyStats.activeMinutes).toBe(60);
+    expect((parsed.dailyStats.stress as Record<string, number>).average).toBe(32);
+    expect((parsed.dailyStats.energy as Record<string, number>).level).toBe(72);
+    expect((parsed.dailyStats.hrv as Record<string, unknown>).status).toBe('balanced');
+    expect(parsed.dailyStats.vo2Max).toBe(42);
+  });
+
+  it('coerces null optional fields to null in derived units', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({
+        hits: {
+          hits: [{
+            _source: {
+              date: '2026-04-06', source: 'garmin',
+              steps: 1000,
+              distance_meters: null,
+              active_seconds: null,
+              stress_average: null, energy_level: null,
+              hrv_weekly_avg: null, vo2_max: null,
+            },
+          }],
+        },
+      }),
+    });
+    const tools = captureTools((s) => registerDailyStatsTools(s, esClient, getUserId));
+
+    const response = await tools.get('get_daily_stats')!({ date: '2026-04-06' });
+    const parsed = parseToolResponse<{ dailyStats: Record<string, unknown> }>(response);
+    expect(parsed.dailyStats.distanceKm).toBeNull();
+    expect(parsed.dailyStats.activeMinutes).toBeNull();
+    expect((parsed.dailyStats.stress as Record<string, unknown>).average).toBeNull();
+    expect(parsed.dailyStats.vo2Max).toBeNull();
+  });
+
+  it('returns isError when no record exists', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({ hits: { hits: [] } }),
+    });
+    const tools = captureTools((s) => registerDailyStatsTools(s, esClient, getUserId));
+
+    const response = await tools.get('get_daily_stats')!({ date: '2026-04-06' });
+    expect(response.isError).toBe(true);
+  });
+});
+
+// ===========================================================================
+// get_activities
+// ===========================================================================
+
+describe('get_activities tool handler', () => {
+  it('queries ES scoped to user_id + range with default 7-day window', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({
+        hits: {
+          total: { value: 1 },
+          hits: [{
+            _source: {
+              source: 'garmin', source_id: 'a-1', activity_type: 'running', name: 'Morning Run',
+              start_time: '2026-04-06T08:00:00Z', end_time: '2026-04-06T08:30:00Z',
+              duration_seconds: 1800, distance_meters: 5000, calories: 320,
+              average_hr: 142, max_hr: 165, elevation_gain: 30,
+              synced_at: '2026-04-06T09:00:00Z',
+            },
+          }],
+        },
+      }),
+    });
+
+    const tools = captureTools((s) => registerActivityTools(s, esClient, getUserId));
+    const response = await tools.get('get_activities')!({});
+
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(searchCall.index).toBe('ll5_health_activities');
+    const filters = searchCall.query.bool.filter as Array<Record<string, unknown>>;
+    expect(filters[0]).toEqual({ term: { user_id: USER_ID } });
+    expect('range' in filters[1]).toBe(true);
+    // Default size 10, no activity_type filter
+    expect(searchCall.size).toBe(10);
+
+    const parsed = parseToolResponse<{ activities: Array<Record<string, unknown>>; count: number; total: number }>(response);
+    expect(parsed.count).toBe(1);
+    expect(parsed.total).toBe(1);
+    expect(parsed.activities[0].activityType).toBe('running');
+    expect(parsed.activities[0].durationMinutes).toBe(30);
+    expect(parsed.activities[0].distanceKm).toBe(5);
+  });
+
+  it('forwards activity_type filter and respects limit', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({ hits: { total: { value: 0 }, hits: [] } }),
+    });
+    const tools = captureTools((s) => registerActivityTools(s, esClient, getUserId));
+
+    await tools.get('get_activities')!({ activity_type: 'cycling', limit: 25, from: '2026-04-01', to: '2026-04-07' });
+
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(searchCall.size).toBe(25);
+    const filters = searchCall.query.bool.filter as Array<Record<string, unknown>>;
+    expect(filters).toEqual(expect.arrayContaining([
+      { term: { user_id: USER_ID } },
+      { term: { activity_type: 'cycling' } },
+    ]));
+  });
+});
+
+// ===========================================================================
+// get_body_composition
+// ===========================================================================
+
+describe('get_body_composition tool handler', () => {
+  it('returns single object for latest (no date / range) scoped to user_id', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({
+        hits: {
+          hits: [{
+            _source: {
+              date: '2026-04-06', source: 'garmin',
+              weight_kg: 75.4, body_fat_pct: 18.5, muscle_mass_kg: 35.2, bmi: 23.1,
+              synced_at: '2026-04-06T07:00:00Z',
+            },
+          }],
+        },
+      }),
+    });
+
+    const tools = captureTools((s) => registerBodyCompositionTools(s, esClient, getUserId));
+    const response = await tools.get('get_body_composition')!({});
+
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(searchCall.index).toBe('ll5_health_body_composition');
+    expect(searchCall.query.bool.filter).toEqual([{ term: { user_id: USER_ID } }]);
+    expect(searchCall.size).toBe(1);
+
+    const parsed = parseToolResponse<{ bodyComposition: Record<string, unknown> }>(response);
+    expect(parsed.bodyComposition.weightKg).toBe(75.4);
+    expect(parsed.bodyComposition.bmi).toBe(23.1);
+  });
+
+  it('returns array when from/to range is supplied', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({
+        hits: {
+          hits: [
+            { _source: { date: '2026-04-06', weight_kg: 75.4 } },
+            { _source: { date: '2026-04-05', weight_kg: 75.7 } },
+          ],
+        },
+      }),
+    });
+    const tools = captureTools((s) => registerBodyCompositionTools(s, esClient, getUserId));
+
+    const response = await tools.get('get_body_composition')!({ from: '2026-04-01', to: '2026-04-06' });
+
+    const searchCall = (esClient.search as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(searchCall.size).toBe(90);
+    expect(searchCall.query.bool.filter).toEqual(expect.arrayContaining([
+      { term: { user_id: USER_ID } },
+      { range: { date: { gte: '2026-04-01', lte: '2026-04-06' } } },
+    ]));
+
+    const parsed = parseToolResponse<{ bodyComposition: unknown[]; count: number }>(response);
+    expect(parsed.count).toBe(2);
+  });
+
+  it('returns isError when no documents exist', async () => {
+    const esClient = makeMockEsClient({
+      search: vi.fn().mockResolvedValue({ hits: { hits: [] } }),
+    });
+    const tools = captureTools((s) => registerBodyCompositionTools(s, esClient, getUserId));
+
+    const response = await tools.get('get_body_composition')!({});
+    expect(response.isError).toBe(true);
+  });
+});
+
+// ===========================================================================
+// get_health_trends
+// ===========================================================================
+
+describe('get_health_trends tool handler', () => {
+  it('queries the metric-mapped ES index with user_id and computes change/direction vs previous period', async () => {
+    const searchFn = vi.fn()
+      .mockResolvedValueOnce({
+        hits: { hits: [] },
+        aggregations: {
+          avg_value: { value: 8000 },
+          min_value: { value: 3000 },
+          max_value: { value: 12000 },
+          daily: { buckets: [
+            { key_as_string: '2026-04-05', value: { value: 8000 } },
+            { key_as_string: '2026-04-06', value: { value: 8000 } },
+          ] },
+        },
+      })
+      .mockResolvedValueOnce({
+        hits: { hits: [] },
+        aggregations: { avg_value: { value: 7000 } },
+      });
+
+    const esClient = makeMockEsClient({ search: searchFn });
+    const tools = captureTools((s) => registerTrendTools(s, esClient, getUserId));
+
+    const response = await tools.get('get_health_trends')!({ metric: 'steps', period: 'week' });
+
+    // First call hits the right index + field for "steps"
+    const firstCall = searchFn.mock.calls[0][0];
+    expect(firstCall.index).toBe('ll5_health_daily_stats');
+    expect(firstCall.aggs.avg_value.avg.field).toBe('steps');
+    // user_id scoped
+    expect(firstCall.query.bool.filter).toEqual(expect.arrayContaining([
+      { term: { user_id: USER_ID } },
+    ]));
+
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ trend: Record<string, unknown> }>(response);
+    const trend = parsed.trend;
+    expect(trend.metric).toBe('steps');
+    expect(trend.period).toBe('week');
+    expect(trend.average).toBe(8000);
+    expect(trend.min).toBe(3000);
+    expect(trend.max).toBe(12000);
+    expect(trend.dataPoints).toBe(2);
+    // (8000-7000)/7000 * 100 = 14.285... -> 14.3
+    expect(trend.changePct).toBe(14.3);
+    expect(trend.direction).toBe('up');
+    expect((trend.previousPeriod as Record<string, unknown>).average).toBe(7000);
+  });
+
+  it('skips the previous-period comparison when compare:false', async () => {
+    const searchFn = vi.fn().mockResolvedValue({
+      hits: { hits: [] },
+      aggregations: {
+        avg_value: { value: 50 },
+        min_value: { value: 40 },
+        max_value: { value: 60 },
+        daily: { buckets: [] },
+      },
+    });
+    const esClient = makeMockEsClient({ search: searchFn });
+    const tools = captureTools((s) => registerTrendTools(s, esClient, getUserId));
+
+    const response = await tools.get('get_health_trends')!({ metric: 'resting_hr', compare: false });
+
+    expect(searchFn).toHaveBeenCalledTimes(1);
+    const parsed = parseToolResponse<{ trend: Record<string, unknown> }>(response);
+    expect(parsed.trend.previousPeriod).toBeUndefined();
+    expect(parsed.trend.changePct).toBeUndefined();
+  });
+
+  it('maps each metric name to the configured index and field', async () => {
+    const searchFn = vi.fn().mockResolvedValue({
+      hits: { hits: [] },
+      aggregations: { avg_value: { value: null }, min_value: { value: null }, max_value: { value: null }, daily: { buckets: [] } },
+    });
+    const esClient = makeMockEsClient({ search: searchFn });
+    const tools = captureTools((s) => registerTrendTools(s, esClient, getUserId));
+
+    await tools.get('get_health_trends')!({ metric: 'weight', compare: false });
+    const call = searchFn.mock.calls[0][0];
+    expect(call.index).toBe('ll5_health_body_composition');
+    expect(call.aggs.avg_value.avg.field).toBe('weight_kg');
+  });
+});
+
+// ===========================================================================
+// sync_health_data
+// ===========================================================================
+
+describe('sync_health_data tool handler', () => {
+  it('returns isError when the user has no connected sources', async () => {
+    const esClient = makeMockEsClient();
+    const pool = makeMockPool([]);
+    const tools = captureTools((s) => registerSyncTools(s, esClient, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('sync_health_data')!({ from: '2026-04-06', to: '2026-04-06' });
+
+    expect(response.isError).toBe(true);
+    // user_id-scoped lookup
+    const [sql, values] = (pool.query as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(sql).toMatch(/WHERE user_id = \$1/);
+    expect(values).toEqual([USER_ID]);
+
+    const parsed = parseToolResponse<{ error: string }>(response);
+    expect(parsed.error).toMatch(/No health sources connected/);
+  });
+
+  it('writes per-category docs scoped to user_id and reports per-source totals', async () => {
+    const creds = { email: 'x', password: 'y' };
+    const encryptedCreds = encrypt(JSON.stringify(creds), ENCRYPTION_KEY);
+
+    const fetchSleep = vi.fn(async () => ({
+      date: '2026-04-06',
+      sleepTime: '2026-04-05T23:30:00Z',
+      wakeTime: '2026-04-06T07:00:00Z',
+      durationSeconds: 27000,
+      deepSeconds: 5400, lightSeconds: 13500, remSeconds: 5400, awakeSeconds: 2700,
+      qualityScore: 80,
     }));
+    const fetchHeartRate = vi.fn(async () => ({
+      date: '2026-04-06',
+      restingHr: 55, minHr: 48, maxHr: 150, averageHr: 72,
+      zones: { rest: 100, z1: 200, z2: 300, z3: 400, z4: 500, z5: 600 },
+    }));
+    const fetchActivities = vi.fn(async () => [{
+      sourceActivityId: 'a-1',
+      activityType: 'running', name: 'Run',
+      startTime: '2026-04-06T08:00:00Z', endTime: '2026-04-06T08:30:00Z',
+      durationSeconds: 1800,
+    }]);
+
+    installAdapter(makeMockAdapter({
+      connect: vi.fn(async () => undefined),
+      fetchSleep,
+      fetchHeartRate,
+      fetchActivities,
+    }));
+
+    const esClient = makeMockEsClient();
+    const pool = makeMockPool([{ source_id: 'garmin', credentials: encryptedCreds }]);
+    const tools = captureTools((s) => registerSyncTools(s, esClient, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('sync_health_data')!({
+      from: '2026-04-06',
+      to: '2026-04-06',
+      categories: ['sleep', 'heart_rate', 'activities'],
+    });
+
+    // Adapter received userId for each fetch
+    expect(fetchSleep).toHaveBeenCalledWith(USER_ID, '2026-04-06');
+    expect(fetchHeartRate).toHaveBeenCalledWith(USER_ID, '2026-04-06');
+    expect(fetchActivities).toHaveBeenCalledWith(USER_ID, '2026-04-06', '2026-04-06');
+
+    // Three ES writes (sleep, heart_rate, one activity)
+    expect(esClient.index).toHaveBeenCalledTimes(3);
+    const indexCalls = (esClient.index as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+
+    const sleepCall = indexCalls.find((c) => c.index === 'll5_health_sleep')!;
+    expect(sleepCall.id).toBe('garmin-sleep-user-test-1-2026-04-06');
+    expect(sleepCall.document.user_id).toBe(USER_ID);
+
+    const hrCall = indexCalls.find((c) => c.index === 'll5_health_heart_rate')!;
+    expect(hrCall.id).toBe('garmin-hr-user-test-1-2026-04-06');
+    expect(hrCall.document.user_id).toBe(USER_ID);
+
+    const actCall = indexCalls.find((c) => c.index === 'll5_health_activities')!;
+    expect(actCall.id).toBe('garmin-activity-a-1');
+    expect(actCall.document.user_id).toBe(USER_ID);
+
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{
+      from: string; to: string;
+      totalSynced: number; totalErrors: number;
+      results: Record<string, { synced: string[]; errors: string[] }>;
+    }>(response);
+    expect(parsed.from).toBe('2026-04-06');
+    expect(parsed.totalSynced).toBe(3);
+    expect(parsed.totalErrors).toBe(0);
+    expect(parsed.results.garmin.synced).toEqual(expect.arrayContaining([
+      'sleep:2026-04-06',
+      'heart_rate:2026-04-06',
+      'activities:1',
+    ]));
+
+    // logAudit fired once
+    expect(logAudit).toHaveBeenCalledTimes(1);
+    const audit = (logAudit as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(audit.user_id).toBe(USER_ID);
+    expect(audit.action).toBe('sync');
   });
 
-  it('accumulates sync results per source', () => {
-    const results: Record<string, { synced: string[]; errors: string[] }> = {};
-    const sourceId = 'garmin';
-    results[sourceId] = { synced: [], errors: [] };
+  it('uses doc_as_upsert for stress writes', async () => {
+    const creds = { email: 'x', password: 'y' };
+    const encryptedCreds = encrypt(JSON.stringify(creds), ENCRYPTION_KEY);
+    installAdapter(makeMockAdapter({
+      connect: vi.fn(async () => undefined),
+      fetchStress: vi.fn(async () => ({
+        date: '2026-04-06', average: 32, max: 65,
+        readings: [{ timestamp: '2026-04-06T10:00:00Z', value: 30 }],
+      })),
+    }));
 
-    results[sourceId].synced.push('sleep:2026-04-06');
-    results[sourceId].synced.push('heart_rate:2026-04-06');
-    results[sourceId].errors.push('daily_stats:2026-04-06: timeout');
+    const esClient = makeMockEsClient();
+    const pool = makeMockPool([{ source_id: 'garmin', credentials: encryptedCreds }]);
+    const tools = captureTools((s) => registerSyncTools(s, esClient, pool, getUserId, ENCRYPTION_KEY));
 
-    const totalSynced = Object.values(results).reduce((sum, r) => sum + r.synced.length, 0);
-    const totalErrors = Object.values(results).reduce((sum, r) => sum + r.errors.length, 0);
+    await tools.get('sync_health_data')!({
+      from: '2026-04-06', to: '2026-04-06',
+      categories: ['stress'],
+    });
 
-    expect(totalSynced).toBe(2);
-    expect(totalErrors).toBe(1);
+    expect(esClient.update).toHaveBeenCalledTimes(1);
+    const updateCall = (esClient.update as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(updateCall.index).toBe('ll5_health_daily_stats');
+    expect(updateCall.id).toBe('garmin-daily-user-test-1-2026-04-06');
+    expect(updateCall.doc_as_upsert).toBe(true);
+    expect(updateCall.doc.stress_average).toBe(32);
+    expect(updateCall.doc.stress_max).toBe(65);
+  });
+
+  it('captures per-source-per-fetch errors without failing the whole sync', async () => {
+    const creds = { email: 'x', password: 'y' };
+    const encryptedCreds = encrypt(JSON.stringify(creds), ENCRYPTION_KEY);
+
+    installAdapter(makeMockAdapter({
+      connect: vi.fn(async () => undefined),
+      fetchSleep: vi.fn(async () => { throw new Error('timeout'); }),
+    }));
+
+    const esClient = makeMockEsClient();
+    const pool = makeMockPool([{ source_id: 'garmin', credentials: encryptedCreds }]);
+    const tools = captureTools((s) => registerSyncTools(s, esClient, pool, getUserId, ENCRYPTION_KEY));
+
+    const response = await tools.get('sync_health_data')!({
+      from: '2026-04-06', to: '2026-04-06',
+      categories: ['sleep'],
+    });
+
+    expect(response.isError).toBeUndefined();
+    const parsed = parseToolResponse<{ totalErrors: number; results: Record<string, { errors: string[] }> }>(response);
+    expect(parsed.totalErrors).toBe(1);
+    expect(parsed.results.garmin.errors[0]).toMatch(/sleep:2026-04-06: timeout/);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Heart rate tool tests
-// ---------------------------------------------------------------------------
-
-describe('heart rate tool', () => {
-  it('uses term filter for single date query', () => {
-    const date = '2026-04-06';
-    const dateFilter = { term: { date } };
-    expect(dateFilter).toEqual({ term: { date: '2026-04-06' } });
-  });
-
-  it('uses range filter for date range query', () => {
-    const from = '2026-04-01';
-    const to = '2026-04-07';
-    const dateFilter = { range: { date: { gte: from, lte: to } } };
-    expect(dateFilter).toEqual({ range: { date: { gte: '2026-04-01', lte: '2026-04-07' } } });
-  });
-
-  it('excludes readings from source by default', () => {
-    const includeReadings = false;
-    const sourceExcludes = includeReadings ? [] : ['readings', 'raw_data'];
-    expect(sourceExcludes).toEqual(['readings', 'raw_data']);
-  });
-
-  it('includes readings when requested', () => {
-    const includeReadings = true;
-    const sourceExcludes = includeReadings ? [] : ['readings', 'raw_data'];
-    expect(sourceExcludes).toEqual([]);
-  });
-
-  it('returns single object for single date, array for range', async () => {
-    const hits = [
-      { _source: { date: '2026-04-06', resting_hr: 55, min_hr: 48, max_hr: 150, average_hr: 72 } },
-      { _source: { date: '2026-04-05', resting_hr: 56, min_hr: 49, max_hr: 148, average_hr: 71 } },
-    ];
-
-    // Single date query -> first record only
-    const singleResult = hits[0]._source;
-    expect(singleResult.date).toBe('2026-04-06');
-
-    // Range query -> all records
-    const rangeResult = hits.map(h => h._source);
-    expect(rangeResult).toHaveLength(2);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Encryption utility tests
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Encryption utility (pure helper — already a real test in the original)
+// ===========================================================================
 
 describe('encryption utility', () => {
-  // Import the actual functions since they are pure crypto
-  it('encrypts and decrypts correctly', async () => {
+  it('round-trips plaintext through encrypt/decrypt with the same key', async () => {
     const { encrypt, decrypt } = await import('../utils/encryption.js');
-    const key = 'a'.repeat(64); // 32 bytes in hex
+    const key = 'a'.repeat(64);
     const plaintext = '{"email":"test@example.com","password":"secret"}';
 
     const encrypted = encrypt(plaintext, key);
     expect(encrypted).not.toBe(plaintext);
-    expect(encrypted.split(':')).toHaveLength(3); // iv:authTag:ciphertext
+    expect(encrypted.split(':')).toHaveLength(3);
 
     const decrypted = decrypt(encrypted, key);
     expect(decrypted).toBe(plaintext);
   });
 
-  it('produces different ciphertexts for same plaintext (random IV)', async () => {
+  it('produces different ciphertexts for identical plaintext (random IV)', async () => {
     const { encrypt } = await import('../utils/encryption.js');
     const key = 'b'.repeat(64);
-    const plaintext = 'test-data';
 
-    const encrypted1 = encrypt(plaintext, key);
-    const encrypted2 = encrypt(plaintext, key);
-
-    expect(encrypted1).not.toBe(encrypted2);
+    expect(encrypt('test-data', key)).not.toBe(encrypt('test-data', key));
   });
 
-  it('throws on invalid encrypted string format', async () => {
+  it('throws on malformed input', async () => {
     const { decrypt } = await import('../utils/encryption.js');
-    const key = 'c'.repeat(64);
-
-    expect(() => decrypt('invalid-no-colons', key)).toThrow('Invalid encrypted string format');
+    expect(() => decrypt('not-a-valid-blob', 'c'.repeat(64))).toThrow('Invalid encrypted string format');
   });
 });

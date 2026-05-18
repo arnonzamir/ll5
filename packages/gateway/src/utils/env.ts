@@ -28,6 +28,9 @@ export interface EnvConfig {
   journalConsolidationHour: number;
   fcmServerKey?: string;
   encryptionKey?: string;
+  /** Shared secret required in X-Webhook-Secret on POST /webhook/whatsapp.
+   *  Required — fail-closed on misconfiguration. */
+  whatsappWebhookSecret: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -70,6 +73,14 @@ export function loadEnv(): EnvConfig {
     throw new Error('DATABASE_URL environment variable is required');
   }
 
+  const whatsappWebhookSecret = process.env.WHATSAPP_WEBHOOK_SECRET;
+  if (!whatsappWebhookSecret) {
+    throw new Error('WHATSAPP_WEBHOOK_SECRET environment variable is required (shared secret with Evolution API)');
+  }
+  if (whatsappWebhookSecret.length < 32) {
+    throw new Error('WHATSAPP_WEBHOOK_SECRET must be at least 32 characters');
+  }
+
   return {
     port: parseInt(process.env.PORT ?? '3006', 10),
     elasticsearchUrl,
@@ -103,5 +114,6 @@ export function loadEnv(): EnvConfig {
     journalConsolidationHour: parseInt(process.env.JOURNAL_CONSOLIDATION_HOUR ?? '2', 10),
     fcmServerKey: process.env.FCM_SERVER_KEY,
     encryptionKey: process.env.ENCRYPTION_KEY,
+    whatsappWebhookSecret,
   };
 }
