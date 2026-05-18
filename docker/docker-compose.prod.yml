@@ -233,6 +233,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       EVOLUTION_API_URL: ${EVOLUTION_API_URL}
+      EVOLUTION_GLOBAL_API_KEY: ${EVOLUTION_GLOBAL_API_KEY:-}
+      GATEWAY_URL: ${GATEWAY_URL:-}
+      WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -19,15 +19,33 @@ import {
   MessageSquare,
   Wifi,
   WifiOff,
+  Plus,
+  QrCode,
+  Power,
+  RotateCw,
+  X,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import {
   fetchAccounts,
   fetchConversations,
   updatePermission,
   syncConversations,
-  type Account,
-  type Conversation,
+  provisionWhatsAppAccount,
+  getPairingQr,
+  restartAccount,
+  disconnectAccount,
+  getAccountStatus,
 } from "./messaging-server-actions";
+import type { Account, Conversation, PairingQr } from "./messaging-types";
 
 // --- Helpers ---
 
@@ -51,12 +69,31 @@ function PlatformBadge({ platform }: { platform: string }) {
 }
 
 function StatusDot({ status }: { status: string }) {
-  const isConnected = status === "connected";
+  // Map both Evolution states (open/close/connecting) AND the legacy
+  // 'connected'/'disconnected' strings the DB row stores. Anything yellow-ish
+  // (pairing) gets a pulse so the user notices.
+  const normalized = status.toLowerCase();
+  let color = "bg-gray-300";
+  let pulse = false;
+  if (normalized === "connected" || normalized === "open") {
+    color = "bg-green-500";
+  } else if (
+    normalized === "connecting" ||
+    normalized === "qr_pending" ||
+    normalized === "reconnecting"
+  ) {
+    color = "bg-yellow-400";
+    pulse = true;
+  } else if (
+    normalized === "close" ||
+    normalized === "disconnected" ||
+    normalized === "token_invalid"
+  ) {
+    color = "bg-red-400";
+  }
   return (
     <span
-      className={`inline-block h-2 w-2 rounded-full ${
-        isConnected ? "bg-green-500" : "bg-red-400"
-      }`}
+      className={`inline-block h-2 w-2 rounded-full ${color} ${pulse ? "animate-pulse" : ""}`}
       title={status}
     />
   );
@@ -83,92 +120,318 @@ function formatTime(ts: string | null): string {
   }
 }
 
+// --- Status badge color picker (shared with AccountRow) ---
+function statusBadgeClass(status: string): string {
+  const normalized = status.toLowerCase();
+  if (normalized === "connected" || normalized === "open") {
+    return "border-green-300 text-green-700";
+  }
+  if (
+    normalized === "connecting" ||
+    normalized === "qr_pending" ||
+    normalized === "reconnecting"
+  ) {
+    return "border-yellow-300 text-yellow-700";
+  }
+  return "border-red-300 text-red-600";
+}
+
 // --- Accounts Section ---
+
+function AccountRow({
+  account,
+  onSync,
+  onRepair,
+  onRestart,
+  onDisconnect,
+  isBusy,
+}: {
+  account: Account;
+  onSync: (accountId: string) => void;
+  onRepair: (accountId: string) => void;
+  onRestart: (accountId: string) => void;
+  onDisconnect: (accountId: string) => void;
+  isBusy: boolean;
+}) {
+  const isWhatsApp = account.platform.toLowerCase() === "whatsapp";
+  return (
+    <div className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+      <StatusDot status={account.status} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium truncate">
+            {account.display_name}
+          </span>
+          <PlatformBadge platform={account.platform} />
+        </div>
+        {account.last_seen_at && (
+          <span className="text-xs text-gray-400">
+            Last seen {formatTime(account.last_seen_at)}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <Badge
+          variant="outline"
+          className={`text-[10px] px-1.5 py-0 ${statusBadgeClass(account.status)}`}
+        >
+          {account.status}
+        </Badge>
+        {isWhatsApp && (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onSync(account.account_id)}
+              disabled={isBusy}
+              className="h-7 text-xs"
+              title="Sync conversations from Evolution"
+            >
+              <RefreshCw className={`h-3 w-3 mr-1 ${isBusy ? "animate-spin" : ""}`} />
+              Sync
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onRepair(account.account_id)}
+              disabled={isBusy}
+              className="h-7 text-xs"
+              title="Fetch fresh QR — re-link this number to a new device slot"
+            >
+              <QrCode className="h-3 w-3 mr-1" />
+              Re-pair
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onRestart(account.account_id)}
+              disabled={isBusy}
+              className="h-7 text-xs"
+              title="Restart Evolution instance — recovers from ghost-connected state"
+            >
+              <RotateCw className="h-3 w-3 mr-1" />
+              Restart
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onDisconnect(account.account_id)}
+              disabled={isBusy}
+              className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+              title="Log this WhatsApp out (does NOT delete the instance)"
+            >
+              <Power className="h-3 w-3 mr-1" />
+              Disconnect
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AccountsSection({
   accounts,
   onSync,
-  isSyncing,
+  onRepair,
+  onRestart,
+  onDisconnect,
+  onAddClick,
+  isBusy,
 }: {
   accounts: Account[];
   onSync: (accountId: string) => void;
-  isSyncing: boolean;
+  onRepair: (accountId: string) => void;
+  onRestart: (accountId: string) => void;
+  onDisconnect: (accountId: string) => void;
+  onAddClick: () => void;
+  isBusy: boolean;
 }) {
-  if (accounts.length === 0) {
-    return (
-      <Card>
-        <CardContent className="py-8">
-          <div className="flex flex-col items-center justify-center text-gray-400">
-            <WifiOff className="h-8 w-8 mb-2" />
-            <p className="text-sm">No messaging accounts connected.</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-3 flex flex-row items-center justify-between">
         <CardTitle className="text-base flex items-center gap-2">
           <Wifi className="h-4 w-4" />
           Connected Accounts
         </CardTitle>
+        <Button size="sm" onClick={onAddClick} className="h-7 text-xs">
+          <Plus className="h-3 w-3 mr-1" />
+          Add WhatsApp account
+        </Button>
       </CardHeader>
       <CardContent>
-        <div className="divide-y divide-gray-100">
-          {accounts.map((account) => (
-            <div
-              key={account.account_id}
-              className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
-            >
-              <StatusDot status={account.status} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium truncate">
-                    {account.display_name}
-                  </span>
-                  <PlatformBadge platform={account.platform} />
-                </div>
-                {account.last_seen_at && (
-                  <span className="text-xs text-gray-400">
-                    Last seen {formatTime(account.last_seen_at)}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Badge
-                  variant="outline"
-                  className={`text-[10px] px-1.5 py-0 ${
-                    account.status === "connected"
-                      ? "border-green-300 text-green-700"
-                      : "border-red-300 text-red-600"
-                  }`}
-                >
-                  {account.status}
-                </Badge>
-                {account.platform.toLowerCase() === "whatsapp" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onSync(account.account_id)}
-                    disabled={isSyncing}
-                    className="h-7 text-xs"
-                  >
-                    <RefreshCw
-                      className={`h-3 w-3 mr-1 ${
-                        isSyncing ? "animate-spin" : ""
-                      }`}
-                    />
-                    Sync
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+        {accounts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+            <WifiOff className="h-8 w-8 mb-2" />
+            <p className="text-sm">No messaging accounts connected.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {accounts.map((account) => (
+              <AccountRow
+                key={account.account_id}
+                account={account}
+                onSync={onSync}
+                onRepair={onRepair}
+                onRestart={onRestart}
+                onDisconnect={onDisconnect}
+                isBusy={isBusy}
+              />
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+// --- Add Account Dialog ---
+
+function AddAccountDialog({
+  open,
+  onOpenChange,
+  onProvision,
+  isSubmitting,
+  error,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onProvision: (instanceName: string) => void;
+  isSubmitting: boolean;
+  error: string | null;
+}) {
+  const [instanceName, setInstanceName] = useState("ll5");
+  const validName = /^[a-z0-9_]{1,64}$/.test(instanceName);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add WhatsApp account</DialogTitle>
+          <DialogDescription>
+            Creates a new Evolution API instance with the gateway webhook
+            pre-configured, then shows you a QR code to pair your phone.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <div>
+            <Label htmlFor="instance-name" className="text-xs text-gray-600">
+              Instance name
+            </Label>
+            <Input
+              id="instance-name"
+              value={instanceName}
+              onChange={(e) => setInstanceName(e.target.value)}
+              placeholder="ll5"
+              disabled={isSubmitting}
+              className="mt-1"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">
+              Lowercase letters, digits, underscore. No spaces. Evolution
+              enforces this.
+            </p>
+          </div>
+          {!validName && instanceName.length > 0 && (
+            <p className="text-xs text-red-600">
+              Invalid name: only lowercase letters, digits, and underscore allowed.
+            </p>
+          )}
+          {error && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {error}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isSubmitting}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => onProvision(instanceName)}
+            disabled={!validName || isSubmitting}
+          >
+            {isSubmitting ? "Creating…" : "Create + show QR"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// --- Pairing QR Dialog ---
+
+function PairingDialog({
+  open,
+  onOpenChange,
+  qr,
+  status,
+  title,
+  onRefreshQr,
+  isRefreshing,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  qr: PairingQr | null;
+  status: string;
+  title: string;
+  onRefreshQr: () => void;
+  isRefreshing: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <QrCode className="h-4 w-4" /> {title}
+          </DialogTitle>
+          <DialogDescription>
+            On your phone: <strong>WhatsApp → Settings → Linked Devices → Link a Device</strong> → scan the code below.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col items-center py-4">
+          {qr?.base64 ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={qr.base64.startsWith("data:") ? qr.base64 : `data:image/png;base64,${qr.base64}`}
+              alt="WhatsApp pairing QR code"
+              className="w-64 h-64 border border-gray-200 rounded-md"
+            />
+          ) : (
+            <div className="w-64 h-64 border border-dashed border-gray-200 rounded-md flex items-center justify-center text-xs text-gray-400">
+              {isRefreshing ? "Loading QR…" : "QR not available"}
+            </div>
+          )}
+          {qr?.pairing_code && (
+            <div className="mt-3 text-center">
+              <div className="text-[11px] text-gray-400 uppercase tracking-wide">
+                Or enter pairing code
+              </div>
+              <div className="font-mono text-lg tracking-widest">
+                {qr.pairing_code}
+              </div>
+            </div>
+          )}
+          <div className="mt-3 flex items-center gap-2 text-xs">
+            <StatusDot status={status} />
+            <span className="text-gray-500">{status}</span>
+          </div>
+        </div>
+        <DialogFooter className="flex sm:justify-between">
+          <Button variant="outline" size="sm" onClick={onRefreshQr} disabled={isRefreshing}>
+            <RefreshCw className={`h-3 w-3 mr-1 ${isRefreshing ? "animate-spin" : ""}`} />
+            Refresh QR
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            <X className="h-3 w-3 mr-1" />
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -442,9 +705,29 @@ export function MessagingView() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isPending, startTransition] = useTransition();
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
   const [syncResult, setSyncResult] = useState<{
     total: number;
     new_conversations: number;
+  } | null>(null);
+
+  // Add-account dialog
+  const [addOpen, setAddOpen] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addSubmitting, setAddSubmitting] = useState(false);
+
+  // Pairing-QR dialog (used for both initial-pair-after-add and re-pair)
+  const [pairOpen, setPairOpen] = useState(false);
+  const [pairTitle, setPairTitle] = useState("Pair WhatsApp");
+  const [pairAccountId, setPairAccountId] = useState<string | null>(null);
+  const [pairQr, setPairQr] = useState<PairingQr | null>(null);
+  const [pairStatus, setPairStatus] = useState<string>("qr_pending");
+  const [pairRefreshing, setPairRefreshing] = useState(false);
+
+  // Banner for action results
+  const [actionBanner, setActionBanner] = useState<{
+    kind: "success" | "error";
+    text: string;
   } | null>(null);
 
   const loadData = useCallback(() => {
@@ -461,6 +744,53 @@ export function MessagingView() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Live-status poll for the accounts list (every 10s)
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    const interval = setInterval(async () => {
+      const fresh = await fetchAccounts();
+      setAccounts(fresh);
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [accounts.length]);
+
+  // While the pairing dialog is open, poll get_account_status every 5s and
+  // auto-close when the account flips to connected. Also re-fetch the QR
+  // every 30s because Evolution rotates it.
+  useEffect(() => {
+    if (!pairOpen || !pairAccountId) return;
+    const aid = pairAccountId;
+
+    const statusTimer = setInterval(async () => {
+      const status = await getAccountStatus(aid);
+      if (status) {
+        setPairStatus(status.status);
+        if (status.status === "connected" || status.status === "open") {
+          setPairOpen(false);
+          setActionBanner({
+            kind: "success",
+            text: `WhatsApp connected: ${status.display_name}`,
+          });
+          // Refresh the accounts list immediately
+          const fresh = await fetchAccounts();
+          setAccounts(fresh);
+        }
+      }
+    }, 5_000);
+
+    const qrTimer = setInterval(async () => {
+      setPairRefreshing(true);
+      const qr = await getPairingQr(aid);
+      if (qr) setPairQr(qr);
+      setPairRefreshing(false);
+    }, 30_000);
+
+    return () => {
+      clearInterval(statusTimer);
+      clearInterval(qrTimer);
+    };
+  }, [pairOpen, pairAccountId]);
 
   function handlePermissionChange(
     platform: string,
@@ -507,6 +837,105 @@ export function MessagingView() {
     });
   }
 
+  async function handleProvision(instanceName: string) {
+    setAddSubmitting(true);
+    setAddError(null);
+    try {
+      const result = await provisionWhatsAppAccount(instanceName);
+      if (!result.success || !result.account) {
+        setAddError(result.message || result.error || "Provision failed");
+        return;
+      }
+      // Close add dialog, open pair dialog
+      setAddOpen(false);
+      setPairTitle(`Pair "${result.account.instance_name}"`);
+      setPairAccountId(result.account.id);
+      setPairQr(result.qr ?? null);
+      setPairStatus(result.account.status);
+      setPairOpen(true);
+      // Refresh accounts list
+      const fresh = await fetchAccounts();
+      setAccounts(fresh);
+    } finally {
+      setAddSubmitting(false);
+    }
+  }
+
+  async function handleRepair(accountId: string) {
+    setIsBusy(true);
+    setActionBanner(null);
+    try {
+      const qr = await getPairingQr(accountId);
+      if (!qr) {
+        setActionBanner({ kind: "error", text: "Could not fetch pairing QR. Is the instance running?" });
+        return;
+      }
+      const account = accounts.find((a) => a.account_id === accountId);
+      setPairTitle(`Re-pair "${account?.display_name ?? "WhatsApp"}"`);
+      setPairAccountId(accountId);
+      setPairQr(qr);
+      setPairStatus("qr_pending");
+      setPairOpen(true);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleRestart(accountId: string) {
+    setIsBusy(true);
+    setActionBanner(null);
+    try {
+      const result = await restartAccount(accountId);
+      if (result.success) {
+        setActionBanner({
+          kind: "success",
+          text: `Restart issued (state: ${result.state_after ?? "pending"}). May take 10–30s to fully reconnect.`,
+        });
+      } else {
+        setActionBanner({ kind: "error", text: `Restart failed: ${result.error}` });
+      }
+      const fresh = await fetchAccounts();
+      setAccounts(fresh);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleDisconnect(accountId: string) {
+    const account = accounts.find((a) => a.account_id === accountId);
+    const name = account?.display_name ?? "this account";
+    if (!confirm(
+      `Log "${name}" out of WhatsApp?\n\nThe Evolution instance and stored data are NOT deleted — you can re-pair later.`,
+    )) {
+      return;
+    }
+    setIsBusy(true);
+    setActionBanner(null);
+    try {
+      const result = await disconnectAccount(accountId);
+      if (result.success) {
+        setActionBanner({ kind: "success", text: `Logged ${name} out of WhatsApp.` });
+      } else {
+        setActionBanner({ kind: "error", text: `Disconnect failed: ${result.error}` });
+      }
+      const fresh = await fetchAccounts();
+      setAccounts(fresh);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function refreshPairQr() {
+    if (!pairAccountId) return;
+    setPairRefreshing(true);
+    try {
+      const qr = await getPairingQr(pairAccountId);
+      if (qr) setPairQr(qr);
+    } finally {
+      setPairRefreshing(false);
+    }
+  }
+
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 8rem)" }}>
       {/* Header */}
@@ -544,12 +973,35 @@ export function MessagingView() {
         </div>
       )}
 
+      {/* Action banner (provision / restart / disconnect) */}
+      {actionBanner && (
+        <div
+          className={`mb-4 shrink-0 rounded-md border px-4 py-2 text-sm ${
+            actionBanner.kind === "success"
+              ? "border-green-200 bg-green-50 text-green-800"
+              : "border-red-200 bg-red-50 text-red-700"
+          }`}
+        >
+          {actionBanner.text}
+          <button
+            onClick={() => setActionBanner(null)}
+            className="ml-2 font-medium cursor-pointer underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Content — scrollable */}
       <div className="flex-1 overflow-y-auto min-h-0 pb-4 space-y-4">
         <AccountsSection
           accounts={accounts}
-          onSync={handleSync}
-          isSyncing={isSyncing}
+          onSync={(id) => { handleSync(id); }}
+          onRepair={(id) => { void handleRepair(id); }}
+          onRestart={(id) => { void handleRestart(id); }}
+          onDisconnect={(id) => { void handleDisconnect(id); }}
+          onAddClick={() => { setAddError(null); setAddOpen(true); }}
+          isBusy={isBusy || isSyncing}
         />
         <ConversationsSection
           conversations={conversations}
@@ -557,6 +1009,24 @@ export function MessagingView() {
           isPending={isPending}
         />
       </div>
+
+      <AddAccountDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onProvision={(name) => { void handleProvision(name); }}
+        isSubmitting={addSubmitting}
+        error={addError}
+      />
+
+      <PairingDialog
+        open={pairOpen}
+        onOpenChange={setPairOpen}
+        qr={pairQr}
+        status={pairStatus}
+        title={pairTitle}
+        onRefreshQr={() => { void refreshPairQr(); }}
+        isRefreshing={pairRefreshing}
+      />
     </div>
   );
 }

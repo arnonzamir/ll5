@@ -168,7 +168,7 @@ ll5/
 │   └── src/
 │       ├── clients/                   # Evolution API (WhatsApp), Telegram Bot API
 │       ├── repositories/postgres/     # Accounts, conversations, contacts (with person linking)
-│       ├── tools/                     # 16 tools (send, read, sync, contacts, link, auto-match, backfill-contact-names, restart-whatsapp-account)
+│       ├── tools/                     # 19 tools (send, read, sync, contacts, link, auto-match, backfill-contact-names, restart-whatsapp-account, provision-whatsapp-account, get-pairing-qr, disconnect-whatsapp-account [last 3 added May 18 for dashboard /settings/messaging Add/Re-pair/Disconnect buttons])
 │       ├── migrations/               # 001 tables, 002 contacts, 003 archived conversations
 │       └── server.ts
 │
@@ -190,7 +190,7 @@ ll5/
 ├── packages/shared/src/__tests__/      # 41 tests: auth token generation, validation, expiry (auth.test.ts: 21); validateLl5Token discriminated-union helper covering malformed/wrong_prefix/bad_signature/expired + role coercion + grace period (validateLl5Token.test.ts: 20, added Phase 2)
 ├── packages/gateway/src/__tests__/     # 174 tests: whatsapp webhook, whatsapp webhook route (auth + no-fallback), uploads-route (ownership), notification rules, chat, chat-conversations, admin API, phone contacts, getOrCreateActiveConversation retry loop
 ├── packages/personal-knowledge/src/__tests__/ # 77 tests: person repo (rewrote May 18 to import real ElasticsearchPersonRepository — was last theater test), people tools (real handlers via captureTools), observation repo, narrative repo
-├── packages/{gtd,awareness,health,messaging,google}/src/__tests__/ # Real tool-handler tests via captureTools helper. Phase 0 (May 18) + carryforward (May 18). 32 gtd, 126 awareness (3 files: tools, tools-extra, geo-search), 44 health (2 files: tools, registry), 39 messaging, 27 google.
+├── packages/{gtd,awareness,health,messaging,google}/src/__tests__/ # Real tool-handler tests via captureTools helper. Phase 0 (May 18) + carryforward (May 18). 32 gtd, 126 awareness (3 files: tools, tools-extra, geo-search), 44 health (2 files: tools, registry), 52 messaging (3 files: encryption, tools, account-management-tools [provision/get_pairing_qr/disconnect, added May 18]), 27 google.
 │   Each package has its own __tests__/_helpers.ts with the captureTools/parseToolResponse pattern.
 │   Standard documented in docs/testing.md.
 │

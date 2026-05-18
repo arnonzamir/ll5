@@ -17,6 +17,9 @@ import { registerLinkContactTool, registerUnlinkContactTool } from './link-conta
 import { registerAutoMatchContactsTool } from './auto-match-contacts.js';
 import { registerBackfillContactNamesTool } from './backfill-contact-names.js';
 import { registerRestartWhatsAppAccountTool } from './restart-whatsapp-account.js';
+import { registerProvisionWhatsAppAccountTool, type ProvisionConfig } from './provision-whatsapp-account.js';
+import { registerGetPairingQrTool } from './get-pairing-qr.js';
+import { registerDisconnectWhatsAppAccountTool } from './disconnect-whatsapp-account.js';
 
 import type { Pool } from 'pg';
 
@@ -26,6 +29,7 @@ export interface ToolDependencies {
   contactRepo: ContactRepository;
   encryptionKey: string;
   pool: Pool;
+  provisionConfig: ProvisionConfig;
 }
 
 export function registerAllTools(
@@ -49,4 +53,7 @@ export function registerAllTools(
   registerAutoMatchContactsTool(server, deps.contactRepo, getUserId);
   registerBackfillContactNamesTool(server, deps.accountRepo, deps.contactRepo, getUserId);
   registerRestartWhatsAppAccountTool(server, deps.accountRepo, getUserId);
+  registerProvisionWhatsAppAccountTool(server, deps.accountRepo, deps.provisionConfig, getUserId);
+  registerGetPairingQrTool(server, deps.accountRepo, getUserId);
+  registerDisconnectWhatsAppAccountTool(server, deps.accountRepo, getUserId);
 }

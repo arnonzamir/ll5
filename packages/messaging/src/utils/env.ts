@@ -7,6 +7,12 @@ export interface EnvConfig {
   databaseUrl: string;
   encryptionKey: string;
   evolutionApiUrl: string | null;
+  /** Evolution-wide AUTHENTICATION_API_KEY used to provision new instances. */
+  evolutionGlobalApiKey: string | null;
+  /** Public gateway URL Evolution uses to POST webhooks. */
+  gatewayUrl: string | null;
+  /** Shared X-Webhook-Secret value (must match gateway WHATSAPP_WEBHOOK_SECRET). */
+  whatsappWebhookSecret: string | null;
 }
 
 export function loadEnv(): EnvConfig {
@@ -42,5 +48,8 @@ export function loadEnv(): EnvConfig {
     databaseUrl,
     encryptionKey,
     evolutionApiUrl: process.env.EVOLUTION_API_URL || null,
+    evolutionGlobalApiKey: process.env.EVOLUTION_GLOBAL_API_KEY || null,
+    gatewayUrl: process.env.GATEWAY_URL || null,
+    whatsappWebhookSecret: process.env.WHATSAPP_WEBHOOK_SECRET || null,
   };
 }

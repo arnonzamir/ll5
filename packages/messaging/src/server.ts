@@ -85,7 +85,20 @@ export async function startServer(): Promise<void> {
   const conversationRepo = new PostgresConversationRepository(pool);
   const contactRepo = new PostgresContactRepository(pool);
 
-  const deps = { accountRepo, conversationRepo, contactRepo, encryptionKey: env.encryptionKey, pool };
+  const deps = {
+    accountRepo,
+    conversationRepo,
+    contactRepo,
+    encryptionKey: env.encryptionKey,
+    pool,
+    provisionConfig: {
+      evolutionApiUrl: env.evolutionApiUrl,
+      evolutionGlobalApiKey: env.evolutionGlobalApiKey,
+      gatewayUrl: env.gatewayUrl,
+      whatsappWebhookSecret: env.whatsappWebhookSecret,
+      encryptionKey: env.encryptionKey,
+    },
+  };
 
   // ---------------------------------------------------------------------------
   // Express app with auth middleware

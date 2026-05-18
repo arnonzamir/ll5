@@ -1,28 +1,13 @@
 "use server";
 
 import { mcpCallJsonSafe } from "@/lib/api";
-
-// --- Types ---
-
-export interface Account {
-  account_id: string;
-  platform: string;
-  display_name: string;
-  status: string;
-  last_seen_at?: string;
-}
-
-export interface Conversation {
-  id: string;
-  account_id: string;
-  platform: string;
-  conversation_id: string;
-  name: string | null;
-  is_group: boolean;
-  is_archived: boolean;
-  permission: "agent" | "input" | "ignore";
-  last_message_at: string | null;
-}
+import type {
+  Account,
+  Conversation,
+  PairingQr,
+  ProvisionResult,
+  AccountStatus,
+} from "./messaging-types";
 
 // --- Server Actions ---
 
@@ -91,5 +76,104 @@ export async function syncConversations(
   } catch (err) {
     console.error("[messaging] syncConversations failed:", err instanceof Error ? err.message : String(err));
     return { total: 0, new_conversations: 0 };
+  }
+}
+
+/**
+ * Get live connection state for a single account (calls Evolution / Telegram
+ * for a real-time check, not just the DB row).
+ */
+export async function getAccountStatus(accountId: string): Promise<AccountStatus | null> {
+  try {
+    const result = await mcpCallJsonSafe<AccountStatus>(
+      "ll5-messaging",
+      "get_account_status",
+      { account_id: accountId },
+    );
+    return result ?? null;
+  } catch (err) {
+    console.error("[messaging] getAccountStatus failed:", err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+/**
+ * Create a brand-new Evolution instance + DB row. Returns the initial QR
+ * code so the UI can render it for pairing.
+ */
+export async function provisionWhatsAppAccount(
+  instanceName: string,
+): Promise<ProvisionResult> {
+  try {
+    const result = await mcpCallJsonSafe<ProvisionResult>(
+      "ll5-messaging",
+      "provision_whatsapp_account",
+      { instance_name: instanceName },
+    );
+    return result ?? { success: false, error: "NO_RESPONSE" };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[messaging] provisionWhatsAppAccount failed:", message);
+    return { success: false, error: "PROVISION_FAILED", message };
+  }
+}
+
+/**
+ * Fetch a fresh QR code for an existing account (re-pair flow).
+ */
+export async function getPairingQr(accountId: string): Promise<PairingQr | null> {
+  try {
+    const result = await mcpCallJsonSafe<{ qr: PairingQr }>(
+      "ll5-messaging",
+      "get_pairing_qr",
+      { account_id: accountId },
+    );
+    return result?.qr ?? null;
+  } catch (err) {
+    console.error("[messaging] getPairingQr failed:", err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+/**
+ * Restart the Evolution instance to recover ghost-connected state. Wraps the
+ * existing restart_whatsapp_account MCP tool.
+ */
+export async function restartAccount(accountId: string): Promise<{ success: boolean; state_after?: string; error?: string }> {
+  try {
+    const result = await mcpCallJsonSafe<{ state_after?: string; error?: string }>(
+      "ll5-messaging",
+      "restart_whatsapp_account",
+      { account_id: accountId },
+    );
+    if (!result) return { success: false, error: "NO_RESPONSE" };
+    if (result.error) return { success: false, error: result.error };
+    return { success: true, state_after: result.state_after };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[messaging] restartAccount failed:", message);
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Log the WhatsApp account out (without deleting the instance or DB row).
+ */
+export async function disconnectAccount(
+  accountId: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const result = await mcpCallJsonSafe<{ success?: boolean; error?: string }>(
+      "ll5-messaging",
+      "disconnect_whatsapp_account",
+      { account_id: accountId },
+    );
+    if (!result) return { success: false, error: "NO_RESPONSE" };
+    if (result.error) return { success: false, error: result.error };
+    return { success: !!result.success };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[messaging] disconnectAccount failed:", message);
+    return { success: false, error: message };
   }
 }

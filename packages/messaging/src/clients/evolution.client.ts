@@ -189,6 +189,128 @@ export class EvolutionClient {
   }
 
   /**
+   * Request a fresh pairing QR code for an already-created instance.
+   * POST /instance/connect/{instanceName}
+   * Evolution returns { code: 'data:image/png;base64,...', pairingCode?: '...' }
+   * or { base64: '...' } depending on version.
+   */
+  async connect(): Promise<{ base64: string | null; pairingCode: string | null }> {
+    const result = await this.request<{
+      code?: string;
+      base64?: string;
+      pairingCode?: string;
+      qrcode?: { code?: string; base64?: string; pairingCode?: string };
+    }>('GET', `/instance/connect/${this.instanceName}`);
+
+    // Evolution v2 wraps in `qrcode`; older returns top-level
+    const qr = result.qrcode ?? result;
+    const base64 = (qr as { base64?: string }).base64 ?? (qr as { code?: string }).code ?? null;
+    const pairingCode = (qr as { pairingCode?: string }).pairingCode ?? null;
+    return { base64, pairingCode };
+  }
+
+  /**
+   * Log the instance out of WhatsApp (revokes the linked-device slot). The
+   * Evolution instance itself remains; a subsequent /instance/connect call
+   * will produce a fresh QR.
+   * DELETE /instance/logout/{instanceName}
+   */
+  async logout(): Promise<{ success: boolean }> {
+    await this.request<unknown>('DELETE', `/instance/logout/${this.instanceName}`);
+    return { success: true };
+  }
+
+  /**
+   * Create a new Evolution instance with a webhook configured. This is the
+   * one-time provisioning call; subsequent reconnects use /instance/connect.
+   *
+   * `globalApiKey` is the Evolution-wide AUTHENTICATION_API_KEY (NOT the
+   * per-instance key). Evolution returns a per-instance `hash` (api_key) that
+   * MUST be stored encrypted alongside the row.
+   */
+  static async createInstance(
+    baseUrl: string,
+    globalApiKey: string,
+    config: {
+      instanceName: string;
+      webhookUrl: string;
+      webhookSecret: string;
+      events?: string[];
+    },
+  ): Promise<{
+    instanceId: string;
+    instanceName: string;
+    apiKey: string;
+    qrBase64: string | null;
+    pairingCode: string | null;
+  }> {
+    const events = config.events ?? [
+      'MESSAGES_UPSERT',
+      'MESSAGES_UPDATE',
+      'CONNECTION_UPDATE',
+      'QRCODE_UPDATED',
+      'CONTACTS_UPSERT',
+      'CHATS_UPSERT',
+      'CHATS_UPDATE',
+      'CHATS_DELETE',
+    ];
+
+    const url = `${baseUrl}/instance/create`;
+    const headers = {
+      'Content-Type': 'application/json',
+      apikey: globalApiKey,
+    };
+    const body = {
+      instanceName: config.instanceName,
+      qrcode: true,
+      integration: 'WHATSAPP-BAILEYS',
+      webhook: {
+        url: config.webhookUrl,
+        byEvents: false,
+        base64: true,
+        headers: { 'X-Webhook-Secret': config.webhookSecret },
+        events,
+      },
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => 'unknown');
+      logger.error('[EvolutionClient][createInstance] Evolution API error', {
+        status: response.status,
+        body: text,
+      });
+      throw new Error(`Evolution createInstance ${response.status}: ${text}`);
+    }
+
+    const raw = (await response.json()) as {
+      instance?: { instanceId?: string; instanceName?: string };
+      hash?: string | { apikey?: string };
+      qrcode?: { code?: string; base64?: string; pairingCode?: string };
+    };
+
+    const instanceId = raw.instance?.instanceId ?? '';
+    const instanceName = raw.instance?.instanceName ?? config.instanceName;
+    const apiKey =
+      typeof raw.hash === 'string'
+        ? raw.hash
+        : (raw.hash?.apikey ?? '');
+    const qrBase64 = raw.qrcode?.base64 ?? raw.qrcode?.code ?? null;
+    const pairingCode = raw.qrcode?.pairingCode ?? null;
+
+    if (!apiKey) {
+      throw new Error('Evolution createInstance returned no api key (hash)');
+    }
+
+    return { instanceId, instanceName, apiKey, qrBase64, pairingCode };
+  }
+
+  /**
    * Fetch all messages with pagination (for backfill).
    * Uses POST /chat/findMessages with empty where clause.
    */

@@ -8,6 +8,30 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Dashboard /settings/messaging — Evolution management UI (2026-05-18 PM)
+
+After today's 2-hour recovery dance (raw SSH + Evolution REST + manual `UPDATE messaging_whatsapp_accounts SET ...`), the `/settings/messaging` page is no longer view-only. New UI capabilities:
+
+- **Add WhatsApp account** — modal with `instance_name` input (validates `^[a-z0-9_]{1,64}$`, defaults to `ll5`). Submit → `provision_whatsapp_account` MCP tool creates the Evolution instance with the gateway webhook prefilled (`${GATEWAY_URL}/webhook/whatsapp` + `X-Webhook-Secret`), persists the re-encrypted `api_key` against the current `ENCRYPTION_KEY`, returns the initial QR code which the dialog renders.
+- **Re-pair** — calls `get_pairing_qr` (GET `/instance/connect/{name}`) and opens the QR dialog. No row recreation.
+- **Restart** — wires the existing `restart_whatsapp_account` tool through a server action button. For the ghost-connected case.
+- **Disconnect** — calls `disconnect_whatsapp_account` (Evolution `DELETE /instance/logout/{name}`). Does NOT delete the row or the Evolution instance. Verbiage + `window.confirm()` says so explicitly.
+- **Live status** — accounts list polls `list_accounts` every 10s. QR dialog additionally polls `get_account_status` every 5s and auto-closes + refreshes once status flips to `connected`. QR refetches every 30s while the dialog is open (Evolution rotates the QR).
+- **StatusDot** colors: green `connected/open`, yellow (pulse) `connecting/qr_pending/reconnecting`, red `disconnected/close/token_invalid`.
+
+New MCP tools in `@ll5/messaging`:
+- `provision_whatsapp_account(instance_name)` — full provision: Evolution instance create + DB row + encrypted key + initial QR.
+- `get_pairing_qr(account_id)` — fresh QR for an existing account.
+- `disconnect_whatsapp_account(account_id)` — Evolution logout, keeps row + instance.
+
+Static `EvolutionClient.createInstance()` helper added; instance methods `connect()` + `logout()` added.
+
+New messaging-MCP env vars: `EVOLUTION_GLOBAL_API_KEY`, `GATEWAY_URL`, `WHATSAPP_WEBHOOK_SECRET` (all optional — provision tool returns a friendly config error if any is missing). Mirrored into `docker/docker-compose.prod.yml`.
+
+Tests: messaging 39 → 52 (+13: covers provision config validation, encrypt-before-store, webhook-URL assembly, QR fetch + status-flip, logout, error envelopes). Gateway unchanged at 174. Dashboard untested (already convention).
+
+The dashboard talks directly to the messaging MCP via the existing `mcpCallJsonSafe()` helper — no gateway routes added (the spec mentioned them, but the established pattern is dashboard → MCP, not dashboard → gateway → MCP).
+
 ### Dashboard /settings/scheduler runtime fix (2026-05-18 PM)
 
 Same bug class as the data-sources one earlier today: `scheduler-server-actions.ts` had `"use server"` at the top while also exporting `DEFAULTS` (a const object). Next.js 15 rejects this. Extracted `DEFAULTS` + `SchedulerSettings` into a sibling `scheduler-types.ts` (no `"use server"`). View imports them from the types file now. Audited all other `"use server"` files in the dashboard — every other one only exports interfaces (types, stripped at compile, unaffected), so no further occurrences.
