@@ -108,7 +108,11 @@ ll5/
 │       ├── repositories/elasticsearch/  # 7 ES repositories (location, message, entity-status, calendar, notable, phone-status, wifi)
 │       ├── services/                    # LocationService — fuses GPS + wifi BSSID → CurrentLocation with provenance (used by get_current_location + where_is_user tools)
 │       ├── tools/                       # 22 MCP tools (situation, location+delete+where_is_user, messages, journal, user model+versioning, geo search, media, phone_status x2, wifi x2)
+│       ├── utils/geo.ts                 # Pure helper: `haversineDistance(lat1, lon1, lat2, lon2)` returns great-circle distance in meters. Re-extracted from geo-search.ts on May 18 so geo-search has unit-testable foundations.
 │       ├── setup/indices.ts             # Shared 7 awareness indices imported from @ll5/shared + 4 awareness-exclusive (journal, user_model, media, media_links)
+│       ├── __tests__/tools.test.ts       # situation/messages/journal/user_model real handler tests (Phase 0, May 18)
+│       ├── __tests__/tools-extra.test.ts # calendar/entity-statuses/location/media/notable-events/notification-rules/phone-status/wifi real handler tests (Phase 0 carryforward, May 18). 80 tests.
+│       ├── __tests__/geo-search.test.ts  # haversineDistance unit + search_nearby_pois/geocode_address/get_area_context/get_distance handler tests via vi.stubGlobal('fetch'). 25 tests.
 │       └── server.ts
 │
 ├── packages/gateway/                  # @ll5/gateway — Express HTTP service
@@ -144,12 +148,14 @@ ll5/
 │
 ├── packages/health/                   # @ll5/health — health monitoring MCP (ES+PG)
 │   └── src/
-│       ├── clients/                     # HealthSourceAdapter interface + Garmin adapter (garmin-connect npm + connectapi.garmin.com direct API)
+│       ├── clients/                     # HealthSourceAdapter interface + Garmin adapter + registry. `clients/registry.ts` exports `HealthClientRegistry` class (instance-scoped Map; `register`/`get`/`list`/`clear`) plus default-instance `registry` for production callers and back-compat `registerAdapter`/`getAdapter`/`listAdapters` shims (May 18 — extracted out of process-global state so tests can isolate per-instance).
 │       ├── tools/                       # 8 tools: sources (connect/disconnect/list/status), sleep, heart rate, daily stats, activities, body comp, trends, sync
 │       ├── types/                       # Generic health types (SleepData, HeartRateData, DailyStatsData, StressData, ActivityData, BodyCompositionData)
 │       ├── setup/indices.ts             # 5 ES indices (ll5_health_sleep, heart_rate, daily_stats, activities, body_composition)
 │       ├── utils/                       # env, encryption (AES-256-GCM), logger, migration runner
 │       ├── migrations/                  # health_source_credentials table
+│       ├── __tests__/tools.test.ts       # source/sleep/heart-rate/daily-stats/activities/body-comp/trends/sync handler tests (Phase 0)
+│       ├── __tests__/registry.test.ts    # HealthClientRegistry register/get/list/clear semantics + per-instance isolation + default-instance shim contract (May 18, 9 tests)
 │       └── server.ts                    # MCP server with ES+PG, registers adapters
 │
 ├── packages/system/                  # @ll5/system — local stdio MCP for this Mac (battery, cpu, memory, disk, system_health)
@@ -183,7 +189,7 @@ ll5/
 ├── packages/shared/src/__tests__/      # 41 tests: auth token generation, validation, expiry (auth.test.ts: 21); validateLl5Token discriminated-union helper covering malformed/wrong_prefix/bad_signature/expired + role coercion + grace period (validateLl5Token.test.ts: 20, added Phase 2)
 ├── packages/gateway/src/__tests__/     # 174 tests: whatsapp webhook, whatsapp webhook route (auth + no-fallback), uploads-route (ownership), notification rules, chat, chat-conversations, admin API, phone contacts, getOrCreateActiveConversation retry loop
 ├── packages/personal-knowledge/src/__tests__/ # 77 tests: person repo (rewrote May 18 to import real ElasticsearchPersonRepository — was last theater test), people tools (real handlers via captureTools), observation repo, narrative repo
-├── packages/{gtd,awareness,health,messaging,google}/src/__tests__/ # Rewritten May 18 (Phase 0): real tool-handler tests via captureTools helper. 32 gtd, 46 awareness, 35 health, 39 messaging, 27 google.
+├── packages/{gtd,awareness,health,messaging,google}/src/__tests__/ # Real tool-handler tests via captureTools helper. Phase 0 (May 18) + carryforward (May 18). 32 gtd, 126 awareness (3 files: tools, tools-extra, geo-search), 44 health (2 files: tools, registry), 39 messaging, 27 google.
 │   Each package has its own __tests__/_helpers.ts with the captureTools/parseToolResponse pattern.
 │   Standard documented in docs/testing.md.
 │

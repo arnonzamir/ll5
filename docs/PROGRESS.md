@@ -59,11 +59,11 @@ Following a code review that found ~80 "theater" tests across the test suite —
 
 **Total: 428 tests passing across all packages, all real.** Each package has its own `__tests__/_helpers.ts` with `captureTools()` for invoking MCP tool handlers. New helper standard documented in [`docs/testing.md`](testing.md).
 
-Follow-ups carried forward (tracked, not blocking):
-- Personal-knowledge repository tests all import real classes now; only awareness tool coverage (calendar, entity-statuses, location, media, notable-events, notification-rules, phone-status, wifi) and geo-search remain on the Phase 0 carryforward list.
-- Add geo-search test coverage (deleted with the inline haversine).
-- Add tests for untested awareness tools (calendar, entity-statuses, location, media, notable-events, notification-rules, phone-status, wifi).
-- Move health `clients/registry.ts` out of process-global state.
+Follow-ups carried forward (all done — see Phase 0 carryforward section below):
+- ✅ Personal-knowledge repository tests all import real classes now.
+- ✅ Geo-search test coverage (re-added `haversineDistance` as a unit-testable helper in `utils/geo.ts`; 25 new tests cover the four geo tools).
+- ✅ Awareness tool tests for the eight previously-uncovered tools (calendar, entity-statuses, location, media, notable-events, notification-rules, phone-status, wifi).
+- ✅ Health `clients/registry.ts` refactored out of process-global state into a `HealthClientRegistry` class with a default instance for back-compat.
 
 ### Hardening Phase 1 — critical security (2026-05-18, partial)
 
@@ -99,6 +99,18 @@ Done. Single source of truth for `ll5.*` token validation, and the user-enumerat
 **2.3 Bcrypt-adjacent timing leak in `auth.ts` (line ~101).** The previous code returned `404 'User not found'` when the user row didn't exist and `401 'Invalid PIN'` only after `bcrypt.compare`. That leaked which usernames were valid in two ways: (a) status code differed, (b) timing differed — the no-user branch returned in <1ms while the wrong-PIN branch took ~150ms because bcrypt.compare wasn't called. Fix: a module-level `DECOY_PIN_HASH` is now compared against when the user is missing so the cost is uniform, both branches return `401 'Invalid credentials'` (same body, same status), and the rate-limiter records failed attempts on both. `pinValid` is now an `await`ed boolean from `bcrypt.compare` against either the real hash or the decoy — `bcrypt.compare` itself was already constant-time, so the only fix needed was always calling it.
 
 **Test suite: 471 passing across all packages** (+22 from Phase 1's 449 — 20 from new validateLl5Token coverage, 2 from earlier shared test). Full typecheck clean. Gateway test count unchanged at 174.
+
+### Hardening Phase 0 carryforward (2026-05-18)
+
+The three follow-up bullets that were tracked-but-not-done after the original Phase 0 are now closed. After this commit, every MCP package has real test coverage on its tool layer, geo-search has its first tests, and health's client registry is no longer process-global.
+
+**Awareness — eight previously uncovered tools now have real tests.** `calendar`, `entity-statuses`, `location` (incl. `where_is_user`, `query_location_history`, `delete_location_point`), `media` (incl. `upload_media`, `list_media`, `link_media`, `unlink_media`, `get_media_for`, `delete_media` with cross-tenant guard), `notable-events`, `notification-rules` (the three gateway-proxy tools, with `fetch` mocked), `phone-status`, and `wifi`. New file: `packages/awareness/src/__tests__/tools-extra.test.ts`. Awareness tests: 46 → 126 (+80).
+
+**Geo-search has tests.** `haversineDistance` was deleted from `tools/geo-search.ts` along with the Phase 0 inline-helper cleanup; it's back as a pure unit-testable helper at `packages/awareness/src/utils/geo.ts` and the four geo tools (`search_nearby_pois`, `geocode_address`, `get_area_context`, `get_distance`) get real coverage in `packages/awareness/src/__tests__/geo-search.test.ts` with `fetch` mocked via `vi.stubGlobal`. Distance helper validated against known city pairs (NYC↔LA ≈ 3935km, London↔Paris ≈ 344km, antipodes ≈ 20015km).
+
+**Health `clients/registry.ts` is no longer process-global.** Refactored from three top-level functions backed by a module-level `Map` to a `HealthClientRegistry` class with the map as an instance field. Default instance `registry` is exported for production callers (no call-site changes), and the existing `registerAdapter` / `getAdapter` / `listAdapters` functions remain as back-compat shims delegating to it. Tests can now `new HealthClientRegistry()` per test for isolation; previously two test files using `--pool=threads` could have corrupted each other. New file: `packages/health/src/__tests__/registry.test.ts` (9 tests covering register/get/list/clear, overwrite semantics, per-instance isolation, and the back-compat shim).
+
+**Test suite: 560 passing across all packages** (+89 from Phase 2's 471 — 80 from new awareness tool tests + geo-search, 9 from registry isolation tests). Awareness: 46→126. Health: 35→44. Other packages unchanged. Full typecheck clean across all 11 packages; awareness + health builds clean.
 
 
 ### Deployed Services (Coolify @ 95.216.23.208)
