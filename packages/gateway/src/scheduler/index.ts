@@ -182,6 +182,7 @@ async function startSchedulersForUser(
     errorRateThreshold: 0.25,
     errorRateMinSamples: 10,
     authSecret: config.authSecret,
+    apiKey: config.apiKey,
   });
   mcpHealthMonitor.start();
   schedulers.push(mcpHealthMonitor);

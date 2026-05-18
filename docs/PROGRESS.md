@@ -8,6 +8,10 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### MCP health-monitor probe prefers `API_KEY` over signed tokens (2026-05-18 PM)
+
+Follow-up to today's `AUTH_SECRET` env fix. `MCPHealthMonitorScheduler.probeTools()` was Bearer-sending a `generateToken(userId, authSecret, …)` signed token to every target MCP — which works only when each MCP itself has `AUTH_SECRET` configured. The missing-`AUTH_SECRET` window on google + messaging produced false-positive `tool_count=0, probe_err="Invalid credentials"` rows in `/admin/health` (the actual MCPs were fine; only the probe was failing auth). Switched the probe to prefer `process.env.API_KEY` (universal Bearer accepted by every MCP regardless of its local `AUTH_SECRET`), with a fallback to the signed-token path when `API_KEY` isn't set so tests and legacy configs keep working. Wiring: `env.ts` (`apiKey: string | undefined`), `scheduler/index.ts` (passes `config.apiKey` into the monitor), `scheduler/mcp-health-monitor.ts` (`token = this.config.apiKey ?? generateToken(...)`).
+
 ### `AUTH_SECRET` added to google + messaging compose entries (2026-05-18 PM)
 
 Per HANDOFF, google + messaging accept ll5 signed tokens when `AUTH_SECRET` is set via the shared auth middleware (which doesn't surface in each package's `env.ts` so it was missed during recovery compose rewrite). Without it, every signed-token call (dashboard → MCP) came back `401 "Invalid credentials"` — visible in `/admin/health` and on dashboard pages. Added the env var to both services. `services_unhealthy: 0` confirmed.

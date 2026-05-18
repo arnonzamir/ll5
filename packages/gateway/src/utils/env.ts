@@ -6,6 +6,11 @@ export interface EnvConfig {
   nodeEnv: string;
   geocodingApiKey: string | undefined;
   authSecret: string;
+  /** Universal inter-MCP auth header value (`Authorization: Bearer ${API_KEY}`).
+   *  Every MCP accepts this regardless of whether it has AUTH_SECRET configured,
+   *  so the health-monitor probe prefers it over a signed token. Optional —
+   *  if unset, callers fall back to a signed token built from authSecret. */
+  apiKey: string | undefined;
   databaseUrl: string;
   // Google MCP integration (for calendar sync and periodic review)
   googleMcpUrl: string | undefined;
@@ -89,6 +94,7 @@ export function loadEnv(): EnvConfig {
     nodeEnv: process.env.NODE_ENV ?? 'development',
     geocodingApiKey: process.env.GEOCODING_API_KEY,
     authSecret,
+    apiKey: process.env.API_KEY,
     databaseUrl,
     googleMcpUrl: process.env.GOOGLE_MCP_URL,
     googleMcpApiKey: process.env.GOOGLE_MCP_API_KEY,

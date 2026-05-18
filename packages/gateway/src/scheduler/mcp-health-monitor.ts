@@ -43,6 +43,11 @@ interface MCPHealthMonitorConfig {
   errorRateMinSamples: number;
   /** Shared auth secret used to mint short-lived probe tokens for tools/list calls. */
   authSecret: string;
+  /** Universal MCP API key (`Authorization: Bearer ${API_KEY}`). When set, the
+   *  tools/list probe uses this instead of a signed token — every MCP accepts
+   *  it regardless of its local AUTH_SECRET config, so it's the robust path.
+   *  When unset, probe falls back to the signed-token approach. */
+  apiKey?: string;
 }
 
 const CACHED_STATE: Map<string, ServiceHealth> = new Map();
@@ -114,16 +119,24 @@ export class MCPHealthMonitorScheduler {
   /**
    * MCP tools/list probe via streamable-HTTP, mirroring the approach used by
    * the channel bridge's `check_mcp_connectivity` (ll5-run/channel). The MCP
-   * endpoint lives at `${url}/mcp` and accepts a Bearer token minted by the
-   * same `generateToken` helper used by every other gateway → MCP call.
+   * endpoint lives at `${url}/mcp` and accepts a Bearer token.
+   *
+   * Uses API_KEY when configured (universal across MCPs); falls back to a
+   * signed token built from authSecret. The API_KEY path is more robust
+   * because not every MCP enables signed-token auth (google + messaging
+   * require AUTH_SECRET to be present, and we've seen probes false-positive
+   * with `Invalid credentials` when that env var is missing on a target).
    *
    * Returns the tool count on success, or an error string on failure. Always
    * resolves within ~5s (PROBE_TIMEOUT_MS).
    */
   private async probeTools(url: string): Promise<{ tool_count: number; error: string | null }> {
-    // Probe runs as the configured monitor user so the MCP's auth layer
-    // accepts the token; the probe doesn't actually read user data.
-    const token = generateToken(this.config.userId, this.config.authSecret, 1, 'user');
+    // Prefer API_KEY when set — every MCP accepts it as Bearer regardless of
+    // its local AUTH_SECRET config. Otherwise mint a short-lived signed token
+    // for the monitor user (legacy path, kept for tests + configs without
+    // API_KEY).
+    const token = this.config.apiKey
+      ?? generateToken(this.config.userId, this.config.authSecret, 1, 'user');
     const mcpUrl = `${url.replace(/\/$/, '')}/mcp`;
 
     let client: McpClient | null = null;
