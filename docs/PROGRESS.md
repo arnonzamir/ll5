@@ -8,6 +8,10 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Dashboard domain corrected (2026-05-18 PM)
+
+Dashboard is on **`https://ll5.noninoni.click`**, not `zzz.arnonzamir.co.il` (incorrect placeholder in older HANDOFF revisions and used by mistake during the recovery below). Repo compose + traefik label corrected. The old `zzz.` host now returns 503 (no upstream).
+
 ### Infrastructure Recovery (2026-05-18 PM): compose is now repo-source-of-truth
 
 After today's morning outage (Coolify nightly docker cleanup pruned image layers + GHCR auth had expired + on-host compose pinned to a deleted SHA tag), recovery revealed that **the Coolify-stored compose only ever declared 4 services** (ES, PG, personal-knowledge, gtd) while the other 7 (gateway, dashboard, awareness, google, health, messaging, evolution-xkkcc) had been running as docker-run-side-loaded orphan containers for ~50 days. A `docker compose up -d --remove-orphans` call during recovery removed those orphans. No data was lost (PG + ES volumes intact, ~15k chat msgs / 77k WhatsApp msgs / etc. preserved). Recovery actions:

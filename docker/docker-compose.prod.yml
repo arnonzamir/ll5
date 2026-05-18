@@ -363,7 +363,7 @@ services:
       start_period: 30s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.ll5-dashboard.rule=Host(`zzz.arnonzamir.co.il`)"
+      - "traefik.http.routers.ll5-dashboard.rule=Host(`ll5.noninoni.click`)"
       - "traefik.http.routers.ll5-dashboard.tls=true"
       - "traefik.http.routers.ll5-dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.services.ll5-dashboard.loadbalancer.server.port=3000"

@@ -79,7 +79,7 @@ Dashboard (Next.js 15)
 | Coolify project UUID | `h48ssk80ko0sgscs0g0ws04o` |
 | Service UUID | `xkkcc0g4o48kkcows8488so4` |
 | Compose path | `/data/coolify/services/xkkcc0g4o48kkcows8488so4/docker-compose.yml` (mirror of `docker/docker-compose.prod.yml` in repo — CI scp's it on every deploy; **repo is source of truth, never edit on host**) |
-| Domain | noninoni.click (wildcard via Cloudflare) |
+| Domain | `noninoni.click` (wildcard via Cloudflare) — MCPs at `mcp-<name>.noninoni.click`, gateway at `gateway.noninoni.click`, dashboard at `ll5.noninoni.click` |
 
 ### Recovery procedure (post-2026-05-18 outage)
 
