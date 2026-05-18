@@ -23,9 +23,8 @@ import Link from "next/link";
 import {
   fetchSchedulerSettings,
   updateSchedulerSettings,
-  DEFAULTS,
-  type SchedulerSettings,
 } from "./scheduler-server-actions";
+import { DEFAULTS, type SchedulerSettings } from "./scheduler-types";
 
 function NumberField({
   label,

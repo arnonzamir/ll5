@@ -8,6 +8,10 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Dashboard /settings/scheduler runtime fix (2026-05-18 PM)
+
+Same bug class as the data-sources one earlier today: `scheduler-server-actions.ts` had `"use server"` at the top while also exporting `DEFAULTS` (a const object). Next.js 15 rejects this. Extracted `DEFAULTS` + `SchedulerSettings` into a sibling `scheduler-types.ts` (no `"use server"`). View imports them from the types file now. Audited all other `"use server"` files in the dashboard — every other one only exports interfaces (types, stripped at compile, unaffected), so no further occurrences.
+
 ### Dashboard /settings/data-sources runtime fix (2026-05-18 PM)
 
 The `data-sources-server-actions.ts` file had `"use server";` at the top but also exported `DEFAULTS` (a plain object) alongside its async server actions. Next.js 15 enforces *only async functions* in `"use server"` modules — runtime error `A "use server" file can only export async functions, found object`. The page hit a client-side exception and the entire dashboard became unusable for that route. Fix: extracted `DEFAULTS` + the type definitions into a sibling `data-sources-types.ts` (no `"use server"`). Both the server-action file and the view component now import the constants from there. Reminder for future routes: anything that isn't an `async function` lives in a non-`"use server"` file.
