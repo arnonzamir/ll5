@@ -2,26 +2,7 @@
 
 import { env } from "@/lib/env";
 import { getToken } from "@/lib/auth";
-
-export interface DataSourceConfig {
-  enabled: boolean;
-}
-
-export interface DataSources {
-  gps: DataSourceConfig;
-  im_capture: DataSourceConfig;
-  calendar: DataSourceConfig;
-  health: DataSourceConfig;
-  whatsapp: DataSourceConfig;
-}
-
-export const DEFAULTS: DataSources = {
-  gps: { enabled: true },
-  im_capture: { enabled: true },
-  calendar: { enabled: true },
-  health: { enabled: true },
-  whatsapp: { enabled: true },
-};
+import { DEFAULTS, type DataSourceConfig, type DataSources } from "./data-sources-types";
 
 export async function fetchDataSources(): Promise<DataSources> {
   const token = await getToken();

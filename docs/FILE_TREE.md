@@ -127,6 +127,7 @@ ll5/
 │       ├── processors/notification-rules.ts  # Priority matcher (sender/app/keyword/group/wildcard)
 │       ├── utils/whatsapp-user-resolver.ts # Instance name → user_id mapping with 5min cache
 │       ├── utils/data-source-config.ts # Per-source enabled/disabled check with 60s cache (reads user_settings JSONB)
+│       (Dashboard) packages/dashboard/src/app/(user)/settings/data-sources/data-sources-types.ts — types + DEFAULTS for the data-sources page. Extracted from data-sources-server-actions.ts on May 18 because Next.js 15 rejects non-async exports from a "use server" file.
 │       ├── utils/system-message.ts    # Shared system message writer with scheduler event correlation + source routing metadata
 │       ├── utils/export.ts            # Full user data export (ES + PG → JSON, no media binaries)
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message

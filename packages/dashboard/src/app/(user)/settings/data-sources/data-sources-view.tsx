@@ -7,9 +7,8 @@ import {
   fetchDataSources,
   updateDataSources,
   syncDataSourceToDevice,
-  DEFAULTS,
-  type DataSources,
 } from "./data-sources-server-actions";
+import { DEFAULTS, type DataSources } from "./data-sources-types";
 
 const SOURCE_META: Array<{
   key: keyof DataSources;

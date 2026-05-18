@@ -123,6 +123,8 @@ OAuth flow: Claude calls `get_auth_url` → user visits URL → Google redirects
 
 Browser gotcha (Reconnect / onboarding Connect Google): the consent-URL new tab must be opened **synchronously inside the click handler** — Chrome/Safari drop the user-gesture flag across any `await`, so `window.open(auth_url)` called after the server action silently popup-blocks. Current pattern: `window.open('about:blank', '_blank')` at click time, then assign `popup.location.href` once the auth URL returns. Keep this shape if you add more OAuth entry points.
 
+Dashboard server-actions: in Next.js 15 a `"use server"` file may only export `async function`s. Constants, types, classes, etc. must live in a sibling file with no `"use server"` directive — otherwise the page renders as a client-side exception. The data-sources route follows this pattern (`data-sources-types.ts` + `data-sources-server-actions.ts`).
+
 Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API key. **`AUTH_SECRET` must be set in the compose env block** — google's `env.ts` doesn't read it directly (the shared `tokenAuthMiddleware` does), so it's easy to omit by mistake. Same applies to messaging MCP. Symptom of omission: every dashboard → MCP call gets `401 "Invalid credentials"`. Do NOT add explicit OAuth discovery route handlers (/.well-known/*, /register) — the default HTML 404 is correct. JSON 404s confuse Claude Code's MCP SDK into thinking auth is needed.
 
 ## Databases
