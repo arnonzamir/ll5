@@ -8,6 +8,10 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### CI compose-drift detection (2026-05-18 PM)
+
+Follow-up to today's recovery: CI now fails the build if the on-host `/data/coolify/services/<uuid>/docker-compose.yml` has been manually edited and differs from `docker/docker-compose.prod.yml`. Implemented as a parallel `compose-drift-check` job in `.github/workflows/build-and-push.yml` (runs on every push to main, in parallel with build, does NOT block the deploy job — deploy still resyncs from repo, the whole point) plus a standalone `.github/workflows/compose-drift-check.yml` on a daily 06:00 UTC cron, so manual drift between deploys gets caught within 24h. Both jobs scp the host file via `appleboy/scp-action`, normalize trailing whitespace + comment-only lines + blank lines, then `diff -u`. Missing host file (first deploy ever / wiped service dir) is handled gracefully via a notice + exit 0, not a noisy failure. On mismatch the workflow logs the first 50 lines of the unified diff plus a pointer to the recovery procedure in `docs/HANDOFF.md`.
+
 ### MCP health-monitor probe prefers `API_KEY` over signed tokens (2026-05-18 PM)
 
 Follow-up to today's `AUTH_SECRET` env fix. `MCPHealthMonitorScheduler.probeTools()` was Bearer-sending a `generateToken(userId, authSecret, …)` signed token to every target MCP — which works only when each MCP itself has `AUTH_SECRET` configured. The missing-`AUTH_SECRET` window on google + messaging produced false-positive `tool_count=0, probe_err="Invalid credentials"` rows in `/admin/health` (the actual MCPs were fine; only the probe was failing auth). Switched the probe to prefer `process.env.API_KEY` (universal Bearer accepted by every MCP regardless of its local `AUTH_SECRET`), with a fallback to the signed-token path when `API_KEY` isn't set so tests and legacy configs keep working. Wiring: `env.ts` (`apiKey: string | undefined`), `scheduler/index.ts` (passes `config.apiKey` into the monitor), `scheduler/mcp-health-monitor.ts` (`token = this.config.apiKey ?? generateToken(...)`).
@@ -30,8 +34,9 @@ After today's morning outage (Coolify nightly docker cleanup pruned image layers
 - CI now scp's `docker/docker-compose.prod.yml` to the host before each deploy — repo is authoritative. Workflow comment explicitly forbids `--remove-orphans` (with a pointer to the incident).
 - ll5-agent restarted to mint a fresh signed token against the new `AUTH_SECRET`.
 
-Drift detection follow-ups (not yet implemented):
-- Gateway scheduler: weekly cross-check `docker compose ps` against declared services list, FCM-warn on mismatch.
+Drift detection follow-ups:
+- ✅ CI compose-drift check — parallel job on push + daily 06:00 UTC scheduled workflow (see entry above). Rejected gateway-side scheduler approach: gateway runs in a container and can't see the docker host's filesystem without socket access, which we don't want.
+- Gateway scheduler: weekly cross-check `docker compose ps` against declared services list, FCM-warn on mismatch. (Different signal — detects orphan containers, not file drift; still useful.)
 - `/admin/health` field: `compose_drift_warnings`.
 
 ### Hardening Phase 0 (2026-05-18): tests are now real
@@ -51,7 +56,7 @@ Following a code review that found ~80 "theater" tests across the test suite —
 **Total: 428 tests passing across all packages, all real.** Each package has its own `__tests__/_helpers.ts` with `captureTools()` for invoking MCP tool handlers. New helper standard documented in [`docs/testing.md`](testing.md).
 
 Follow-ups carried forward (tracked, not blocking):
-- Rewrite personal-knowledge repository tests — `person-repository.test.ts`, `observation-repository.test.ts`, `narrative-repository.test.ts` inline their own `docToPerson` etc. instead of importing the real class.
+- Personal-knowledge repository tests all import real classes now; only awareness tool coverage (calendar, entity-statuses, location, media, notable-events, notification-rules, phone-status, wifi) and geo-search remain on the Phase 0 carryforward list.
 - Add geo-search test coverage (deleted with the inline haversine).
 - Add tests for untested awareness tools (calendar, entity-statuses, location, media, notable-events, notification-rules, phone-status, wifi).
 - Move health `clients/registry.ts` out of process-global state.

@@ -89,6 +89,7 @@ If the stack goes down and a redeploy gets "manifest unknown" (image SHA pruned 
 2. `cd /data/coolify/services/xkkcc0g4o48kkcows8488so4 && docker compose pull && docker compose up -d` — **NEVER use `--remove-orphans`** (it destroyed 7 manually-started containers on 2026-05-18). If a container needs removal, name it explicitly.
 3. If gateway/MCPs crash with "password authentication failed for user ll5": the cluster's stored password drifted from the env var. From inside postgres container, run `docker exec postgres-xkkcc... psql -U ll5 -d ll5 -c "ALTER USER ll5 WITH PASSWORD 'll5-pg-secret-2026';"` (works via socket trust-mode without knowing current password).
 4. The repo's `docker/docker-compose.prod.yml` is authoritative for the 10-service stack (ES + PG + 6 MCPs + gateway + dashboard). CI re-scps it on every deploy from main.
+5. **Do NOT hot-edit the on-host compose file.** CI runs a drift check in two places: a parallel job in `.github/workflows/build-and-push.yml` (every push to main), and a daily scheduled run in `.github/workflows/compose-drift-check.yml` (06:00 UTC). Both scp the host file down, normalize trailing whitespace + comment-only + blank lines, diff against `docker/docker-compose.prod.yml`, and fail loudly on mismatch. If you need a hot patch, commit it to the repo and push — the next deploy resyncs the host. The next deploy will overwrite any manual on-host edit regardless, so the check exists only so you know that's about to happen.
 
 ## Auth
 

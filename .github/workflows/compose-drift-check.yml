@@ -1,0 +1,74 @@
+name: Compose Drift Check
+
+# Daily safety net: catches manual edits to the on-host docker-compose.yml
+# even when no one is pushing. Same diff logic as the parallel job in
+# build-and-push.yml — kept as a separate file so it has its own cron + manual
+# trigger and a clean checks page surface.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 06:00 UTC every day. Drift gets caught within ~24h even if main is quiet.
+    - cron: '0 6 * * *'
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch on-host compose file
+        uses: appleboy/scp-action@v0.1.7
+        continue-on-error: true
+        with:
+          host: ${{ vars.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: /data/coolify/services/${{ secrets.COOLIFY_SERVICE_UUID }}/docker-compose.yml
+          target: /tmp/host-compose/
+          strip_components: 5
+
+      - name: Diff host compose against repo
+        run: |
+          HOST_FILE="/tmp/host-compose/docker-compose.yml"
+          REPO_FILE="docker/docker-compose.prod.yml"
+
+          if [ ! -f "$HOST_FILE" ]; then
+            echo "::notice::No on-host compose file found at /data/coolify/services/<uuid>/docker-compose.yml."
+            echo "::notice::This is expected on a first deploy ever, or after the host service dir was wiped."
+            echo "::notice::Skipping drift check — the next deploy will scp the repo file into place."
+            exit 0
+          fi
+
+          normalize() {
+            sed -E 's/[[:space:]]+$//' "$1" \
+              | grep -Ev '^[[:space:]]*#' \
+              | grep -Ev '^[[:space:]]*$'
+          }
+
+          normalize "$HOST_FILE" > /tmp/host.norm
+          normalize "$REPO_FILE" > /tmp/repo.norm
+
+          if diff -q /tmp/host.norm /tmp/repo.norm > /dev/null; then
+            echo "Compose files match (ignoring trailing whitespace, comments, blank lines)."
+            exit 0
+          fi
+
+          echo "::error title=Compose drift detected::On-host docker-compose.yml differs from docker/docker-compose.prod.yml"
+          echo ""
+          echo "==================================================================="
+          echo "DRIFT DETECTED: on-host compose != repo docker/docker-compose.prod.yml"
+          echo "==================================================================="
+          echo ""
+          echo "Don't edit on-host compose. CI will overwrite it from the repo on"
+          echo "next deploy anyway. If you need a hot patch, commit it to the repo"
+          echo "and push — that's the only safe path."
+          echo ""
+          echo "Recovery procedure: see 'Recovery procedure (post-2026-05-18 outage)'"
+          echo "in docs/HANDOFF.md."
+          echo ""
+          echo "First ~50 lines of unified diff (host -> repo):"
+          echo "-------------------------------------------------------------------"
+          diff -u /tmp/host.norm /tmp/repo.norm | head -n 50 || true
+          echo "-------------------------------------------------------------------"
+          exit 1
