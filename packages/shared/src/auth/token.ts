@@ -102,3 +102,139 @@ export interface TokenExpiredError extends Error {
 export function isTokenExpiredError(err: unknown): err is TokenExpiredError {
   return err instanceof Error && (err as TokenExpiredError).code === 'TOKEN_EXPIRED';
 }
+
+// ---------------------------------------------------------------------------
+// validateLl5Token — the single source of truth for ll5.* token validation.
+//
+// The four call sites in the gateway (chat auth middleware, admin middleware,
+// webhook path-token handler, webhook Bearer handler) all used to inline the
+// same parse-and-verify logic with slight drift between copies. They now all
+// delegate here. Pure, no I/O, easy to unit-test. Constant-time HMAC compare
+// via crypto.timingSafeEqual after a length-equality guard so the compare
+// never throws on length mismatch.
+// ---------------------------------------------------------------------------
+
+export interface TokenClaims {
+  uid: string;
+  role: 'admin' | 'user';
+  iat: number;
+  exp: number;
+}
+
+export type ValidationResult =
+  | { ok: true; claims: TokenClaims }
+  | {
+      ok: false;
+      reason: 'malformed' | 'bad_signature' | 'expired' | 'wrong_prefix';
+    };
+
+export interface ValidateLl5TokenOptions {
+  /** Current time in seconds since epoch. Defaults to `Date.now() / 1000`. */
+  now?: number;
+  /** Extra seconds of slack allowed past `exp`. Defaults to 0. */
+  gracePeriodSeconds?: number;
+}
+
+/**
+ * Validate a raw `ll5.<payloadB64>.<32-hex hmac>` token.
+ *
+ * Pass the bare token, not an `Authorization` header. The caller decides how
+ * the token was conveyed (Bearer header, ?token=, or path segment) and
+ * extracts it before calling here.
+ *
+ * Returns a discriminated union — never throws.
+ */
+export function validateLl5Token(
+  token: string,
+  authSecret: string,
+  opts: ValidateLl5TokenOptions = {},
+): ValidationResult {
+  if (typeof token !== 'string' || token.length === 0) {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return { ok: false, reason: 'malformed' };
+  }
+  if (parts[0] !== 'll5') {
+    return { ok: false, reason: 'wrong_prefix' };
+  }
+
+  const [, payloadB64, signature] = parts;
+  if (!payloadB64 || !signature) {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  // Compute expected signature first so the length compare below operates on a
+  // known-good buffer. The HMAC is always 32 hex chars (16 bytes of sha256
+  // truncated). A mismatched length is treated as bad_signature, not
+  // malformed, so we don't leak structural details about the token format.
+  const expectedHex = crypto
+    .createHmac('sha256', authSecret)
+    .update(payloadB64)
+    .digest('hex')
+    .slice(0, 32);
+
+  // Length-equality guard — required so timingSafeEqual doesn't throw on
+  // mismatched buffer sizes. This is the one branch that depends on input
+  // length, but it's a fixed expected length so no secret leaks.
+  if (signature.length !== expectedHex.length) {
+    return { ok: false, reason: 'bad_signature' };
+  }
+
+  let sigBuf: Buffer;
+  let expBuf: Buffer;
+  try {
+    sigBuf = Buffer.from(signature, 'hex');
+    expBuf = Buffer.from(expectedHex, 'hex');
+  } catch {
+    return { ok: false, reason: 'bad_signature' };
+  }
+  // Buffer.from with invalid hex silently truncates rather than throws, so
+  // double-check that the decoded length matches what 32 hex chars should
+  // yield (16 bytes). Anything else means the signature wasn't valid hex.
+  if (sigBuf.length !== expBuf.length || sigBuf.length === 0) {
+    return { ok: false, reason: 'bad_signature' };
+  }
+
+  if (!crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return { ok: false, reason: 'bad_signature' };
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+  } catch {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  const obj = raw as Record<string, unknown>;
+  const uid = obj.uid;
+  const iat = obj.iat;
+  const exp = obj.exp;
+  const roleRaw = obj.role;
+
+  if (typeof uid !== 'string' || uid.length === 0) {
+    return { ok: false, reason: 'malformed' };
+  }
+  if (typeof iat !== 'number' || typeof exp !== 'number') {
+    return { ok: false, reason: 'malformed' };
+  }
+
+  // Tokens minted before the role field existed default to 'user'.
+  const role: 'admin' | 'user' =
+    roleRaw === 'admin' ? 'admin' : 'user';
+
+  const now = opts.now ?? Date.now() / 1000;
+  const grace = opts.gracePeriodSeconds ?? 0;
+  if (exp + grace < now) {
+    return { ok: false, reason: 'expired' };
+  }
+
+  return { ok: true, claims: { uid, role, iat, exp } };
+}

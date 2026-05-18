@@ -88,6 +88,18 @@ Still outstanding for the operator (not code):
 
 Next: Phase 2 — auth consolidation (the four reimplementations of token validation in `chat.ts`, `admin.ts`, and `server.ts`×2 → single `validateLl5Token()` helper in `@ll5/shared`; bcrypt timing leak in `auth.ts:101`).
 
+### Hardening Phase 2 — auth consolidation + timing leak (2026-05-18)
+
+Done. Single source of truth for `ll5.*` token validation, and the user-enumeration timing channel on `POST /auth/token` is closed.
+
+**2.1 `validateLl5Token` in `@ll5/shared`.** New pure helper in `packages/shared/src/auth/token.ts` returning a `ValidationResult` discriminated union (`{ ok: true, claims } | { ok: false, reason: 'malformed' | 'bad_signature' | 'expired' | 'wrong_prefix' }`). Constant-time HMAC compare via `crypto.timingSafeEqual` with a length-equality guard so the compare never throws. Pure, no I/O. 20 dedicated tests cover malformed (3 shapes), wrong_prefix, bad_signature (length-match, length-mismatch, tampered payload, wrong secret, non-hex chars), expired (real and synthetic clock), grace-period acceptance, role round-trip, role default, and unknown-role coercion to `user` (no privilege escalation via the role field).
+
+**2.2 Four inline validators replaced.** `chatAuthMiddleware` (chat.ts), `requireAdmin` (admin.ts), and both webhook code paths in `server.ts` (path-segment token + Bearer header fallback) now all delegate to `validateLl5Token`. The variants previously differed: server.ts both paths skipped the `parts[0] === 'll5'` check on the Bearer-header branch and didn't distinguish between `expired` and `bad_signature` (any failure was just "Invalid webhook token"); chat.ts/admin.ts did parse the prefix but returned `'Invalid token format'` for non-3-segment and `'Invalid token'` for everything else; admin.ts additionally enforced `role === 'admin'`. The new code path preserves every observable HTTP behavior (status codes, error bodies including `token_expired` and `Admin access required`).
+
+**2.3 Bcrypt-adjacent timing leak in `auth.ts` (line ~101).** The previous code returned `404 'User not found'` when the user row didn't exist and `401 'Invalid PIN'` only after `bcrypt.compare`. That leaked which usernames were valid in two ways: (a) status code differed, (b) timing differed — the no-user branch returned in <1ms while the wrong-PIN branch took ~150ms because bcrypt.compare wasn't called. Fix: a module-level `DECOY_PIN_HASH` is now compared against when the user is missing so the cost is uniform, both branches return `401 'Invalid credentials'` (same body, same status), and the rate-limiter records failed attempts on both. `pinValid` is now an `await`ed boolean from `bcrypt.compare` against either the real hash or the decoy — `bcrypt.compare` itself was already constant-time, so the only fix needed was always calling it.
+
+**Test suite: 471 passing across all packages** (+22 from Phase 1's 449 — 20 from new validateLl5Token coverage, 2 from earlier shared test). Full typecheck clean. Gateway test count unchanged at 174.
+
 
 ### Deployed Services (Coolify @ 95.216.23.208)
 

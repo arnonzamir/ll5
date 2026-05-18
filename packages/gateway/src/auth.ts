@@ -7,6 +7,23 @@ import { logger } from './utils/logger.js';
 
 const REFRESH_GRACE_PERIOD_DAYS = 7; // Allow refresh up to 7 days after expiry
 
+/**
+ * A pre-computed bcrypt hash used as a decoy when the requested user does not
+ * exist. We always run bcrypt.compare so the response time for "no such user"
+ * matches "user exists, wrong PIN". The plaintext is irrelevant — the hash is
+ * generated once at module load with the production salt-rounds setting and
+ * is never a valid PIN for any real user (random 32 bytes). This closes a
+ * user-enumeration side channel that existed at packages/gateway/src/auth.ts
+ * line ~101: previously the missing-user branch returned 404 in <1ms while
+ * the wrong-PIN branch returned 401 in ~150ms, letting an attacker probe for
+ * valid usernames without ever knowing a PIN.
+ */
+const DECOY_PIN_HASH = bcrypt.hashSync(
+  // 32 random bytes hex-encoded — guaranteed not to match any real PIN.
+  Math.random().toString(36) + Date.now().toString(36) + Math.random().toString(36),
+  12,
+);
+
 // --- In-memory rate limiter for login attempts ---
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
@@ -91,18 +108,23 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
         [loginId],
       );
 
-      if (result.rows.length === 0) {
-        res.status(404).json({ error: 'User not found' });
-        return;
-      }
+      // Always run bcrypt.compare, even when the user doesn't exist, to keep
+      // the response timing and error shape uniform. Otherwise the missing-
+      // user path returns instantly and leaks which usernames are valid. We
+      // also collapse "user not found" and "wrong PIN" into the same 401 so
+      // the status code doesn't enumerate either.
+      const user: AuthUser | null = result.rows.length > 0 ? result.rows[0] : null;
+      const hashToCompare = user?.pin_hash ?? DECOY_PIN_HASH;
+      const pinValid = await bcrypt.compare(pin, hashToCompare);
 
-      const user = result.rows[0];
-
-      const pinValid = await bcrypt.compare(pin, user.pin_hash);
-      if (!pinValid) {
+      if (!user || !pinValid) {
         recordFailedAttempt(loginId);
-        logger.warn('[auth][issueToken] Invalid PIN attempt', { userId: loginId });
-        res.status(401).json({ error: 'Invalid PIN' });
+        logger.warn('[auth][issueToken] Invalid credentials attempt', {
+          userId: loginId,
+          userExists: !!user,
+        });
+        // Same 401 for both branches — client cannot distinguish them.
+        res.status(401).json({ error: 'Invalid credentials' });
         return;
       }
 

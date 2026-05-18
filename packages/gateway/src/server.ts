@@ -14,6 +14,7 @@ import {
   AWARENESS_INDICES,
   KNOWLEDGE_NETWORKS_INDEX,
   AWARENESS_INDEX_SETTINGS,
+  validateLl5Token,
   type IndexDefinition,
 } from '@ll5/shared';
 import { createAdminRouter } from './admin.js';
@@ -943,26 +944,15 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     // Validate token: try webhook token first, then auth token, then Bearer header
     let userId = config.webhookTokens[token];
 
-    if (!userId && config.authSecret) {
-      // Try as ll5 auth token (from Android app)
-      try {
-        const crypto = await import('node:crypto');
-        const parts = token.split('.');
-        if (parts.length === 3 && parts[0] === 'll5') {
-          const [, payloadB64, signature] = parts;
-          const expected = crypto.createHmac('sha256', config.authSecret)
-            .update(payloadB64).digest('hex').slice(0, 32);
-          if (signature.length === 32 && crypto.timingSafeEqual(
-            Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex')
-          )) {
-            const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-            if (payload.exp > Date.now() / 1000) {
-              userId = payload.uid;
-            }
-          }
-        }
-      } catch (err) {
-        logger.debug('[startServer][webhook] Auth token validation failed', { error: err instanceof Error ? err.message : String(err) });
+    if (!userId && config.authSecret && token) {
+      // Try the path-segment token as a real ll5 auth token (Android pre-Bearer flow).
+      const result = validateLl5Token(token, config.authSecret);
+      if (result.ok) {
+        userId = result.claims.uid;
+      } else if (result.reason !== 'wrong_prefix' && result.reason !== 'malformed') {
+        // Only log when the caller actually attempted to use an ll5 token —
+        // not for plain webhook-token strings that lack the prefix.
+        logger.debug('[startServer][webhook] Auth token validation failed', { reason: result.reason });
       }
     }
 
@@ -970,25 +960,12 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       // Try Bearer header as last resort
       const authHeader = req.headers.authorization;
       if (authHeader?.startsWith('Bearer ll5.') && config.authSecret) {
-        try {
-          const crypto = await import('node:crypto');
-          const authToken = authHeader.slice(7);
-          const parts = authToken.split('.');
-          if (parts.length === 3) {
-            const [, payloadB64, signature] = parts;
-            const expected = crypto.createHmac('sha256', config.authSecret)
-              .update(payloadB64).digest('hex').slice(0, 32);
-            if (signature.length === 32 && crypto.timingSafeEqual(
-              Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex')
-            )) {
-              const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-              if (payload.exp > Date.now() / 1000) {
-                userId = payload.uid;
-              }
-            }
-          }
-        } catch (err) {
-          logger.debug('[startServer][webhook] Bearer token validation failed', { error: err instanceof Error ? err.message : String(err) });
+        const authToken = authHeader.slice(7);
+        const result = validateLl5Token(authToken, config.authSecret);
+        if (result.ok) {
+          userId = result.claims.uid;
+        } else {
+          logger.debug('[startServer][webhook] Bearer token validation failed', { reason: result.reason });
         }
       }
     }

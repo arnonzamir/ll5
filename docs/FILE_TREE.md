@@ -79,7 +79,7 @@ ll5/
 │       ├── indices/                  # Canonical ES mappings for cross-package indices — awareness.ts (7 ll5_awareness_* indices + ensureAwarenessIndices helper), knowledge.ts (ll5_knowledge_networks; shared by personal-knowledge + gateway wifi processor), narratives.ts (ll5_knowledge_observations + ll5_knowledge_narratives — atomic subject-tagged observations + lazy per-subject rollups, deterministic doc id `{user}::{kind}::{ref}`). Prevents drift between gateway-writer and MCP-reader.
 │       ├── repositories/             # 13 repository interfaces
 │       ├── storage/                  # ES + PG client factories
-│       ├── auth/                     # Token generate/validate, Express middleware
+│       ├── auth/                     # Token generate/validate, Express middleware. `token.ts` exports `generateToken`, `validateToken` (Bearer-header form, throws on expiry), and `validateLl5Token` (raw-token form returning `ValidationResult` discriminated union — single source of truth for the four gateway call sites after Phase 2)
 │       ├── mcp/                      # MCP server helpers
 │       ├── audit.ts                  # ES audit writer (100% mutation coverage across all MCPs)
 │       ├── app-log.ts               # ES app logger (all tool calls, errors, webhooks)
@@ -180,7 +180,7 @@ ll5/
 │       ├── lib/                       # MCP client, auth helpers, env
 │       └── providers/                 # React Query
 │
-├── packages/shared/src/__tests__/      # 21 tests: auth token generation, validation, expiry
+├── packages/shared/src/__tests__/      # 41 tests: auth token generation, validation, expiry (auth.test.ts: 21); validateLl5Token discriminated-union helper covering malformed/wrong_prefix/bad_signature/expired + role coercion + grace period (validateLl5Token.test.ts: 20, added Phase 2)
 ├── packages/gateway/src/__tests__/     # 174 tests: whatsapp webhook, whatsapp webhook route (auth + no-fallback), uploads-route (ownership), notification rules, chat, chat-conversations, admin API, phone contacts, getOrCreateActiveConversation retry loop
 ├── packages/personal-knowledge/src/__tests__/ # 77 tests: person repo (rewrote May 18 to import real ElasticsearchPersonRepository — was last theater test), people tools (real handlers via captureTools), observation repo, narrative repo
 ├── packages/{gtd,awareness,health,messaging,google}/src/__tests__/ # Rewritten May 18 (Phase 0): real tool-handler tests via captureTools helper. 32 gtd, 46 awareness, 35 health, 39 messaging, 27 google.

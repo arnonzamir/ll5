@@ -6,6 +6,7 @@ import type { Request, Response } from 'express';
 import multer from 'multer';
 import pg from 'pg';
 import type { Pool, PoolClient } from 'pg';
+import { validateLl5Token } from '@ll5/shared';
 import { logger } from './utils/logger.js';
 import { sendFCMNotification } from './utils/fcm-sender.js';
 import type { NotificationLevel } from './utils/fcm-sender.js';
@@ -72,45 +73,24 @@ export function chatAuthMiddleware(authSecret: string) {
       return;
     }
 
-    try {
-      const crypto = await import('node:crypto');
-      const token = rawToken;
-      const parts = token.split('.');
-      if (parts.length !== 3 || parts[0] !== 'll5') {
-        res.status(401).json({ error: 'Invalid token format' });
-        return;
-      }
-
-      const [, payloadB64, signature] = parts;
-
-      const expected = crypto.createHmac('sha256', authSecret)
-        .update(payloadB64).digest('hex').slice(0, 32);
-
-      if (signature.length !== 32) {
-        res.status(401).json({ error: 'Invalid token' });
-        return;
-      }
-
-      if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
-        res.status(401).json({ error: 'Invalid token' });
-        return;
-      }
-
-      const payload = JSON.parse(
-        Buffer.from(payloadB64, 'base64url').toString(),
-      ) as { uid: string; iat: number; exp: number };
-
-      if (payload.exp < Date.now() / 1000) {
+    const result = validateLl5Token(rawToken, authSecret);
+    if (!result.ok) {
+      if (result.reason === 'expired') {
         res.status(401).json({ error: 'token_expired' });
         return;
       }
-
-      (req as AuthenticatedRequest).userId = payload.uid;
-      next();
-    } catch (err) {
-      logger.warn('[chat][authMiddleware] Token validation error', { error: err instanceof Error ? err.message : String(err) });
+      if (result.reason === 'malformed' || result.reason === 'wrong_prefix') {
+        res.status(401).json({ error: 'Invalid token format' });
+        return;
+      }
+      // bad_signature
+      logger.warn('[chat][authMiddleware] Token validation error', { reason: result.reason });
       res.status(401).json({ error: 'Invalid token' });
+      return;
     }
+
+    (req as AuthenticatedRequest).userId = result.claims.uid;
+    next();
   };
 }
 

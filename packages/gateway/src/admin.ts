@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import type { Pool } from 'pg';
+import { validateLl5Token } from '@ll5/shared';
 import { logger } from './utils/logger.js';
 import { getHealthSnapshot } from './scheduler/mcp-health-monitor.js';
 import { getAllWhatsAppFlowSnapshots } from './scheduler/whatsapp-flow-monitor.js';
@@ -59,48 +60,28 @@ export function requireAdmin(authSecret: string) {
       return;
     }
 
-    try {
-      const parts = rawToken.split('.');
-      if (parts.length !== 3 || parts[0] !== 'll5') {
-        res.status(401).json({ error: 'Invalid token format' });
-        return;
-      }
-
-      const [, payloadB64, signature] = parts;
-
-      const expected = crypto.createHmac('sha256', authSecret)
-        .update(payloadB64).digest('hex').slice(0, 32);
-
-      if (signature.length !== 32) {
-        res.status(401).json({ error: 'Invalid token' });
-        return;
-      }
-
-      if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
-        res.status(401).json({ error: 'Invalid token' });
-        return;
-      }
-
-      const payload = JSON.parse(
-        Buffer.from(payloadB64, 'base64url').toString(),
-      ) as { uid: string; role: string; iat: number; exp: number };
-
-      if (payload.exp < Date.now() / 1000) {
+    const result = validateLl5Token(rawToken, authSecret);
+    if (!result.ok) {
+      if (result.reason === 'expired') {
         res.status(401).json({ error: 'token_expired' });
         return;
       }
-
-      if (payload.role !== 'admin') {
-        res.status(403).json({ error: 'Admin access required' });
+      if (result.reason === 'malformed' || result.reason === 'wrong_prefix') {
+        res.status(401).json({ error: 'Invalid token format' });
         return;
       }
-
-      (req as AdminRequest).adminUserId = payload.uid;
-      next();
-    } catch (err) {
-      logger.warn('[admin][requireAdmin] Token validation error', { error: err instanceof Error ? err.message : String(err) });
+      logger.warn('[admin][requireAdmin] Token validation error', { reason: result.reason });
       res.status(401).json({ error: 'Invalid token' });
+      return;
     }
+
+    if (result.claims.role !== 'admin') {
+      res.status(403).json({ error: 'Admin access required' });
+      return;
+    }
+
+    (req as AdminRequest).adminUserId = result.claims.uid;
+    next();
   };
 }
 

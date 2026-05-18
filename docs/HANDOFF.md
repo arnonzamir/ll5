@@ -99,6 +99,8 @@ If the stack goes down and a redeploy gets "manifest unknown" (image SHA pruned 
 | Admin user_id | `f08f46b3-0a9c-41ae-9e6a-294c697424e4` |
 | Admin PIN | `1234` |
 | Token format | `ll5.<base64url {uid,role,iat,exp}>.<32char hmac>` |
+| Token validation | Single helper `validateLl5Token(token, secret, opts?)` in `@ll5/shared` (see `packages/shared/src/auth/token.ts`). Returns `{ ok: true, claims } \| { ok: false, reason }`. Used by `chatAuthMiddleware`, `requireAdmin`, and both webhook auth paths in `server.ts`. Constant-time HMAC compare via `crypto.timingSafeEqual`. Use this — never reimplement parse-and-verify inline. |
+| Login timing | `POST /auth/token` runs `bcrypt.compare` against `DECOY_PIN_HASH` when the user row is missing, so "no such user" and "wrong PIN" share the same ~150ms response time. Both return `401 'Invalid credentials'`. Closes the pre-Phase-2 user-enumeration channel. |
 | Token TTL | 7 days |
 | Token refresh | `POST /auth/refresh` — accepts valid or expired token (within 7-day grace), returns new token. Channel MCP auto-refreshes on startup + every 12h. Dashboard refreshes via `middleware.ts` when `secondsLeft < 2 days`; writes the new token to both `request.cookies` (so current-request server actions see it) and the response cookie. Beyond grace it clears the cookie and redirects to `/login?next=<path>`. |
 | WHATSAPP_WEBHOOK_SECRET (May 18) | **Required.** Set in Coolify gateway env. Shared with Evolution API via `WEBHOOK_GLOBAL_HEADERS={"X-Webhook-Secret":"…"}` (or per-instance webhook config). Gateway fail-closes on startup if missing or < 32 chars. Without the matching value on Evolution side, all WhatsApp webhooks 401. See `docs/runbooks/whatsapp-webhook-secret.md`. |
