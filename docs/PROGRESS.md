@@ -8,6 +8,10 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### `AUTH_SECRET` added to google + messaging compose entries (2026-05-18 PM)
+
+Per HANDOFF, google + messaging accept ll5 signed tokens when `AUTH_SECRET` is set via the shared auth middleware (which doesn't surface in each package's `env.ts` so it was missed during recovery compose rewrite). Without it, every signed-token call (dashboard → MCP) came back `401 "Invalid credentials"` — visible in `/admin/health` and on dashboard pages. Added the env var to both services. `services_unhealthy: 0` confirmed.
+
 ### Dashboard domain corrected (2026-05-18 PM)
 
 Dashboard is on **`https://ll5.noninoni.click`**, not `zzz.arnonzamir.co.il` (incorrect placeholder in older HANDOFF revisions and used by mistake during the recovery below). Repo compose + traefik label corrected. The old `zzz.` host now returns 503 (no upstream).
