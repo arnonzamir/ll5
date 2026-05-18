@@ -103,6 +103,11 @@ function mergeMessage(prev: Message, next: Partial<Message>): Message {
   if (next.content != null && prev.content != null && prev.content.length > next.content.length) {
     out.content = prev.content;
   }
+  // Role is immutable once set — never let a partial merge change it.
+  // Status updates and other patches must not flip a 'user' row to
+  // 'assistant'. Belt-and-suspenders alongside the status_update handler
+  // that no longer sends role.
+  if (prev.role) out.role = prev.role;
   // Status machine: pending → processing → delivered; never regress.
   const rank: Record<string, number> = { pending: 0, processing: 1, delivered: 2, failed: 3 };
   if (prev.status && next.status && (rank[prev.status] ?? 0) > (rank[next.status] ?? 0)) {
@@ -355,20 +360,20 @@ export function useChatSession(): void {
         if (!id || !status) return;
         // Only merge a status_update if the target message is already in the
         // store. Otherwise `ingest` will treat the phantom row as a new
-        // message (null content, role=assistant, display_compact=false) and
-        // it will render as an empty unboxed-assistant bubble — the
-        // "sparkle with no content" bug. status_update events for messages
-        // that scrolled off / paginated out / never loaded in this session
-        // have nothing to merge into; drop silently.
+        // message and it will render as an empty unboxed-assistant bubble
+        // — the "sparkle with no content" bug.
         const exists = useChatStore.getState().messages.some((m) => m.id === id);
         if (!exists) return;
+        // CRITICAL: send ONLY {id, status} — do NOT include role or content.
+        // mergeMessage spreads next over prev, so any field in the payload
+        // overwrites the stored value. Previously this payload hardcoded
+        // `role: "assistant"` which clobbered the user's role on their own
+        // just-sent message, making it render with the assistant sparkle
+        // gutter instead of as a user bubble.
         useChatStore.getState().ingest("sse", {
           id,
-          role: "assistant",
-          content: null,
-          created_at: new Date().toISOString(),
           status,
-        } as Message);
+        } as Partial<Message> as Message);
         return;
       }
 

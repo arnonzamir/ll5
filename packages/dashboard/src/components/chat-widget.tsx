@@ -458,13 +458,38 @@ export function ChatWidget() {
   const seenIds = useRef(new Set<string>());
   const pendingIdMap = useRef(new Map<string, string>());
   const messagesEnd = useRef<HTMLDivElement>(null);
+  const scrollContainer = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingImage, setPendingImage] = useState<{ file: File; preview: string } | null>(null);
 
-  const scrollToBottom = () => {
-    messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
-  };
-  useEffect(scrollToBottom, [messages]);
+  // Auto-scroll only when the user is already pinned to the bottom, and only
+  // when the number of messages actually changes. Without these guards every
+  // status_update / reaction / image-load ingest would re-trigger
+  // scrollIntoView, racing with the smooth-scroll animation and dumping the
+  // user at an unintended position — same "random jump" pattern that bit
+  // the main /chat view (fixed there via the pinnedRef pattern).
+  const pinnedRef = useRef(true);
+  const lastLenRef = useRef(0);
+
+  useEffect(() => {
+    const el = scrollContainer.current;
+    if (!el) return;
+    function onScroll() {
+      if (!el) return;
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      pinnedRef.current = distance < 80;
+    }
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (messages.length === lastLenRef.current) return;
+    lastLenRef.current = messages.length;
+    if (pinnedRef.current) {
+      messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages.length]);
 
   // ---- Bootstrap: render-cached-then-refresh ---------------------------
   // Phase 1: paint cached state (<50ms). Phase 2: fetch fresh active and
@@ -889,7 +914,7 @@ export function ChatWidget() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-0">
+        <div ref={scrollContainer} className="flex-1 overflow-y-auto p-4 space-y-2 min-h-0">
           {renderItems.length === 0 && (
             <p className="text-sm text-gray-400 text-center mt-8">
               Send a message to start a conversation
