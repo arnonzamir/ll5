@@ -49,6 +49,13 @@ export function buildRenderItems(
   const out: RenderItem[] = [];
   for (const m of messages) {
     if (reactionIds.has(m.id)) continue;
+    // Defense in depth — skip content-less non-reaction rows. The DB
+    // constraint `(reaction IS NULL) <> (content IS NULL)` guarantees this
+    // never happens for persisted rows, but client-state can accumulate
+    // phantoms from stray SSE events (status_update without a parent in
+    // store, etc.). Without this guard they render as empty unboxed-
+    // assistant bubbles — visible as a sparkle with no text.
+    if (!m.reaction && (m.content == null || m.content.trim() === "")) continue;
     if (m.display_compact) {
       const last = out[out.length - 1];
       if (last && last.kind === "compact" && closeInTime(last.items[last.items.length - 1], m)) {

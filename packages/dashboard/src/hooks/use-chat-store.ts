@@ -353,7 +353,15 @@ export function useChatSession(): void {
         const id = data.id as string | undefined;
         const status = data.status as string | undefined;
         if (!id || !status) return;
-        // Merge status via ingest (it handles id-then-status merging).
+        // Only merge a status_update if the target message is already in the
+        // store. Otherwise `ingest` will treat the phantom row as a new
+        // message (null content, role=assistant, display_compact=false) and
+        // it will render as an empty unboxed-assistant bubble — the
+        // "sparkle with no content" bug. status_update events for messages
+        // that scrolled off / paginated out / never loaded in this session
+        // have nothing to merge into; drop silently.
+        const exists = useChatStore.getState().messages.some((m) => m.id === id);
+        if (!exists) return;
         useChatStore.getState().ingest("sse", {
           id,
           role: "assistant",
