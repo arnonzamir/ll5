@@ -37,7 +37,7 @@ ll5/
 │   ├── Dockerfile.gateway            # Gateway-specific Dockerfile (copies src/migrations to dist)
 │   ├── Dockerfile.dashboard          # Next.js standalone Dockerfile
 │   ├── docker-compose.yml            # Local dev: ES + PG
-│   └── docker-compose.prod.yml       # Production reference (Coolify uses its own)
+│   └── docker-compose.prod.yml       # **Production source of truth** (10 services). CI scp's to host on every deploy; never edit on host.
 │
 ├── docs/
 │   ├── vision.md                     # What the system does for the user

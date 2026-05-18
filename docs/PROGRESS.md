@@ -8,6 +8,20 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Infrastructure Recovery (2026-05-18 PM): compose is now repo-source-of-truth
+
+After today's morning outage (Coolify nightly docker cleanup pruned image layers + GHCR auth had expired + on-host compose pinned to a deleted SHA tag), recovery revealed that **the Coolify-stored compose only ever declared 4 services** (ES, PG, personal-knowledge, gtd) while the other 7 (gateway, dashboard, awareness, google, health, messaging, evolution-xkkcc) had been running as docker-run-side-loaded orphan containers for ~50 days. A `docker compose up -d --remove-orphans` call during recovery removed those orphans. No data was lost (PG + ES volumes intact, ~15k chat msgs / 77k WhatsApp msgs / etc. preserved). Recovery actions:
+
+- Rewrote `docker/docker-compose.prod.yml` as the comprehensive 10-service canonical compose (ES + PG + 6 MCPs + gateway + dashboard) with correct traefik labels, healthchecks, `container_name` convention, log rotation, resource limits.
+- Generated fresh `AUTH_SECRET` and `ENCRYPTION_KEY`. Mirrored all 14 env vars into Coolify's per-service env-var store so future deploys don't lose them. (Pre-recovery only `WHATSAPP_WEBHOOK_SECRET` was in Coolify; everything else lived only in destroyed orphans.) Side-effect: existing client tokens (web, Android, ll5-agent) invalidated — must re-login. Encrypted blobs in PG (Google OAuth tokens, encrypted WhatsApp keys) became garbage — must re-auth Google + re-enter Evolution key via dashboard.
+- PG password drift detected (cluster's stored ll5 password ≠ env-var). Reset via `ALTER USER ll5 WITH PASSWORD ...` over the trust-mode unix socket.
+- CI now scp's `docker/docker-compose.prod.yml` to the host before each deploy — repo is authoritative. Workflow comment explicitly forbids `--remove-orphans` (with a pointer to the incident).
+- ll5-agent restarted to mint a fresh signed token against the new `AUTH_SECRET`.
+
+Drift detection follow-ups (not yet implemented):
+- Gateway scheduler: weekly cross-check `docker compose ps` against declared services list, FCM-warn on mismatch.
+- `/admin/health` field: `compose_drift_warnings`.
+
 ### Hardening Phase 0 (2026-05-18): tests are now real
 
 Following a code review that found ~80 "theater" tests across the test suite — tests that didn't actually invoke the code they claimed to cover — Phase 0 rewrote the worst offenders against the new standard in [`docs/testing.md`](testing.md). Every rewritten test now imports the real handler/repo, mocks at the client boundary (`pg.Pool` / `@elastic/elasticsearch.Client`), and asserts on real return values plus mandatory `user_id` scoping.

@@ -1,27 +1,45 @@
-version: "3.8"
-
 # LL5 Production Docker Compose for Coolify
-# Infrastructure (ES + PG) + Application services (MCPs + Gateway)
+# Coolify service UUID: xkkcc0g4o48kkcows8488so4
+# Host path:            /data/coolify/services/xkkcc0g4o48kkcows8488so4/docker-compose.yml
+# Repo source-of-truth: docker/docker-compose.prod.yml (kept in sync via CI diff check, post-recovery)
 #
-# Environment variables are injected by Coolify per-service.
-# This file uses ${VAR} syntax — Coolify resolves them from service env config.
+# Env vars resolved from .env at this path (and/or Coolify per-service env).
+# Required: API_KEY, USER_ID, AUTH_SECRET, ENCRYPTION_KEY, POSTGRES_PASSWORD,
+#           WHATSAPP_WEBHOOK_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+#           EVOLUTION_API_URL, EVOLUTION_API_KEY
+#
+# Network strategy: single per-service network (xkkcc0g4o48kkcows8488so4).
+# Traefik reaches services via that network — verified by mcp-knowledge routing
+# correctly with only this network attached. No external `coolify` network needed.
 
 networks:
-  ll5-net:
-    driver: bridge
+  default:
+    name: xkkcc0g4o48kkcows8488so4
+    external: true
 
 volumes:
   es-data:
+    name: xkkcc0g4o48kkcows8488so4_es-data
+    external: true
   pg-data:
+    name: xkkcc0g4o48kkcows8488so4_pg-data
+    external: true
+
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# ---------- Infrastructure ----------
 
 services:
-  # =========================================================================
-  # Infrastructure
-  # =========================================================================
-
   elasticsearch:
+    <<: *defaults
     image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
-    container_name: ll5-elasticsearch
+    container_name: elasticsearch-xkkcc0g4o48kkcows8488so4
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -29,8 +47,6 @@ services:
       - ES_JAVA_OPTS=${ES_JAVA_OPTS:--Xms1g -Xmx1g}
     volumes:
       - es-data:/usr/share/elasticsearch/data
-    networks:
-      - ll5-net
     deploy:
       resources:
         limits:
@@ -42,24 +58,17 @@ services:
       timeout: 10s
       retries: 5
       start_period: 45s
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   postgres:
+    <<: *defaults
     image: postgres:16-alpine
-    container_name: ll5-postgres
+    container_name: postgres-xkkcc0g4o48kkcows8488so4
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ll5}
       POSTGRES_USER: ${POSTGRES_USER:-ll5}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pg-data:/var/lib/postgresql/data
-    networks:
-      - ll5-net
     deploy:
       resources:
         limits:
@@ -70,29 +79,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
-  # =========================================================================
-  # Application Services
-  # =========================================================================
+  # ---------- MCPs ----------
 
   personal-knowledge:
-    image: ghcr.io/arnonzamir/ll5-personal-knowledge:${IMAGE_TAG:-latest}
-    container_name: ll5-personal-knowledge
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-personal-knowledge:latest
+    container_name: personal-knowledge-xkkcc0g4o48kkcows8488so4
     environment:
       NODE_ENV: production
       PORT: "3000"
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      API_KEY: ${API_KEY:?API_KEY is required}
-      USER_ID: ${USER_ID:?USER_ID is required}
+      API_KEY: ${API_KEY}
+      USER_ID: ${USER_ID}
+      AUTH_SECRET: ${AUTH_SECRET}
       ELASTICSEARCH_URL: http://elasticsearch:9200
-    networks:
-      - ll5-net
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -101,31 +102,31 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.ll5-knowledge.rule=Host(`mcp-knowledge.${DOMAIN}`)"
+      - "traefik.http.routers.ll5-knowledge.rule=Host(`mcp-knowledge.noninoni.click`)"
       - "traefik.http.routers.ll5-knowledge.tls=true"
       - "traefik.http.routers.ll5-knowledge.tls.certresolver=letsencrypt"
       - "traefik.http.services.ll5-knowledge.loadbalancer.server.port=3000"
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   gtd:
-    image: ghcr.io/arnonzamir/ll5-gtd:${IMAGE_TAG:-latest}
-    container_name: ll5-gtd
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-gtd:latest
+    container_name: gtd-xkkcc0g4o48kkcows8488so4
     environment:
       NODE_ENV: production
       PORT: "3000"
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      API_KEY: ${API_KEY:?API_KEY is required}
-      USER_ID: ${USER_ID:?USER_ID is required}
+      API_KEY: ${API_KEY}
+      USER_ID: ${USER_ID}
+      AUTH_SECRET: ${AUTH_SECRET}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
-    networks:
-      - ll5-net
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,34 +135,137 @@ services:
         limits:
           memory: 256M
           cpus: "0.5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.ll5-gtd.rule=Host(`mcp-gtd.${DOMAIN}`)"
+      - "traefik.http.routers.ll5-gtd.rule=Host(`mcp-gtd.noninoni.click`)"
       - "traefik.http.routers.ll5-gtd.tls=true"
       - "traefik.http.routers.ll5-gtd.tls.certresolver=letsencrypt"
       - "traefik.http.services.ll5-gtd.loadbalancer.server.port=3000"
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
 
-  health:
-    image: ghcr.io/arnonzamir/ll5-health:${IMAGE_TAG:-latest}
-    container_name: ll5-health
+  awareness:
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-awareness:latest
+    container_name: awareness-xkkcc0g4o48kkcows8488so4
     environment:
       NODE_ENV: production
       PORT: "3000"
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
-      API_KEY: ${API_KEY:?API_KEY is required}
-      USER_ID: ${USER_ID:?USER_ID is required}
+      API_KEY: ${API_KEY}
+      USER_ID: ${USER_ID}
+      AUTH_SECRET: ${AUTH_SECRET}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      TZ: ${TZ:-Asia/Jerusalem}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ll5-awareness.rule=Host(`mcp-awareness.noninoni.click`)"
+      - "traefik.http.routers.ll5-awareness.tls=true"
+      - "traefik.http.routers.ll5-awareness.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ll5-awareness.loadbalancer.server.port=3000"
+
+  google:
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-google:latest
+    container_name: google-xkkcc0g4o48kkcows8488so4
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      API_KEY: ${API_KEY}
+      USER_ID: ${USER_ID}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://mcp-google.noninoni.click/oauth/callback}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ll5-google.rule=Host(`mcp-google.noninoni.click`)"
+      - "traefik.http.routers.ll5-google.tls=true"
+      - "traefik.http.routers.ll5-google.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ll5-google.loadbalancer.server.port=3000"
+
+  messaging:
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-messaging:latest
+    container_name: messaging-xkkcc0g4o48kkcows8488so4
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      API_KEY: ${API_KEY}
+      USER_ID: ${USER_ID}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      EVOLUTION_API_URL: ${EVOLUTION_API_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ll5-messaging.rule=Host(`mcp-messaging.noninoni.click`)"
+      - "traefik.http.routers.ll5-messaging.tls=true"
+      - "traefik.http.routers.ll5-messaging.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ll5-messaging.loadbalancer.server.port=3000"
+
+  health:
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-health:latest
+    container_name: health-xkkcc0g4o48kkcows8488so4
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      API_KEY: ${API_KEY}
+      USER_ID: ${USER_ID}
+      AUTH_SECRET: ${AUTH_SECRET}
       ELASTICSEARCH_URL: http://elasticsearch:9200
       DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
-    networks:
-      - ll5-net
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -170,17 +274,96 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 384M
           cpus: "0.5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.ll5-health.rule=Host(`mcp-health.${DOMAIN}`)"
+      - "traefik.http.routers.ll5-health.rule=Host(`mcp-health.noninoni.click`)"
       - "traefik.http.routers.ll5-health.tls=true"
       - "traefik.http.routers.ll5-health.tls.certresolver=letsencrypt"
       - "traefik.http.services.ll5-health.loadbalancer.server.port=3000"
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+
+  # ---------- Gateway (orchestrator) ----------
+
+  gateway:
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-gateway:latest
+    container_name: gateway-xkkcc0g4o48kkcows8488so4
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: ${TZ:-Asia/Jerusalem}
+      AUTH_SECRET: ${AUTH_SECRET}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET}
+      GOOGLE_MCP_URL: http://google:3000
+      GOOGLE_MCP_API_KEY: ${API_KEY}
+      WEBHOOK_TOKENS: ${WEBHOOK_TOKENS:-{}}
+      GEOCODING_API_KEY: ${GEOCODING_API_KEY:-}
+      FCM_SERVICE_ACCOUNT_PATH: /etc/fcm/fcm-service-account.json
+    volumes:
+      - /data/coolify/services/xkkcc0g4o48kkcows8488so4/fcm-service-account.json:/etc/fcm/fcm-service-account.json:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ll5-gateway.rule=Host(`gateway.noninoni.click`)"
+      - "traefik.http.routers.ll5-gateway.tls=true"
+      - "traefik.http.routers.ll5-gateway.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ll5-gateway.loadbalancer.server.port=3000"
+
+  # ---------- Dashboard ----------
+
+  dashboard:
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-dashboard:latest
+    container_name: dashboard-xkkcc0g4o48kkcows8488so4
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      GATEWAY_URL: http://gateway:3000
+      NEXT_PUBLIC_GATEWAY_URL: https://gateway.noninoni.click
+      AUTH_SECRET: ${AUTH_SECRET}
+    depends_on:
+      - gateway
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 0"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ll5-dashboard.rule=Host(`zzz.arnonzamir.co.il`)"
+      - "traefik.http.routers.ll5-dashboard.tls=true"
+      - "traefik.http.routers.ll5-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ll5-dashboard.loadbalancer.server.port=3000"

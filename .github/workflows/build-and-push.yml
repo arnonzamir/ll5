@@ -127,6 +127,22 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy compose to server (repo is source of truth)
+        # Sync docker/docker-compose.prod.yml to the host BEFORE the deploy script
+        # runs. Prevents the post-2026-05-18 drift class where the on-host compose
+        # diverges from repo and orphan containers accumulate.
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: docker/docker-compose.prod.yml
+          target: /data/coolify/services/${{ secrets.COOLIFY_SERVICE_UUID }}/
+          strip_components: 1
+          overwrite: true
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
         env:
@@ -140,13 +156,23 @@ jobs:
           script: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             cd /data/coolify/services/${{ secrets.COOLIFY_SERVICE_UUID }}
+            # Move the scp'd file into place atomically (scp puts it as
+            # docker-compose.prod.yml; we want docker-compose.yml).
+            if [ -f docker-compose.prod.yml ]; then
+              mv docker-compose.prod.yml docker-compose.yml
+            fi
             # Only pull our GHCR-built images — never databases (postgres, ES) or
             # third-party images (evolution). A new patch of postgres:16-alpine
             # would otherwise trigger a container recreate → downtime.
             for img in gateway dashboard personal-knowledge gtd awareness google messaging health; do
               docker pull ghcr.io/arnonzamir/ll5-$img:latest 2>/dev/null || true
             done
-            docker compose up -d --remove-orphans
+            # NEVER use --remove-orphans here. On 2026-05-18 a --remove-orphans run
+            # destroyed 7 manually-started containers that weren't in the compose.
+            # The fix was to put every service in the compose so orphans are impossible.
+            # If you genuinely need to remove an unwanted container, do it explicitly
+            # by name (docker rm <name>) — not via this flag.
+            docker compose up -d
 
       - name: Health check
         run: |

@@ -78,8 +78,17 @@ Dashboard (Next.js 15)
 | Coolify API token | `eZRQh5pdR1WUKFLEYaNjgxI8nmnpH1QlW0iHz9cK52994642` |
 | Coolify project UUID | `h48ssk80ko0sgscs0g0ws04o` |
 | Service UUID | `xkkcc0g4o48kkcows8488so4` |
-| Compose path | `/data/coolify/services/xkkcc0g4o48kkcows8488so4/docker-compose.yml` |
+| Compose path | `/data/coolify/services/xkkcc0g4o48kkcows8488so4/docker-compose.yml` (mirror of `docker/docker-compose.prod.yml` in repo — CI scp's it on every deploy; **repo is source of truth, never edit on host**) |
 | Domain | noninoni.click (wildcard via Cloudflare) |
+
+### Recovery procedure (post-2026-05-18 outage)
+
+If the stack goes down and a redeploy gets "manifest unknown" (image SHA pruned from GHCR) or "denied: denied" (GHCR creds expired):
+
+1. SSH to `root@95.216.23.208`. Run `echo $PAT | docker login ghcr.io -u arnonzamir --password-stdin` with a fresh `read:packages` PAT.
+2. `cd /data/coolify/services/xkkcc0g4o48kkcows8488so4 && docker compose pull && docker compose up -d` — **NEVER use `--remove-orphans`** (it destroyed 7 manually-started containers on 2026-05-18). If a container needs removal, name it explicitly.
+3. If gateway/MCPs crash with "password authentication failed for user ll5": the cluster's stored password drifted from the env var. From inside postgres container, run `docker exec postgres-xkkcc... psql -U ll5 -d ll5 -c "ALTER USER ll5 WITH PASSWORD 'll5-pg-secret-2026';"` (works via socket trust-mode without knowing current password).
+4. The repo's `docker/docker-compose.prod.yml` is authoritative for the 10-service stack (ES + PG + 6 MCPs + gateway + dashboard). CI re-scps it on every deploy from main.
 
 ## Auth
 
