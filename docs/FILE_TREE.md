@@ -112,7 +112,7 @@ ll5/
 │       ├── setup/indices.ts             # Shared 7 awareness indices imported from @ll5/shared + 4 awareness-exclusive (journal, user_model, media, media_links)
 │       ├── __tests__/tools.test.ts       # situation/messages/journal/user_model real handler tests (Phase 0, May 18)
 │       ├── __tests__/tools-extra.test.ts # calendar/entity-statuses/location/media/notable-events/notification-rules/phone-status/wifi real handler tests (Phase 0 carryforward, May 18). 80 tests.
-│       ├── __tests__/geo-search.test.ts  # haversineDistance unit + search_nearby_pois/geocode_address/get_area_context/get_distance handler tests via vi.stubGlobal('fetch'). 25 tests.
+│       ├── __tests__/geo-search.test.ts  # haversineDistance unit + search_nearby_pois/geocode_address/get_area_context/get_distance handler tests via vi.stubGlobal('fetch'). beforeEach calls resetNominatimRateLimitForTests() to clear module-local rate-limiter state — keeps suite ~1s instead of >25s. 25 tests.
 │       └── server.ts
 │
 ├── packages/gateway/                  # @ll5/gateway — Express HTTP service

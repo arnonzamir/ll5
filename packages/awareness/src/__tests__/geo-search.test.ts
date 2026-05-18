@@ -10,7 +10,7 @@ vi.mock('@ll5/shared', async () => {
   };
 });
 
-import { registerGeoSearchTools } from '../tools/geo-search.js';
+import { registerGeoSearchTools, resetNominatimRateLimitForTests } from '../tools/geo-search.js';
 import { haversineDistance } from '../utils/geo.js';
 import { captureTools, parseToolResponse } from './_helpers.js';
 
@@ -80,6 +80,10 @@ function mockJsonResponse(data: unknown, ok = true, status = 200): Response {
 beforeEach(() => {
   fetchSpy = vi.fn();
   vi.stubGlobal('fetch', fetchSpy);
+  // Reset the module-local Nominatim rate-limiter state so the 1.1s gate
+  // doesn't serialize across tests (state-leak between cases is the only
+  // reason these were taking >25s in aggregate before).
+  resetNominatimRateLimitForTests();
 });
 
 afterEach(() => {

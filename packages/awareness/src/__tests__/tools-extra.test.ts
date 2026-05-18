@@ -815,7 +815,11 @@ describe('get_notable_events tool handler', () => {
     expect(parsed.total).toBe(0);
   });
 
-  it('sets acknowledged_at to timestamp if event.acknowledged is true (defensive shape)', async () => {
+  it('acknowledged_at is always null — queryUnacknowledged contract guarantees acknowledged=false', async () => {
+    // Even if the repo somehow returns acknowledged=true (contract violation),
+    // the tool collapses to null because the contract of queryUnacknowledged
+    // is that everything returned is by definition unacknowledged. This locks
+    // in the post-2026-05-18 dead-branch removal.
     const query = vi.fn(async () => [
       { id: 'n-ack', userId: USER_ID, type: 'urgent_im', summary: 'X', details: {}, acknowledged: true, timestamp: '2026-04-06T10:00:00Z' },
     ]);
@@ -824,7 +828,7 @@ describe('get_notable_events tool handler', () => {
     ));
     const response = await tools.get('get_notable_events')!({});
     const parsed = parseToolResponse<{ events: Array<{ acknowledged_at: string | null }> }>(response);
-    expect(parsed.events[0].acknowledged_at).toBe('2026-04-06T10:00:00Z');
+    expect(parsed.events[0].acknowledged_at).toBeNull();
   });
 });
 

@@ -23,6 +23,8 @@ export function registerNotableEventTools(
         min_severity: params.min_severity,
       });
 
+      // `queryUnacknowledged` filters `acknowledged=false` in ES, so every event
+      // here is by definition unacknowledged. `acknowledged_at` is always null.
       const results = events.map((e) => ({
         id: e.id,
         event_type: e.type,
@@ -30,7 +32,7 @@ export function registerNotableEventTools(
         severity: (e.details as Record<string, unknown>)?.severity ?? 'low',
         payload: e.details ?? {},
         created_at: e.timestamp,
-        acknowledged_at: e.acknowledged ? e.timestamp : null,
+        acknowledged_at: null,
       }));
 
       return {

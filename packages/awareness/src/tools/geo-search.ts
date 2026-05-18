@@ -3,7 +3,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logger } from '../utils/logger.js';
 import { haversineDistance } from '../utils/geo.js';
 
-/** Rate limiter for Nominatim: 1 req/sec */
+/** Rate limiter for Nominatim: 1 req/sec (TOS).
+ *
+ * State is module-local. `resetNominatimRateLimitForTests()` is the only sanctioned
+ * way to clear it — used by tests to avoid the 1.1s wait serializing across cases.
+ * Production code never calls it. */
 let lastNominatimRequest = 0;
 async function rateLimitNominatim(): Promise<void> {
   const now = Date.now();
@@ -12,6 +16,11 @@ async function rateLimitNominatim(): Promise<void> {
     await new Promise((r) => setTimeout(r, 1100 - elapsed));
   }
   lastNominatimRequest = Date.now();
+}
+
+/** Test-only: reset the rate-limiter state. Production callers must not use this. */
+export function resetNominatimRateLimitForTests(): void {
+  lastNominatimRequest = 0;
 }
 
 const NOMINATIM_HEADERS = {

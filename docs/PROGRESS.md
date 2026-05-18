@@ -8,6 +8,13 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Latent-bug cleanup from Phase 0 carryforward (2026-05-18 PM)
+
+Three things the carryforward tests surfaced got addressed:
+- `awareness/src/tools/notable-events.ts` — removed dead branch `e.acknowledged ? e.timestamp : null`. `queryUnacknowledged` filters `acknowledged=false` in ES, so the truthy branch was unreachable. `acknowledged_at` is now always `null`; corresponding test inverted to lock in the new contract.
+- `awareness/src/tools/geo-search.ts` — exported `resetNominatimRateLimitForTests()` so the module-local rate-limiter state can be cleared between tests. Cuts the geo-search suite from >25s to ~1s. Production behavior unchanged.
+- The third subagent-flagged bug (notification-rules.ts "missing try/catch around `await res.json()`") was a false alarm — the `await res.json()` IS inside the function's outer try/catch block.
+
 ### Last theater test eliminated: person-repository (2026-05-18 PM)
 
 `packages/personal-knowledge/src/__tests__/person-repository.test.ts` was inlining its own `PersonDoc` interface and `docToPerson` function and asserting against that re-implementation — never invoking the real `ElasticsearchPersonRepository`. Rewritten to mirror the sibling observation/narrative test pattern: import the real class, mock at the `@elastic/elasticsearch.Client` boundary via a shared `makeEsClient(...)` helper, and exercise actual repo methods. File went from 25 inlined-mapping tests to 26 real behavioral tests covering `list` (filters, pagination, sort behavior with/without free-text query, result mapping), `get` (404, user_id mismatch, mapped success), `upsert` (create, merge-from-existing, status preservation/override, default status, forced-id-as-create), `delete` (scoped deleteByQuery), and `search` (boosted multi_match, highlight, score normalization, summary fallback). All 4 personal-knowledge test files now import real code (77 passing).
