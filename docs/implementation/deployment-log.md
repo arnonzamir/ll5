@@ -105,9 +105,13 @@ networks:
 
 ES needs 45-120s to start. PG needs 15-30s for first init. Set appropriate `start_period` values or services with `depends_on: condition: service_healthy` will fail immediately.
 
-### 8. GHCR images from private repos need auth
+### 8. GHCR images from private repos need auth (and the login is SHARED + must be non-expiring)
 
-GitHub Container Registry images from private repos require `docker login ghcr.io`. Either make the repo public or configure registry auth on the server. We currently have the repo public.
+GitHub Container Registry images from private repos require `docker login ghcr.io` on the host. The repos are **private**; we authenticate via a server-side login in `/root/.docker/config.json` — which is **shared by every Coolify deploy on this host**.
+
+**The trap (hit repeatedly, May 2026):** logging in with a short-lived token (`GITHUB_TOKEN`, a GitHub App token, or a default 30/90-day PAT) leaves a credential that dies soon after. Already-cached images keep running, so nothing breaks — until the *next fresh image* (e.g. the `claude-box` agent) tries to pull and gets `denied`. Two clobber sources were found: (a) the ll5 deploy workflow logging in with `GITHUB_TOKEN` (fixed 2026-05-21, PR #2 → now uses the non-expiring `GHCR_READ_PAT` secret), and (b) manual `docker login` with personal short-lived PATs.
+
+**Policy:** only ever log in with the long-lived, non-expiring `read:packages` PAT (`-u arnonzamir`). See HANDOFF "GHCR login policy" for the rule + a 200/403 health-check one-liner.
 
 ## Deployment Procedure
 

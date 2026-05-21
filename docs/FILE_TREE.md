@@ -69,7 +69,7 @@ ll5/
 │   └── implementation/
 │       ├── mcp-implementation.md     # Phased build plan for all MCPs
 │       ├── deployment.md             # Docker, CI/CD, Coolify
-│       ├── deployment-log.md         # What was deployed, lessons learned
+│       ├── deployment-log.md         # What was deployed, lessons learned (incl. GHCR auth: shared /root/.docker/config.json, must use non-expiring read:packages PAT — see HANDOFF "GHCR login policy")
 │       ├── coolify-setup.md          # Step-by-step Coolify guide
 │       └── mcp-client-config.md      # How to configure Claude Code for MCPs
 │
