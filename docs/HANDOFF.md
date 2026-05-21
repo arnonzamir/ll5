@@ -81,11 +81,20 @@ Dashboard (Next.js 15)
 | Compose path | `/data/coolify/services/xkkcc0g4o48kkcows8488so4/docker-compose.yml` (mirror of `docker/docker-compose.prod.yml` in repo — CI scp's it on every deploy; **repo is source of truth, never edit on host**) |
 | Domain | `noninoni.click` (wildcard via Cloudflare) — MCPs at `mcp-<name>.noninoni.click`, gateway at `gateway.noninoni.click`, dashboard at `ll5.noninoni.click` |
 
+### ⚠️ GHCR login policy — READ BEFORE running `docker login` on the server
+
+The host's `/root/.docker/config.json` is **shared by every Coolify deploy** (ll5 services, ll5-agent, claude-box, and all other apps). It is the single source of GHCR pull auth. Rules:
+
+- **Only ever log in with the long-lived, non-expiring `read:packages` PAT** (`-u arnonzamir`). NEVER use a short-lived token — `GITHUB_TOKEN`, a GitHub App installation token, or a default 30/90-day PAT. Any of those leave a credential that dies and breaks the *next fresh image pull* (`denied`) while cached images keep running and hide it.
+- **CI must not hand-login on the server with ephemeral tokens.** The ll5 deploy workflow now uses the `GHCR_READ_PAT` secret (fixed 2026-05-21, PR #2). If you add a new deploy path, reuse that secret — do not reintroduce a `GITHUB_TOKEN` login. See "Deployment → GHCR auth" below.
+- After PR #2 merges, the credential is auto-refreshed on every ll5 deploy, so **manual login should rarely be needed**. If you must, use the non-expiring PAT.
+- Quick health check: `AUTH=$(jq -r '.auths["ghcr.io"].auth' /root/.docker/config.json); TOK=$(curl -s -H "Authorization: Basic $AUTH" "https://ghcr.io/token?scope=repository:arnonzamir/claude-box:pull&service=ghcr.io" | jq -r .token); curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOK" -H "Accept: application/vnd.oci.image.index.v1+json" https://ghcr.io/v2/arnonzamir/claude-box/manifests/latest` → want **200**.
+
 ### Recovery procedure (post-2026-05-18 outage)
 
 If the stack goes down and a redeploy gets "manifest unknown" (image SHA pruned from GHCR) or "denied: denied" (GHCR creds expired):
 
-1. SSH to `root@95.216.23.208`. Run `echo $PAT | docker login ghcr.io -u arnonzamir --password-stdin` with a fresh `read:packages` PAT.
+1. SSH to `root@95.216.23.208`. Run `echo $PAT | docker login ghcr.io -u arnonzamir --password-stdin` with a **non-expiring** `read:packages` PAT (see GHCR login policy above — do NOT use a short-lived token).
 2. `cd /data/coolify/services/xkkcc0g4o48kkcows8488so4 && docker compose pull && docker compose up -d` — **NEVER use `--remove-orphans`** (it destroyed 7 manually-started containers on 2026-05-18). If a container needs removal, name it explicitly.
 3. If gateway/MCPs crash with "password authentication failed for user ll5": the cluster's stored password drifted from the env var. From inside postgres container, run `docker exec postgres-xkkcc... psql -U ll5 -d ll5 -c "ALTER USER ll5 WITH PASSWORD 'll5-pg-secret-2026';"` (works via socket trust-mode without knowing current password).
 4. The repo's `docker/docker-compose.prod.yml` is authoritative for the 10-service stack (ES + PG + 6 MCPs + gateway + dashboard). CI re-scps it on every deploy from main.
@@ -169,7 +178,8 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - GitHub Actions: `.github/workflows/build-and-push.yml`
 - Builds changed packages on push to main, pushes to GHCR
 - **Typecheck gate (Apr 23)**: every package build runs `tsc --noEmit` before the actual build. Root `tsconfig.json` has `noEmitOnError: true`, so strict TS errors in any package now fail the build instead of silently emitting broken JS. Run `npm run typecheck` locally to check all 11 packages. `gateway/tsconfig.json` excludes `src/**/__tests__/**` (vitest transpiles tests independently); any non-test TS error is a build-blocker.
-- Auto-deploy: `appleboy/ssh-action@v1` SSHs to server, `docker login ghcr.io` using `GITHUB_TOKEN`, then `docker compose pull && up -d --remove-orphans`
+- Auto-deploy: `appleboy/ssh-action@v1` SSHs to server, `docker login ghcr.io -u arnonzamir` using the **non-expiring `GHCR_READ_PAT`** secret (read:packages), then `docker compose pull && up -d` (NEVER `--remove-orphans`)
+- **GHCR auth (why the login uses a PAT, not `GITHUB_TOKEN`)**: the server's `/root/.docker/config.json` is shared by every Coolify deploy. The deploy step used to log in with `secrets.GITHUB_TOKEN`, which GitHub revokes the instant the job ends — so each ll5 deploy left a *dead* credential on the host. Cached ll5 images kept running, but the next *fresh* image pull (e.g. the `claude-box` general-use agent) failed with `denied`. Fixed 2026-05-21 by switching the login to the long-lived `GHCR_READ_PAT` secret so every deploy refreshes the host with a durable credential. If `denied` recurs, re-run `echo $PAT | docker login ghcr.io -u arnonzamir --password-stdin` with a non-expiring read:packages PAT and check no other workflow re-logs-in with an ephemeral token.
 - Health check: curls mcp-knowledge.noninoni.click/health (4 retries, non-blocking)
 - Deploy only runs on main branch (skipped for workflow_dispatch)
 - IMPORTANT: deploy pulls only our GHCR images, NOT database/third-party images. A `docker compose pull` would re-pull postgres/ES base images and recreate their containers, causing downtime. To upgrade postgres or ES, do it manually on the server.
