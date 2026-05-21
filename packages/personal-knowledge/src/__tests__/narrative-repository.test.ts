@@ -345,4 +345,96 @@ describe('ElasticsearchNarrativeRepository', () => {
       expect(filters).toContainEqual({ term: { user_id: USER_ID } });
     });
   });
+
+  // These prove the count is recomputed LIVE from the observations index and not
+  // read from the stored observation_count field. They FAIL if the live-recompute
+  // is removed (the assertions demand a value different from the stored one).
+  describe('observationCount is computed live, not the stored counter', () => {
+    const subject: SubjectRef = { kind: 'person', ref: 'p-rotem' };
+    const SUBJECT_KEY = 'person::p-rotem'; // matches subjectKey(): `${kind}::${ref}`
+    const DOC_ID = `${USER_ID}::person::p-rotem`;
+
+    function narrativeDoc(storedCount: number) {
+      return {
+        user_id: USER_ID,
+        subject: { kind: 'person', ref: 'p-rotem' },
+        title: 'Rotem',
+        summary: 's',
+        open_threads: [],
+        recent_decisions: [],
+        participants: [],
+        places: [],
+        observation_count: storedCount,
+        sensitive: false,
+        status: 'active',
+      };
+    }
+
+    /** ES mock that answers the narrative index and the observations agg differently. */
+    function makeClient(opts: {
+      storedCount: number;
+      liveCount?: number;
+      observationsThrows?: boolean;
+      forGet?: boolean;
+    }): Client {
+      return {
+        get: vi.fn().mockResolvedValue({ _source: narrativeDoc(opts.storedCount) }),
+        search: vi.fn().mockImplementation((params: { index?: string }) => {
+          if (params.index === 'll5_knowledge_observations') {
+            if (opts.observationsThrows) return Promise.reject(new Error('es unavailable'));
+            return Promise.resolve({
+              aggregations: {
+                per_subject: { buckets: { [SUBJECT_KEY]: { doc_count: opts.liveCount ?? 0 } } },
+              },
+            });
+          }
+          // narrative index search (used by list)
+          return Promise.resolve({
+            hits: {
+              total: { value: opts.forGet ? 0 : 1 },
+              hits: opts.forGet ? [] : [{ _id: DOC_ID, _source: narrativeDoc(opts.storedCount) }],
+            },
+          });
+        }),
+        index: vi.fn().mockResolvedValue({ result: 'updated' }),
+        deleteByQuery: vi.fn().mockResolvedValue({ deleted: 0 }),
+      } as unknown as Client;
+    }
+
+    it('list(): uses the live count, overriding a stale stored 0', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeClient({ storedCount: 0, liveCount: 73 }));
+      const { items } = await r.list(USER_ID, { status: 'active' });
+      expect(items[0].observationCount).toBe(73);
+    });
+
+    it('list(): live count overrides even a non-zero stored count', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeClient({ storedCount: 5, liveCount: 73 }));
+      const { items } = await r.list(USER_ID, {});
+      expect(items[0].observationCount).toBe(73); // not the stored 5
+    });
+
+    it('getBySubject(): returns the live count, not the stored 0', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeClient({ storedCount: 0, liveCount: 42, forGet: true }));
+      const n = await r.getBySubject(USER_ID, subject);
+      expect(n?.observationCount).toBe(42);
+    });
+
+    it('queries the observations index with a per-subject filters aggregation', async () => {
+      const client = makeClient({ storedCount: 0, liveCount: 1 });
+      const r = new ElasticsearchNarrativeRepository(client);
+      await r.list(USER_ID, {});
+      const obsCall = vi
+        .mocked(client.search)
+        .mock.calls.find((c) => (c[0] as { index?: string }).index === 'll5_knowledge_observations');
+      expect(obsCall).toBeDefined();
+      const body = obsCall![0] as { aggs: { per_subject: { filters: { filters: Record<string, unknown> } } } };
+      expect(body.aggs.per_subject.filters.filters[SUBJECT_KEY]).toBeDefined();
+    });
+
+    it('falls back to the stored count when the observations query fails', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeClient({ storedCount: 9, observationsThrows: true }));
+      const { items } = await r.list(USER_ID, {});
+      expect(items[0].observationCount).toBe(9); // stored fallback — reads never break
+    });
+  });
 });
