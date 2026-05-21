@@ -8,8 +8,14 @@ import {
   type UpsertNarrativeInput,
   narrativeDocId,
 } from '../../types/narrative.js';
+import { logger } from '../../utils/logger.js';
 
 const INDEX = 'll5_knowledge_narratives';
+const OBSERVATIONS_INDEX = 'll5_knowledge_observations';
+
+function subjectKey(s: { kind: string; ref: string }): string {
+  return `${s.kind}::${s.ref}`;
+}
 
 interface NarrativeDoc {
   user_id: string;
@@ -66,13 +72,88 @@ export class ElasticsearchNarrativeRepository
     super(client, INDEX);
   }
 
+  /**
+   * Compute the real observation count per subject, live from the observations
+   * index. The `observation_count` stored on a narrative doc is only written
+   * during consolidation, so it goes stale the moment new observations are
+   * tagged to the subject (it sat at 0 for every narrative after the May
+   * cutover). Reads must reflect reality, so we always recompute here — one
+   * filters-aggregation covers every subject in the batch. On any failure we
+   * return an empty map and callers keep the stored value, so reads never break.
+   */
+  private async liveObservationCounts(
+    userId: string,
+    subjects: Array<{ kind: string; ref: string }>,
+  ): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (subjects.length === 0) return counts;
+
+    const uniq = new Map<string, { kind: string; ref: string }>();
+    for (const s of subjects) uniq.set(subjectKey(s), s);
+
+    const filters: Record<string, EsQueryContainer> = {};
+    for (const [key, s] of uniq) {
+      filters[key] = {
+        nested: {
+          path: 'subjects',
+          query: {
+            bool: {
+              must: [
+                { term: { 'subjects.kind': s.kind } },
+                { term: { 'subjects.ref': s.ref } },
+              ],
+            },
+          },
+        },
+      };
+    }
+
+    try {
+      const resp = await this.client.search({
+        index: OBSERVATIONS_INDEX,
+        size: 0,
+        query: { bool: { filter: [{ term: { user_id: userId } }] } },
+        aggs: { per_subject: { filters: { filters } } },
+      });
+      const buckets =
+        (resp.aggregations as {
+          per_subject?: { buckets?: Record<string, { doc_count?: number }> };
+        })?.per_subject?.buckets ?? {};
+      for (const [key, bucket] of Object.entries(buckets)) {
+        counts.set(key, bucket.doc_count ?? 0);
+      }
+    } catch (err) {
+      logger.warn(
+        '[NarrativeRepository] live observation count failed — falling back to stored count',
+        { error: err instanceof Error ? err.message : String(err) },
+      );
+    }
+    return counts;
+  }
+
+  /** Overwrite each narrative's observationCount with the live value. */
+  private async withLiveCounts(userId: string, narratives: Narrative[]): Promise<Narrative[]> {
+    if (narratives.length === 0) return narratives;
+    const counts = await this.liveObservationCounts(
+      userId,
+      narratives.map((n) => n.subject),
+    );
+    for (const n of narratives) {
+      const live = counts.get(subjectKey(n.subject));
+      if (live != null) n.observationCount = live;
+    }
+    return narratives;
+  }
+
   async getBySubject(userId: string, subject: SubjectRef): Promise<Narrative | null> {
     const id = narrativeDocId(userId, subject);
     try {
       const got = await this.client.get<NarrativeDoc>({ index: INDEX, id });
       const src = got._source;
       if (!src || src.user_id !== userId) return null;
-      return docToNarrative(src, id);
+      const narrative = docToNarrative(src, id);
+      await this.withLiveCounts(userId, [narrative]);
+      return narrative;
     } catch (err: unknown) {
       const e = err as { meta?: { statusCode?: number } };
       if (e.meta?.statusCode === 404) return null;
@@ -122,6 +203,7 @@ export class ElasticsearchNarrativeRepository
       .filter((h) => h._source != null && h._id != null)
       .map((h) => docToNarrative(h._source!, h._id!));
 
+    await this.withLiveCounts(userId, items);
     return { items, total };
   }
 
@@ -132,9 +214,12 @@ export class ElasticsearchNarrativeRepository
       sort: [{ last_observed_at: { order: 'desc', missing: '_last' } }],
     });
 
-    return hits
+    const items = hits
       .filter((h) => h._source != null && h._id != null)
       .map((h) => docToNarrative(h._source!, h._id!));
+
+    await this.withLiveCounts(userId, items);
+    return items;
   }
 
   async upsert(
