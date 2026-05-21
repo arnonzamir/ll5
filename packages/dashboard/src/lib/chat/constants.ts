@@ -6,11 +6,13 @@ import {
   Clock,
   Ellipsis,
   LayoutList,
+  Send,
   ShieldAlert,
   ThumbsDown,
   ThumbsUp,
   Wrench,
   X,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import type { Message, Reaction } from "./types";
@@ -54,6 +56,11 @@ export const COMPACT_GROUP_WINDOW_MS = 60_000;
  *  Deterministic — same content always maps to the same icon. */
 export function compactIcon(m: Message): LucideIcon {
   const c = (m.content ?? "").toLowerCase();
+  // Agent activity markers (live tool-action rows from the PostToolUse hook).
+  if (m.metadata?.kind === "activity") {
+    if (c.startsWith("whatsapp →") || c.startsWith("telegram →")) return Send;
+    return Zap;
+  }
   if (c.includes("[scheduler]") || c.includes("heartbeat") || c.includes("briefing")) return Clock;
   if (c.includes("alert") || c.includes("unhealthy") || c.includes("failed")) return ShieldAlert;
   if (c.includes("[tool") || c.includes("tool result")) return Wrench;
