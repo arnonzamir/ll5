@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### agent-output-monitor: journal-aware liveness — fixes false "agent silent" FCM storms (2026-05-21)
+The monitor measured agent liveness only by assistant chat-outbound rows. During legitimate silent work (e.g. consolidation backlog), the agent produces no chat outbound, so the monitor false-fired `critical` FCM ("LL5 agent silent — N triggers") every cooldown cycle — endless Android alarms. Fix: the monitor now also queries `ll5_agent_journal` (created_at/updated_at within the silence window) via ES; a journal touch counts as "alive". It only alerts when there is no chat outbound **and** no journal activity — i.e. the agent is genuinely unresponsive. `AgentOutputMonitor` now takes an ES `Client`; snapshot gains `journal_active_in_window`.
+
 ### Dashboard /settings/messaging — Evolution management UI (2026-05-18 PM)
 
 After today's 2-hour recovery dance (raw SSH + Evolution REST + manual `UPDATE messaging_whatsapp_accounts SET ...`), the `/settings/messaging` page is no longer view-only. New UI capabilities:

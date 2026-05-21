@@ -205,7 +205,7 @@ async function startSchedulersForUser(
   // outbound flow, not pending queue depth). Default silence 0.5h (30min)
   // strikes the balance between catching real hangs quickly and tolerating
   // long tool-call clusters (narrative consolidation, weekly review, etc.).
-  const agentOutputMonitor = new AgentOutputMonitor(pgPool, {
+  const agentOutputMonitor = new AgentOutputMonitor(pgPool, es, {
     intervalMinutes: s('agent_output_minutes', 15),
     minSystemInbound: s('agent_output_min_triggers', 2),
     silenceHours: s('agent_output_silence_hours', 0.5),

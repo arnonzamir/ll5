@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import type { Client } from '@elastic/elasticsearch';
 import { logger } from '../utils/logger.js';
 import { sendFCMNotification } from '../utils/fcm-sender.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
@@ -33,6 +34,12 @@ export interface AgentOutputSnapshot {
   last_agent_outbound_at: string | null;
   /** Hours since last assistant outbound; null if never. */
   hours_since_last_outbound: number | null;
+  /**
+   * True if the agent wrote/updated a journal entry within the silence window.
+   * Journal writes are the agent's silent-work signal (consolidation, ambient
+   * journaling) — they prove it's alive even when it produces no chat outbound.
+   */
+  journal_active_in_window: boolean;
   /**
    * True when the agent has gone silent long enough and there were enough
    * scheduler triggers in the window that silence looks broken, not organic.
@@ -75,6 +82,7 @@ export class AgentOutputMonitor {
 
   constructor(
     private pool: Pool,
+    private es: Client,
     private config: AgentOutputConfig,
   ) {}
 
@@ -138,11 +146,41 @@ export class AgentOutputMonitor {
         ? (Date.now() - new Date(lastOutbound).getTime()) / (60 * 60 * 1000)
         : null;
 
-      // Stale if the agent has been silent long enough AND the schedulers
-      // have fired enough that silence can't be explained by "nothing to say".
-      // Missing outbound history entirely (null) counts as silent.
-      const silentEnough = lastOutbound === null
+      // Is the agent doing silent work? Journal writes/updates (consolidation,
+      // ambient journaling) prove it's alive even with zero chat outbound — the
+      // false positive this monitor used to fire on. Treat a journal touch in
+      // the silence window as "alive". On ES error, don't suppress (preserve the
+      // failsafe) — a rare false alarm beats masking a real outage.
+      const silenceSince = new Date(Date.now() - silenceMs).toISOString();
+      let journalActive = false;
+      try {
+        const journalResult = await this.es.count({
+          index: 'll5_agent_journal',
+          query: {
+            bool: {
+              filter: [{ term: { user_id: this.config.userId } }],
+              should: [
+                { range: { created_at: { gte: silenceSince } } },
+                { range: { updated_at: { gte: silenceSince } } },
+              ],
+              minimum_should_match: 1,
+            },
+          },
+        });
+        journalActive = journalResult.count > 0;
+      } catch (err) {
+        logger.warn('[AgentOutputMonitor][tick] journal activity check failed — not suppressing alert', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      // Stale if the agent has been silent long enough on BOTH channels (no chat
+      // outbound AND no journal activity) AND the schedulers have fired enough
+      // that silence can't be explained by "nothing to say". Missing outbound
+      // history entirely (null) counts as silent.
+      const outboundSilent = lastOutbound === null
         || (Date.now() - new Date(lastOutbound).getTime() >= silenceMs);
+      const silentEnough = outboundSilent && !journalActive;
       const stale = silentEnough && systemInbound >= this.config.minSystemInbound;
 
       const snapshot: AgentOutputSnapshot = {
@@ -152,6 +190,7 @@ export class AgentOutputMonitor {
         hours_since_last_outbound: hoursSinceLastOutbound !== null
           ? Math.round(hoursSinceLastOutbound * 10) / 10
           : null,
+        journal_active_in_window: journalActive,
         stale,
         checked_at: new Date().toISOString(),
       };
@@ -192,7 +231,7 @@ export class AgentOutputMonitor {
         : 'ever';
       await sendFCMNotification(this.pool, this.config.userId, {
         title: 'LL5 agent silent',
-        body: `${systemInbound} scheduler triggers in the last ${this.config.lookbackHours}h but no agent reply in ${hoursFragment}. Check the laptop — channel MCP may be draining but the agent isn't responding.`,
+        body: `${systemInbound} scheduler triggers in the last ${this.config.lookbackHours}h but no agent reply OR journal activity in ${hoursFragment}. The agent appears genuinely unresponsive — check it.`,
         type: 'agent_silent',
         notification_level: 'critical',
         data: {
