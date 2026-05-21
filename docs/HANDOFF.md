@@ -75,7 +75,7 @@ Dashboard (Next.js 15)
 | IP | 95.216.23.208 |
 | SSH | `ssh -i ~/.ssh/id_ed25519 root@95.216.23.208` |
 | Coolify dashboard | https://cp.arnonzamir.co.il |
-| Coolify API token | `eZRQh5pdR1WUKFLEYaNjgxI8nmnpH1QlW0iHz9cK52994642` |
+| Coolify API token | `eVaXk68FrEeMvNgKgooF7lP2eKxNIo6HUiZSnvRVc57555b2` |
 | Coolify project UUID | `h48ssk80ko0sgscs0g0ws04o` |
 | Service UUID | `xkkcc0g4o48kkcows8488so4` |
 | Compose path | `/data/coolify/services/xkkcc0g4o48kkcows8488so4/docker-compose.yml` (mirror of `docker/docker-compose.prod.yml` in repo — CI scp's it on every deploy; **repo is source of truth, never edit on host**) |

@@ -8,7 +8,7 @@ What was deployed, where, how, and the gotchas we hit.
 
 **Server:** `95.216.23.208` (Coolify host — resolves as `cp.arnonzamir.co.il`)
 **SSH:** `ssh -i ~/.ssh/id_ed25519 root@95.216.23.208`
-**Coolify API:** `https://cp.arnonzamir.co.il/api/v1/` with token `eZRQh5pdR1WUKFLEYaNjgxI8nmnpH1QlW0iHz9cK52994642`
+**Coolify API:** `https://cp.arnonzamir.co.il/api/v1/` with token `eVaXk68FrEeMvNgKgooF7lP2eKxNIo6HUiZSnvRVc57555b2`
 **Domain:** `noninoni.click` (wildcard DNS via Cloudflare)
 
 ## Coolify Resources
