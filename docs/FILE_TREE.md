@@ -12,7 +12,7 @@ ll5/
 ├── .env.example                       # All environment variables documented
 │
 ├── .github/workflows/
-│   ├── build-and-push.yml            # CI: build changed packages, push to GHCR, deploy via SSH (pulls only GHCR images, never DBs; 15min command_timeout — 5min wasn't enough under host pressure). Also runs `compose-drift-check` in parallel with build — diffs the on-host compose vs `docker/docker-compose.prod.yml` and fails loudly on manual edits (does not block deploy; deploy resyncs from repo).
+│   ├── build-and-push.yml            # CI: build changed packages, push to GHCR, deploy via SSH (pulls only GHCR images, never DBs; 15min command_timeout — 5min wasn't enough under host pressure). Server `docker login ghcr.io` uses the non-expiring `GHCR_READ_PAT` secret, NOT the ephemeral GITHUB_TOKEN (which left a dead shared credential on the host — see HANDOFF "GHCR auth"). Also runs `compose-drift-check` in parallel with build — diffs the on-host compose vs `docker/docker-compose.prod.yml` and fails loudly on manual edits (does not block deploy; deploy resyncs from repo).
 │   └── compose-drift-check.yml       # Standalone daily 06:00 UTC drift check (same logic as the parallel job) — catches manual on-host edits within 24h even when no one is pushing. Also workflow_dispatch.
 │
 │ (ll5-run repo — client workspace — is a separate git repo.)

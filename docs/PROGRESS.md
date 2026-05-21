@@ -8,6 +8,10 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### GHCR deploy-login now uses a non-expiring PAT (2026-05-21)
+
+The auto-deploy step in `.github/workflows/build-and-push.yml` logged into GHCR on the server with the ephemeral `secrets.GITHUB_TOKEN`, which GitHub revokes when the job ends. Because the server's `/root/.docker/config.json` is shared by all Coolify deploys, every ll5 deploy left a dead credential behind — invisible while cached ll5 images kept running, but breaking the next *fresh* image pull (the new `claude-box` general-use agent) with `denied`. Switched the deploy login to the long-lived `GHCR_READ_PAT` secret (read:packages, no expiration) so each deploy refreshes the host with a durable credential. See HANDOFF "GHCR auth".
+
 ### Dashboard /settings/messaging — Evolution management UI (2026-05-18 PM)
 
 After today's 2-hour recovery dance (raw SSH + Evolution REST + manual `UPDATE messaging_whatsapp_accounts SET ...`), the `/settings/messaging` page is no longer view-only. New UI capabilities:

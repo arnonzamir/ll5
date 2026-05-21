@@ -217,7 +217,14 @@ jobs:
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
         env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use a long-lived read:packages PAT, NOT the ephemeral GITHUB_TOKEN.
+          # GITHUB_TOKEN is revoked the instant this job ends, so logging in with
+          # it left the server's shared /root/.docker/config.json holding a dead
+          # credential after every deploy — breaking the next *fresh* image pull
+          # (e.g. claude-box) with `denied`, while cached ll5 images kept running
+          # and hid it. The non-expiring PAT refreshes the server with a good,
+          # durable credential on every deploy instead. See HANDOFF "GHCR auth".
+          GHCR_TOKEN: ${{ secrets.GHCR_READ_PAT }}
         with:
           host: ${{ vars.SERVER_HOST }}
           username: root
@@ -225,7 +232,7 @@ jobs:
           envs: GHCR_TOKEN
           command_timeout: 15m
           script: |
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u arnonzamir --password-stdin
             cd /data/coolify/services/${{ secrets.COOLIFY_SERVICE_UUID }}
             # Move the scp'd file into place atomically (scp puts it as
             # docker-compose.prod.yml; we want docker-compose.yml).
