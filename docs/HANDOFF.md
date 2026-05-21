@@ -134,7 +134,7 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - `gtd_inbox` — captured items
 - `gtd_review_sessions` — review tracking
 - `auth_users` — user accounts with PIN hash and role
-- `chat_messages` — message queue with status lifecycle
+- `chat_messages` — message queue with status lifecycle. `POST /chat/messages` accepts an optional `idempotency_key` (migration 025); insert is `ON CONFLICT (user_id, idempotency_key) DO NOTHING`, returns the existing row as `200 {deduped:true}` on conflict (skips FCM). Used by the conversation-unify hooks to make auto-POSTs retry/double-fire-safe.
 - `notify_chat_message` — PG trigger for LISTEN/NOTIFY on new inbound messages
 - Channel constraint includes: web, telegram, whatsapp, cli, android, system
 - `device_commands` — command queue for Android app (pending/sent/confirmed/failed/expired), result_data JSONB for return values

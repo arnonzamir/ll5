@@ -227,6 +227,7 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       reply_to_id,
       reaction,
       display_compact,
+      idempotency_key,
     } = req.body as {
       channel?: string;
       content?: string | null;
@@ -238,6 +239,7 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       reply_to_id?: string;
       reaction?: string;
       display_compact?: boolean;
+      idempotency_key?: string;
     };
 
     if (!channel) {
@@ -303,8 +305,10 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       const result = await pool.query<{ id: string; conversation_id: string }>(
         `INSERT INTO chat_messages
            (user_id, conversation_id, channel, direction, role, content, status,
-            metadata, reply_to_id, reaction, display_compact)
-         VALUES ($1, COALESCE($2::uuid, gen_random_uuid()), $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            metadata, reply_to_id, reaction, display_compact, idempotency_key)
+         VALUES ($1, COALESCE($2::uuid, gen_random_uuid()), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+         DO NOTHING
          RETURNING id, conversation_id`,
         [
           userId,
@@ -318,8 +322,27 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
           reply_to_id || null,
           reaction || null,
           display_compact === true,
+          idempotency_key || null,
         ],
       );
+
+      // ON CONFLICT DO NOTHING returns no row when a message with this
+      // idempotency_key already exists — return the existing one as success so
+      // hook retries / double-fires are no-ops, and skip the FCM + insert side effects.
+      if (result.rows.length === 0) {
+        const existing = await pool.query<{ id: string; conversation_id: string }>(
+          `SELECT id, conversation_id FROM chat_messages
+           WHERE user_id = $1 AND idempotency_key = $2 LIMIT 1`,
+          [userId, idempotency_key || null],
+        );
+        const dup = existing.rows[0];
+        res.status(200).json(
+          dup
+            ? { id: dup.id, conversation_id: dup.conversation_id, deduped: true }
+            : { deduped: true },
+        );
+        return;
+      }
 
       const row = result.rows[0];
       const body: Record<string, unknown> = { id: row.id, conversation_id: row.conversation_id };

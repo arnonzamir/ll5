@@ -320,6 +320,49 @@ describe('createChatRouter', () => {
       );
     });
 
+    it('dedupes on idempotency_key conflict — returns existing row as 200, not a new insert', async () => {
+      // INSERT ... ON CONFLICT DO NOTHING returns no row; the follow-up SELECT
+      // returns the pre-existing message. whatsapp channel skips the unified
+      // active-conversation lookup, so query #1 is the INSERT, #2 is the SELECT.
+      const query = vi.fn()
+        .mockResolvedValueOnce({ rows: [] }) // INSERT conflicted → no row
+        .mockResolvedValueOnce({ rows: [{ id: 'existing-1', conversation_id: 'conv-x' }] }); // SELECT existing
+      pool = { query } as unknown as Pool;
+      const router = createChatRouter(pool, AUTH_SECRET);
+
+      const route = router.stack.find(
+        (layer: { route?: { path: string; methods: { post?: boolean } } }) =>
+          layer.route?.path === '/messages' && layer.route?.methods.post,
+      );
+      const handlers = route.route.stack
+        .map((s: { handle: Function }) => s.handle)
+        .filter((h: Function) => h.length <= 3);
+
+      const req = makeReq({
+        body: {
+          channel: 'whatsapp',
+          content: 'dup',
+          direction: 'outbound',
+          role: 'assistant',
+          idempotency_key: 'key-abc',
+        },
+      }) as unknown as Request & { userId: string };
+      req.userId = 'user-1';
+      const res = makeRes();
+
+      await handlers[handlers.length - 1](req, res);
+
+      expect(res._status).toBe(200);
+      expect((res._json as { deduped: boolean }).deduped).toBe(true);
+      expect((res._json as { id: string }).id).toBe('existing-1');
+      // The INSERT carried the idempotency_key as the last bound param.
+      expect(query).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining('ON CONFLICT'),
+        expect.arrayContaining(['key-abc']),
+      );
+    });
+
     it('sets direction=outbound and status=delivered for outbound messages', async () => {
       pool = makePgPool({
         rows: [{ id: 'msg-out', conversation_id: 'conv-out' }],
