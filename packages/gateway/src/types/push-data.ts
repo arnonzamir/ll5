@@ -19,6 +19,7 @@ const PushMessageItemSchema = z.object({
   body: z.string(),
   is_group: z.boolean().optional(),
   group_name: z.string().nullable().optional(),
+  from_me: z.boolean().optional(), // true = the user sent this (outbound capture)
 });
 
 const PushCalendarItemSchema = z.object({

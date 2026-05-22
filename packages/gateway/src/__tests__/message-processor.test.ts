@@ -279,6 +279,30 @@ describe('processMessage', () => {
       expect(es.update).toHaveBeenCalledWith(expect.objectContaining({ doc: { processed: true } }));
     });
 
+    it('renders outbound (from_me) SMS as "You → recipient" with from_me source routing', async () => {
+      const { insertSystemMessage } = await import('../utils/system-message.js');
+      vi.mocked(pool.query).mockResolvedValue({ rows: [{ person_id: 'p-mom', display_name: 'Mom' }] } as never);
+      const matcher = makeMatcher('immediate');
+      const item = makeMessageItem({ app: 'sms', sender: '+15550001111', body: 'on my way', from_me: true });
+      await processMessage(es, 'user-1', item, pool, matcher);
+
+      const call = vi.mocked(insertSystemMessage).mock.calls[0];
+      expect(call[2]).toContain('[SMS] You → Mom');
+      expect(call[5]).toEqual(expect.objectContaining({
+        platform: 'sms',
+        remote_jid: 'sms:+15550001111',
+        sender_name: '(me)',
+        contact_name: 'Mom',
+        person_id: 'p-mom',
+        from_me: true,
+      }));
+      // outbound is informational: indexed as processed, no entity status, no re-update
+      const msgDoc = vi.mocked(es.index).mock.calls[0][0] as Record<string, unknown>;
+      expect((msgDoc.document as Record<string, unknown>).from_me).toBe(true);
+      expect((msgDoc.document as Record<string, unknown>).processed).toBe(true);
+      expect(es.index).toHaveBeenCalledTimes(1); // message doc only — no entity status for outbound
+    });
+
     it('sends system message for agent priority', async () => {
       const { insertSystemMessage } = await import('../utils/system-message.js');
       const matcher = makeMatcher('agent');

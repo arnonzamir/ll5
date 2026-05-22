@@ -32,47 +32,53 @@ export async function processMessage(
   matcher?: NotificationRuleMatcher,
 ): Promise<void> {
   const isGroup = !!item.is_group;
+  const fromMe = !!item.from_me;
 
-  // Parse the REAL author out of the notification title (strips Slack's
-  // "#channel: " prefix and detects bot integrations) — see message-identity.ts.
-  const author = parseMessageAuthor(item.app, item.sender, item.group_name, isGroup);
+  // Parse the conversation PEER out of the notification title — for inbound this
+  // is the author, for outbound (from_me) this is the RECIPIENT. Strips Slack's
+  // "#channel: " prefix and detects bots — see message-identity.ts.
+  const peer = parseMessageAuthor(item.app, item.sender, item.group_name, isGroup);
 
   // Synthesised conversation key (phone notifications have no native thread id):
-  // groups (Slack channels / email accounts) → app:group:<name>, 1:1 → app:<author>.
+  // groups (Slack channels / email accounts) → app:group:<name>, 1:1 → app:<peer>.
   const convKey = isGroup && item.group_name
     ? `${item.app}:group:${item.group_name}`
-    : `${item.app}:${author.authorId}`;
+    : `${item.app}:${peer.authorId}`;
 
-  // Resolve+enrich the AUTHOR (not the channel) to a known person + display name.
+  // Resolve+enrich the PEER (not the channel) to a known person + display name.
   // Done even for "group" channels — a Slack author is a real person/bot worth
   // tracking and linking, unlike a WhatsApp group whose peer is the group itself.
+  // For outbound this identifies the RECIPIENT ("who did I message?").
   let personId: string | null = null;
-  let speakerName = author.authorName;
+  let peerName = peer.authorName;
   if (pgPool) {
-    const resolved = await enrichContact(pgPool, userId, item.app, author.authorId, author.authorName, {
-      phoneNumber: author.phoneNumber,
+    const resolved = await enrichContact(pgPool, userId, item.app, peer.authorId, peer.authorName, {
+      phoneNumber: peer.phoneNumber,
       isGroup,
     });
     personId = resolved.personId;
-    speakerName = resolved.displayName;
+    peerName = resolved.displayName;
   }
+  // Who spoke: the user for outbound, else the resolved peer.
+  const speakerName = fromMe ? '(me)' : peerName;
 
-  // Write message document — carries the clean author, conversation_id, person_id
+  // Write message document — carries the resolved peer, conversation_id, person_id
   // and a `source` so phone-pushed messages are queryable like WhatsApp's.
   const messageDoc: Record<string, unknown> = {
     user_id: userId,
     sender: item.sender,        // raw notification title (kept for continuity)
-    author: speakerName,        // resolved author display name
+    author: speakerName,        // who spoke ('(me)' when outbound)
     app: item.app,
     content: item.body,
-    processed: false,
+    processed: fromMe,          // outbound is informational — never needs batch review
+    from_me: fromMe,
     timestamp: item.timestamp,
     conversation_id: convKey,
     source: 'phone',
   };
   if (item.is_group !== undefined) messageDoc.is_group = item.is_group;
   if (item.group_name) messageDoc.group_name = item.group_name;
-  if (author.isBot) messageDoc.is_bot = true;
+  if (!fromMe && peer.isBot) messageDoc.is_bot = true;
   if (personId) messageDoc.person_id = personId;
 
   const docId = crypto.randomUUID();
@@ -80,19 +86,21 @@ export async function processMessage(
 
   logger.info('[message][processMessage] IM message received', {
     app: item.app,
-    author: speakerName,
+    peer: peerName,
+    from_me: fromMe,
     is_group: isGroup,
-    is_bot: author.isBot,
+    is_bot: peer.isBot,
     group_name: item.group_name ?? null,
     person_id: personId ?? null,
     bodyLength: item.body.length,
   });
 
-  await updateEntityStatus(es, userId, item, speakerName);
+  // Inbound only: entity status reflects the peer who reached out.
+  if (!fromMe) await updateEntityStatus(es, userId, item, peerName);
 
   if (pgPool && matcher) {
     const priority = await matcher.match(userId, {
-      sender: speakerName,        // clean author so sender-rules match the person/bot
+      sender: speakerName,        // clean peer (or '(me)') so sender-rules match the person/bot
       app: item.app,
       body: item.body,
       is_group: item.is_group,
@@ -104,41 +112,46 @@ export async function processMessage(
 
     logger.info('[message][processMessage] Notification rule match', {
       app: item.app,
-      author: speakerName,
+      peer: peerName,
+      from_me: fromMe,
       priority: priority ?? 'no-match',
     });
 
     if (priority === 'ignore') {
       await es.update({ index: 'll5_awareness_messages', id: docId, doc: { processed: true }, refresh: false });
-      logger.debug('[message][processMessage] Ignored message marked processed', { author: speakerName, app: item.app });
+      logger.debug('[message][processMessage] Ignored message marked processed', { peer: peerName, app: item.app });
       return;
     }
 
     if (priority === 'immediate' || priority === 'agent') {
       const truncBody = item.body.length > 2000 ? item.body.slice(0, 2000) + '...' : item.body;
-      // Name the author + channel: "[Slack] Opsgenie in #data-platform-alerts: …" / "[SMS] Mom: …"
       const groupInfo = isGroup && item.group_name ? ` in ${item.group_name}` : '';
-      const botTag = author.isBot ? ' (bot)' : '';
+      // Outbound names the recipient ("You → Mom"); inbound names the author.
+      const header = fromMe
+        ? `You → ${peerName}${groupInfo}`
+        : `${peerName}${peer.isBot ? ' (bot)' : ''}${groupInfo}`;
       await insertSystemMessage(
         pgPool,
         userId,
-        `[${appLabel(item.app)}] ${speakerName}${botTag}${groupInfo}: "${truncBody}"`,
+        `[${appLabel(item.app)}] ${header}: "${truncBody}"`,
         undefined, // notify
         undefined, // schedulerEvent
         buildSourceRouting({
           platform: item.app,
           remoteJid: convKey,
-          senderName: author.authorName,
-          contactName: speakerName,
+          senderName: fromMe ? '(me)' : peer.authorName,
+          contactName: peerName,
           personId,
-          fromMe: false,
+          fromMe,
           isGroup,
           groupName: item.group_name,
         }),
       );
 
-      await es.update({ index: 'll5_awareness_messages', id: docId, doc: { processed: true }, refresh: false });
-      logger.info('[message][processMessage] Immediate notification sent', { author: speakerName, app: item.app, person_id: personId ?? null });
+      if (!fromMe) {
+        await es.update({ index: 'll5_awareness_messages', id: docId, doc: { processed: true }, refresh: false });
+      }
+      logger.info('[message][processMessage] Notification sent', { peer: peerName, app: item.app, from_me: fromMe, person_id: personId ?? null });
     }
   } else {
     logger.warn('[message][processMessage] Notification rule matcher not available', { hasPgPool: !!pgPool, hasMatcher: !!matcher });
