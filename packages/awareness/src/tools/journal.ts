@@ -14,7 +14,7 @@ export function registerJournalTools(
 ): void {
   server.tool(
     'write_journal',
-    'Write a micro-journal entry that persists across sessions. Use for observations, feedback, decisions, context, thoughts, or commitments.',
+    'Write a micro-journal entry that persists across sessions — observations, feedback, decisions, context, thoughts, or commitments. Default to writing: entries are cheap, append-only, and silent, and uncaptured context is lost permanently. Recording is the expectation after any meaningful event, not a judgment call — skip only a purely mechanical exchange that reveals nothing. When in doubt, write.',
     {
       type: z.enum(['observation', 'feedback', 'decision', 'context', 'thought', 'commitment']).describe('Category of the journal entry'),
       topic: z.string().describe('Short topic or subject line'),
