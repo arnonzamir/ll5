@@ -793,6 +793,7 @@ export function ContactSettingsView() {
   const [groups, setGroups] = useState<GroupWithSettings[]>([]);
   const [search, setSearch] = useState("");
   const [namedOnly, setNamedOnly] = useState(false);
+  const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [contactPage, setContactPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [linkPersonId, setLinkPersonId] = useState<string | null>(null);
@@ -953,12 +954,21 @@ export function ContactSettingsView() {
     refreshFromServer();
   }
 
+  // Platforms present in the loaded data — drives the source filter chips.
+  const availablePlatforms = Array.from(new Set([
+    ...people.flatMap((p) => p.platforms.map((pl) => pl.platform)),
+    ...contacts.map((c) => c.platform),
+    ...groups.map((g) => g.platform),
+  ].filter((x): x is string => !!x))).sort();
+
   const searchLower = search.toLowerCase();
   const filteredPeople = people.filter((p) =>
-    !search || p.name.toLowerCase().includes(searchLower) ||
-    p.platforms.some((pl) => pl.display_name?.toLowerCase().includes(searchLower))
+    (platformFilter === "all" || p.platforms.some((pl) => pl.platform === platformFilter)) &&
+    (!search || p.name.toLowerCase().includes(searchLower) ||
+      p.platforms.some((pl) => pl.display_name?.toLowerCase().includes(searchLower)))
   );
   const filteredContacts = contacts.filter((c) => {
+    if (platformFilter !== "all" && c.platform !== platformFilter) return false;
     if (namedOnly) {
       if (!c.displayName) return false;
       // Exclude names that are just phone numbers, WhatsApp JIDs, or platform IDs
@@ -974,8 +984,9 @@ export function ContactSettingsView() {
   const contactTotalPages = Math.max(1, Math.ceil(filteredContacts.length / CONTACTS_PAGE_SIZE));
   const pagedContacts = filteredContacts.slice((contactPage - 1) * CONTACTS_PAGE_SIZE, contactPage * CONTACTS_PAGE_SIZE);
   const filteredGroups = groups.filter((g) =>
-    !search || (g.name?.toLowerCase().includes(searchLower)) ||
-    g.conversation_id.toLowerCase().includes(searchLower)
+    (platformFilter === "all" || g.platform === platformFilter) &&
+    (!search || (g.name?.toLowerCase().includes(searchLower)) ||
+      g.conversation_id.toLowerCase().includes(searchLower))
   );
 
   const tabs: { id: TabId; label: string; count: number; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -1049,6 +1060,26 @@ export function ContactSettingsView() {
           </>
         )}
       </div>
+
+      {/* Source (platform) filter */}
+      {availablePlatforms.length > 1 && (
+        <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+          <span className="text-[10px] text-gray-400 uppercase tracking-wide mr-1">Source</span>
+          {["all", ...availablePlatforms].map((plat) => (
+            <button
+              key={plat}
+              onClick={() => { setPlatformFilter(plat); setContactPage(1); }}
+              className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-colors cursor-pointer shrink-0 ${
+                platformFilter === plat
+                  ? "bg-blue-50 text-blue-700 border-blue-300"
+                  : "text-gray-500 hover:text-gray-700 border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              {plat === "all" ? "All" : plat.charAt(0).toUpperCase() + plat.slice(1)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Column headers */}
       <div className="flex items-center gap-3 px-2 mb-1 text-[10px] text-gray-400 uppercase tracking-wide">
