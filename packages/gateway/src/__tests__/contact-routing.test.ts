@@ -91,10 +91,22 @@ describe('ContactRoutingResolver', () => {
       expect(await resolver.shouldDownloadMedia('u1', 'whatsapp', 'x', false, 'p1')).toBe(true);
     });
 
-    it('returns false for a 1:1 with no linked person', async () => {
+    it('defaults a 1:1 to downloading pictures when the person has no row', async () => {
+      const resolver = new ContactRoutingResolver(poolReturning([]));
+      expect(await resolver.shouldDownloadMedia('u1', 'whatsapp', 'x', false, 'p1')).toBe(true);
+    });
+
+    it('honors an explicit download_media=false on a 1:1 person', async () => {
+      const resolver = new ContactRoutingResolver(
+        poolReturning([{ routing: 'batch', permission: 'input', download_media: false }]),
+      );
+      expect(await resolver.shouldDownloadMedia('u1', 'whatsapp', 'x', false, 'p1')).toBe(false);
+    });
+
+    it('defaults a 1:1 to downloading pictures even with no linked person', async () => {
       const pool = poolReturning([]);
       const resolver = new ContactRoutingResolver(pool);
-      expect(await resolver.shouldDownloadMedia('u1', 'whatsapp', 'x', false)).toBe(false);
+      expect(await resolver.shouldDownloadMedia('u1', 'whatsapp', 'x', false)).toBe(true);
       expect(pool.query).not.toHaveBeenCalled();
     });
   });
