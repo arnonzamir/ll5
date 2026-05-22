@@ -28,8 +28,8 @@ import {
 // as `priority === 'immediate' || priority === 'agent'`). Keeping the value
 // in the DB enum is harmless; if a legacy row has routing='agent' we
 // normalize for display to `immediate` so the active button stays visible.
-// TECH DEBT: drop the value from the contact_settings + notification_rules
-// CHECK constraints when there's appetite for a migration.
+// TECH DEBT: drop the value from the contact_settings.routing CHECK
+// constraint when there's appetite for a migration.
 const ROUTING_OPTIONS = ["ignore", "batch", "immediate"] as const;
 const PERMISSION_OPTIONS = ["ignore", "input", "agent"] as const;
 

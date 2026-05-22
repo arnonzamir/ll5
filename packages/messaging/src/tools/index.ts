@@ -7,6 +7,7 @@ import { registerSendWhatsAppTool } from './send-whatsapp.js';
 import { registerSendTelegramTool } from './send-telegram.js';
 import { registerListConversationsTool } from './list-conversations.js';
 import { registerUpdatePermissionsTool } from './update-permissions.js';
+import { registerContactSettingsTools } from './contact-settings.js';
 import { registerReadMessagesTool } from './read-messages.js';
 import { registerSyncWhatsAppTool } from './sync-whatsapp.js';
 import { registerGetAccountStatusTool } from './get-account-status.js';
@@ -42,6 +43,7 @@ export function registerAllTools(
   registerSendTelegramTool(server, deps.accountRepo, deps.conversationRepo, deps.pool, getUserId);
   registerListConversationsTool(server, deps.conversationRepo, getUserId);
   registerUpdatePermissionsTool(server, deps.pool, getUserId);
+  registerContactSettingsTools(server, deps.pool, getUserId);
   registerReadMessagesTool(server, deps.accountRepo, deps.conversationRepo, deps.pool, getUserId);
   registerSyncWhatsAppTool(server, deps.accountRepo, deps.conversationRepo, deps.contactRepo, getUserId);
   registerGetAccountStatusTool(server, deps.accountRepo, getUserId);

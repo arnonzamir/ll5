@@ -3,7 +3,7 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import type { Pool } from 'pg';
 import type { Client } from '@elastic/elasticsearch';
-import type { NotificationRuleMatcher } from './processors/notification-rules.js';
+import type { ContactRoutingResolver } from './processors/contact-routing.js';
 import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
 import { processWhatsAppContactWebhook } from './processors/whatsapp-contact-webhook.js';
 import { resolveWhatsAppUserId } from './utils/whatsapp-user-resolver.js';
@@ -13,7 +13,7 @@ import { logger } from './utils/logger.js';
 export interface WhatsappWebhookDeps {
   pgPool: Pool;
   esClient: Client;
-  notificationMatcher: NotificationRuleMatcher;
+  notificationMatcher: ContactRoutingResolver;
   /** Required shared secret. Evolution API must send this in `X-Webhook-Secret`. */
   webhookSecret: string;
   encryptionKey: string | undefined;

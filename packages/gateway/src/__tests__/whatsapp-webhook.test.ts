@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { processWhatsAppWebhook } from '../processors/whatsapp-webhook.js';
 import type { Pool } from 'pg';
 import type { Client } from '@elastic/elasticsearch';
-import type { NotificationRuleMatcher } from '../processors/notification-rules.js';
+import type { ContactRoutingResolver } from '../processors/contact-routing.js';
 
 // ---------------------------------------------------------------------------
 // Mock system-message to avoid side effects
@@ -39,12 +39,12 @@ function makePgPool(): Pool {
 function makeMatcher(
   priority: string | null = null,
   downloadMedia = false,
-): NotificationRuleMatcher {
+): ContactRoutingResolver {
   return {
     match: vi.fn().mockResolvedValue(priority),
     shouldDownloadMedia: vi.fn().mockResolvedValue(downloadMedia),
     shouldDownloadImages: vi.fn().mockResolvedValue(downloadMedia),
-  } as unknown as NotificationRuleMatcher;
+  } as unknown as ContactRoutingResolver;
 }
 
 interface PayloadOverrides {
@@ -107,7 +107,7 @@ function makePayload(overrides: PayloadOverrides = {}) {
 describe('processWhatsAppWebhook', () => {
   let es: Client;
   let pool: Pool;
-  let matcher: NotificationRuleMatcher;
+  let matcher: ContactRoutingResolver;
 
   beforeEach(() => {
     vi.clearAllMocks();
