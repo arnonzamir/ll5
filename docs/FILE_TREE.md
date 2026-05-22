@@ -94,7 +94,7 @@ ll5/
 │       ├── setup/indices.ts             # ES index creation (8 indices: profile, facts, people, places, data_gaps, networks, observations, narratives)
 │       └── server.ts                    # MCP server with StreamableHTTP + AsyncLocalStorage (auth from @ll5/shared)
 │
-├── packages/gtd/                      # @ll5/gtd — PG-backed MCP (45 tests)
+├── packages/gtd/                      # @ll5/gtd — PG-backed MCP (45 tests). Also hosts the agent's channel bridge (tools/chat.ts: check_messages/send_message/list_conversations → gateway /chat/* — needs GATEWAY_URL=http://gateway:3000)
 │   └── src/__tests__/                   # GTD action CRUD, inbox, health metrics
 │   └── src/
 │       ├── repositories/postgres/       # 3 PG repositories (horizon, inbox, review-session)
