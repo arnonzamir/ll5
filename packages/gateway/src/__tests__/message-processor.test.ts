@@ -227,6 +227,58 @@ describe('processMessage', () => {
       }));
     });
 
+    it('parses Slack channel/author: clean author for matching, channel as conversation', async () => {
+      const { insertSystemMessage } = await import('../utils/system-message.js');
+      vi.mocked(pool.query).mockResolvedValue({ rows: [] } as never);
+      const matcher = makeMatcher('immediate');
+      const item = makeMessageItem({
+        app: 'slack',
+        sender: '#data-platform-alerts: Opsgenie (bot)',
+        group_name: '#data-platform-alerts',
+        is_group: true,
+        body: 'New alert: Airflow failed',
+      });
+      await processMessage(es, 'user-1', item, pool, matcher);
+
+      // matcher receives the CLEAN author (so sender-rules match the bot/person)
+      // and the channel as the group conversation (so group rules can mute it)
+      expect(matcher.match).toHaveBeenCalledWith('user-1', expect.objectContaining({
+        sender: 'Opsgenie',
+        platform: 'slack',
+        conversation_id: 'slack:group:#data-platform-alerts',
+        is_group: true,
+        group_name: '#data-platform-alerts',
+      }));
+      // header names the author + channel + bot tag
+      const call = vi.mocked(insertSystemMessage).mock.calls[0];
+      expect(call[2]).toContain('[Slack] Opsgenie (bot) in #data-platform-alerts');
+      expect(call[5]).toEqual(expect.objectContaining({
+        platform: 'slack',
+        remote_jid: 'slack:group:#data-platform-alerts',
+        sender_name: 'Opsgenie',
+        is_group: true,
+        group_name: '#data-platform-alerts',
+        from_me: false,
+      }));
+    });
+
+    it('marks Slack bot noise processed when a rule ignores the author', async () => {
+      vi.mocked(pool.query).mockResolvedValue({ rows: [] } as never);
+      const matcher = makeMatcher('ignore');
+      const item = makeMessageItem({
+        app: 'slack',
+        sender: '#data-platform-alerts: Opsgenie (bot)',
+        group_name: '#data-platform-alerts',
+        is_group: true,
+        body: 'noise',
+      });
+      await processMessage(es, 'user-1', item, pool, matcher);
+
+      // the matcher saw the clean author "Opsgenie" — a sender rule on that works
+      expect(matcher.match).toHaveBeenCalledWith('user-1', expect.objectContaining({ sender: 'Opsgenie' }));
+      expect(es.update).toHaveBeenCalledWith(expect.objectContaining({ doc: { processed: true } }));
+    });
+
     it('sends system message for agent priority', async () => {
       const { insertSystemMessage } = await import('../utils/system-message.js');
       const matcher = makeMatcher('agent');

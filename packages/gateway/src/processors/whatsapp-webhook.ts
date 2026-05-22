@@ -7,14 +7,16 @@ import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
 import { escalateConversation } from '../utils/escalation.js';
 import { decrypt } from '../utils/encryption.js';
+import { buildSourceRouting, enrichContact } from './message-identity.js';
 import type { NotificationRuleMatcher } from './notification-rules.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 
 /**
- * Enrich a contact's display_name from pushName.
- * Creates the contact if it doesn't exist (ensure-upsert).
- * Only overwrites null, empty, phone-number-only, or JID-as-name values.
+ * Enrich a WhatsApp contact's display_name from pushName.
+ * Computes the phone number from the JID and applies the WhatsApp-specific
+ * guards (skip self-named numbers and group JIDs), then delegates the upsert
+ * to the shared `enrichContact` helper (same table/logic phone apps use).
  */
 async function enrichContactFromPushName(
   pgPool: Pool,
@@ -34,33 +36,7 @@ async function enrichContactFromPushName(
     phoneNumber = `+${phonePart}`;
   }
 
-  try {
-    await pgPool.query(
-      `INSERT INTO messaging_contacts
-         (user_id, platform, platform_id, display_name, phone_number, is_group, last_seen_at)
-       VALUES ($1, 'whatsapp', $2, $3, $4, false, NOW())
-       ON CONFLICT (user_id, platform, platform_id)
-       DO UPDATE SET
-         display_name = CASE
-           WHEN messaging_contacts.display_name IS NULL
-             OR messaging_contacts.display_name = ''
-             OR messaging_contacts.display_name ~ '^\\+?[0-9]+$'
-             OR messaging_contacts.display_name LIKE '%@s.whatsapp.net'
-             OR messaging_contacts.display_name LIKE '%@lid'
-           THEN EXCLUDED.display_name
-           ELSE messaging_contacts.display_name
-         END,
-         phone_number = COALESCE(EXCLUDED.phone_number, messaging_contacts.phone_number),
-         last_seen_at = NOW(),
-         updated_at = NOW()`,
-      [userId, platformId, pushName, phoneNumber],
-    );
-  } catch (err) {
-    logger.warn('[enrichContactFromPushName] Failed', {
-      error: err instanceof Error ? err.message : String(err),
-      platformId,
-    });
-  }
+  await enrichContact(pgPool, userId, 'whatsapp', platformId, pushName, { phoneNumber, isGroup: false });
 }
 
 interface EvolutionMessageData {
@@ -392,16 +368,16 @@ export async function processWhatsAppWebhook(
         `[WhatsApp] You → ${dest}: "${truncBody}"${mediaInfo}`,
         undefined, // notify
         undefined, // schedulerEvent
-        {
+        buildSourceRouting({
           platform: 'whatsapp',
-          remote_jid: remoteJid,
-          sender_name: '(me)',
-          contact_name: peerName || undefined,
-          person_id: personId ?? undefined,
-          from_me: true,
-          is_group: isGroup,
-          group_name: groupName ?? undefined,
-        },
+          remoteJid,
+          senderName: '(me)',
+          contactName: peerName,
+          personId,
+          fromMe: true,
+          isGroup,
+          groupName,
+        }),
       );
 
       await es.update({
@@ -481,16 +457,16 @@ export async function processWhatsAppWebhook(
       `[WhatsApp] ${header}: "${truncBody}"${mediaInfo}`,
       undefined, // notify
       undefined, // schedulerEvent
-      {
+      buildSourceRouting({
         platform: 'whatsapp',
-        remote_jid: remoteJid,
-        sender_name: sender,
-        contact_name: peerName || undefined,
-        person_id: personId ?? undefined,
-        from_me: fromMe,
-        is_group: isGroup,
-        group_name: groupName ?? undefined,
-      },
+        remoteJid,
+        senderName: sender,
+        contactName: peerName,
+        personId,
+        fromMe,
+        isGroup,
+        groupName,
+      }),
     );
 
     // Mark as processed so batch review doesn't re-report it
