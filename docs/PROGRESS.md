@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### GHCR credential clobber — durable fix (2026-05-22)
+Root-caused the recurring `denied` GHCR outage that kept breaking deploys. The ll5-main deploy step (`.github/workflows/build-and-push.yml` "Deploy to server") logged into the host's GHCR with `secrets.GITHUB_TOKEN` — an ephemeral `ghs_` Actions token (1h expiry). Because `/root/.docker/config.json` is SHARED by every Coolify app on the box, each ll5-main deploy overwrote the credential with a token that died an hour later, so the next pull by ll5-agent/ll5-run/claude-box failed `denied`. Manual PAT re-logins only lasted until the next ll5-main deploy. Fix: pin that login to the existing non-expiring `secrets.GHCR_READ_PAT` (read:packages) and `-u arnonzamir`. The `GHCR_READ_PAT` secret already existed (added 2026-05-21) but the workflow was never actually switched to use it. Now durable as long as the PAT stays No-expiration in GitHub.
+
 ### Contacts & Routing — source (platform) filter (2026-05-22)
 `/settings/contacts` (`contact-settings-view.tsx`) gained a **Source filter** chip row (All / WhatsApp / Slack / SMS / Gmail / …) that scopes all three tabs (People/Contacts/Groups). Platforms are derived live from the loaded data (`availablePlatforms` = union of people-platforms + contacts + groups), so the chips only show sources that actually exist; the row hides itself when there's ≤1 platform. People match if any of their linked platforms matches; Contacts/Groups match on their `platform`. Resets contact pagination on change. Pure client-side filter — no server change.
 

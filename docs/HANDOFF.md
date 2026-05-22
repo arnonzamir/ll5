@@ -170,7 +170,8 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - GitHub Actions: `.github/workflows/build-and-push.yml`
 - Builds changed packages on push to main, pushes to GHCR
 - **Typecheck gate (Apr 23)**: every package build runs `tsc --noEmit` before the actual build. Root `tsconfig.json` has `noEmitOnError: true`, so strict TS errors in any package now fail the build instead of silently emitting broken JS. Run `npm run typecheck` locally to check all 11 packages. `gateway/tsconfig.json` excludes `src/**/__tests__/**` (vitest transpiles tests independently); any non-test TS error is a build-blocker.
-- Auto-deploy: `appleboy/ssh-action@v1` SSHs to server, `docker login ghcr.io` using `GITHUB_TOKEN`, then `docker compose pull && up -d --remove-orphans`
+- Auto-deploy: `appleboy/ssh-action@v1` SSHs to server, `docker login ghcr.io -u arnonzamir` using **`secrets.GHCR_READ_PAT`** (non-expiring read:packages PAT — NOT `GITHUB_TOKEN`), then `docker compose pull && up -d`
+- **GHCR credential — durable fix (2026-05-22):** the host `/root/.docker/config.json` is SHARED by every Coolify app. Previously this step logged in with `secrets.GITHUB_TOKEN`, an ephemeral `ghs_` Actions token (1h life); each ll5-main deploy clobbered the shared cred, so ll5-agent/ll5-run/claude-box pulls failed `denied` after expiry (the recurring GHCR outage). Now pinned to non-expiring `GHCR_READ_PAT` — do NOT revert to `GITHUB_TOKEN`. The PAT must be set to **No expiration** in GitHub for this to stay durable.
 - Health check: curls mcp-knowledge.noninoni.click/health (4 retries, non-blocking)
 - Deploy only runs on main branch (skipped for workflow_dispatch)
 - IMPORTANT: deploy pulls only our GHCR images, NOT database/third-party images. A `docker compose pull` would re-pull postgres/ES base images and recreate their containers, causing downtime. To upgrade postgres or ES, do it manually on the server.
