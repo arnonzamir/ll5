@@ -3,8 +3,10 @@ import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 import type { PushLocationItem } from '../types/index.js';
 import { reverseGeocode } from '../utils/geocoding.js';
+import type { GeocodingResult } from '../utils/geocoding.js';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
+import { sendFCMNotification } from '../utils/fcm-sender.js';
 import { writeNotableEvent } from './notable.js';
 
 interface PlaceHit {
@@ -130,113 +132,172 @@ async function getPreviousLocation(
   }
 }
 
-/**
- * Format distance for human-readable display.
- */
-function formatDistance(km: number): string {
-  if (km < 1) return `${Math.round(km * 1000)}m`;
-  return `${km.toFixed(1)}km`;
+
+// ---------------------------------------------------------------------------
+// Place/region state machine.
+//
+// We track the user's current *semantic* location label — a known place
+// (within 100m, e.g. "Home") or the geocoded city/town (e.g. "Be'erotaim") —
+// persisted per user in a tiny ES doc (id = userId). Notifications fire only on
+// a TRANSITION (the label changes), not on a distance threshold and not on
+// every GPS push. This replaces the old >200m distance heuristic, which both
+// missed "you're home" (no clean >200m hop) and spammed a duplicate notable
+// event on every in-place jitter push.
+// ---------------------------------------------------------------------------
+const LOCATION_STATE_INDEX = 'll5_awareness_location_state';
+// Anti-flap: don't re-push the same label within this window (handles A→B→A
+// oscillation at a boundary, and survives a quick out-and-back).
+const TRANSITION_DEDUP_MS = 5 * 60 * 1000;
+
+interface LocationState {
+  user_id: string;
+  label: string;
+  kind: 'place' | 'city';
+  place_id?: string;
+  city?: string;
+  lat: number;
+  lon: number;
+  last_seen?: string;
+  last_push_label?: string;
+  last_push_at?: number;
+  updated_at?: string;
 }
 
-// Per-user last-notified movement state. In-memory dedup so GPS jitter between
-// two points doesn't fire a system message on every push — keyed by userId,
-// tracks the last destination label we already notified about.
-const lastMovementNotify = new Map<string, { destination: string; at: number }>();
-const MOVEMENT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
+interface CurrentLabel {
+  label: string;
+  kind: 'place' | 'city';
+  place_id?: string;
+  city?: string;
+}
+
+/** The user's current semantic label: known place > city; null = in transit. */
+export function deriveLabel(
+  placeMatch: PlaceMatchResult | null,
+  geocode: GeocodingResult | null,
+): CurrentLabel | null {
+  if (placeMatch) {
+    return { label: placeMatch.place_name, kind: 'place', place_id: placeMatch.place_id, city: geocode?.city };
+  }
+  if (geocode?.city) {
+    return { label: geocode.city, kind: 'city', city: geocode.city };
+  }
+  return null; // unknown / in transit — awareness only, no push
+}
+
+/** Friendly push body. "Home" → "You're home"; place → "You're at X"; city → "You're in X". */
+export function phraseArrival(cur: CurrentLabel): string {
+  if (cur.kind === 'place') {
+    return cur.label.trim().toLowerCase() === 'home' ? "You're home" : `You're at ${cur.label}`;
+  }
+  return `You're in ${cur.label}`;
+}
+
+async function getLocationState(es: Client, userId: string): Promise<LocationState | null> {
+  try {
+    const got = await es.get<LocationState>({ index: LOCATION_STATE_INDEX, id: userId });
+    return got._source ?? null;
+  } catch {
+    return null; // no state yet (or index not created) — first push is a transition
+  }
+}
+
+async function setLocationState(es: Client, userId: string, state: Omit<LocationState, 'user_id' | 'updated_at'>): Promise<void> {
+  await es.index({
+    index: LOCATION_STATE_INDEX,
+    id: userId,
+    document: { user_id: userId, ...state, updated_at: new Date().toISOString() },
+    refresh: false,
+  });
+}
 
 /**
- * Detect meaningful movement and push a system chat message.
- * Non-blocking: runs as fire-and-forget, does not slow the webhook response.
- *
- * Rules:
- * - Only triggers if distance > 200m
- * - Only triggers if previous point is within the last hour (not stale)
- * - Dedups against the last notified destination within 10 min
+ * Detect a place/region transition and notify the user.
+ * Awaited (not fire-and-forget) so the per-user state read/write is serialized
+ * against the location push that triggered it. On a transition we: write a
+ * notable event (awareness), insert a system message (agent context, no FCM),
+ * and send a direct FCM push ("You're home") at `notify` level.
  */
-function detectMovementAndNotify(
+async function detectPlaceTransitionAndNotify(
   es: Client,
   pool: Pool,
   userId: string,
   item: PushLocationItem,
-  currentAddress: string | undefined,
-  currentPlaceMatch: PlaceMatchResult | null,
-): void {
-  // Fire-and-forget: wrap in an immediately-invoked async and catch errors
-  void (async () => {
-    try {
-      const prev = await getPreviousLocation(es, userId);
-      if (!prev?.location || !prev.timestamp) return;
+  geocode: GeocodingResult | null,
+  placeMatch: PlaceMatchResult | null,
+): Promise<void> {
+  try {
+    const cur = deriveLabel(placeMatch, geocode);
+    const state = await getLocationState(es, userId);
 
-      // Check staleness: skip if previous point is older than 1 hour
-      const prevTime = new Date(prev.timestamp).getTime();
-      const currentTime = new Date(item.timestamp).getTime();
-      const hourMs = 60 * 60 * 1000;
-      if (currentTime - prevTime > hourMs) {
-        logger.debug('[location][detectMovementAndNotify] Previous location too old for movement detection', {
-          prevTimestamp: prev.timestamp,
-          currentTimestamp: item.timestamp,
-        });
-        return;
-      }
+    // In transit / unknown: keep the last confirmed label so the next known
+    // place/city still reads as a transition. No event, no push.
+    if (!cur) return;
 
-      // Calculate distance
-      const dist = haversine(prev.location, { lat: item.lat, lon: item.lon });
-
-      // Only notify for moves > 200m
-      if (dist < 0.2) return;
-
-      // Build human-readable message
-      const prevLabel = prev.matched_place
-        ? prev.matched_place
-        : prev.address
-          ? prev.address
-          : `${prev.location.lat.toFixed(4)}, ${prev.location.lon.toFixed(4)}`;
-
-      let newLabel: string;
-      let arrivalContext = '';
-
-      if (currentPlaceMatch) {
-        newLabel = currentPlaceMatch.place_name;
-        arrivalContext = ` User arrived at ${currentPlaceMatch.place_name}.`;
-      } else if (currentAddress) {
-        newLabel = currentAddress;
-        arrivalContext = ` User is near ${currentAddress}.`;
-      } else {
-        newLabel = `${item.lat.toFixed(4)}, ${item.lon.toFixed(4)}`;
-        arrivalContext = '';
-      }
-
-      const time = new Date(item.timestamp).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
+    // Same place as last confirmed: just refresh coordinates/last_seen.
+    if (state && state.label === cur.label) {
+      await setLocationState(es, userId, {
+        ...state, label: cur.label, kind: cur.kind, place_id: cur.place_id, city: cur.city,
+        lat: item.lat, lon: item.lon, last_seen: item.timestamp,
       });
-
-      const content = `Location change detected: User moved ${formatDistance(dist)} from [${prevLabel}] to [${newLabel}] at ${time}.${arrivalContext}`;
-
-      // Dedup: skip if we already notified about this destination recently
-      const last = lastMovementNotify.get(userId);
-      if (last && last.destination === newLabel && Date.now() - last.at < MOVEMENT_DEDUP_WINDOW_MS) {
-        logger.debug('[location][detectMovementAndNotify] Dedup — same destination within window', {
-          destination: newLabel,
-          ageSec: Math.round((Date.now() - last.at) / 1000),
-        });
-        return;
-      }
-      lastMovementNotify.set(userId, { destination: newLabel, at: Date.now() });
-
-      await insertSystemMessage(pool, userId, content);
-
-      logger.info('[location][detectMovementAndNotify] Movement detected, system message sent', {
-        distance: formatDistance(dist),
-        from: prevLabel,
-        to: newLabel,
-      });
-    } catch (err) {
-      logger.warn('[location][detectMovementAndNotify] Movement detection failed (non-blocking)', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      return;
     }
-  })();
+
+    const now = Date.now();
+    const prevLabel = state?.label;
+
+    // Anti-flap: if we already pushed this exact label very recently (A→B→A),
+    // update state silently without re-pushing.
+    if (state?.last_push_label === cur.label && state.last_push_at && now - state.last_push_at < TRANSITION_DEDUP_MS) {
+      await setLocationState(es, userId, {
+        ...state, label: cur.label, kind: cur.kind, place_id: cur.place_id, city: cur.city,
+        lat: item.lat, lon: item.lon, last_seen: item.timestamp,
+      });
+      return;
+    }
+
+    const summary = cur.kind === 'place' ? `Arrived at ${cur.label}` : `Now in ${cur.label}`;
+
+    // 1) Awareness record
+    await writeNotableEvent(es, userId, {
+      event_type: 'location_change',
+      timestamp: item.timestamp,
+      summary,
+      severity: 'low',
+      payload: {
+        kind: cur.kind,
+        place_id: cur.place_id,
+        place_name: cur.kind === 'place' ? cur.label : undefined,
+        city: cur.city,
+        previous: prevLabel,
+        location: { lat: item.lat, lon: item.lon },
+      },
+    });
+
+    // 2) Agent context (no FCM — the gateway sends the user push directly below)
+    const ctx = prevLabel ? ` (was ${prevLabel})` : '';
+    await insertSystemMessage(pool, userId, `[Location] ${phraseArrival(cur)}${ctx}.`);
+
+    // 3) Direct push to the user
+    await sendFCMNotification(pool, userId, {
+      title: 'LL5',
+      body: phraseArrival(cur),
+      type: 'location',
+      notification_level: 'notify',
+    });
+
+    // 4) Commit new state
+    await setLocationState(es, userId, {
+      label: cur.label, kind: cur.kind, place_id: cur.place_id, city: cur.city,
+      lat: item.lat, lon: item.lon, last_seen: item.timestamp,
+      last_push_label: cur.label, last_push_at: now,
+    });
+
+    logger.info('[location][transition] place/region transition pushed', { from: prevLabel ?? '(none)', to: cur.label, kind: cur.kind });
+  } catch (err) {
+    logger.warn('[location][transition] transition detection failed (non-blocking)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**
@@ -312,17 +373,11 @@ export async function processLocation(
     matchKnownPlace(es, userId, item.lat, item.lon),
   ]);
 
-  // Fire off movement detection BEFORE writing the new point
-  // (so getPreviousLocation gets the actual previous point, not this one)
+  // Detect a place/region transition and notify (awaited — serializes the
+  // per-user state read/write against this push). Uses its own state doc, so
+  // it's independent of the location-doc write below.
   if (pgPool) {
-    detectMovementAndNotify(
-      es,
-      pgPool,
-      userId,
-      item,
-      geocodeResult?.address,
-      placeMatch,
-    );
+    await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, placeMatch);
   }
 
   // Build the location document
@@ -342,6 +397,8 @@ export async function processLocation(
 
   if (geocodeResult) {
     doc.address = geocodeResult.address;
+    if (geocodeResult.city) doc.city = geocodeResult.city;
+    if (geocodeResult.neighborhood) doc.neighborhood = geocodeResult.neighborhood;
   }
 
   if (placeMatch) {
@@ -364,18 +421,6 @@ export async function processLocation(
     matched_place: placeMatch?.place_name,
   });
 
-  // If place matched, write a notable event (canonical awareness-reader shape)
-  if (placeMatch) {
-    await writeNotableEvent(es, userId, {
-      event_type: 'location_change',
-      timestamp: item.timestamp,
-      summary: `Arrived at ${placeMatch.place_name}`,
-      severity: 'low',
-      payload: {
-        place_id: placeMatch.place_id,
-        place_name: placeMatch.place_name,
-        location: { lat: item.lat, lon: item.lon },
-      },
-    });
-  }
+  // Note: arrival notable events are written by detectPlaceTransitionAndNotify
+  // (only on a real place/region transition), not on every in-place GPS push.
 }

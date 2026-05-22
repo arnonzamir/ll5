@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Location awareness: place/region state machine + arrival pushes (2026-05-22)
+Replaced the >200m distance-threshold movement heuristic (which missed "you're home" — no clean >200m hop — and spammed a duplicate "Arrived at X" notable event on every in-place GPS jitter push). The location processor (`packages/gateway/src/processors/location.ts`) now tracks the user's current **semantic label** — a known place (≤100m, e.g. "Home") or the geocoded city/town (e.g. "Be'erotaim") — persisted per user in a tiny ES doc `ll5_awareness_location_state` (id=userId). Notifications fire only on a **transition** (label changes): writes a notable event (awareness), inserts a `[Location]` system message (agent context, no FCM), and sends a **direct FCM push** ("You're home" / "You're at X" / "You're in Be'erotaim") at `notify` level. Anti-flap dedup (no re-push of the same label within 5 min); in-transit/unknown points are awareness-only (no push). Location docs now also store `city`/`neighborhood`. New gateway test (6) for `deriveLabel`/`phraseArrival`. NOT yet: near-a-shop/POI proximity (geocode gives city/address, not nearby POIs) — a follow-up.
+
 ### Unify conversation surfaces — one live thread across CLI/web/Android (2026-05-21, flag-gated)
 "CLI vs app diverge" + "agent responds in the wrong place" fix. Remote-control is closed (no third-party client) and an Agent-SDK rewrite is out of scope, so we keep the existing unified `chat_messages` thread and bridge the agent's Claude Code session to it with Claude Code hooks. WhatsApp/Telegram stay separate (contacts).
 
