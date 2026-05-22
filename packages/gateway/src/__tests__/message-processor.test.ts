@@ -184,9 +184,46 @@ describe('processMessage', () => {
         pool,
         'user-1',
         expect.stringContaining('Alice'),
+        undefined, // notify
+        undefined, // schedulerEvent
+        expect.objectContaining({
+          platform: 'whatsapp',
+          remote_jid: 'whatsapp:Alice',
+          sender_name: 'Alice',
+          contact_name: 'Alice',
+          from_me: false,
+          is_group: false,
+        }),
       );
       expect(es.update).toHaveBeenCalledWith(expect.objectContaining({
         doc: { processed: true },
+      }));
+    });
+
+    it('resolves sender identity + synthesizes conversation_id and surfaces source routing (SMS)', async () => {
+      const { insertSystemMessage } = await import('../utils/system-message.js');
+      // messaging_contacts upsert returns a linked person + curated name.
+      vi.mocked(pool.query).mockResolvedValue({ rows: [{ person_id: 'p-mom', display_name: 'Mom' }] } as never);
+      const matcher = makeMatcher('immediate');
+      const item = makeMessageItem({ app: 'sms', sender: '+15550001111', body: 'call me' });
+      await processMessage(es, 'user-1', item, pool, matcher);
+
+      // matcher now receives platform / conversation_id / person_id (parity with WhatsApp)
+      expect(matcher.match).toHaveBeenCalledWith('user-1', expect.objectContaining({
+        platform: 'sms',
+        conversation_id: 'sms:+15550001111',
+        person_id: 'p-mom',
+      }));
+      // system message names the resolved contact and carries full identity in source routing
+      const call = vi.mocked(insertSystemMessage).mock.calls[0];
+      expect(call[2]).toContain('[SMS] Mom'); // resolved name, not the raw number
+      expect(call[5]).toEqual(expect.objectContaining({
+        platform: 'sms',
+        remote_jid: 'sms:+15550001111',
+        sender_name: '+15550001111',
+        contact_name: 'Mom',
+        person_id: 'p-mom',
+        from_me: false,
       }));
     });
 
