@@ -83,7 +83,7 @@ Dashboard (Next.js 15)
 
 ### Recovery procedure (post-2026-05-18 outage)
 
-If the stack goes down and a redeploy gets "manifest unknown" (image SHA pruned from GHCR) or "denied: denied" (GHCR creds expired):
+If the stack goes down and a redeploy gets "manifest unknown" (image SHA pruned from GHCR) or "denied: denied" (GHCR creds expired) — **for the recurring `denied` case see the full root cause + durable fix in `docs/runbooks/ghcr-shared-credential.md`** (shared host credential clobbered by ephemeral `GITHUB_TOKEN` logins):
 
 1. SSH to `root@95.216.23.208`. Run `echo $PAT | docker login ghcr.io -u arnonzamir --password-stdin` with a fresh `read:packages` PAT.
 2. `cd /data/coolify/services/xkkcc0g4o48kkcows8488so4 && docker compose pull && docker compose up -d` — **NEVER use `--remove-orphans`** (it destroyed 7 manually-started containers on 2026-05-18). If a container needs removal, name it explicitly.
