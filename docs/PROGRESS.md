@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Fix: gtd `check_messages`/`send_message` "fetch failed" — missing GATEWAY_URL (2026-05-22)
+The agent's channel bridge (`check_messages` / `send_message` / `list_conversations`, which live on the **gtd** MCP in `tools/chat.ts`) was throwing "fetch failed" — a connection-level error, not an HTTP status — so inbound web/Telegram/WhatsApp messages couldn't be pulled and replies couldn't be sent. Root cause: the `gtd` service in `docker/docker-compose.prod.yml` had **no `GATEWAY_URL`** env, so `gtd/src/utils/env.ts` fell back to `http://localhost:3006`; the gtd container listens on 3000 and isn't the gateway, so every chat fetch connection-refused. The token the chat tools hand-roll is fine (`validateToken` only checks the HMAC over the payload + reads `uid`). Fix: set `GATEWAY_URL: http://gateway:3000` on the gtd service (the internal address the dashboard already uses). Config-only; ships via the compose scp on deploy. GTD MCP itself was always healthy — only its gateway-calling chat tools were affected.
+
 ### Narrative consolidation ON by default (2026-05-22)
 Flipped the `narrative-consolidation` scheduler from default-OFF to **default-ON** (`scheduler/index.ts`: `narrative_consolidation_enabled ?? true`). It now fires daily (~3am, after journal consolidation) nudging the agent to refresh any narrative with ≥5 new observations since `last_consolidated_at`. This closes the loop with the strengthened journaling: the agent records observations constantly *and* now distills them into current summaries on a schedule, instead of leaving raw observations to pile up until a manual `/review`. A per-user `narrative_consolidation_enabled=false` still disables it (nullish-coalesce, so explicit false wins).
 

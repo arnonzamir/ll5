@@ -127,6 +127,10 @@ services:
       USER_ID: ${USER_ID}
       AUTH_SECRET: ${AUTH_SECRET}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
+      # gtd chat tools (check_messages/send_message/list_conversations) call the
+      # gateway over the internal network. Without this, env.ts falls back to
+      # localhost:3006 and every chat fetch fails with "fetch failed".
+      GATEWAY_URL: http://gateway:3000
     depends_on:
       postgres:
         condition: service_healthy
