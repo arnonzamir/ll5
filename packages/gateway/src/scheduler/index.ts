@@ -145,12 +145,12 @@ async function startSchedulersForUser(
   journalConsolidationScheduler.start();
   schedulers.push(journalConsolidationScheduler);
 
-  // Narrative consolidation — default OFF. Enable via
-  // user_settings.scheduler.narrative_consolidation_enabled = true.
-  // When enabled, fires once a day at configured hour (default 3am, an hour
-  // after journal consolidation so the agent has rested user_model first).
+  // Narrative consolidation — default ON (2026-05-22). Disable per-user via
+  // user_settings.scheduler.narrative_consolidation_enabled = false.
+  // Fires once a day at configured hour (default 3am, an hour after journal
+  // consolidation so the agent has refreshed user_model first).
   const narrativeConsolidationScheduler = new NarrativeConsolidationScheduler(pgPool, {
-    enabled: (sched['narrative_consolidation_enabled'] as unknown as boolean) ?? false,
+    enabled: (sched['narrative_consolidation_enabled'] as unknown as boolean) ?? true,
     consolidationHour: s('narrative_consolidation_hour', 3),
     timezone, userId,
   });

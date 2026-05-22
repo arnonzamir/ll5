@@ -10,8 +10,8 @@ interface NarrativeConsolidationConfig {
 }
 
 /**
- * Periodic narrative consolidation trigger. Default-off; enable per-user via
- * user_settings.scheduler.narrative_consolidation_enabled = true.
+ * Periodic narrative consolidation trigger. Default-on; disable per-user via
+ * user_settings.scheduler.narrative_consolidation_enabled = false.
  *
  * The scheduler doesn't itself decide which narratives to consolidate — it just
  * nudges the agent to scan list_narratives for threads that have accumulated
@@ -28,7 +28,7 @@ export class NarrativeConsolidationScheduler {
 
   start(): void {
     if (!this.config.enabled) {
-      logger.info('[NarrativeConsolidationScheduler][start] Disabled — skipping (enable via user_settings.scheduler.narrative_consolidation_enabled)');
+      logger.info('[NarrativeConsolidationScheduler][start] Disabled — skipping (re-enable via user_settings.scheduler.narrative_consolidation_enabled=true)');
       return;
     }
     logger.info('[NarrativeConsolidationScheduler][start] Started', {
