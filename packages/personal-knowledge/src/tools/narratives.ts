@@ -74,9 +74,11 @@ export function registerNarrativeTools(
     [
       'Quietly record an atomic observation about the user\'s world. Tag it with one or more subjects',
       '(person, place, group, topic). Use this constantly during conversation processing — it\'s the',
-      'substrate for narratives. Confidence: `high` for explicit user statements, `medium` for clear',
-      'implication, `low` for inference. Sensitive=true for tender topics (mood, self-esteem, kids,',
-      'marital, money worry); flag is informational, not gating.',
+      'substrate for narratives, and it is cheap, append-only, and silent. Default to noting: if you',
+      'can name a person, place, group, topic, mood, preference, or plan, record it rather than',
+      'skipping — skipped detail is substrate lost for good. When in doubt, note it. Confidence: `high`',
+      'for explicit user statements, `medium` for clear implication, `low` for inference. Sensitive=true',
+      'for tender topics (mood, self-esteem, kids, marital, money worry); flag is informational, not gating.',
     ].join(' '),
     {
       subjects: z.array(subjectSchema).min(1).describe('1+ subjects this observation is about'),
