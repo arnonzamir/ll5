@@ -75,7 +75,7 @@ export async function exportUserData(
     { name: 'gtd_horizons', query: 'SELECT * FROM gtd_horizons WHERE user_id = $1' },
     { name: 'gtd_inbox', query: 'SELECT * FROM gtd_inbox WHERE user_id = $1' },
     { name: 'chat_messages', query: 'SELECT id, conversation_id, channel, direction, role, content, status, created_at FROM chat_messages WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5000' },
-    { name: 'notification_rules', query: 'SELECT * FROM notification_rules WHERE user_id = $1' },
+    { name: 'contact_settings', query: 'SELECT * FROM contact_settings WHERE user_id = $1' },
     { name: 'user_settings', query: 'SELECT * FROM user_settings WHERE user_id = $1' },
   ];
 

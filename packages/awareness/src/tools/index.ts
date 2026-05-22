@@ -13,7 +13,6 @@ import { registerMessageTools } from './messages.js';
 import { registerEntityStatusTools } from './entity-statuses.js';
 import { registerNotableEventTools } from './notable-events.js';
 import { registerSituationTools } from './situation.js';
-import { registerNotificationRuleTools } from './notification-rules.js';
 import { registerJournalTools } from './journal.js';
 import { registerMediaTools } from './media.js';
 import { registerGeoSearchTools } from './geo-search.js';
@@ -35,8 +34,8 @@ export function registerAllTools(
   repos: Repositories,
   getUserId: () => string,
   timezone: string,
-  gatewayUrl?: string,
-  authSecret?: string,
+  _gatewayUrl?: string,
+  _authSecret?: string,
   esClient?: Client,
 ): void {
   if (!esClient) {
@@ -59,9 +58,6 @@ export function registerAllTools(
     getUserId,
     timezone,
   );
-  if (gatewayUrl && authSecret) {
-    registerNotificationRuleTools(server, getUserId, gatewayUrl, authSecret);
-  }
   if (esClient) {
     registerJournalTools(server, esClient, getUserId);
     registerMediaTools(server, esClient, getUserId);

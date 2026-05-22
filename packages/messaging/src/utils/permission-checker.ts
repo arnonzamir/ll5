@@ -6,11 +6,10 @@ export type ConversationPriority = 'agent' | 'immediate' | 'batch' | 'ignore';
  * Resolve the agent's permission for a conversation. Used by read_messages
  * (blocks 'ignore') and by send_whatsapp / send_telegram (require 'agent').
  *
- * Reads `contact_settings.permission` first — that's the unified field the
- * dashboard writes to. Falls back to the legacy `notification_rules.priority`
- * field for any conversation that hasn't been migrated yet.
+ * Reads `contact_settings.permission` — the unified field for all per-contact /
+ * per-chat settings, written by both the dashboard and the messaging MCP.
  *
- * Returns null when neither table has a row for this conversation. Callers
+ * Returns null when contact_settings has no row for this conversation. Callers
  * treat null as default-input authority (read OK, send blocked).
  *
  * Mapping from contact_settings.permission (3 values) onto the legacy
@@ -25,7 +24,7 @@ export async function getConversationPriority(
   platform: string,
   conversationId: string,
 ): Promise<ConversationPriority | null> {
-  // Step 1: contact_settings via messaging_contacts join. Handles both
+  // Resolve contact_settings via the messaging_contacts join. Handles both
   // group (target_type='group', target_id=conversation JID) and 1:1
   // (target_type='person', target_id=KB person_id) shapes.
   const csResult = await pool.query<{ permission: string }>(
@@ -43,21 +42,9 @@ export async function getConversationPriority(
      LIMIT 1`,
     [userId, platform, conversationId],
   );
-  if (csResult.rows.length > 0) {
-    const perm = csResult.rows[0].permission;
-    if (perm === 'agent')  return 'agent';
-    if (perm === 'ignore') return 'ignore';
-    return 'batch'; // 'input' — read OK, send blocked
-  }
-
-  // Step 2: legacy notification_rules fallback.
-  const nrResult = await pool.query<{ priority: string }>(
-    `SELECT priority FROM notification_rules
-     WHERE user_id = $1 AND rule_type = 'conversation'
-       AND match_value = $2 AND platform = $3
-     LIMIT 1`,
-    [userId, conversationId, platform],
-  );
-  if (nrResult.rows.length === 0) return null;
-  return nrResult.rows[0].priority as ConversationPriority;
+  if (csResult.rows.length === 0) return null;
+  const perm = csResult.rows[0].permission;
+  if (perm === 'agent')  return 'agent';
+  if (perm === 'ignore') return 'ignore';
+  return 'batch'; // 'input' — read OK, send blocked
 }

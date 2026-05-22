@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { processMessage } from '../processors/message.js';
 import type { Pool } from 'pg';
 import type { Client } from '@elastic/elasticsearch';
-import type { NotificationRuleMatcher } from '../processors/notification-rules.js';
+import type { ContactRoutingResolver } from '../processors/contact-routing.js';
 import type { PushMessageItem } from '../types/index.js';
 
 // ---------------------------------------------------------------------------
@@ -29,11 +29,11 @@ function makePgPool(): Pool {
   } as unknown as Pool;
 }
 
-function makeMatcher(priority: string | null = null): NotificationRuleMatcher {
+function makeMatcher(priority: string | null = null): ContactRoutingResolver {
   return {
     match: vi.fn().mockResolvedValue(priority),
     shouldDownloadImages: vi.fn().mockResolvedValue(false),
-  } as unknown as NotificationRuleMatcher;
+  } as unknown as ContactRoutingResolver;
 }
 
 function makeMessageItem(overrides: Partial<PushMessageItem> = {}): PushMessageItem {

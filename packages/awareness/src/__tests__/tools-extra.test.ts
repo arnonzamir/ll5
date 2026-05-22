@@ -25,7 +25,6 @@ import { registerEntityStatusTools } from '../tools/entity-statuses.js';
 import { registerLocationTools } from '../tools/location.js';
 import { registerMediaTools } from '../tools/media.js';
 import { registerNotableEventTools } from '../tools/notable-events.js';
-import { registerNotificationRuleTools } from '../tools/notification-rules.js';
 import { registerPhoneStatusTools } from '../tools/phone-status.js';
 import { registerWifiTools } from '../tools/wifi.js';
 import { captureTools, parseToolResponse, makeMockEsClient } from './_helpers.js';
@@ -856,131 +855,6 @@ describe('acknowledge_events tool handler', () => {
     const response = await tools.get('acknowledge_events')!({ event_ids: [] });
     expect(ack).toHaveBeenCalledWith(USER_ID, []);
     expect(parseToolResponse<{ acknowledged_count: number }>(response).acknowledged_count).toBe(0);
-  });
-});
-
-// ===========================================================================
-// NOTIFICATION RULES — list/create/delete (all proxy to gateway)
-// ===========================================================================
-
-describe('notification-rule tool handlers', () => {
-  let fetchSpy: ReturnType<typeof vi.fn>;
-  beforeEach(() => {
-    vi.clearAllMocks();
-    fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-  });
-
-  function mockResp(body: unknown, ok = true, status = 200): Response {
-    return {
-      ok, status,
-      json: async () => body,
-      text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
-    } as unknown as Response;
-  }
-
-  describe('list_notification_rules', () => {
-    it('GETs /notification-rules with a bearer token and returns the body', async () => {
-      fetchSpy.mockResolvedValue(mockResp({ rules: [{ id: 1 }] }));
-      const tools = captureTools((s) => registerNotificationRuleTools(s, getUserId, 'http://gw', 'secret'));
-
-      const response = await tools.get('list_notification_rules')!({});
-
-      const [url, init] = fetchSpy.mock.calls[0];
-      expect(url).toBe('http://gw/notification-rules');
-      expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer mock-token-xyz' });
-
-      expect(response.isError).toBeUndefined();
-      const parsed = parseToolResponse<{ rules: Array<{ id: number }> }>(response);
-      expect(parsed.rules[0].id).toBe(1);
-    });
-
-    it('returns isError envelope when gateway returns non-ok', async () => {
-      fetchSpy.mockResolvedValue(mockResp('forbidden', false, 403));
-      const tools = captureTools((s) => registerNotificationRuleTools(s, getUserId, 'http://gw', 'secret'));
-
-      const response = await tools.get('list_notification_rules')!({});
-      expect(response.isError).toBe(true);
-      expect(response.content[0].text).toMatch(/403 forbidden/);
-    });
-
-    it('returns isError envelope when fetch throws', async () => {
-      fetchSpy.mockRejectedValue(new Error('econnrefused'));
-      const tools = captureTools((s) => registerNotificationRuleTools(s, getUserId, 'http://gw', 'secret'));
-
-      const response = await tools.get('list_notification_rules')!({});
-      expect(response.isError).toBe(true);
-      expect(response.content[0].text).toMatch(/econnrefused/);
-    });
-  });
-
-  describe('create_notification_rule', () => {
-    it('POSTs the rule JSON with default priority=immediate', async () => {
-      fetchSpy.mockResolvedValue(mockResp({ id: 7 }));
-      const tools = captureTools((s) => registerNotificationRuleTools(s, getUserId, 'http://gw', 'secret'));
-
-      const response = await tools.get('create_notification_rule')!({
-        rule_type: 'sender', match_value: 'Alice',
-      });
-
-      const [, init] = fetchSpy.mock.calls[0];
-      expect((init as RequestInit).method).toBe('POST');
-      expect((init as RequestInit).headers).toMatchObject({
-        Authorization: 'Bearer mock-token-xyz',
-        'Content-Type': 'application/json',
-      });
-      expect(JSON.parse(String((init as RequestInit).body))).toEqual({
-        rule_type: 'sender', match_value: 'Alice', priority: 'immediate',
-      });
-      expect(response.isError).toBeUndefined();
-      expect(parseToolResponse<{ id: number }>(response).id).toBe(7);
-    });
-
-    it('forwards explicit priority and platform fields', async () => {
-      fetchSpy.mockResolvedValue(mockResp({ id: 8 }));
-      const tools = captureTools((s) => registerNotificationRuleTools(s, getUserId, 'http://gw', 'secret'));
-
-      await tools.get('create_notification_rule')!({
-        rule_type: 'conversation', match_value: 'conv-123',
-        priority: 'agent', platform: 'whatsapp',
-      });
-
-      const body = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body));
-      expect(body.priority).toBe('agent');
-      expect(body.platform).toBe('whatsapp');
-    });
-
-    it('returns isError on non-ok response', async () => {
-      fetchSpy.mockResolvedValue(mockResp('invalid', false, 400));
-      const tools = captureTools((s) => registerNotificationRuleTools(s, getUserId, 'http://gw', 'secret'));
-
-      const response = await tools.get('create_notification_rule')!({ rule_type: 'app', match_value: 'whatsapp' });
-      expect(response.isError).toBe(true);
-    });
-  });
-
-  describe('delete_notification_rule', () => {
-    it('DELETEs /notification-rules/:id with a bearer token', async () => {
-      fetchSpy.mockResolvedValue(mockResp({ deleted: true }));
-      const tools = captureTools((s) => registerNotificationRuleTools(s, getUserId, 'http://gw', 'secret'));
-
-      const response = await tools.get('delete_notification_rule')!({ rule_id: 'r-42' });
-
-      const [url, init] = fetchSpy.mock.calls[0];
-      expect(url).toBe('http://gw/notification-rules/r-42');
-      expect((init as RequestInit).method).toBe('DELETE');
-      expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer mock-token-xyz' });
-
-      expect(response.isError).toBeUndefined();
-    });
-
-    it('returns isError on non-ok status', async () => {
-      fetchSpy.mockResolvedValue(mockResp('nope', false, 404));
-      const tools = captureTools((s) => registerNotificationRuleTools(s, getUserId, 'http://gw', 'secret'));
-
-      const response = await tools.get('delete_notification_rule')!({ rule_id: 'r-missing' });
-      expect(response.isError).toBe(true);
-    });
   });
 });
 

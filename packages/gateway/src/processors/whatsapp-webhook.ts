@@ -8,7 +8,7 @@ import { insertSystemMessage } from '../utils/system-message.js';
 import { escalateConversation } from '../utils/escalation.js';
 import { decrypt } from '../utils/encryption.js';
 import { buildSourceRouting, enrichContact } from './message-identity.js';
-import type { NotificationRuleMatcher } from './notification-rules.js';
+import type { ContactRoutingResolver } from './contact-routing.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 
@@ -91,7 +91,7 @@ interface EvolutionWebhookPayload {
 export async function processWhatsAppWebhook(
   es: Client,
   pgPool: Pool,
-  matcher: NotificationRuleMatcher,
+  matcher: ContactRoutingResolver,
   userId: string,
   payload: EvolutionWebhookPayload,
   encryptionKey?: string,

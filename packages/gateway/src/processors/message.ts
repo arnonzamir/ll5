@@ -5,7 +5,7 @@ import type { PushMessageItem } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
 import { buildSourceRouting, enrichContact, parseMessageAuthor } from './message-identity.js';
-import type { NotificationRuleMatcher } from './notification-rules.js';
+import type { ContactRoutingResolver } from './contact-routing.js';
 
 /** Display label for an app: "SMS", "Slack", "Gmail", "WhatsApp", … */
 function appLabel(app: string): string {
@@ -29,7 +29,7 @@ export async function processMessage(
   userId: string,
   item: PushMessageItem,
   pgPool?: Pool,
-  matcher?: NotificationRuleMatcher,
+  matcher?: ContactRoutingResolver,
 ): Promise<void> {
   const isGroup = !!item.is_group;
   const fromMe = !!item.from_me;

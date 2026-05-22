@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response, RequestHandler, Router } from 'express';
 import type { Pool } from 'pg';
 import type { Client } from '@elastic/elasticsearch';
-import type { NotificationRuleMatcher } from '../processors/notification-rules.js';
+import type { ContactRoutingResolver } from '../processors/contact-routing.js';
 import { createWhatsappWebhookRouter } from '../whatsapp-webhook-route.js';
 
 // ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@ function buildRouter(): { router: Router; pgPool: Pool } {
     match: vi.fn().mockResolvedValue(null),
     shouldDownloadMedia: vi.fn().mockResolvedValue(false),
     shouldDownloadImages: vi.fn().mockResolvedValue(false),
-  } as unknown as NotificationRuleMatcher;
+  } as unknown as ContactRoutingResolver;
 
   const router = createWhatsappWebhookRouter({
     pgPool,

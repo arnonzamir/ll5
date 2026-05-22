@@ -23,7 +23,7 @@ import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { processCalendar } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
-import { NotificationRuleMatcher } from './processors/notification-rules.js';
+import { ContactRoutingResolver } from './processors/contact-routing.js';
 import { processPhoneContacts } from './processors/phone-contacts.js';
 import { processPhoneStatus } from './processors/phone-status.js';
 import { processWifi } from './processors/wifi.js';
@@ -119,7 +119,7 @@ async function processItem(
   itemIndex: number,
   config: EnvConfig,
   pgPool?: pg.Pool,
-  matcher?: NotificationRuleMatcher,
+  matcher?: ContactRoutingResolver,
 ): Promise<ItemResult> {
   try {
     // Check data source toggles (user_settings.data_sources)
@@ -209,58 +209,10 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // Mount chat routes
   app.use('/chat', createChatRouter(pgPool, config.authSecret, esClient));
 
-  // Create notification rule matcher
-  const notificationMatcher = new NotificationRuleMatcher(pgPool);
+  // Resolves message routing/media from contact_settings (the unified source of truth).
+  const notificationMatcher = new ContactRoutingResolver(pgPool);
 
-  // --- Notification rules CRUD ---
   const authMw = chatAuthMiddleware(config.authSecret);
-
-  app.get('/notification-rules', authMw, async (req: Request, res: Response) => {
-    const userId = (req as any).userId;
-    const result = await pgPool.query(
-      'SELECT * FROM notification_rules WHERE user_id = $1 ORDER BY created_at',
-      [userId],
-    );
-    res.json({ rules: result.rows });
-  });
-
-  app.post('/notification-rules', authMw, async (req: Request, res: Response) => {
-    const userId = (req as any).userId;
-    const { rule_type, match_value, priority, platform, download_images } = req.body;
-    if (!rule_type || !match_value) {
-      res.status(400).json({ error: 'rule_type and match_value required' });
-      return;
-    }
-
-    // Conversation rules use upsert (one rule per conversation)
-    if (rule_type === 'conversation' && platform) {
-      const result = await pgPool.query(
-        `INSERT INTO notification_rules (user_id, rule_type, match_value, priority, platform, download_images)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (user_id, platform, match_value) WHERE rule_type = 'conversation'
-         DO UPDATE SET priority = EXCLUDED.priority, download_images = COALESCE(EXCLUDED.download_images, notification_rules.download_images)
-         RETURNING *`,
-        [userId, rule_type, match_value, priority || 'batch', platform, download_images ?? false],
-      );
-      res.status(201).json(result.rows[0]);
-      return;
-    }
-
-    const result = await pgPool.query(
-      'INSERT INTO notification_rules (user_id, rule_type, match_value, priority, platform) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [userId, rule_type, match_value, priority || 'immediate', platform || null],
-    );
-    res.status(201).json(result.rows[0]);
-  });
-
-  app.delete('/notification-rules/:id', authMw, async (req: Request, res: Response) => {
-    const userId = (req as any).userId;
-    await pgPool.query(
-      'DELETE FROM notification_rules WHERE id = $1 AND user_id = $2',
-      [req.params.id, userId],
-    );
-    res.json({ deleted: true });
-  });
 
   // --- FCM token management ---
 
