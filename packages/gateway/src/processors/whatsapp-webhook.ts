@@ -171,19 +171,30 @@ export async function processWhatsAppWebhook(
     if (isGroup) groupName = remoteJid;
   }
 
-  // Resolve sender to person_id via messaging_contacts
+  // Resolve the conversation PEER to a known person + display name via
+  // messaging_contacts. For a 1:1, remote_jid is the peer whether the message is
+  // inbound or fromMe — so this also identifies the RECIPIENT of outbound
+  // messages, which the agent needs to answer "who did I message?".
   let personId: string | null = null;
+  let contactDisplayName: string | null = null;
   if (!isGroup) {
     try {
       const contactResult = await pgPool.query(
-        "SELECT person_id FROM messaging_contacts WHERE platform = 'whatsapp' AND platform_id = $1 AND person_id IS NOT NULL LIMIT 1",
+        "SELECT person_id, display_name FROM messaging_contacts WHERE platform = 'whatsapp' AND platform_id = $1 LIMIT 1",
         [remoteJid],
       );
       personId = contactResult.rows[0]?.person_id ?? null;
+      contactDisplayName = contactResult.rows[0]?.display_name ?? null;
     } catch {
       // Non-critical — fall back to name-based matching
     }
   }
+
+  // The peer name the agent reasons about: contact display name > conversation
+  // name > inbound sender > bare JID. For a group, the peer is the group.
+  const peerName: string = isGroup
+    ? (groupName ?? remoteJid)
+    : (contactDisplayName || conversationName || (!fromMe ? sender : '') || remoteJid.split('@')[0]);
 
   // Enrich contact display_name from pushName (both 1:1 and group senders)
   const pushName = data.pushName;
@@ -371,12 +382,26 @@ export async function processWhatsAppWebhook(
     // Notify agent for conversations with immediate or agent priority
     if (priority === 'immediate' || priority === 'agent') {
       const truncBody = text.length > 2000 ? text.slice(0, 2000) + '...' : text;
-      const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
       const mediaInfo = hasMedia && mediaUrl ? ` [${mediaType} attached: ${mediaUrl}${mediaDurationSec ? ` (${mediaDurationSec}s)` : ''}]` : hasMedia ? ` [${mediaType} attached]` : '';
+      // Name the recipient so the agent knows exactly who the user messaged, and
+      // attach source routing (peer name + person_id + from_me) for context.
+      const dest = isGroup ? `group: ${groupName ?? remoteJid}` : peerName;
       await insertSystemMessage(
         pgPool,
         userId,
-        `[WhatsApp] You sent${groupInfo}: "${truncBody}"${mediaInfo}`,
+        `[WhatsApp] You → ${dest}: "${truncBody}"${mediaInfo}`,
+        undefined, // notify
+        undefined, // schedulerEvent
+        {
+          platform: 'whatsapp',
+          remote_jid: remoteJid,
+          sender_name: '(me)',
+          contact_name: peerName || undefined,
+          person_id: personId ?? undefined,
+          from_me: true,
+          is_group: isGroup,
+          group_name: groupName ?? undefined,
+        },
       );
 
       await es.update({
@@ -386,7 +411,7 @@ export async function processWhatsAppWebhook(
         refresh: false,
       });
 
-      logger.info('[processWhatsAppWebhook][handle] Outbound message notified to agent', { isGroup, priority });
+      logger.info('[processWhatsAppWebhook][handle] Outbound message notified to agent', { isGroup, priority, to: dest });
     }
     return;
   }
@@ -446,19 +471,23 @@ export async function processWhatsAppWebhook(
 
   if (priority === 'immediate' || priority === 'agent') {
     const truncBody = text.length > 200 ? text.slice(0, 200) + '...' : text;
-    const groupInfo = isGroup && groupName ? ` (group: ${groupName})` : '';
     const mediaInfo = hasMedia && mediaUrl ? ` [${mediaType} attached: ${mediaUrl}${mediaDurationSec ? ` (${mediaDurationSec}s)` : ''}]` : hasMedia ? ` [${mediaType} attached]` : '';
+    // Inbound only (fromMe returns earlier). Header = sender (+ group context).
+    const header = `${sender}${isGroup && groupName ? ` (group: ${groupName})` : ''}`;
     // No FCM notify — immediate WhatsApp goes to agent via system message → SSE only
     await insertSystemMessage(
       pgPool,
       userId,
-      `[WhatsApp] ${sender}${groupInfo}: "${truncBody}"${mediaInfo}`,
+      `[WhatsApp] ${header}: "${truncBody}"${mediaInfo}`,
       undefined, // notify
       undefined, // schedulerEvent
       {
         platform: 'whatsapp',
         remote_jid: remoteJid,
         sender_name: sender,
+        contact_name: peerName || undefined,
+        person_id: personId ?? undefined,
+        from_me: fromMe,
         is_group: isGroup,
         group_name: groupName ?? undefined,
       },

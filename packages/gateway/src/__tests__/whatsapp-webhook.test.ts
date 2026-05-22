@@ -246,7 +246,10 @@ describe('processWhatsAppWebhook', () => {
       expect(insertSystemMessage).toHaveBeenCalledWith(
         pool,
         'user-1',
-        expect.stringContaining('You sent'),
+        expect.stringContaining('You →'), // names the recipient
+        undefined,
+        undefined,
+        expect.objectContaining({ from_me: true, platform: 'whatsapp' }),
       );
     });
 
@@ -341,13 +344,14 @@ describe('processWhatsAppWebhook', () => {
         expect.stringContaining('Charlie'),
         undefined, // notify
         undefined, // schedulerEvent
-        {
+        expect.objectContaining({
           platform: 'whatsapp',
           remote_jid: '972501234567@s.whatsapp.net',
           sender_name: 'Charlie',
+          contact_name: 'Charlie', // resolved peer (falls back to inbound sender)
+          from_me: false,
           is_group: false,
-          group_name: undefined,
-        },
+        }),
       );
     });
 

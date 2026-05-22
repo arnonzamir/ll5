@@ -20,7 +20,12 @@ export interface SourceRoutingMeta {
   platform: string;         // 'whatsapp', 'telegram'
   remote_jid: string;       // conversation ID on the platform
   account_id?: string;      // messaging account UUID
-  sender_name?: string;     // display name of sender
+  sender_name?: string;     // display name of the message author ('(me)' when from_me)
+  contact_name?: string;    // resolved display name of the conversation PEER — the
+                            // recipient when from_me, the sender when inbound. This is
+                            // who the agent reasons about ("who did I message?").
+  person_id?: string;       // resolved known-person id for the peer, if linked in KB
+  from_me?: boolean;        // true = the user sent this (outbound); false = inbound
   is_group?: boolean;
   group_name?: string;
 }
