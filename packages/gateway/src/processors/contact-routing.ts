@@ -72,7 +72,14 @@ export class ContactRoutingResolver {
     return null;
   }
 
-  /** Check if a conversation/person has media download enabled. */
+  /**
+   * Check if a conversation/person has media download enabled.
+   *
+   * Defaults differ by shape: **groups default OFF** (opt-in, to avoid pulling
+   * every image from large/noisy chats), while **1:1 conversations default ON**
+   * — direct messages include pictures unless the contact is explicitly set to
+   * download_media=false.
+   */
   async shouldDownloadMedia(
     userId: string,
     _platform: string,
@@ -84,10 +91,11 @@ export class ContactRoutingResolver {
       const groupSettings = await this.getContactSettings(userId, 'group', conversationId);
       return groupSettings?.download_media ?? false;
     }
+    // 1:1 — default to downloading pictures unless explicitly disabled.
     if (personId) {
       const personSettings = await this.getContactSettings(userId, 'person', personId);
-      return personSettings?.download_media ?? false;
+      return personSettings?.download_media ?? true;
     }
-    return false;
+    return true;
   }
 }

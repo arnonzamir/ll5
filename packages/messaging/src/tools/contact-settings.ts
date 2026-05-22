@@ -86,7 +86,8 @@ export function registerContactSettingsTools(
               target_type: resolved.targetType,
               target_id: resolved.targetId,
               configured: false,
-              defaults: { routing: 'batch', permission: 'input', download_media: false },
+              // 1:1 (person) includes pictures by default; groups are opt-in.
+              defaults: { routing: 'batch', permission: 'input', download_media: resolved.targetType === 'person' },
             }, null, 2),
           }],
         };
