@@ -101,11 +101,14 @@ export interface UserSettings {
     start_hour: string; // "09:00"
     end_hour: string;   // "17:00"
   };
+  /** The user's own display name(s), used to detect outbound messages (e.g. Slack channel posts). */
+  self_names: string[];
 }
 
 const DEFAULT_SETTINGS: UserSettings = {
   timezone: "Asia/Jerusalem",
   work_week: { start_day: 0, start_hour: "09:00", end_hour: "17:00" },
+  self_names: [],
 };
 
 export async function getUserSettings(): Promise<{ settings: UserSettings; error: string | null }> {
@@ -123,6 +126,9 @@ export async function getUserSettings(): Promise<{ settings: UserSettings; error
     }
     const raw = (await res.json()) as Record<string, unknown>;
     const ww = (raw.work_week ?? {}) as Record<string, unknown>;
+    const selfNames = Array.isArray(raw.self_names)
+      ? (raw.self_names as unknown[]).filter((x): x is string => typeof x === "string")
+      : [];
     return {
       settings: {
         timezone: (raw.timezone as string) ?? DEFAULT_SETTINGS.timezone,
@@ -131,6 +137,7 @@ export async function getUserSettings(): Promise<{ settings: UserSettings; error
           start_hour: (ww.start_hour as string) ?? DEFAULT_SETTINGS.work_week.start_hour,
           end_hour: (ww.end_hour as string) ?? DEFAULT_SETTINGS.work_week.end_hour,
         },
+        self_names: selfNames,
       },
       error: null,
     };

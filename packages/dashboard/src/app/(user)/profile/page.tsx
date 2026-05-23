@@ -33,7 +33,10 @@ export default function ProfilePage() {
   const [settings, setSettings] = useState<UserSettings>({
     timezone: "Asia/Jerusalem",
     work_week: { start_day: 0, start_hour: "09:00", end_hour: "17:00" },
+    self_names: [],
   });
+  const [selfNamesText, setSelfNamesText] = useState("");
+  const [selfNamesSaved, setSelfNamesSaved] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -50,9 +53,29 @@ export default function ProfilePage() {
       setDisplayName(name);
       setPrimaryLanguage(lang);
       if (us.error) setSettingsError(us.error);
-      else setSettings(us.settings);
+      else {
+        setSettings(us.settings);
+        setSelfNamesText(us.settings.self_names.join(", "));
+      }
     });
   }, []);
+
+  function handleSaveSelfNames() {
+    const names = selfNamesText
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    startTransition(async () => {
+      const result = await updateUserSettings({ self_names: names });
+      if (result.ok) {
+        setSettings((s) => ({ ...s, self_names: names }));
+        setSelfNamesSaved(true);
+        setTimeout(() => setSelfNamesSaved(false), 2000);
+      } else {
+        setSettingsError(result.error);
+      }
+    });
+  }
 
   function handleSaveDisplayName() {
     startTransition(async () => {
@@ -168,6 +191,43 @@ export default function ProfilePage() {
           </div>
           <p className="text-xs text-gray-400">
             This name is shown in the navigation bar and used across the system.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Your Names (outbound detection) */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-gray-500">
+            Your Names (outbound detection)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Input
+              value={selfNamesText}
+              onChange={(e) => {
+                setSelfNamesText(e.target.value);
+                setSelfNamesSaved(false);
+              }}
+              placeholder="e.g. Arnon Zamir, Arnon"
+              className="flex-1"
+            />
+            <Button size="sm" onClick={handleSaveSelfNames} disabled={isPending}>
+              {selfNamesSaved ? (
+                <>
+                  <Check className="h-4 w-4 mr-1" />
+                  Saved
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-gray-400">
+            Comma-separated. The names you appear as in chats. Used to flag your own
+            messages as outbound when the source can&apos;t tell — chiefly Slack
+            channel posts captured off-screen.
           </p>
         </CardContent>
       </Card>
