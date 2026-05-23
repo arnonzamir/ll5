@@ -12,6 +12,19 @@ import { sendFCMNotification } from './utils/fcm-sender.js';
 import type { NotificationLevel } from './utils/fcm-sender.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
+// Public uploads: served WITHOUT auth from /public with crypto-random
+// (unguessable) filenames, so the agent can share an openable image link.
+const PUBLIC_UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/public-uploads' : './public-uploads';
+
+/** Force a safe, sniffing-proof extension for public files from the (allowlisted) mime. */
+const MIME_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
+};
+
+/** A public upload is requested via `?public=1` (or `=true`) on /chat/upload. */
+function isPublicUpload(req: Request): boolean {
+  return req.query.public === '1' || req.query.public === 'true';
+}
 
 /** Conversations with archived_at < this window still accept inbound writes
  *  (rerouted to the current active). Prevents silent drops during the
@@ -32,10 +45,18 @@ const VALID_CHANNELS = ['web', 'telegram', 'whatsapp', 'cli', 'android', 'system
 const VALID_REACTIONS = ['acknowledge', 'reject', 'agree', 'disagree', 'confused', 'thinking'];
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, UPLOAD_DIR);
+  destination: (req, _file, cb) => {
+    cb(null, isPublicUpload(req) ? PUBLIC_UPLOAD_DIR : UPLOAD_DIR);
   },
   filename: (req, file, cb) => {
+    if (isPublicUpload(req)) {
+      // No owner prefix (it's public); 24 random bytes = unguessable. Extension
+      // forced from the allowlisted mime so a crafted name can't make us serve
+      // e.g. .html off our own domain.
+      const ext = MIME_EXT[file.mimetype] ?? 'bin';
+      cb(null, `${crypto.randomBytes(24).toString('hex')}.${ext}`);
+      return;
+    }
     const userId = (req as AuthenticatedRequest).userId;
     const ext = path.extname(file.originalname).slice(1) || 'bin';
     const randomHex = crypto.randomBytes(16).toString('hex');
@@ -978,6 +999,8 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
     }
 
     const filename = req.file.filename;
+    const isPublic = isPublicUpload(req);
+    const relUrl = isPublic ? `/public/${filename}` : `/uploads/${filename}`;
 
     if (esClient) {
       try {
@@ -985,11 +1008,12 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
           index: 'll5_media',
           document: {
             user_id: (req as AuthenticatedRequest).userId,
-            url: `/uploads/${filename}`,
+            url: relUrl,
             mime_type: req.file.mimetype,
             filename: req.file.originalname,
             size_bytes: req.file.size,
             source: 'chat',
+            public: isPublic,
             created_at: new Date().toISOString(),
           },
         });
@@ -1000,9 +1024,12 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       }
     }
 
+    // For public uploads, return an absolute, openable URL the agent can share.
+    const base = process.env.GATEWAY_PUBLIC_URL || `https://${req.get('host')}`;
     res.status(201).json({
       id: filename,
-      url: `/uploads/${filename}`,
+      url: relUrl,
+      ...(isPublic ? { public_url: `${base}${relUrl}` } : {}),
       filename: req.file.originalname,
     });
   });
