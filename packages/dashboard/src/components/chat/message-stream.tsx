@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { Message, Reaction } from "@/lib/chat/types";
 import { buildRenderItems, indexReactions } from "@/lib/chat/format";
-import { CompactGroup, MessageBubble } from "./message-bubble";
+import { CompactGroup, MessageBubble, ThinkingLine } from "./message-bubble";
 
 interface Props {
   messages: Message[];
@@ -85,6 +85,9 @@ export function MessageStream({
           items.map((item, i) => {
             if (item.kind === "compact") {
               return <CompactGroup key={`cg-${i}`} items={item.items} />;
+            }
+            if (item.kind === "thinking") {
+              return <ThinkingLine key={item.message.id} m={item.message} />;
             }
             return (
               <MessageBubble

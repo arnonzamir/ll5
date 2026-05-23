@@ -40,7 +40,9 @@ export function truncate(s: string | null | undefined, n = 80): string {
  *  parent. */
 export type RenderItem =
   | { kind: "bubble"; message: Message }
-  | { kind: "compact"; items: Message[] };
+  | { kind: "compact"; items: Message[] }
+  // Agent internal-voice (narrate). Stands alone — never folded into a tool-call group.
+  | { kind: "thinking"; message: Message };
 
 export function buildRenderItems(
   messages: Message[],
@@ -56,6 +58,12 @@ export function buildRenderItems(
     // store, etc.). Without this guard they render as empty unboxed-
     // assistant bubbles — visible as a sparkle with no text.
     if (!m.reaction && (m.content == null || m.content.trim() === "")) continue;
+    // narrate / internal voice renders standalone — emitting it here also ends any
+    // open compact group, so it visibly cuts the folded tool-call block.
+    if (m.metadata?.kind === "thinking") {
+      out.push({ kind: "thinking", message: m });
+      continue;
+    }
     if (m.display_compact) {
       const last = out[out.length - 1];
       if (last && last.kind === "compact" && closeInTime(last.items[last.items.length - 1], m)) {

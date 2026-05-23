@@ -720,12 +720,19 @@ export function ChatWidget() {
   // ---- Group messages for rendering: fold consecutive compact rows ---
   type RenderItem =
     | { kind: "bubble"; m: Message }
-    | { kind: "compact"; items: Message[] };
+    | { kind: "compact"; items: Message[] }
+    | { kind: "thinking"; m: Message };
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = [];
     for (const m of messages) {
       if (reactionIds.has(m.id)) continue; // reactions are rendered under parent
+      // narrate / internal voice renders standalone so it isn't hidden inside the
+      // collapsible "N system events" band; also ends any open compact group.
+      if (m.metadata?.kind === "thinking") {
+        items.push({ kind: "thinking", m });
+        continue;
+      }
       if (m.display_compact) {
         const last = items[items.length - 1];
         if (last && last.kind === "compact" && closeInTime(last.items[last.items.length - 1], m)) {
@@ -923,6 +930,8 @@ export function ChatWidget() {
           {renderItems.map((item, i) =>
             item.kind === "compact" ? (
               <CompactGroup key={`cg-${i}`} items={item.items} />
+            ) : item.kind === "thinking" ? (
+              <CompactRow key={item.m.id} m={item.m} />
             ) : (
               <MessageBubble
                 key={item.m.id}

@@ -103,6 +103,26 @@ export function ReplyQuote({ parent }: { parent: Message }) {
 // Compact system row + 60s grouping band
 // ---------------------------------------------------------------------------
 
+/**
+ * Agent internal-voice (narrate) line: asterisk-prefix-italic, like Claude
+ * Code's narration. No icon/time chip, dimmer than system rows. Rendered both
+ * standalone (so it breaks out of the folded tool-call group) and, defensively,
+ * for any thinking row that still lands inside a compact group.
+ */
+export function ThinkingLine({ m }: { m: Message }) {
+  return (
+    <div
+      className="flex items-start gap-2 py-0.5 px-1 text-[13px] text-ink-400 italic"
+      dir="auto"
+    >
+      <span className="text-ink-300 shrink-0 select-none">*</span>
+      <span className="flex-1 leading-snug whitespace-pre-wrap break-words">
+        {m.content ?? ""}
+      </span>
+    </div>
+  );
+}
+
 function CompactRow({ m }: { m: Message }) {
   const isThinking = m.metadata?.kind === "thinking";
   const time = new Date(m.created_at).toLocaleTimeString([], {
@@ -110,22 +130,7 @@ function CompactRow({ m }: { m: Message }) {
     minute: "2-digit",
   });
 
-  if (isThinking) {
-    // Thinking lines render asterisk-prefix-italic, like Claude Code's
-    // narration. No icon, no time chip — just the line, dimmer than system
-    // rows so it visually recedes.
-    return (
-      <div
-        className="flex items-start gap-2 py-0.5 px-1 text-[13px] text-ink-400 italic"
-        dir="auto"
-      >
-        <span className="text-ink-300 shrink-0 select-none">*</span>
-        <span className="flex-1 leading-snug whitespace-pre-wrap break-words">
-          {m.content ?? ""}
-        </span>
-      </div>
-    );
-  }
+  if (isThinking) return <ThinkingLine m={m} />;
 
   const Icon: LucideIcon = pickCompactIcon(m);
   return (
