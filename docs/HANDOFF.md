@@ -328,3 +328,5 @@ See docs/implementation/deployment-log.md for full details:
 
 
 
+
+_2026-05-24: gateway character-refresh nudge now re-anchors three habits (narrate, always-reply, one-voice/no-third-person-recap) mid-session._
