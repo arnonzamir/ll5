@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Fix: google/calendar MCP missing ELASTICSEARCH_URL (2026-05-23)
+The calendar MCP reported "no Elasticsearch" / `ES not configured`: the `google` service in `docker-compose.prod.yml` never set `ELASTICSEARCH_URL` (every other ES-using service — personal-knowledge, awareness, health, gateway — does). With it null, `google/src/server.ts` runs `esClient = null`, logs "ELASTICSEARCH_URL not set — calendar reads will fall back to live Google API", and the ES-backed calendar tool returns `"ES not configured"` (`calendar.ts:603`); calendar reads hit the live Google API every time instead of the cached `ll5_awareness_calendar` ES index. Added `ELASTICSEARCH_URL: http://elasticsearch:9200` + a `depends_on: elasticsearch (service_healthy)` to the google service. Config-only; ships via the compose scp on deploy. (Google OAuth itself was fine — verified connected, live `/api/events` → 200.)
+
 ### character-refresh re-anchors narrate + always-reply (2026-05-23)
 Two behaviors regressed after session-mirroring went live (the "you don't have to call reply just to be seen" framing): the agent stopped narrating multi-step work (~11/day → ~1/day) and stopped confirming completion of direct requests (did the work + journaled, no reply). Fixed in the agent persona (`ll5-run` CLAUDE.md), but CLAUDE.md only loads at session start — so also folded both into the gateway's 4-hourly **character-refresh** nudge (`scheduler/character-refresh.ts`) which re-asserts mid-session: (1) narrate your reasoning during multi-step work — activity markers are mechanical echoes, not narration; (2) always reply with a one-line confirmation when a direct request is done — a journal/update_*/marker is not a reply. Gateway typecheck + tests pass.
 

@@ -198,12 +198,18 @@ services:
       USER_ID: ${USER_ID}
       AUTH_SECRET: ${AUTH_SECRET}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
+      # Calendar reads/writes are cached in ES (ll5_awareness_calendar). Without
+      # this, server.ts logs "ELASTICSEARCH_URL not set — calendar reads will fall
+      # back to live Google API" and the ES-backed tools return "ES not configured".
+      ELASTICSEARCH_URL: http://elasticsearch:9200
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://mcp-google.noninoni.click/oauth/callback}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
     depends_on:
       postgres:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     deploy:
       resources:
