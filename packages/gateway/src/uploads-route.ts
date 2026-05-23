@@ -89,3 +89,34 @@ export function createUploadsRouter(deps: UploadsRouterDeps): Router {
 export function resolveUploadsDir(): string {
   return process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 }
+
+/** Public uploads dir, matching chat.ts PUBLIC_UPLOAD_DIR. */
+export function resolvePublicUploadsDir(): string {
+  return process.env.NODE_ENV === 'production' ? '/app/public-uploads' : './public-uploads';
+}
+
+/**
+ * Serve public uploads with NO auth — mount at `/public`. Files here have
+ * crypto-random, unguessable names (set in chat.ts), so the link is shareable
+ * but not enumerable. nosniff + no directory index + dotfile deny harden it.
+ */
+export function createPublicUploadsRouter(publicDir: string): Router {
+  const router = Router();
+  router.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+  });
+  router.use(
+    express.static(publicDir, {
+      dotfiles: 'deny',
+      fallthrough: false,
+      index: false,
+      maxAge: '7d',
+    }),
+  );
+  router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const code = (err as { status?: number } | undefined)?.status ?? 404;
+    res.status(code).end();
+  });
+  return router;
+}

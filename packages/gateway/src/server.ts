@@ -32,7 +32,7 @@ import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, t
 import { queueDeviceCommand } from './utils/device-commands.js';
 import { isSourceEnabled } from './utils/data-source-config.js';
 import { createWhatsappWebhookRouter } from './whatsapp-webhook-route.js';
-import { createUploadsRouter, resolveUploadsDir } from './uploads-route.js';
+import { createUploadsRouter, resolveUploadsDir, createPublicUploadsRouter, resolvePublicUploadsDir } from './uploads-route.js';
 import type { EnvConfig } from './utils/env.js';
 import { logger } from './utils/logger.js';
 import { recordWebhookFailure } from './utils/webhook-stats.js';
@@ -205,6 +205,12 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   const uploadsDir = resolveUploadsDir();
   fs.mkdirSync(uploadsDir, { recursive: true });
   app.use('/uploads', createUploadsRouter({ authSecret: config.authSecret, uploadsDir }));
+
+  // Public uploads — NO auth, unguessable filenames. Lets the agent share an
+  // openable image link (POST /chat/upload?public=1). Mounted before any auth.
+  const publicUploadsDir = resolvePublicUploadsDir();
+  fs.mkdirSync(publicUploadsDir, { recursive: true });
+  app.use('/public', createPublicUploadsRouter(publicUploadsDir));
 
   // Mount chat routes
   app.use('/chat', createChatRouter(pgPool, config.authSecret, esClient));

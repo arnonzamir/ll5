@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Public image uploads — shareable links (2026-05-23)
+`/uploads/*` requires the LL5 token (per-file ownership), so those links only work inside authenticated clients. Added a public path so the agent can share an openable image link: `POST /chat/upload?public=1` stores the file under a crypto-random (unguessable) name in `/app/public-uploads` with the extension forced from the allowlisted mime, and returns `public_url`. New unauthenticated `/public/*` static route (`uploads-route.ts:createPublicUploadsRouter`, mounted before any auth in `server.ts`) serves it with `X-Content-Type-Options: nosniff`, no index, dotfile-deny. Dockerfile creates `/app/public-uploads` (app-owned). Pairs with the agent-box rasterizer (ll5-run): generate → `rsvg-convert` to PNG → upload `?public=1` → share `public_url`. Durability matches `/uploads` (no volume yet). Gateway 181 tests pass.
+
 ### Self-name outbound detection for phone-mirrored messages (2026-05-23)
 The Android Slack reader can flag the user's own 1:1 DM replies (peer-name heuristic) but can't tell in **channels** read off-screen. Added a server-side backstop: `user_settings.self_names` (JSON array of the user's display names). `gateway/src/utils/self-names.ts` reads it (cached 60s, like `data-source-config.ts`); `processors/message.ts` now sets `from_me=true` when the resolved author matches a self-name (and nulls `person_id` so the message isn't linked to the user as a contact). Covers Slack channels + any phone-mirrored app. Editable in the dashboard **Profile → "Your Names (outbound detection)"** (comma-separated, saved to `user_settings` via the existing `/user-settings` PUT). Seeded `["Arnon Zamir","Arnon"]` for the live user. Gateway 181 tests pass; dashboard typechecks.
 
