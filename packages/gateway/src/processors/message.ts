@@ -5,6 +5,7 @@ import type { PushMessageItem } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
 import { buildSourceRouting, enrichContact, parseMessageAuthor } from './message-identity.js';
+import { getSelfNames, isSelfAuthor } from '../utils/self-names.js';
 import type { ContactRoutingResolver } from './contact-routing.js';
 
 /** Display label for an app: "SMS", "Slack", "Gmail", "WhatsApp", … */
@@ -32,12 +33,18 @@ export async function processMessage(
   matcher?: ContactRoutingResolver,
 ): Promise<void> {
   const isGroup = !!item.is_group;
-  const fromMe = !!item.from_me;
 
   // Parse the conversation PEER out of the notification title — for inbound this
   // is the author, for outbound (from_me) this is the RECIPIENT. Strips Slack's
   // "#channel: " prefix and detects bots — see message-identity.ts.
   const peer = parseMessageAuthor(item.app, item.sender, item.group_name, isGroup);
+
+  // The device flags from_me for WhatsApp/SMS and (heuristically) 1:1 Slack DMs,
+  // but can't tell in Slack channels read off-screen. Backstop: if the resolved
+  // author is one of the user's own names (user_settings.self_names), it's outbound.
+  const selfNames = pgPool ? await getSelfNames(pgPool, userId) : [];
+  const authorIsSelf = !item.from_me && isSelfAuthor(peer.authorName, selfNames);
+  const fromMe = !!item.from_me || authorIsSelf;
 
   // Synthesised conversation key (phone notifications have no native thread id):
   // groups (Slack channels / email accounts) → app:group:<name>, 1:1 → app:<peer>.
@@ -59,6 +66,8 @@ export async function processMessage(
     personId = resolved.personId;
     peerName = resolved.displayName;
   }
+  // Don't attribute a self-authored message to "me" as a contact/person.
+  if (authorIsSelf) personId = null;
   // Who spoke: the user for outbound, else the resolved peer.
   const speakerName = fromMe ? '(me)' : peerName;
 

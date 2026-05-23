@@ -127,6 +127,7 @@ ll5/
 │       ├── processors/contact-routing.ts  # ContactRoutingResolver — routing/media resolved from contact_settings only (escalation→immediate, group by conversation_id, 1:1 by person_id). Media default differs by shape: groups OFF (opt-in), 1:1 ON (pictures unless explicitly disabled). Replaced notification-rules.ts when notification_rules was dropped (2026-05-22).
 │       ├── utils/whatsapp-user-resolver.ts # Instance name → user_id mapping with 5min cache
 │       ├── utils/data-source-config.ts # Per-source enabled/disabled check with 60s cache (reads user_settings JSONB)
+│       ├── utils/self-names.ts        # User's own display names (user_settings.self_names, 60s cache) → message.ts flags from_me on self-authored phone-mirrored messages (Slack channels)
 │       (Dashboard) packages/dashboard/src/app/(user)/settings/data-sources/data-sources-types.ts — types + DEFAULTS for the data-sources page. Extracted from data-sources-server-actions.ts on May 18 because Next.js 15 rejects non-async exports from a "use server" file.
 │       ├── utils/system-message.ts    # Shared system message writer with scheduler event correlation + source routing metadata
 │       ├── utils/export.ts            # Full user data export (ES + PG → JSON, no media binaries)
