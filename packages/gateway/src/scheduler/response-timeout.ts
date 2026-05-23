@@ -5,7 +5,7 @@ import { insertSystemMessage, createSchedulerEvent } from '../utils/system-messa
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface ResponseTimeoutConfig {
-  timeoutMinutes: number; // default 2
+  timeoutSeconds: number; // default 120
   startHour: number;
   endHour: number;
   timezone: string;
@@ -27,7 +27,7 @@ export class ResponseTimeoutScheduler {
 
   start(): void {
     logger.info('[ResponseTimeoutScheduler][start] Started', {
-      timeoutMinutes: this.config.timeoutMinutes,
+      timeoutSeconds: this.config.timeoutSeconds,
     });
     this.timer = setInterval(() => void this.tick(), 30_000); // every 30s
   }
@@ -71,11 +71,11 @@ export class ResponseTimeoutScheduler {
            AND status = 'processing'
            AND channel IN ('web', 'android', 'cli')
            AND (metadata->>'timeout_notified') IS NULL
-           AND created_at < now() - make_interval(mins := $2)
+           AND created_at < now() - make_interval(secs := $2)
            AND created_at > now() - interval '30 minutes'
          ORDER BY created_at ASC
          LIMIT 5`,
-        [this.config.userId, this.config.timeoutMinutes],
+        [this.config.userId, this.config.timeoutSeconds],
       );
 
       if (staleResult.rows.length === 0) return;
@@ -85,8 +85,8 @@ export class ResponseTimeoutScheduler {
         `SELECT COUNT(*) as count FROM chat_messages
          WHERE user_id = $1
            AND direction = 'outbound'
-           AND created_at > now() - make_interval(mins := $2)`,
-        [this.config.userId, this.config.timeoutMinutes],
+           AND created_at > now() - make_interval(secs := $2)`,
+        [this.config.userId, this.config.timeoutSeconds],
       );
       const agentActive = parseInt(recentOutbound.rows[0]?.count ?? '0', 10) > 0;
 

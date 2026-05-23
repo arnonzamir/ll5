@@ -270,7 +270,8 @@ async function startSchedulersForUser(
   schedulers.push(ticklerAlertScheduler);
 
   const responseTimeoutScheduler = new ResponseTimeoutScheduler(pgPool, {
-    timeoutMinutes: s('response_timeout_minutes', 2),
+    // Seconds-granularity; falls back to the legacy minutes key (×60) then 120s.
+    timeoutSeconds: s('response_timeout_seconds', s('response_timeout_minutes', 2) * 60),
     startHour, endHour, timezone, userId,
   });
   responseTimeoutScheduler.start();

@@ -4,6 +4,7 @@ import { useState, useTransition, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Card,
   CardContent,
@@ -33,6 +34,7 @@ function NumberField({
   onChange,
   min,
   max,
+  step,
   suffix,
 }: {
   label: string;
@@ -41,8 +43,10 @@ function NumberField({
   onChange: (v: number) => void;
   min?: number;
   max?: number;
+  step?: number;
   suffix?: string;
 }) {
+  const isFloat = step != null && step < 1;
   return (
     <div className="flex items-center justify-between gap-4 py-2">
       <div className="flex-1">
@@ -53,13 +57,36 @@ function NumberField({
         <Input
           type="number"
           value={value}
-          onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+          onChange={(e) => onChange((isFloat ? parseFloat(e.target.value) : parseInt(e.target.value)) || 0)}
           min={min}
           max={max}
+          step={step}
           className="w-20 h-8 text-center text-sm"
         />
         {suffix && <span className="text-xs text-gray-400 w-8">{suffix}</span>}
       </div>
+    </div>
+  );
+}
+
+function ToggleField({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2">
+      <div className="flex-1">
+        <Label className="text-sm">{label}</Label>
+        {description && <p className="text-xs text-gray-400">{description}</p>}
+      </div>
+      <Checkbox checked={checked} onCheckedChange={(v) => onChange(v === true)} />
     </div>
   );
 }
@@ -97,7 +124,7 @@ export function SchedulerSettingsView() {
     });
   }
 
-  function update(key: keyof SchedulerSettings, value: number) {
+  function update(key: keyof SchedulerSettings, value: number | boolean) {
     setSettings((prev) => ({ ...prev, [key]: value }));
     setSaved(false);
   }
@@ -193,6 +220,37 @@ export function SchedulerSettingsView() {
             <NumberField label="GTD health check interval" value={settings.gtd_health_hours} onChange={(v) => update("gtd_health_hours", v)} min={1} max={24} suffix="h" />
             <NumberField label="Message batch review interval" value={settings.message_batch_minutes} onChange={(v) => update("message_batch_minutes", v)} min={10} suffix="min" />
             <NumberField label="Journal consolidation hour" description="Nightly consolidation trigger" value={settings.consolidation_hour} onChange={(v) => update("consolidation_hour", v)} min={0} max={23} suffix="h" />
+          </CardContent>
+        </Card>
+
+        {/* Proactive Agent Output */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Bell className="h-4 w-4" /> Proactive Output
+            </CardTitle>
+            <CardDescription className="text-xs">How eagerly the agent volunteers unprompted messages</CardDescription>
+          </CardHeader>
+          <CardContent className="divide-y divide-gray-50">
+            <NumberField label="Output check interval" description="How often to consider sending a proactive message" value={settings.agent_output_minutes} onChange={(v) => update("agent_output_minutes", v)} min={5} suffix="min" />
+            <NumberField label="Min triggers" description="Require at least this many system events before speaking up" value={settings.agent_output_min_triggers} onChange={(v) => update("agent_output_min_triggers", v)} min={1} max={20} suffix="×" />
+            <NumberField label="Silence threshold" description="Only after this much quiet (fractional hours, e.g. 0.5 = 30 min)" value={settings.agent_output_silence_hours} onChange={(v) => update("agent_output_silence_hours", v)} min={0} step={0.5} suffix="h" />
+            <NumberField label="Lookback window" description="How far back to scan for trigger events" value={settings.agent_output_lookback_hours} onChange={(v) => update("agent_output_lookback_hours", v)} min={1} max={24} suffix="h" />
+            <NumberField label="Response watchdog" description="If a direct request goes unanswered this long, the agent narrates what it's doing" value={settings.response_timeout_seconds} onChange={(v) => update("response_timeout_seconds", v)} min={5} max={600} suffix="sec" />
+          </CardContent>
+        </Card>
+
+        {/* Narrative Consolidation */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Calendar className="h-4 w-4" /> Narrative Consolidation
+            </CardTitle>
+            <CardDescription className="text-xs">Daily rollup that distills observations into current narrative summaries</CardDescription>
+          </CardHeader>
+          <CardContent className="divide-y divide-gray-50">
+            <ToggleField label="Enabled" description="Run the daily narrative consolidation" checked={settings.narrative_consolidation_enabled} onChange={(v) => update("narrative_consolidation_enabled", v)} />
+            <NumberField label="Run at hour" description="Hour of day to consolidate (after journal consolidation)" value={settings.narrative_consolidation_hour} onChange={(v) => update("narrative_consolidation_hour", v)} min={0} max={23} suffix="h" />
           </CardContent>
         </Card>
 

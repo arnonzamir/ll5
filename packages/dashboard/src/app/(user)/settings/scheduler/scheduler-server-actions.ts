@@ -16,10 +16,10 @@ export async function fetchSchedulerSettings(): Promise<{ settings: SchedulerSet
     const raw = (await res.json()) as Record<string, unknown>;
     const sched = (raw.scheduler ?? {}) as Record<string, unknown>;
 
-    const merged = { ...DEFAULTS } as Record<string, number>;
+    const merged = { ...DEFAULTS } as Record<string, number | boolean>;
     for (const key of Object.keys(DEFAULTS)) {
       if (sched[key] != null) {
-        merged[key] = sched[key] as number;
+        merged[key] = sched[key] as number | boolean;
       }
     }
     return { settings: merged as unknown as SchedulerSettings, error: null };

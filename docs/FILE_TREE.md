@@ -226,3 +226,5 @@ ll5/
 
 
 
+
+<!-- 2026-05-23: scheduler settings page surfaces proactivity knobs (agent_output_*, narrative_consolidation, response_timeout_seconds) -->

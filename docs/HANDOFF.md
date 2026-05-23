@@ -6,7 +6,7 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
-Claude Code is the agent. 5 MCP servers are the data layer. Gateway handles webhooks and chat. Dashboard is the web UI (full-screen `/chat`: assistant messages render in a left-aligned speech bubble with the ✦ coach gutter dot; collapsible "N system events" bands are left-aligned).
+Claude Code is the agent. 5 MCP servers are the data layer. Gateway handles webhooks and chat. Dashboard is the web UI (full-screen `/chat`: assistant messages render in a left-aligned speech bubble with the ✦ coach gutter dot; collapsible "N system events" bands are left-aligned). Global config lives in gateway `user_settings` (JSONB); the Scheduler settings page now exposes the proactivity knobs (agent_output_*, narrative_consolidation, response watchdog in **seconds** via `response_timeout_seconds`), and the agent reads/writes the same store via the channel MCP's `get_user_settings`/`set_user_settings`.
 
 ```
 Claude Code (ll5-run workspace)

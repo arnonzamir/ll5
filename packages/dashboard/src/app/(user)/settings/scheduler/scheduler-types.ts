@@ -18,6 +18,16 @@ export interface SchedulerSettings {
   consolidation_hour: number;
   schedule_lookback_hours: number;
   schedule_lookahead_hours: number;
+  // Narrative consolidation (daily rollup)
+  narrative_consolidation_enabled: boolean;
+  narrative_consolidation_hour: number;
+  // Proactive agent-output trigger
+  agent_output_minutes: number;
+  agent_output_min_triggers: number;
+  agent_output_silence_hours: number;
+  agent_output_lookback_hours: number;
+  // "Reply within N or narrate" watchdog — seconds granularity
+  response_timeout_seconds: number;
 }
 
 export const DEFAULTS: SchedulerSettings = {
@@ -36,4 +46,11 @@ export const DEFAULTS: SchedulerSettings = {
   consolidation_hour: 2,
   schedule_lookback_hours: 1,
   schedule_lookahead_hours: 3,
+  narrative_consolidation_enabled: true,
+  narrative_consolidation_hour: 3,
+  agent_output_minutes: 15,
+  agent_output_min_triggers: 2,
+  agent_output_silence_hours: 0.5,
+  agent_output_lookback_hours: 3,
+  response_timeout_seconds: 120,
 };
