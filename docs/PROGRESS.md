@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Web chat: agent bubble + left-aligned compact groups (2026-05-23)
+Two visual regressions on the full-screen `/chat` stream. (1) Assistant messages had lost their speech bubble — the `unboxed` variant (`message-bubble.tsx`) rendered the agent's text as flush prose next to the ✦ coach dot. Restored a bubble: the content block is now a left-aligned, content-hugging speech bubble (`w-fit rounded-2xl rounded-bl-sm bg-gray-100 px-4 py-2.5`), keeping the ✦ gutter dot. (2) The collapsible "N system events · time" bands (`CompactGroup`) were center-aligned — the label sat between two `flex-1 border-t` rules. Dropped the leading rule (and added `text-left`) so the chevron+label start at the left margin with a single trailing rule. Dashboard typecheck clean.
+
 ### Fix: google/calendar MCP missing ELASTICSEARCH_URL (2026-05-23)
 The calendar MCP reported "no Elasticsearch" / `ES not configured`: the `google` service in `docker-compose.prod.yml` never set `ELASTICSEARCH_URL` (every other ES-using service — personal-knowledge, awareness, health, gateway — does). With it null, `google/src/server.ts` runs `esClient = null`, logs "ELASTICSEARCH_URL not set — calendar reads will fall back to live Google API", and the ES-backed calendar tool returns `"ES not configured"` (`calendar.ts:603`); calendar reads hit the live Google API every time instead of the cached `ll5_awareness_calendar` ES index. Added `ELASTICSEARCH_URL: http://elasticsearch:9200` + a `depends_on: elasticsearch (service_healthy)` to the google service. Config-only; ships via the compose scp on deploy. (Google OAuth itself was fine — verified connected, live `/api/events` → 200.)
 

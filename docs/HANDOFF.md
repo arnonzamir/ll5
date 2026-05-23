@@ -6,7 +6,7 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
-Claude Code is the agent. 5 MCP servers are the data layer. Gateway handles webhooks and chat. Dashboard is the web UI.
+Claude Code is the agent. 5 MCP servers are the data layer. Gateway handles webhooks and chat. Dashboard is the web UI (full-screen `/chat`: assistant messages render in a left-aligned speech bubble with the ✦ coach gutter dot; collapsible "N system events" bands are left-aligned).
 
 ```
 Claude Code (ll5-run workspace)

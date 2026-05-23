@@ -156,9 +156,8 @@ export function CompactGroup({ items }: { items: Message[] }) {
     <div className="text-[13px] font-mono">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-2 text-ink-400 hover:text-ink-500 py-0.5 w-full"
+        className="flex items-center gap-2 text-ink-400 hover:text-ink-500 py-0.5 w-full text-left"
       >
-        <span className="flex-1 border-t border-ink-300/40" />
         {expanded ? (
           <ChevronDown className="w-3.5 h-3.5" />
         ) : (
@@ -239,7 +238,7 @@ export function MessageBubble({
               </div>
             )}
             <div
-              className="text-[17px] leading-7 text-ink-900 whitespace-pre-wrap break-words"
+              className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-gray-100 px-4 py-2.5 text-[17px] leading-7 text-ink-900 whitespace-pre-wrap break-words"
               dir="auto"
             >
               {m.content}
