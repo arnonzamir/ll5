@@ -230,3 +230,5 @@ ll5/
 <!-- 2026-05-23: scheduler settings page surfaces proactivity knobs (agent_output_*, narrative_consolidation, response_timeout_seconds) -->
 
 <!-- 2026-05-24: character-refresh nudge gains habit (3) ONE VOICE — turn-final prose is the message, no third-person recaps -->
+
+<!-- 2026-05-24: character-refresh habit (3) — answers via explicit push/reply; mirroring is backstop only -->

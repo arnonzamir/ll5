@@ -330,3 +330,5 @@ See docs/implementation/deployment-log.md for full details:
 
 
 _2026-05-24: gateway character-refresh nudge now re-anchors three habits (narrate, always-reply, one-voice/no-third-person-recap) mid-session._
+
+_2026-05-24: agent answers delivered via explicit push_to_user/reply; session-mirror (stop-mirror.sh) is a backstop only — it mirrors the transcript global last assistant line and mis-delivers under burst._
