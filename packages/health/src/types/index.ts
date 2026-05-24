@@ -43,9 +43,8 @@ export interface DailyStatsData {
   respirationAvg?: number;
   respirationMin?: number;
   respirationMax?: number;
-  // Device (watch) status — battery is only as fresh as the last watch sync.
-  deviceBattery?: number;        // percent 0–100
-  deviceBatteryStatus?: string;  // e.g. "MEASURED" / "CHARGING" (model-dependent)
+  // Device (watch) status. NOTE: Garmin's web API does NOT expose watch
+  // battery % (only capability flags), so we surface name + last sync only.
   deviceLastSync?: string;       // ISO timestamp of the last device upload
   deviceName?: string;
 }

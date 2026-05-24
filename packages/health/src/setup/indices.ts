@@ -88,8 +88,6 @@ const INDICES: IndexDefinition[] = [
         hrv_last_night_avg: { type: 'float' },
         hrv_status: { type: 'keyword' },
         vo2_max: { type: 'float' },
-        device_battery: { type: 'integer' },
-        device_battery_status: { type: 'keyword' },
         device_last_sync: { type: 'date' },
         device_name: { type: 'keyword' },
         raw_data: { type: 'object', enabled: false },

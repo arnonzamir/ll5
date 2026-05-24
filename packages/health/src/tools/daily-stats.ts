@@ -82,9 +82,9 @@ export function registerDailyStatsTools(
           vo2Max: doc.vo2_max ?? null,
           device: {
             name: doc.device_name ?? null,
-            battery: doc.device_battery ?? null,        // percent; null if Garmin didn't expose it for this watch
-            batteryStatus: doc.device_battery_status ?? null,
-            lastSync: doc.device_last_sync ?? null,     // battery is only as fresh as this
+            lastSync: doc.device_last_sync ?? null,
+            // NOTE: Garmin's web API does not expose watch battery % (only the
+            // mobile app shows it, via BLE) — so there is no battery field here.
           },
           syncedAt: doc.synced_at,
         };

@@ -108,8 +108,6 @@ async function writeDailyStatsToES(esClient: Client, userId: string, sourceId: s
       respiration_average: data.respirationAvg,
       respiration_min: data.respirationMin,
       respiration_max: data.respirationMax,
-      device_battery: data.deviceBattery,
-      device_battery_status: data.deviceBatteryStatus,
       device_last_sync: data.deviceLastSync,
       device_name: data.deviceName,
       synced_at: new Date().toISOString(),

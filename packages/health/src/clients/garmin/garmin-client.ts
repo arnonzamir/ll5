@@ -113,34 +113,18 @@ export class GarminClient {
     }
   }
 
-  /** Registered devices (watch, scale, …) — device catalog/metadata (name,
-   *  model). Does NOT carry live battery; used for the device name. */
-  async getDevices(): Promise<unknown> {
+  /** Last-used device — gives the watch name + last sync time
+   *  (lastUsedDeviceUploadTime). NOTE: Garmin's web API does NOT expose the
+   *  watch's live battery % (confirmed empirically for vívoactive 5 — only
+   *  capability flags like bodyBatteryCapable/batteryStatusCapable exist, no
+   *  value), so we surface name + last sync only. */
+  async getDeviceLastUsed(): Promise<unknown> {
     try {
-      return await this.apiGet('/device-service/deviceregistration/devices');
+      return await this.apiGet('/device-service/deviceservice/mylastused');
     } catch (err) {
-      logger.warn('[GarminClient][getDevices] Failed', { error: String(err) });
+      logger.warn('[GarminClient][getDeviceLastUsed] Failed', { error: String(err) });
       return null;
     }
-  }
-
-  /** Probe candidate endpoints that may carry live watch battery + last sync.
-   *  Returns a map of {endpointLabel: response} so the normalizer can extract
-   *  and we can see (via calibration log) which one actually has battery. */
-  async getDeviceStatusProbe(): Promise<Record<string, unknown>> {
-    const candidates: Record<string, string> = {
-      lastUsed: '/device-service/deviceservice/mylastused',
-      primaryTraining: '/web-gateway/device-info/primary-training-device',
-    };
-    const out: Record<string, unknown> = {};
-    await Promise.all(Object.entries(candidates).map(async ([label, path]) => {
-      try {
-        out[label] = await this.apiGet(path);
-      } catch (err) {
-        out[label] = { __error: String(err) };
-      }
-    }));
-    return out;
   }
 
   async getHRV(date: string): Promise<unknown> {

@@ -340,3 +340,5 @@ _2026-05-24: health daily-stats now includes device:{name,battery,batteryStatus,
 _2026-05-24: garmin watch=vívoactive 5; deviceregistration/devices gives name only (no battery). Probing /device-service/deviceservice/mylastused + /web-gateway/device-info/primary-training-device for live battery (calibration log)._
 
 _(garmin battery-key scan probe)_
+
+_garmin watch battery is NOT available via the web API (confirmed vívoactive 5); daily-stats device={name,lastSync} from mylastused only._

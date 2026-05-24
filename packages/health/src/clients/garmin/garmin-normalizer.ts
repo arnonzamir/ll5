@@ -140,41 +140,22 @@ export function normalizeHeartRate(raw: unknown): HeartRateData | null {
  * spellings defensively and log the raw shape ONCE (info) for calibration —
  * once we confirm the field for this user's watch we can tighten this.
  */
-function extractDeviceStatus(devices: unknown, deviceStatus?: unknown): {
-  battery?: number; batteryStatus?: string; lastSync?: string; name?: string;
-} {
+/**
+ * Watch name + last-sync from Garmin's mylastused endpoint.
+ *
+ * NOTE: Garmin's web Connect API does NOT expose the watch's live battery %
+ * (confirmed for vívoactive 5 — devices/mylastused/primary-training-device
+ * carry only capability flags like bodyBatteryCapable, no battery value; the
+ * mobile app's battery comes from BLE, not the web API). So battery stays
+ * undefined; we surface the device name + last sync, which ARE available.
+ */
+function extractDeviceStatus(lastUsedDevice?: unknown): { lastSync?: string; name?: string } {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const list = (Array.isArray(devices) ? devices : []) as any[];
-  // Calibration: deviceregistration has the name/model; battery (if anywhere)
-  // is in the probe endpoints (mylastused / primary-training-device). Log both
-  // fully so we can see which carries a battery field for this watch.
-  try {
-    // Definitive battery hunt: scan the entire devices+probe blob for any
-    // key/value mentioning "batter" so we know if Garmin exposes it at all.
-    const blob = JSON.stringify({ devices, deviceStatus });
-    const batteryHits = (blob.match(/.{0,40}batter[a-z]*"?\s*:?\s*[^,}]{0,30}/gi) || []).slice(0, 12);
-    logger.info('[GarminNormalizer][extractDeviceStatus] battery hunt (calibration)', {
-      deviceStatusValue: JSON.stringify(list[0]?.deviceStatus ?? null),
-      batteryHits,
-    });
-  } catch { /* ignore */ }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ds = (deviceStatus ?? {}) as any;
-  const batt = (o: any): number | undefined =>
-    o?.batteryLevel ?? o?.percentRemaining ?? o?.batteryStatus?.batteryLevel ??
-    o?.deviceStatus?.batteryLevel ?? o?.batteryLevelPercent ?? o?.batteryRemaining ?? undefined;
-  // Search the probe responses (and devices) for a battery reading.
-  const sources = [ds?.lastUsed, ds?.primaryTraining, ...list].filter(Boolean);
-  const withBatt = sources.find((s) => batt(s) != null);
-  const lastUsed = ds?.lastUsed ?? {};
-  const reg = list[0] ?? {};
+  const lu = (lastUsedDevice ?? {}) as any;
+  const uploadMs = lu?.lastUsedDeviceUploadTime;
   return {
-    battery: withBatt ? batt(withBatt) : undefined,
-    batteryStatus: withBatt?.batteryStatus ?? undefined,
-    lastSync: lastUsed?.lastUsedDeviceUploadTime ?? lastUsed?.lastSyncTimeGMT ??
-      ds?.primaryTraining?.lastSyncTimeGMT ?? reg?.lastUsedDeviceUploadTime ?? undefined,
-    name: reg?.productDisplayName ?? lastUsed?.lastUsedDeviceName ?? reg?.displayName ?? undefined,
+    lastSync: typeof uploadMs === 'number' ? new Date(uploadMs).toISOString() : undefined,
+    name: lu?.lastUsedDeviceName ?? undefined,
   };
 }
 
@@ -187,11 +168,11 @@ export function normalizeDailyStats(
   raw: unknown,
   stepsCount?: number | null,
   dateOverride?: string,
-  extras?: { bodyBattery?: unknown; hrv?: unknown; vo2Max?: unknown; respiration?: unknown; devices?: unknown; deviceStatus?: unknown },
+  extras?: { bodyBattery?: unknown; hrv?: unknown; vo2Max?: unknown; respiration?: unknown; lastUsedDevice?: unknown },
 ): DailyStatsData | null {
   if (!raw && stepsCount == null && !extras?.bodyBattery && !extras?.hrv) return null;
 
-  const device = extractDeviceStatus(extras?.devices, extras?.deviceStatus);
+  const device = extractDeviceStatus(extras?.lastUsedDevice);
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -242,8 +223,6 @@ export function normalizeDailyStats(
       respirationAvg: resp?.avgWakingRespirationValue ?? undefined,
       respirationMin: resp?.lowestRespirationValue ?? undefined,
       respirationMax: resp?.highestRespirationValue ?? undefined,
-      deviceBattery: device.battery,
-      deviceBatteryStatus: device.batteryStatus,
       deviceLastSync: device.lastSync,
       deviceName: device.name,
     };

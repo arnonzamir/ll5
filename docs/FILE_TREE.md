@@ -240,3 +240,5 @@ ll5/
 <!-- 2026-05-24: garmin battery probe — deviceregistration lacks battery (catalog only); probing mylastused + primary-training-device -->
 
 <!-- garmin battery-key scan probe -->
+
+<!-- garmin: watch battery NOT exposed by web API; device={name,lastSync} from mylastused -->
