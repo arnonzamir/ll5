@@ -232,3 +232,5 @@ ll5/
 <!-- 2026-05-24: character-refresh nudge gains habit (3) ONE VOICE — turn-final prose is the message, no third-person recaps -->
 
 <!-- 2026-05-24: character-refresh habit (3) — answers via explicit push/reply; mirroring is backstop only -->
+
+<!-- 2026-05-24: mirror true-backstop (skip when agent delivered via push/reply); persona prose-IS-the-answer for CLI fidelity -->
