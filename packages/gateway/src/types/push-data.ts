@@ -81,6 +81,19 @@ const PushWifiItemSchema = z.object({
   trigger: z.enum(['connect', 'disconnect', 'ssid_change', 'heartbeat']).optional(),
 });
 
+const PushCameraPhotoSchema = z.object({
+  type: z.literal('camera_photo'),
+  timestamp: z.string().datetime({ offset: true }), // when the photo was taken (EXIF/date-taken)
+  url: z.string(),                                   // uploaded image URL (gateway /uploads or /public)
+  mime_type: z.string().optional(),
+  filename: z.string().optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lon: z.number().min(-180).max(180).nullable().optional(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+  bucket: z.string().optional(),                     // album/folder (e.g. "Camera", "Screenshots")
+});
+
 const PushItemSchema = z.discriminatedUnion('type', [
   PushLocationItemSchema,
   PushMessageItemSchema,
@@ -89,6 +102,7 @@ const PushItemSchema = z.discriminatedUnion('type', [
   PushPhoneContactSchema,
   PushPhoneStatusItemSchema,
   PushWifiItemSchema,
+  PushCameraPhotoSchema,
 ]);
 
 export const WebhookPayloadSchema = z.object({
@@ -105,6 +119,7 @@ export type PushCalendarItem = z.infer<typeof PushCalendarItemSchema>;
 export type PushPhoneContactItem = z.infer<typeof PushPhoneContactSchema>;
 export type PushPhoneStatusItem = z.infer<typeof PushPhoneStatusItemSchema>;
 export type PushWifiItem = z.infer<typeof PushWifiItemSchema>;
+export type PushCameraPhotoItem = z.infer<typeof PushCameraPhotoSchema>;
 export type PushItem = z.infer<typeof PushItemSchema>;
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 

@@ -27,6 +27,7 @@ import { ContactRoutingResolver } from './processors/contact-routing.js';
 import { processPhoneContacts } from './processors/phone-contacts.js';
 import { processPhoneStatus } from './processors/phone-status.js';
 import { processWifi } from './processors/wifi.js';
+import { processCameraPhoto } from './processors/camera-photo.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
@@ -129,6 +130,7 @@ async function processItem(
       calendar_event: 'calendar',
       phone_status: 'phone_status',
       wifi: 'wifi',
+      camera_photo: 'camera_photos',
     };
     const sourceKey = sourceMap[item.type];
     if (sourceKey && pgPool && !await isSourceEnabled(pgPool, userId, sourceKey)) {
@@ -156,6 +158,9 @@ async function processItem(
         break;
       case 'wifi':
         await processWifi(es, userId, item);
+        break;
+      case 'camera_photo':
+        await processCameraPhoto(es, pgPool, userId, item);
         break;
     }
     return { index: itemIndex, type: item.type, status: 'ok' };

@@ -246,3 +246,5 @@ ll5/
 <!-- health: reconnect_health_source — agent re-logins from SAVED creds (no password in chat) -->
 
 <!-- dashboard chat: agent messages render as GitHub-flavored Markdown (tables/bold/lists/code) via components/chat/markdown.tsx -->
+
+<!-- gateway: camera_photo push type → ll5_media(source:camera, time+gps) + agent system msg (processors/camera-photo.ts) -->

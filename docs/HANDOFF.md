@@ -346,3 +346,5 @@ _garmin watch battery is NOT available via the web API (confirmed vívoactive 5)
 _health: reconnect_health_source tool — agent re-establishes a source session from already-saved encrypted credentials (no password through chat); recovers broken/expired sessions; fails if nothing stored (then dashboard connect)._
 
 _dashboard chat renders agent messages as GFM Markdown (react-markdown + remark-gfm + remark-breaks) — tables, bold, lists, code, links; user messages stay plain. See components/chat/markdown.tsx._
+
+_gateway accepts camera_photo push items (phone camera reel): processors/camera-photo.ts indexes into ll5_media (source:camera, taken_at + lat/lon) and surfaces a [Photo] system message for proactive-smart agent reaction. Gated by data_sources.camera_photos._
