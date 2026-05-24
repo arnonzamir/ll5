@@ -8,7 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
-### health/Garmin: watch device name + last sync (battery NOT available) (2026-05-24)
+### health: reconnect_health_source + Garmin device name/last-sync (2026-05-24)
+Added **`reconnect_health_source`** (health MCP, agent-accessible): re-establishes a source connection from the user's already-saved encrypted credentials — no password through chat — to recover a broken/expired session (e.g. Garmin "Unsupported state"); fails clearly if nothing is stored (→ dashboard connect). Reuses the same decrypt→adapter.connect path sync already runs. 44 tests pass.
+
 Investigated adding watch battery to daily stats. **Conclusion (live, vívoactive 5): Garmin's web API does NOT expose watch battery %.** Probed `deviceregistration/devices`, `/device-service/deviceservice/mylastused`, and `/web-gateway/device-info/primary-training-device` via the `apiGet` escape hatch — all carry only capability flags (`bodyBatteryCapable`, `batteryStatusCapable:false`), no battery value; the device's nested `deviceStatus` is just `"active"`. (Battery shows in the Garmin *mobile* app via BLE, not the queryable web API — matches garth/python-garminconnect having no battery method.) Final shape: `get_daily_stats.device = { name, lastSync }` from `mylastused` (`GarminClient.getDeviceLastUsed()` → `garmin-normalizer.extractDeviceStatus()`; stored as `device_name`/`device_last_sync` in `ll5_health_daily_stats`) — the battery fields were removed rather than ship a perpetually-null value. Body Battery (the energy metric) was already captured. Health 44 tests pass; typecheck clean.
 
 ### CLI fidelity: prose IS the answer + mirror true-backstop (2026-05-24)

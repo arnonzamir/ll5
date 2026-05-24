@@ -242,3 +242,5 @@ ll5/
 <!-- garmin battery-key scan probe -->
 
 <!-- garmin: watch battery NOT exposed by web API; device={name,lastSync} from mylastused -->
+
+<!-- health: reconnect_health_source — agent re-logins from SAVED creds (no password in chat) -->

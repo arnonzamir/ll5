@@ -70,6 +70,63 @@ export function registerSourceTools(
   );
 
   server.tool(
+    'reconnect_health_source',
+    'Re-establish a health source connection using the user\'s ALREADY-SAVED credentials — no password needed. Use this to recover a broken/expired session (e.g. Garmin "Unsupported state or unable to authenticate") without the user re-entering anything, and WITHOUT credentials passing through chat. Fails if nothing is stored — then the user must connect once via the dashboard (Settings → Health).',
+    {
+      source_id: z.string().describe('Source identifier, e.g. "garmin"'),
+    },
+    async (params) => {
+      const userId = getUserId();
+      const adapter = getAdapter(params.source_id);
+
+      if (!adapter) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: `Unknown health source: ${params.source_id}. Available: ${listAdapters().map((a) => a.sourceId).join(', ')}` }) }],
+          isError: true,
+        };
+      }
+
+      try {
+        const res = await pool.query<{ credentials: string }>(
+          'SELECT credentials FROM health_source_credentials WHERE user_id = $1 AND source_id = $2',
+          [userId, params.source_id],
+        );
+        if (res.rows.length === 0) {
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({ error: `No saved credentials for ${params.source_id}. Connect once via the dashboard (Settings → Health) first.` }) }],
+            isError: true,
+          };
+        }
+
+        const creds = JSON.parse(decrypt(res.rows[0].credentials, encryptionKey)) as Record<string, string>;
+        await adapter.connect(userId, creds);
+
+        logger.info('[reconnect_health_source] Reconnected from saved credentials', { userId, sourceId: params.source_id });
+        logAudit({
+          user_id: userId,
+          source: 'health',
+          action: 'update',
+          entity_type: 'health_source',
+          entity_id: params.source_id,
+          summary: `Reconnected health source from saved credentials: ${adapter.displayName}`,
+          metadata: { source_id: params.source_id },
+        });
+
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ success: true, source: params.source_id, message: `${adapter.displayName} reconnected from saved credentials` }) }],
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error('[reconnect_health_source] Reconnect failed', { userId, sourceId: params.source_id, error: message });
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: `Failed to reconnect ${adapter.displayName} from saved credentials: ${message}. The saved credentials may be invalid — re-enter them in the dashboard (Settings → Health).` }) }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
     'disconnect_health_source',
     'Disconnect a health data source and remove stored credentials.',
     {
