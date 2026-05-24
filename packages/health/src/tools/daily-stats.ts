@@ -80,6 +80,12 @@ export function registerDailyStatsTools(
             status: doc.hrv_status ?? null,
           },
           vo2Max: doc.vo2_max ?? null,
+          device: {
+            name: doc.device_name ?? null,
+            battery: doc.device_battery ?? null,        // percent; null if Garmin didn't expose it for this watch
+            batteryStatus: doc.device_battery_status ?? null,
+            lastSync: doc.device_last_sync ?? null,     // battery is only as fresh as this
+          },
           syncedAt: doc.synced_at,
         };
 

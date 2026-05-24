@@ -234,3 +234,5 @@ ll5/
 <!-- 2026-05-24: character-refresh habit (3) — answers via explicit push/reply; mirroring is backstop only -->
 
 <!-- 2026-05-24: mirror true-backstop (skip when agent delivered via push/reply); persona prose-IS-the-answer for CLI fidelity -->
+
+<!-- 2026-05-24: health/garmin watch battery — getDevices() + device_battery/status/last_sync/name on daily stats -->

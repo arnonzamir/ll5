@@ -135,6 +135,38 @@ export function normalizeHeartRate(raw: unknown): HeartRateData | null {
 }
 
 /**
+ * Extract watch battery + last-sync from the /device-service devices list.
+ * Battery field naming varies by model/API version, so we probe several known
+ * spellings defensively and log the raw shape ONCE (info) for calibration —
+ * once we confirm the field for this user's watch we can tighten this.
+ */
+function extractDeviceStatus(devices: unknown): {
+  battery?: number; batteryStatus?: string; lastSync?: string; name?: string;
+} {
+  if (!Array.isArray(devices) || devices.length === 0) return {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const list = devices as any[];
+  try {
+    logger.info('[GarminNormalizer][extractDeviceStatus] devices payload (calibration)', {
+      count: list.length,
+      sample: JSON.stringify(list[0]).slice(0, 800),
+    });
+  } catch { /* ignore */ }
+  const batt = (d: any): number | undefined =>
+    d?.batteryLevel ?? d?.percentRemaining ?? d?.deviceStatus?.batteryLevel ??
+    d?.deviceStatus?.percentRemaining ?? d?.batteryLevelPercent ?? undefined;
+  // Prefer a device that actually exposes a battery reading (usually the watch).
+  const d = list.find((x) => batt(x) != null) ?? list[0];
+  return {
+    battery: batt(d),
+    batteryStatus: d?.batteryStatus ?? d?.deviceStatus?.batteryStatus ?? undefined,
+    lastSync: d?.lastUsedDeviceUploadTime ?? d?.lastSyncTimeGMT ??
+      d?.lastDeviceSyncTime ?? d?.lastUploadTime ?? undefined,
+    name: d?.productDisplayName ?? d?.displayName ?? d?.deviceTypePk ?? undefined,
+  };
+}
+
+/**
  * Normalizes Garmin daily summary + steps data into the generic DailyStatsData type.
  *
  * This combines data from the daily summary endpoint and/or step counts.
@@ -143,9 +175,11 @@ export function normalizeDailyStats(
   raw: unknown,
   stepsCount?: number | null,
   dateOverride?: string,
-  extras?: { bodyBattery?: unknown; hrv?: unknown; vo2Max?: unknown; respiration?: unknown },
+  extras?: { bodyBattery?: unknown; hrv?: unknown; vo2Max?: unknown; respiration?: unknown; devices?: unknown },
 ): DailyStatsData | null {
   if (!raw && stepsCount == null && !extras?.bodyBattery && !extras?.hrv) return null;
+
+  const device = extractDeviceStatus(extras?.devices);
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -196,6 +230,10 @@ export function normalizeDailyStats(
       respirationAvg: resp?.avgWakingRespirationValue ?? undefined,
       respirationMin: resp?.lowestRespirationValue ?? undefined,
       respirationMax: resp?.highestRespirationValue ?? undefined,
+      deviceBattery: device.battery,
+      deviceBatteryStatus: device.batteryStatus,
+      deviceLastSync: device.lastSync,
+      deviceName: device.name,
     };
   } catch (err) {
     logger.warn('[GarminNormalizer][normalizeDailyStats] Failed to normalize', {

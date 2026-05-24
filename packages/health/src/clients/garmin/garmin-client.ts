@@ -113,6 +113,18 @@ export class GarminClient {
     }
   }
 
+  /** Registered devices (watch, scale, …). Used to surface watch battery + last
+   *  sync. Field availability varies by device model/API version, so the
+   *  normalizer extracts battery defensively. */
+  async getDevices(): Promise<unknown> {
+    try {
+      return await this.apiGet('/device-service/deviceregistration/devices');
+    } catch (err) {
+      logger.warn('[GarminClient][getDevices] Failed', { error: String(err) });
+      return null;
+    }
+  }
+
   async getHRV(date: string): Promise<unknown> {
     try {
       return await this.apiGet(`/hrv-service/hrv/${date}`);

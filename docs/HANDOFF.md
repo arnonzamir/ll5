@@ -334,3 +334,5 @@ _2026-05-24: gateway character-refresh nudge now re-anchors three habits (narrat
 _2026-05-24: agent answers delivered via explicit push_to_user/reply; session-mirror (stop-mirror.sh) is a backstop only — it mirrors the transcript global last assistant line and mis-delivers under burst._
 
 _2026-05-24: CLI fidelity — agent prose IS the answer (CLI shows prose, not the folded push call); stop-mirror stands down once the agent delivered via push/reply this turn (decide_mirror delivered-detection), so prose can be the full answer with no double-post._
+
+_2026-05-24: health daily-stats now includes device:{name,battery,batteryStatus,lastSync} from Garmin /device-service/deviceregistration/devices (battery as of last watch sync; field extraction is defensive + logs raw payload once for calibration)._
