@@ -113,9 +113,8 @@ export class GarminClient {
     }
   }
 
-  /** Registered devices (watch, scale, …). Used to surface watch battery + last
-   *  sync. Field availability varies by device model/API version, so the
-   *  normalizer extracts battery defensively. */
+  /** Registered devices (watch, scale, …) — device catalog/metadata (name,
+   *  model). Does NOT carry live battery; used for the device name. */
   async getDevices(): Promise<unknown> {
     try {
       return await this.apiGet('/device-service/deviceregistration/devices');
@@ -123,6 +122,25 @@ export class GarminClient {
       logger.warn('[GarminClient][getDevices] Failed', { error: String(err) });
       return null;
     }
+  }
+
+  /** Probe candidate endpoints that may carry live watch battery + last sync.
+   *  Returns a map of {endpointLabel: response} so the normalizer can extract
+   *  and we can see (via calibration log) which one actually has battery. */
+  async getDeviceStatusProbe(): Promise<Record<string, unknown>> {
+    const candidates: Record<string, string> = {
+      lastUsed: '/device-service/deviceservice/mylastused',
+      primaryTraining: '/web-gateway/device-info/primary-training-device',
+    };
+    const out: Record<string, unknown> = {};
+    await Promise.all(Object.entries(candidates).map(async ([label, path]) => {
+      try {
+        out[label] = await this.apiGet(path);
+      } catch (err) {
+        out[label] = { __error: String(err) };
+      }
+    }));
+    return out;
   }
 
   async getHRV(date: string): Promise<unknown> {

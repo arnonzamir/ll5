@@ -336,3 +336,5 @@ _2026-05-24: agent answers delivered via explicit push_to_user/reply; session-mi
 _2026-05-24: CLI fidelity — agent prose IS the answer (CLI shows prose, not the folded push call); stop-mirror stands down once the agent delivered via push/reply this turn (decide_mirror delivered-detection), so prose can be the full answer with no double-post._
 
 _2026-05-24: health daily-stats now includes device:{name,battery,batteryStatus,lastSync} from Garmin /device-service/deviceregistration/devices (battery as of last watch sync; field extraction is defensive + logs raw payload once for calibration)._
+
+_2026-05-24: garmin watch=vívoactive 5; deviceregistration/devices gives name only (no battery). Probing /device-service/deviceservice/mylastused + /web-gateway/device-info/primary-training-device for live battery (calibration log)._
