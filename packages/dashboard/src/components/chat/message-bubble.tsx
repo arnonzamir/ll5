@@ -17,6 +17,7 @@ import {
 } from "@/lib/chat/constants";
 import type { Message, Reaction } from "@/lib/chat/types";
 import { uploadsUrl } from "@/lib/chat/format";
+import { Markdown } from "./markdown";
 
 // ---------------------------------------------------------------------------
 // Reaction strip under a parent bubble
@@ -238,10 +239,10 @@ export function MessageBubble({
               </div>
             )}
             <div
-              className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-gray-100 px-4 py-2.5 text-[17px] leading-7 text-ink-900 whitespace-pre-wrap break-words"
+              className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-gray-100 px-4 py-2.5 text-[17px] leading-7 text-ink-900 break-words"
               dir="auto"
             >
-              {m.content}
+              <Markdown content={m.content ?? ""} />
             </div>
             <ReactionStrip reactions={reactions} onToggle={onRemoveReaction ?? (() => {})} />
             <HoverBar
@@ -296,7 +297,7 @@ export function MessageBubble({
               loading="lazy"
             />
           ))}
-          {m.content}
+          {isUser ? m.content : <Markdown content={m.content ?? ""} />}
         </div>
         <ReactionStrip reactions={reactions} onToggle={onRemoveReaction ?? (() => {})} />
       </div>

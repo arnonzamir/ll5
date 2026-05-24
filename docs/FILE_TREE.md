@@ -244,3 +244,5 @@ ll5/
 <!-- garmin: watch battery NOT exposed by web API; device={name,lastSync} from mylastused -->
 
 <!-- health: reconnect_health_source — agent re-logins from SAVED creds (no password in chat) -->
+
+<!-- dashboard chat: agent messages render as GitHub-flavored Markdown (tables/bold/lists/code) via components/chat/markdown.tsx -->

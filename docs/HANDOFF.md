@@ -344,3 +344,5 @@ _(garmin battery-key scan probe)_
 _garmin watch battery is NOT available via the web API (confirmed vívoactive 5); daily-stats device={name,lastSync} from mylastused only._
 
 _health: reconnect_health_source tool — agent re-establishes a source session from already-saved encrypted credentials (no password through chat); recovers broken/expired sessions; fails if nothing stored (then dashboard connect)._
+
+_dashboard chat renders agent messages as GFM Markdown (react-markdown + remark-gfm + remark-breaks) — tables, bold, lists, code, links; user messages stay plain. See components/chat/markdown.tsx._

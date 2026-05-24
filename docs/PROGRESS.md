@@ -450,3 +450,6 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 _(2026-05-24 cont.) Garmin reconnected; deviceregistration confirmed name-only (no battery) — added getDeviceStatusProbe (mylastused + primary-training-device) to locate the live battery field via calibration log._
 
 _(garmin battery hunt probe)_
+
+### Web chat: Markdown rendering for agent messages (2026-05-24)
+Agent messages were rendered as raw text, so Markdown tables (`| … |`) and `**bold**` showed literally. Added GFM Markdown rendering on the dashboard chat (`react-markdown` + `remark-gfm` tables + `remark-breaks` to keep soft line breaks) via `components/chat/markdown.tsx`, themed to the ink/coach palette (tables scroll horizontally, `dir=\"auto\"` per block for RTL). Wired into `message-bubble.tsx` for assistant messages (unboxed + bubble variants); user messages stay plain text. Dashboard typecheck clean. (Android equivalent next.)
