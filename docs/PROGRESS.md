@@ -446,3 +446,5 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 
 _(2026-05-24 cont.) Garmin reconnected; deviceregistration confirmed name-only (no battery) — added getDeviceStatusProbe (mylastused + primary-training-device) to locate the live battery field via calibration log._
+
+_(garmin battery hunt probe)_

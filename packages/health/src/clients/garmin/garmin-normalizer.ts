@@ -149,10 +149,13 @@ function extractDeviceStatus(devices: unknown, deviceStatus?: unknown): {
   // is in the probe endpoints (mylastused / primary-training-device). Log both
   // fully so we can see which carries a battery field for this watch.
   try {
-    logger.info('[GarminNormalizer][extractDeviceStatus] device-status probe (calibration)', {
-      deviceCount: list.length,
-      deviceKeys: list[0] ? Object.keys(list[0]) : [],
-      probe: JSON.stringify(deviceStatus ?? {}).slice(0, 2500),
+    // Definitive battery hunt: scan the entire devices+probe blob for any
+    // key/value mentioning "batter" so we know if Garmin exposes it at all.
+    const blob = JSON.stringify({ devices, deviceStatus });
+    const batteryHits = (blob.match(/.{0,40}batter[a-z]*"?\s*:?\s*[^,}]{0,30}/gi) || []).slice(0, 12);
+    logger.info('[GarminNormalizer][extractDeviceStatus] battery hunt (calibration)', {
+      deviceStatusValue: JSON.stringify(list[0]?.deviceStatus ?? null),
+      batteryHits,
     });
   } catch { /* ignore */ }
 
