@@ -8,6 +8,11 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Agent MCP autoheal + CI deploy via tailnet (2026-05-25, ll5-run)
+The server agent lost all 6 remote MCPs when the Coolify proxy dropped the app network (Claude Code marks HTTP MCPs failed and never retries after recovery → manual `/mcp` reconnect × 6). Fixed in `ll5-run` (`0862c30`): `ll5-server` is now a **supervisor loop** (not `exec claude`) so the tmux session/container survive a claude restart; a new in-container watcher `scripts/mcp-autoheal-server.sh` (started by `docker-entrypoint.sh`) polls the 6 `/health` endpoints every 60s and, on the **recovery edge** (down→up — the reliable trigger, since the channel MCP's probe only proves endpoints reachable, not that claude reconnected), touches a resume-flag + kills claude so the loop relaunches `claude --continue` (same conversation, fresh MCP clients). 10-min anti-flap.
+
+Separately, the `ll5-run` CI **deploy** step was timing out (`curl: (28)`) because `cp.arnonzamir.co.il` (Coolify API) is now tailnet-only. Fixed (`a632bfa`): the deploy job runs `tailscale/github-action@v3` with repo secret `TS_AUTHKEY` before the deploy curl. **⚠️ `TS_AUTHKEY` is an auth key → expires ~2026-08-23; rotate before then** (see `docs/HANDOFF.md` → Agent deploy). Manual fallback: Coolify MCP `deploy {tag_or_uuid: js8owk0g0cgog800ckc8ww0s, force: true}`. Both pipelines verified green end-to-end.
+
 ### health: reconnect_health_source + Garmin device name/last-sync (2026-05-24)
 Added **`reconnect_health_source`** (health MCP, agent-accessible): re-establishes a source connection from the user's already-saved encrypted credentials — no password through chat — to recover a broken/expired session (e.g. Garmin "Unsupported state"); fails clearly if nothing is stored (→ dashboard connect). Reuses the same decrypt→adapter.connect path sync already runs. 44 tests pass.
 

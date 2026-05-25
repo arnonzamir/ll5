@@ -248,3 +248,5 @@ ll5/
 <!-- dashboard chat: agent messages render as GitHub-flavored Markdown (tables/bold/lists/code) via components/chat/markdown.tsx -->
 
 <!-- gateway: camera_photo push type → ll5_media(source:camera, time+gps) + agent system msg (processors/camera-photo.ts) -->
+
+<!-- 2026-05-25 (ll5-run): agent MCP autoheal — ll5-server supervisor loop + scripts/mcp-autoheal-server.sh watcher → claude --continue on endpoint recovery edge; CI deploy joins tailnet via TS_AUTHKEY (expires ~Aug 23). Docs in HANDOFF.md. -->

@@ -176,6 +176,14 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 - IMPORTANT: deploy pulls only our GHCR images, NOT database/third-party images. A `docker compose pull` would re-pull postgres/ES base images and recreate their containers, causing downtime. To upgrade postgres or ES, do it manually on the server.
 - Secrets configured: `DEPLOY_SSH_KEY`, `COOLIFY_SERVICE_UUID` (GitHub secrets) + `SERVER_HOST` (GitHub variable)
 
+### Agent (`ll5-run`) deploy — separate repo/workflow
+
+- The Claude Code agent lives in the **`ll5-run`** repo with its own `.github/workflows/build-and-push.yml`: builds `ghcr.io/arnonzamir/ll5-agent:latest`, then triggers Coolify (app UUID `js8owk0g0cgog800ckc8ww0s`) via `GET cp.arnonzamir.co.il/api/v1/deploy`.
+- **The deploy step joins the tailnet first.** `cp.arnonzamir.co.il` (Coolify API) is now tailnet-only — public port firewalled + DNS → the box's Tailscale IP `100.70.111.31`. So the workflow runs `tailscale/github-action@v3` with repo secret **`TS_AUTHKEY`** (ephemeral + reusable auth key) before the deploy curl, or it times out (`curl: (28)`).
+- **⚠️ `TS_AUTHKEY` expires ≤90 days** — minted ~2026-05-25, so **rotate before ~2026-08-23**. When it lapses the deploy step times out with `(28)`; fix = mint a fresh ephemeral+reusable key at https://login.tailscale.com/admin/settings/keys then `gh secret set TS_AUTHKEY -R arnonzamir/ll5-run`. (Durable alternative: switch to a Tailscale OAuth client + `tag:ci`, no expiry, needs a tagOwners ACL edit.)
+- **Manual deploy fallback** when CI can't reach Coolify: the Coolify MCP — `deploy { tag_or_uuid: js8owk0g0cgog800ckc8ww0s, force: true }`. Reaches Coolify regardless of the runner's tailnet state.
+- The agent auto-reconnects its 6 remote MCPs after a connectivity blip (no manual `/mcp`): `ll5-server` supervisor loop + in-container `scripts/mcp-autoheal-server.sh` watcher → `claude --continue` on the endpoint recovery edge.
+
 ## How to Deploy
 
 ```bash
