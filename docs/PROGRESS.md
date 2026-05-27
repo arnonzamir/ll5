@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Phone low-battery alert + ES memory bump (2026-05-27)
+Gateway proactively alerts on a discharging phone — escalating thresholds **20% (notify) → 10% (notify) → 5% (alert)**, each once per discharge, reset on charge. Event-driven from `phone_status` pushes: `processors/battery-alert.ts` (pure `decideBatteryAlert(prevState, pct, isCharging)` + in-memory per-user state) wired into `processPhoneStatus` (now takes the pg Pool) → `insertSystemMessage`. +8 unit tests; gateway 189 tests pass. Also bumped **Elasticsearch 1g heap/1.5G → 2g heap / 4G limit** (`docker/docker-compose.prod.yml`) to stop the recurring ES OOM/restart cascades that flag gateway+knowledge+awareness+health as "down" (their /health probes hit ES). See `docs/HANDOFF.md` Databases.
+
 ### Agent MCP autoheal + CI deploy via tailnet (2026-05-25, ll5-run)
 The server agent lost all 6 remote MCPs when the Coolify proxy dropped the app network (Claude Code marks HTTP MCPs failed and never retries after recovery → manual `/mcp` reconnect × 6). Fixed in `ll5-run` (`0862c30`): `ll5-server` is now a **supervisor loop** (not `exec claude`) so the tmux session/container survive a claude restart; a new in-container watcher `scripts/mcp-autoheal-server.sh` (started by `docker-entrypoint.sh`) polls the 6 `/health` endpoints every 60s and, on the **recovery edge** (down→up — the reliable trigger, since the channel MCP's probe only proves endpoints reachable, not that claude reconnected), touches a resume-flag + kills claude so the loop relaunches `claude --continue` (same conversation, fresh MCP clients). 10-min anti-flap.
 

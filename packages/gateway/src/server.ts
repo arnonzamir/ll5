@@ -154,7 +154,7 @@ async function processItem(
         // Batched after the loop — accepted individually, processed in bulk
         break;
       case 'phone_status':
-        await processPhoneStatus(es, userId, item);
+        await processPhoneStatus(es, pgPool, userId, item);
         break;
       case 'wifi':
         await processWifi(es, userId, item);

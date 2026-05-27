@@ -1,10 +1,13 @@
 import type { Client } from '@elastic/elasticsearch';
 import crypto from 'node:crypto';
+import type { Pool } from 'pg';
 import type { PushPhoneStatusItem } from '../types/index.js';
 import { logger } from '../utils/logger.js';
+import { maybeAlertLowBattery } from './battery-alert.js';
 
 export async function processPhoneStatus(
   es: Client,
+  pool: Pool | undefined,
   userId: string,
   item: PushPhoneStatusItem,
 ): Promise<void> {
@@ -38,4 +41,11 @@ export async function processPhoneStatus(
     is_charging: item.is_charging,
     trigger: item.trigger,
   });
+
+  // Proactive escalating low-battery alert (discharging only). In-memory
+  // per-user episode state; each threshold (20/10/5) fires at most once per
+  // discharge episode and resets on charge / recovery above 20%.
+  if (pool && item.battery_pct !== undefined && item.is_charging !== undefined) {
+    await maybeAlertLowBattery(pool, userId, item.battery_pct, item.is_charging);
+  }
 }

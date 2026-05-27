@@ -250,3 +250,5 @@ ll5/
 <!-- gateway: camera_photo push type → ll5_media(source:camera, time+gps) + agent system msg (processors/camera-photo.ts) -->
 
 <!-- 2026-05-25 (ll5-run): agent MCP autoheal — ll5-server supervisor loop + scripts/mcp-autoheal-server.sh watcher → claude --continue on endpoint recovery edge; CI deploy joins tailnet via TS_AUTHKEY (expires ~Aug 23). Docs in HANDOFF.md. -->
+
+<!-- 2026-05-27: gateway phone low-battery alert (packages/gateway/src/processors/battery-alert.ts — escalating 20/10/5% on discharge, resets on charge); ES bumped 1g/1.5G → 2g heap/4G in docker/docker-compose.prod.yml to stop ES-restart health cascades. -->

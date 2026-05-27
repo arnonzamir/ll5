@@ -128,6 +128,8 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 
 ## Databases
 
+**Elasticsearch** (awareness + personal-knowledge): single-node 8.17.0. Heap/limit raised 2026-05-27 from 1g/1.5G to **`-Xmx2g` / 4G limit** (`docker/docker-compose.prod.yml`) — the old 1g/1.5G ran pegged (~97%) and restarted under load, and each ES restart makes the ES-backed `/health` probes of gateway+knowledge+awareness+health fail, firing false "service down" critical alerts. If those alerts return, check ES `RestartCount` first.
+
 **PostgreSQL** (ll5 database, user: ll5, password: changeme123):
 - `gtd_horizons` — unified GTD h=0-5
 - `gtd_inbox` — captured items
