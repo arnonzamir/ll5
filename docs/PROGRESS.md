@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Fix: outbound WhatsApp now stores the contact name (2026-05-27)
+Your own sent WhatsApp messages were captured (`from_me:true`, full `content`) but with `conversation_name: null` — the ES doc write used `conversationName ?? groupName` and ignored the already-resolved `contactDisplayName` (from the `messaging_contacts` lookup that runs for any 1:1). So outbound landed keyed only by raw JID, and the agent's name/person-based thread lookups (`read_messages`, `get_person`) couldn't correlate it → it thought it "didn't see" sent messages and re-nagged about handled items. Fix in `processors/whatsapp-webhook.ts`: `conversation_name` now falls back to `contactDisplayName` (1:1) so outbound is queryable by contact name like inbound; `person_id` was already attached. +6 tests; gateway 194 tests pass.
+
 ### Phone low-battery alert + ES memory bump (2026-05-27)
 Gateway proactively alerts on a discharging phone — escalating thresholds **20% (notify) → 10% (notify) → 5% (alert)**, each once per discharge, reset on charge. Event-driven from `phone_status` pushes: `processors/battery-alert.ts` (pure `decideBatteryAlert(prevState, pct, isCharging)` + in-memory per-user state) wired into `processPhoneStatus` (now takes the pg Pool) → `insertSystemMessage`. +8 unit tests; gateway 189 tests pass. Also bumped **Elasticsearch 1g heap/1.5G → 2g heap / 4G limit** (`docker/docker-compose.prod.yml`) to stop the recurring ES OOM/restart cascades that flag gateway+knowledge+awareness+health as "down" (their /health probes hit ES). See `docs/HANDOFF.md` Databases.
 

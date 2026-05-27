@@ -288,6 +288,17 @@ export async function processWhatsAppWebhook(
     ? new Date(data.messageTimestamp * 1000).toISOString()
     : new Date().toISOString();
 
+  // The name stored on the message doc, so name/person-based thread lookups
+  // (read_messages, get_person) correlate it to the right contact/thread.
+  // For a 1:1 this is the PEER (= recipient for outbound, sender for inbound):
+  // contact display name > conversation name > inbound sender > bare JID. For a
+  // group it is the group name. Crucially this resolves the recipient on
+  // outbound (fromMe) docs the same way inbound docs are resolved, instead of
+  // leaving conversation_name null when there is no messaging_conversations row.
+  const messageConversationName: string | null = isGroup
+    ? (conversationName ?? groupName)
+    : (contactDisplayName || conversationName || (!fromMe ? sender : null));
+
   // Write to ES — same index as phone-pushed messages
   const docId = crypto.randomUUID();
   const messageDoc: Record<string, unknown> = {
@@ -298,7 +309,7 @@ export async function processWhatsAppWebhook(
     is_group: isGroup,
     group_name: groupName,
     conversation_id: remoteJid,
-    conversation_name: conversationName ?? groupName,
+    conversation_name: messageConversationName,
     processed: fromMe,
     from_me: fromMe,
     timestamp,

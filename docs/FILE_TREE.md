@@ -252,3 +252,5 @@ ll5/
 <!-- 2026-05-25 (ll5-run): agent MCP autoheal — ll5-server supervisor loop + scripts/mcp-autoheal-server.sh watcher → claude --continue on endpoint recovery edge; CI deploy joins tailnet via TS_AUTHKEY (expires ~Aug 23). Docs in HANDOFF.md. -->
 
 <!-- 2026-05-27: gateway phone low-battery alert (packages/gateway/src/processors/battery-alert.ts — escalating 20/10/5% on discharge, resets on charge); ES bumped 1g/1.5G → 2g heap/4G in docker/docker-compose.prod.yml to stop ES-restart health cascades. -->
+
+<!-- 2026-05-27: fix whatsapp-webhook.ts from_me enrichment — conversation_name now uses resolved contactDisplayName (was conversationName??groupName → null), so the user's outbound WhatsApp is queryable by contact name (stops the agent re-nagging on already-handled threads). -->>

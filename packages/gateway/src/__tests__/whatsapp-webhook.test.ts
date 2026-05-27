@@ -36,6 +36,21 @@ function makePgPool(): Pool {
   } as unknown as Pool;
 }
 
+/**
+ * A pool whose messaging_contacts SELECT resolves the peer (1:1) to a known
+ * contact display_name + person_id, while every other query returns no rows.
+ * Mirrors how the contact-resolution dependency behaves for a known recipient.
+ */
+function makePgPoolWithContact(displayName: string, personId: string | null): Pool {
+  const query = vi.fn((sql: unknown) => {
+    if (typeof sql === 'string' && sql.includes('FROM messaging_contacts') && sql.includes('SELECT')) {
+      return Promise.resolve({ rows: [{ person_id: personId, display_name: displayName }] });
+    }
+    return Promise.resolve({ rows: [] });
+  });
+  return { query } as unknown as Pool;
+}
+
 function makeMatcher(
   priority: string | null = null,
   downloadMedia = false,
@@ -261,6 +276,54 @@ describe('processWhatsAppWebhook', () => {
 
       expect(insertSystemMessage).not.toHaveBeenCalled();
     });
+
+    it('resolves recipient to contact name + person_id for fromMe to a known contact', async () => {
+      // The recipient (remoteJid) is a known messaging_contacts row.
+      pool = makePgPoolWithContact('Bob Smith', 'person-42');
+      const payload = makePayload({ fromMe: true, remoteJid: '972528524448@s.whatsapp.net' });
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+
+      const indexCall = vi.mocked(es.index).mock.calls[0][0] as Record<string, unknown>;
+      const doc = indexCall.document as Record<string, unknown>;
+      // The outbound doc is now queryable by the recipient's contact name.
+      expect(doc.conversation_name).toBe('Bob Smith');
+      expect(doc.person_id).toBe('person-42');
+      expect(doc.from_me).toBe(true);
+      expect(doc.sender).toBe('(me)');
+    });
+
+    it('falls back gracefully for fromMe to an unknown JID (no throw, no name)', async () => {
+      // Unknown recipient: messaging_contacts returns no rows.
+      pool = makePgPool();
+      const payload = makePayload({ fromMe: true, remoteJid: '972500000000@s.whatsapp.net' });
+      await expect(
+        processWhatsAppWebhook(es, pool, matcher, 'user-1', payload),
+      ).resolves.toBeUndefined();
+
+      const indexCall = vi.mocked(es.index).mock.calls[0][0] as Record<string, unknown>;
+      const doc = indexCall.document as Record<string, unknown>;
+      // No contact, no conversation row → name stays null, JID still queryable.
+      expect(doc.conversation_name).toBeNull();
+      expect(doc.person_id).toBeUndefined();
+      expect(doc.conversation_id).toBe('972500000000@s.whatsapp.net');
+      expect(doc.from_me).toBe(true);
+    });
+
+    it('still resolves the recipient even when contact lookup throws', async () => {
+      // Resilience: a failing messaging_contacts query must not throw.
+      pool = {
+        query: vi.fn().mockRejectedValue(new Error('db down')),
+      } as unknown as Pool;
+      const payload = makePayload({ fromMe: true, remoteJid: '972511111111@s.whatsapp.net' });
+      await expect(
+        processWhatsAppWebhook(es, pool, matcher, 'user-1', payload),
+      ).resolves.toBeUndefined();
+
+      const indexCall = vi.mocked(es.index).mock.calls[0][0] as Record<string, unknown>;
+      const doc = indexCall.document as Record<string, unknown>;
+      expect(doc.conversation_name).toBeNull();
+      expect(doc.from_me).toBe(true);
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -274,6 +337,27 @@ describe('processWhatsAppWebhook', () => {
       const indexCall = vi.mocked(es.index).mock.calls[0][0] as Record<string, unknown>;
       const doc = indexCall.document as Record<string, unknown>;
       expect(doc.sender).toBe('Bob Smith');
+    });
+
+    it('sets conversation_name to the contact name for inbound 1:1 (unchanged)', async () => {
+      pool = makePgPoolWithContact('Carol', 'person-7');
+      const payload = makePayload({ fromMe: false, pushName: 'Carol', remoteJid: '972509876543@s.whatsapp.net' });
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+
+      const indexCall = vi.mocked(es.index).mock.calls[0][0] as Record<string, unknown>;
+      const doc = indexCall.document as Record<string, unknown>;
+      expect(doc.conversation_name).toBe('Carol');
+      expect(doc.person_id).toBe('person-7');
+      expect(doc.from_me).toBe(false);
+    });
+
+    it('falls back to inbound sender for conversation_name when contact unknown', async () => {
+      const payload = makePayload({ fromMe: false, pushName: 'Unknown Dude', remoteJid: '972500001111@s.whatsapp.net' });
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+
+      const indexCall = vi.mocked(es.index).mock.calls[0][0] as Record<string, unknown>;
+      const doc = indexCall.document as Record<string, unknown>;
+      expect(doc.conversation_name).toBe('Unknown Dude');
     });
 
     it('falls back to phone number when pushName is missing', async () => {
