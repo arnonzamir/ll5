@@ -253,4 +253,6 @@ ll5/
 
 <!-- 2026-05-27: gateway phone low-battery alert (packages/gateway/src/processors/battery-alert.ts — escalating 20/10/5% on discharge, resets on charge); ES bumped 1g/1.5G → 2g heap/4G in docker/docker-compose.prod.yml to stop ES-restart health cascades. -->
 
-<!-- 2026-05-27: fix whatsapp-webhook.ts from_me enrichment — conversation_name now uses resolved contactDisplayName (was conversationName??groupName → null), so the user's outbound WhatsApp is queryable by contact name (stops the agent re-nagging on already-handled threads). -->>
+<!-- 2026-05-27: fix whatsapp-webhook.ts from_me enrichment — conversation_name now uses resolved contactDisplayName (was conversationName??groupName → null), so the user's outbound WhatsApp is queryable by contact name (stops the agent re-nagging on already-handled threads). -->
+
+<!-- 2026-05-29: code-quality/bug review batch (branch fix/review-batch-2026-05-29). NEW: docs/decisions/DECISION-001..006.md (scoping, calendar storage, oauth rotation, gtd completed_at, search scoring, user-salted doc ids); docs/reviews/2026-05-29/ (README audit+evidence, verification.md, per-workstream RED/GREEN .log). NEW data-repair scripts: packages/{gateway,health,google}/scripts/repair-*.ts (dry-run guarded one-offs, not in build/deploy). +20 test files across packages (calendar-merge/sync, *-scoping, cross-tenant-hardening, search-tools, api-key-auth, etc.). 28 bugs fixed incl. multi-tenant by-id scoping + unsalted-doc-id contamination vectors. -->>

@@ -95,8 +95,13 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
       return;
     }
 
+    // Normalize the rate-limit key so case/whitespace variants of the same
+    // login ("Alice" vs "alice ") share one bucket — otherwise an attacker
+    // trivially multiplies the per-identity attempt limit by varying case.
+    const rateKey = loginId.trim().toLowerCase();
+
     // Rate limit check
-    if (isRateLimited(loginId)) {
+    if (isRateLimited(rateKey)) {
       logger.warn('[auth][issueToken] Rate limited', { loginId });
       res.status(429).json({ error: 'Too many failed attempts. Try again later.' });
       return;
@@ -118,7 +123,7 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
       const pinValid = await bcrypt.compare(pin, hashToCompare);
 
       if (!user || !pinValid) {
-        recordFailedAttempt(loginId);
+        recordFailedAttempt(rateKey);
         logger.warn('[auth][issueToken] Invalid credentials attempt', {
           userId: loginId,
           userExists: !!user,
@@ -129,7 +134,7 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
       }
 
       // Successful login — clear rate limit tracking
-      clearAttempts(loginId);
+      clearAttempts(rateKey);
 
       const token = generateToken(user.user_id, authSecret, user.token_ttl_days, user.role);
       const expiresAt = new Date(

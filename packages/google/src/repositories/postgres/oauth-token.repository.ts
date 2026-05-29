@@ -66,6 +66,15 @@ export class PostgresOAuthTokenRepository extends BasePostgresRepository impleme
     );
   }
 
+  async updateRefreshToken(userId: string, refreshToken: string): Promise<void> {
+    const encRefreshToken = encrypt(refreshToken, this.encryptionKey);
+
+    await this.query(
+      `UPDATE google_oauth_tokens SET refresh_token = $1, updated_at = now() WHERE user_id = $2`,
+      [encRefreshToken, userId],
+    );
+  }
+
   async delete(userId: string): Promise<void> {
     await this.query(`DELETE FROM google_oauth_tokens WHERE user_id = $1`, [userId]);
   }

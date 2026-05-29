@@ -480,7 +480,7 @@ describe('ElasticsearchPersonRepository', () => {
       );
     });
 
-    it('maps hits to SearchResult with normalized score and highlight fallback', async () => {
+    it('maps hits to SearchResult carrying raw _score and highlight fallback', async () => {
       const client = makeEsClient({
         searchResult: {
           hits: {
@@ -525,11 +525,13 @@ describe('ElasticsearchPersonRepository', () => {
       expect(results).toHaveLength(2);
       expect(results[0].entityType).toBe('person');
       expect(results[0].entityId).toBe('p-1');
-      expect(results[0].score).toBe(1); // 2.0 / 2.0 max
+      // Repos now carry the raw BM25 _score; the search tool normalizes
+      // globally across entity types so cross-entity ranking is comparable.
+      expect(results[0].score).toBe(2.0); // raw _score
       expect(results[0].highlight).toBe('<em>Alice</em>');
       expect(results[0].summary).toBe('Alice (friend)');
 
-      expect(results[1].score).toBe(0.5); // 1.0 / 2.0 max
+      expect(results[1].score).toBe(1.0); // raw _score
       expect(results[1].highlight).toBe('Alicia'); // falls back to person name
       expect(results[1].summary).toBe('Alicia'); // no relationship → no parens
     });

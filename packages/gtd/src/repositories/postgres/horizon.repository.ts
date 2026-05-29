@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { logger } from '../../utils/logger.js';
 import { BasePostgresRepository, mapHorizonRow } from './base.repository.js';
 import type { HorizonRepository } from '../interfaces/horizon.repository.js';
 import type {
@@ -96,11 +97,20 @@ export class PostgresHorizonRepository extends BasePostgresRepository implements
       }
     }
 
-    // Auto-set completed_at when status changes to completed
+    // completed_at lifecycle:
+    //   - status -> 'completed': stamp completion time.
+    //   - status -> 'active':    explicit re-open, clear completion history.
+    //   - status -> 'on_hold' / 'dropped': leave completed_at untouched so we
+    //     don't wipe a prior completion timestamp (history is preserved).
+    //   - no status in the update: never touch completed_at.
     if (data.status === 'completed') {
       setClauses.push(`completed_at = now()`);
-    } else if (data.status) {
+    } else if (data.status === 'active') {
       setClauses.push(`completed_at = NULL`);
+      logger.info('[gtd][updateAction] clearing completed_at (re-opened to active)', {
+        id,
+        userId,
+      });
     }
 
     params.push(id, userId);
@@ -236,13 +246,15 @@ export class PostgresHorizonRepository extends BasePostgresRepository implements
   }
 
   async deleteAction(userId: string, id: string): Promise<boolean> {
-    const sql = `DELETE FROM gtd_horizons WHERE id = $1 AND user_id = $2 AND horizon = 0`;
-    const rows = await this.query(sql, [id, userId]);
-    // pg returns rowCount via query result, but our wrapper returns rows
-    // Use a RETURNING clause instead
-    const checkSql = `DELETE FROM gtd_horizons WHERE id = $1 AND user_id = $2 AND horizon = 0 RETURNING id`;
-    const deleted = await this.queryOne<{ id: string }>(checkSql, [id, userId]);
-    return deleted !== null;
+    const sql = `DELETE FROM gtd_horizons WHERE id = $1 AND user_id = $2 AND horizon = 0 RETURNING id`;
+    const deleted = await this.queryOne<{ id: string }>(sql, [id, userId]);
+    const wasDeleted = deleted !== null;
+    logger.info('[gtd][deleteAction] action_deleted', {
+      id,
+      user_id: userId,
+      deleted: wasDeleted,
+    });
+    return wasDeleted;
   }
 
   // ---------------------------------------------------------------------------

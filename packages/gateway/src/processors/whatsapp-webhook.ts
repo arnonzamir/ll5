@@ -136,8 +136,8 @@ export async function processWhatsAppWebhook(
   let conversationName: string | null = null;
   try {
     const nameResult = await pgPool.query(
-      'SELECT name FROM messaging_conversations WHERE conversation_id = $1 AND name IS NOT NULL LIMIT 1',
-      [remoteJid],
+      'SELECT name FROM messaging_conversations WHERE user_id = $1 AND conversation_id = $2 AND name IS NOT NULL LIMIT 1',
+      [userId, remoteJid],
     );
     conversationName = nameResult.rows[0]?.name ?? null;
     if (isGroup) {
@@ -156,8 +156,8 @@ export async function processWhatsAppWebhook(
   if (!isGroup) {
     try {
       const contactResult = await pgPool.query(
-        "SELECT person_id, display_name FROM messaging_contacts WHERE platform = 'whatsapp' AND platform_id = $1 LIMIT 1",
-        [remoteJid],
+        "SELECT person_id, display_name FROM messaging_contacts WHERE user_id = $1 AND platform = 'whatsapp' AND platform_id = $2 LIMIT 1",
+        [userId, remoteJid],
       );
       personId = contactResult.rows[0]?.person_id ?? null;
       contactDisplayName = contactResult.rows[0]?.display_name ?? null;
@@ -199,10 +199,18 @@ export async function processWhatsAppWebhook(
     const shouldDownload = await matcher.shouldDownloadMedia(userId, 'whatsapp', remoteJid, isGroup, personId);
     if (shouldDownload) {
       try {
+        // Tenant-scoped: only this user's Evolution credentials may be used to
+        // download their inbound media. ORDER BY makes the single-row pick
+        // deterministic when a tenant has more than one account row.
         const evoAccount = await pgPool.query(
-          'SELECT api_url, api_key, instance_name FROM messaging_whatsapp_accounts LIMIT 1',
+          'SELECT api_url, api_key, instance_name FROM messaging_whatsapp_accounts WHERE user_id = $1 ORDER BY instance_name LIMIT 1',
+          [userId],
         );
         const evo = evoAccount.rows[0];
+        logger.debug('[processWhatsAppWebhook][handle] Evolution account lookup', {
+          userId,
+          found: !!evo,
+        });
         let buf: Buffer | null = null;
 
         if (evo) {

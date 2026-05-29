@@ -3,6 +3,7 @@ import { BaseElasticsearchRepository } from './base.repository.js';
 import type { EsQueryContainer } from './base.repository.js';
 import type { LocationRepository } from '../interfaces/location.repository.js';
 import type { Location, LocationQuery, GeoPoint } from '../../types/location.js';
+import { logger } from '../../utils/logger.js';
 
 const INDEX = 'll5_awareness_locations';
 
@@ -106,12 +107,30 @@ export class ElasticsearchLocationRepository
   }
 
   async delete(userId: string, id: string): Promise<boolean> {
-    try {
-      const result = await this.client.delete({ index: INDEX, id });
-      return result.result === 'deleted';
-    } catch {
-      return false;
+    // Scope the delete by user_id so one user can never delete another user's
+    // point by guessing its _id. deleteByQuery returns the count actually
+    // removed: 0 means "not found / not owned by this user".
+    const response = await this.client.deleteByQuery({
+      index: INDEX,
+      refresh: true,
+      query: {
+        bool: {
+          filter: [
+            { term: { user_id: userId } },
+            { ids: { values: [id] } },
+          ],
+        },
+      },
+    });
+
+    const deleted = response.deleted ?? 0;
+    if (deleted === 0) {
+      logger.warn('[ElasticsearchLocationRepository.delete] not found', {
+        user_id: userId,
+        id,
+      });
     }
+    return deleted > 0;
   }
 
   private mapToLocation(id: string, doc: LocationDoc, userId: string): Location {

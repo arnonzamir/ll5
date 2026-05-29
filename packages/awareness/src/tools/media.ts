@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
 import { logAudit } from '@ll5/shared';
+import { logger } from '../utils/logger.js';
 
 const MEDIA_INDEX = 'll5_media';
 const MEDIA_LINKS_INDEX = 'll5_media_links';
@@ -155,6 +156,30 @@ export function registerMediaTools(
       const now = new Date().toISOString();
       const linkId = `${params.media_id}_${params.entity_type}_${params.entity_id}`;
 
+      // Verify the media belongs to the caller before creating a link.
+      let mediaOwner: string | undefined;
+      try {
+        const doc = await esClient.get({ index: MEDIA_INDEX, id: params.media_id });
+        mediaOwner = (doc._source as Record<string, unknown> | undefined)?.user_id as
+          | string
+          | undefined;
+      } catch {
+        mediaOwner = undefined;
+      }
+
+      if (mediaOwner !== userId) {
+        logger.warn('cross_user_access_denied', {
+          actor_user_id: userId,
+          owner_user_id: mediaOwner ?? null,
+          resource: 'media',
+          id: params.media_id,
+        });
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Not found' }) }],
+          isError: true,
+        };
+      }
+
       await esClient.index({
         index: MEDIA_LINKS_INDEX,
         id: linkId,
@@ -201,10 +226,18 @@ export function registerMediaTools(
       const userId = getUserId();
       const linkId = `${params.media_id}_${params.entity_type}_${params.entity_id}`;
 
-      await esClient.delete({
+      // Scope the delete by user_id so one user can't unlink another's media.
+      await esClient.deleteByQuery({
         index: MEDIA_LINKS_INDEX,
-        id: linkId,
-        refresh: 'wait_for',
+        refresh: true,
+        query: {
+          bool: {
+            filter: [
+              { term: { user_id: userId } },
+              { ids: { values: [linkId] } },
+            ],
+          },
+        },
       });
 
       logAudit({
@@ -319,10 +352,17 @@ export function registerMediaTools(
         return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Media not found' }) }], isError: true };
       }
 
-      // Delete all links
+      // Delete all links, scoped by user_id (ownership already verified above).
       await esClient.deleteByQuery({
         index: MEDIA_LINKS_INDEX,
-        query: { term: { media_id: params.media_id } },
+        query: {
+          bool: {
+            filter: [
+              { term: { user_id: userId } },
+              { term: { media_id: params.media_id } },
+            ],
+          },
+        },
         refresh: true,
       });
 

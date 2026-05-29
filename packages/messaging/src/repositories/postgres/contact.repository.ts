@@ -45,12 +45,32 @@ export class PostgresContactRepository
   async bulkUpsert(userId: string, contacts: ContactUpsertInput[]): Promise<number> {
     if (contacts.length === 0) return 0;
 
+    // Dedupe by (platform, platform_id) before building the batch. A single
+    // multi-row INSERT ... ON CONFLICT DO UPDATE that touches the same conflict
+    // target twice raises Postgres 21000 ("ON CONFLICT DO UPDATE command cannot
+    // affect row a second time") and aborts the whole sync. Evolution contact
+    // dumps can contain duplicate remoteJids, so dedupe last-wins: a Map keyed
+    // by platform|platform_id, later entries overwrite earlier ones.
+    const platform = contacts[0]?.platform ?? null;
+    const deduped = new Map<string, ContactUpsertInput>();
+    for (const contact of contacts) {
+      deduped.set(`${contact.platform}|${contact.platform_id}`, contact);
+    }
+    const dedupedContacts = Array.from(deduped.values());
+
+    logger.info('[PostgresContactRepository][bulkUpsert] Deduping batch', {
+      user_id: userId,
+      platform,
+      input_count: contacts.length,
+      deduped_count: dedupedContacts.length,
+    });
+
     // Build a single multi-row INSERT for efficiency
     const values: unknown[] = [userId];
     const rows: string[] = [];
     let paramIndex = 2;
 
-    for (const contact of contacts) {
+    for (const contact of dedupedContacts) {
       rows.push(
         `($1, $${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, $${paramIndex + 4}, now())`,
       );
@@ -81,6 +101,7 @@ export class PostgresContactRepository
 
     logger.info('[PostgresContactRepository][bulkUpsert] Contacts upserted', {
       requested: contacts.length,
+      deduped: dedupedContacts.length,
       affected: result.length,
     });
 

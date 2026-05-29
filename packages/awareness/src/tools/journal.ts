@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
 import { logAudit, formatTime, sessionTimezone } from '@ll5/shared';
+import { logger } from '../utils/logger.js';
 
 const INDEX = 'll5_agent_journal';
 const USER_MODEL_INDEX = 'll5_agent_user_model';
@@ -143,6 +144,30 @@ export function registerJournalTools(
       let resolvedCount = 0;
 
       if (params.entry_id) {
+        // Verify ownership before mutating: a raw update by _id would let one
+        // user resolve another user's journal entry.
+        let ownerUserId: string | undefined;
+        try {
+          const existing = await esClient.get({ index: INDEX, id: params.entry_id });
+          ownerUserId = (existing._source as Record<string, unknown> | undefined)?.user_id as
+            | string
+            | undefined;
+        } catch {
+          ownerUserId = undefined;
+        }
+
+        if (ownerUserId !== userId) {
+          logger.warn('cross_user_access_denied', {
+            actor_user_id: userId,
+            owner_user_id: ownerUserId ?? null,
+            resource: 'journal',
+            id: params.entry_id,
+          });
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({ resolved_count: 0 }) }],
+          };
+        }
+
         await esClient.update({
           index: INDEX,
           id: params.entry_id,

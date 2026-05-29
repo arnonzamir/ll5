@@ -168,11 +168,12 @@ export class ElasticsearchPersonRepository
         highlights?.aliases?.[0] ??
         highlights?.notes?.[0] ??
         person.name;
-      const maxScore = hits[0]?._score ?? 1;
+      // Carry the raw BM25 _score; the search tool normalizes globally so
+      // cross-entity ranking is comparable (see fact.repository.search).
       return {
         entityType: 'person' as const,
         entityId: person.id,
-        score: (hit._score ?? 0) / (maxScore || 1),
+        score: hit._score ?? 0,
         highlight,
         summary: `${person.name}${person.relationship ? ' (' + person.relationship + ')' : ''}`,
         data: person,

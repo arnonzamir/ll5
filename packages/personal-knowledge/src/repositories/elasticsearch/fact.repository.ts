@@ -173,11 +173,13 @@ export class ElasticsearchFactRepository
       const fact = docToFact(hit._source!, hit._id!);
       const highlights = (hit.highlight as Record<string, string[]> | undefined);
       const highlight = highlights?.content?.[0] ?? fact.content;
-      const maxScore = hits[0]?._score ?? 1;
+      // Carry the raw BM25 _score. Per-repo normalization would make every
+      // repo's top hit 1.0, which is not comparable across entity types in the
+      // cross-entity merge. The search tool normalizes against the global max.
       return {
         entityType: 'fact' as const,
         entityId: fact.id,
-        score: (hit._score ?? 0) / (maxScore || 1),
+        score: hit._score ?? 0,
         highlight,
         summary: fact.content.length > 120 ? fact.content.slice(0, 120) + '...' : fact.content,
         data: fact,

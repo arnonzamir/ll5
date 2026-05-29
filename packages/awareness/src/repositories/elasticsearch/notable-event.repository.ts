@@ -77,27 +77,26 @@ export class ElasticsearchNotableEventRepository
       filters.push({ term: { event_type: params.event_type } });
     }
 
+    // Apply min_severity as a query-time filter. Doing it in memory after a
+    // size:100 newest-first fetch silently drops high-severity events older
+    // than the 100 most-recent unacknowledged events.
+    if (params.min_severity) {
+      const minLevel = SEVERITY_ORDER[params.min_severity] ?? 0;
+      const allowed = Object.keys(SEVERITY_ORDER).filter(
+        (sev) => (SEVERITY_ORDER[sev] ?? 0) >= minLevel,
+      );
+      filters.push({ terms: { severity: allowed } });
+    }
+
     const { hits } = await this.searchDocs<NotableEventDoc>(userId, {
       filters,
       size: 100,
       sort: [{ created_at: { order: 'desc' } }],
     });
 
-    let results = hits
+    return hits
       .filter((h) => h._source != null)
       .map((h) => this.mapToNotableEvent(h._id!, h._source!, userId));
-
-    // Filter by minimum severity
-    if (params.min_severity) {
-      const minLevel = SEVERITY_ORDER[params.min_severity] ?? 0;
-      results = results.filter((e) => {
-        const details = e.details as Record<string, unknown> | undefined;
-        const severity = (details?.severity as string) ?? 'low';
-        return (SEVERITY_ORDER[severity] ?? 0) >= minLevel;
-      });
-    }
-
-    return results;
   }
 
   async acknowledge(userId: string, eventIds: string[]): Promise<number> {

@@ -65,11 +65,20 @@ export async function getAuthenticatedClient(
       const { credentials } = await oauth2Client.refreshAccessToken();
       const newAccessToken = credentials.access_token;
       const newExpiryDate = credentials.expiry_date;
+      const newRefreshToken = credentials.refresh_token;
 
       if (newAccessToken && newExpiryDate) {
         await tokenRepo.updateAccessToken(userId, newAccessToken, new Date(newExpiryDate));
         oauth2Client.setCredentials(credentials);
         logger.info('[getAuthenticatedClient] Access token refreshed successfully', { userId });
+      }
+
+      // Google may rotate the refresh token. If it returns one that differs from
+      // what we have stored, persist it — otherwise after a restart the stale
+      // stored token causes permanent invalid_grant.
+      if (newRefreshToken && newRefreshToken !== tokens.refresh_token) {
+        await tokenRepo.updateRefreshToken(userId, newRefreshToken);
+        logger.info('google_refresh_token_rotated', { user_id: userId });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

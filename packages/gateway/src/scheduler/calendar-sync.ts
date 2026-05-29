@@ -50,29 +50,53 @@ export class CalendarSyncScheduler {
 
       for (const event of events) {
         const docId = `google-${event.event_id}`;
+        const attendees = event.attendees.map((a) => a.name ?? a.email);
+
+        // Partial update doc: only the volatile scheduling fields. Crucially it
+        // omits created_at (so the original insert time survives) and omits
+        // title/location/source (so a previously merged enrichment from a phone
+        // push is NOT reverted back to the bare Google title/'google' source).
+        const partialDoc: Record<string, unknown> = {
+          start_time: event.start,
+          end_time: event.end,
+          calendar_name: event.calendar_name,
+          all_day: event.all_day,
+          attendees,
+          updated_at: nowStr,
+        };
+        if (event.description != null) partialDoc.description = event.description;
+
+        // Upsert branch: the full doc used ONLY when the event does not yet
+        // exist. This is the only place created_at, title, location and the
+        // 'google' source are set.
+        const upsertDoc: Record<string, unknown> = {
+          user_id: this.userId,
+          title: event.title,
+          description: event.description,
+          start_time: event.start,
+          end_time: event.end,
+          location: event.location,
+          calendar_name: event.calendar_name,
+          source: 'google',
+          all_day: event.all_day,
+          attendees,
+          created_at: nowStr,
+          updated_at: nowStr,
+        };
 
         operations.push(
-          { index: { _index: 'll5_awareness_calendar_events', _id: docId } },
-          {
-            user_id: this.userId,
-            title: event.title,
-            description: event.description,
-            start_time: event.start,
-            end_time: event.end,
-            location: event.location,
-            calendar_name: event.calendar_name,
-            source: 'google',
-            all_day: event.all_day,
-            attendees: event.attendees.map((a) => a.name ?? a.email),
-            created_at: nowStr,
-            updated_at: nowStr,
-          },
+          { update: { _index: 'll5_awareness_calendar_events', _id: docId } },
+          { doc: partialDoc, upsert: upsertDoc },
         );
       }
 
       if (operations.length > 0) {
-        await this.es.bulk({ operations, refresh: false });
-        logger.info('[CalendarSyncScheduler][sync] Calendar sync completed', { eventCount: events.length });
+        const result = await this.es.bulk({ operations, refresh: false }) as { errors?: boolean };
+        logger.info('[CalendarSyncScheduler][sync] calendar_sync', {
+          event_count: events.length,
+          op: 'update_upsert',
+          errors: result?.errors ?? false,
+        });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -339,9 +339,9 @@ export function registerTicklerTools(
           // For series deletion, remove by the recurring event ID pattern
           // Individual instances have doc IDs like tickler-eventId_timestamp
           // The parent has doc ID tickler-eventId
-          await esRepo.deleteByDocId(`tickler-${targetEventId}`);
+          await esRepo.deleteForUser(userId, targetEventId, true);
         } else {
-          await esRepo.deleteByDocId(`tickler-${event_id}`);
+          await esRepo.deleteForUser(userId, event_id, true);
         }
       }
 

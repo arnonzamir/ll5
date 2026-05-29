@@ -117,11 +117,11 @@ export class PostgresAccountRepository extends BasePostgresRepository implements
     );
   }
 
-  async getMessageCountToday(accountId: string): Promise<number> {
+  async getMessageCountToday(userId: string, accountId: string): Promise<number> {
     return this.queryCount(
       `SELECT COUNT(*) AS count FROM messaging_send_log
-       WHERE account_id = $1 AND sent_at >= CURRENT_DATE`,
-      [accountId],
+       WHERE user_id = $1 AND account_id = $2 AND sent_at >= CURRENT_DATE`,
+      [userId, accountId],
     );
   }
 

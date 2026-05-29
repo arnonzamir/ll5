@@ -233,7 +233,23 @@ export function registerGmailTools(
           threadId = originalMsg.data.threadId ?? undefined;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          logger.warn('[gmail][sendEmail] Could not fetch original message for reply', { error: message });
+          // An explicit reply was requested but we could not fetch the original
+          // message. Sending now would silently produce a NEW standalone email
+          // (no threadId / In-Reply-To / References). Fail loudly instead.
+          logger.error('[gmail][sendEmail] reply aborted: could not fetch original message', {
+            user_id: userId,
+            reply_to_message_id,
+            error: message,
+          });
+          return {
+            isError: true,
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({
+                error: `Could not fetch original message ${reply_to_message_id} to thread the reply: ${message}. Email NOT sent to avoid sending a standalone (unthreaded) message.`,
+              }),
+            }],
+          };
         }
       }
 

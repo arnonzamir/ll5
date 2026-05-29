@@ -4,7 +4,6 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AccountRepository } from '../repositories/interfaces/account.repository.js';
 import type { ConversationRepository } from '../repositories/interfaces/conversation.repository.js';
 import { EvolutionClient } from '../clients/evolution.client.js';
-import { TelegramClient } from '../clients/telegram.client.js';
 import { getConversationPriority } from '../utils/permission-checker.js';
 import { formatTime, sessionTimezone } from '@ll5/shared';
 
@@ -143,39 +142,36 @@ async function readTelegramMessages(
     };
   }
 
-  const client = new TelegramClient(account.bot_token);
-  const updates = await client.getUpdates(undefined, limit);
-
-  const chatIdNum = parseInt(conversationId, 10);
-  const messages = updates
-    .filter((u) => u.message && u.message.chat.id === chatIdNum)
-    .map((u) => {
-      const msg = u.message!;
-      const timestamp = new Date(msg.date * 1000);
-      const t = formatTime(timestamp, sessionTimezone());
-      const senderName = msg.from
-        ? [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ')
-        : 'Unknown';
-
-      return {
-        message_id: msg.message_id.toString(),
-        timestamp: t.utc,
-        local_time: t.local,
-        sender_name: senderName,
-        sender_id: msg.from?.id.toString() ?? '',
-        content: msg.text ?? '',
-        is_from_bot: msg.from?.is_bot ?? false,
-        is_group: msg.chat.type === 'group' || msg.chat.type === 'supergroup',
-        reply_to_message_id: msg.reply_to_message?.message_id.toString() ?? null,
-      };
-    })
-    .filter((m) => {
-      if (!since) return true;
-      return new Date(m.timestamp) > since;
-    })
-    .slice(0, limit);
-
+  // We intentionally do NOT fetch Telegram history here.
+  //
+  // The Bot API has no "read past chat history" endpoint. getUpdates() returns
+  // the bot's *pending update queue*, not chat history, and reading it with an
+  // offset acknowledges (deletes) those updates server-side — which would drop
+  // messages for the real consumer (the gateway webhook/poller that ingests
+  // incoming Telegram messages). Calling it for history is both incorrect
+  // (wrong data) and destructive (steals updates). Bots also only ever see
+  // messages sent after they were added, so there is no safe historical read.
+  //
+  // Telegram messages are ingested via the gateway and persisted; history
+  // should be read from our own store, not pulled from the Bot API. Until that
+  // path is wired here, return a clear not-supported error rather than silently
+  // draining the update queue.
+  void accountRepo;
+  void account;
+  void conversationId;
+  void limit;
+  void since;
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify({ messages, tz: sessionTimezone() }, null, 2) }],
+    content: [
+      {
+        type: 'text' as const,
+        text: JSON.stringify({
+          error: 'TELEGRAM_HISTORY_NOT_SUPPORTED',
+          detail:
+            'The Telegram Bot API exposes no chat-history endpoint. getUpdates returns the pending update queue and consuming it would drop messages for the gateway ingester. Read Telegram history from the persisted message store instead.',
+        }),
+      },
+    ],
+    isError: true,
   };
 }

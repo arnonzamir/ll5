@@ -930,6 +930,26 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
 
     const listener = new pg.Client({ connectionString });
 
+    // Single idempotent teardown: clears the keepalive timer, ends the PG
+    // client, and ends the response. Every exit path (req close, listener
+    // error, setup failure) routes through here so neither the 30s interval
+    // nor the dedicated LISTEN connection can leak.
+    let keepAlive: ReturnType<typeof setInterval> | null = null;
+    let cleanedUp = false;
+    const cleanup = (reason: string): void => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (keepAlive) {
+        clearInterval(keepAlive);
+        keepAlive = null;
+      }
+      listener.end().catch((err: unknown) => {
+        logger.debug('[chat][listen] PG listener cleanup error', { error: err instanceof Error ? err.message : String(err) });
+      });
+      if (!res.writableEnded) res.end();
+      logger.info('[chat][listen] SSE connection closed', { reason });
+    };
+
     try {
       await listener.connect();
       await listener.query('LISTEN chat_messages');
@@ -949,30 +969,23 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
         }
       });
 
-      listener.on('error', () => {
-        res.end();
+      listener.on('error', (err: unknown) => {
+        logger.warn('[chat][listen] PG listener error', { error: err instanceof Error ? err.message : String(err) });
+        cleanup('listener_error');
       });
 
-      req.on('close', () => {
-        listener.end().catch((err: unknown) => {
-          logger.debug('[chat][listen] PG listener cleanup error', { error: err instanceof Error ? err.message : String(err) });
-        });
-      });
+      req.on('close', () => cleanup('client_disconnect'));
 
-      const keepAlive = setInterval(() => {
+      keepAlive = setInterval(() => {
         res.write(': keepalive\n\n');
       }, 30000);
-
-      req.on('close', () => {
-        clearInterval(keepAlive);
-      });
 
     } catch (err) {
       logger.error('[chat][listen] SSE listen failed', {
         error: err instanceof Error ? err.message : String(err),
       });
-      res.write(`data: {"type":"error","message":"Connection failed"}\n\n`);
-      res.end();
+      if (!res.writableEnded) res.write(`data: {"type":"error","message":"Connection failed"}\n\n`);
+      cleanup('setup_failure');
     }
   });
 

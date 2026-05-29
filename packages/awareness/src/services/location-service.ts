@@ -39,6 +39,7 @@ export interface CurrentLocation {
 }
 
 interface NetworkDoc {
+  user_id?: string;
   manual_place_id?: string;
   manual_place_name?: string;
   place_observations?: Array<{
@@ -210,6 +211,18 @@ export class LocationService {
       const got = await this.es.get<NetworkDoc>({ index: 'll5_knowledge_networks', id: docId });
       const src = got._source;
       if (!src) return null;
+      // Recheck ownership: the id is server-derived, but mirror the network
+      // repository discipline so a doc whose stored user_id diverges from the
+      // caller is never leaked across tenants.
+      if (src.user_id !== userId) {
+        logger.warn('cross_user_access_denied', {
+          actor_user_id: userId,
+          owner_user_id: src.user_id,
+          resource: 'network',
+          id: docId,
+        });
+        return null;
+      }
       if (src.manual_place_id && src.manual_place_name) {
         return { place_id: src.manual_place_id, place_name: src.manual_place_name };
       }

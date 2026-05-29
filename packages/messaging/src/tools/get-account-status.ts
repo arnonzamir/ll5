@@ -27,7 +27,7 @@ export function registerGetAccountStatusTool(
         };
       }
 
-      const messageCountToday = await accountRepo.getMessageCountToday(params.account_id);
+      const messageCountToday = await accountRepo.getMessageCountToday(userId, params.account_id);
 
       if (platformInfo.platform === 'whatsapp') {
         const account = await accountRepo.getWhatsApp(userId, params.account_id);
@@ -49,6 +49,11 @@ export function registerGetAccountStatusTool(
             lastError = null;
             await accountRepo.updateStatus(userId, params.account_id, 'whatsapp', 'connected', null);
             await accountRepo.touchLastSeen(userId, params.account_id, 'whatsapp');
+          } else if (state.state === 'transient_error') {
+            // Couldn't reach Evolution (network blip / 5xx). This is NOT a
+            // WhatsApp logout — do not overwrite the persisted status. Keep the
+            // stored status and surface that the live check was inconclusive.
+            lastError = 'connection check unavailable (transient transport error)';
           } else {
             liveStatus = state.state === 'close' ? 'disconnected' : (state.state as typeof liveStatus);
             await accountRepo.updateStatus(userId, params.account_id, 'whatsapp', liveStatus, null);

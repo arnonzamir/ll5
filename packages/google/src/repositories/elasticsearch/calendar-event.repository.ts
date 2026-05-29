@@ -44,6 +44,24 @@ interface ESHit {
 }
 
 /**
+ * Build the user-scoped ES doc id for a calendar event.
+ *
+ * Doc id scheme: `${userId}::google-${eventId}` (or `${userId}::tickler-...`).
+ * The user_id prefix guarantees two users sharing the same Google event_id
+ * never collide on the same ES document (previously they did, causing
+ * cross-user overwrite/delete). The legacy unscoped scheme was
+ * `google-${eventId}` / `tickler-${eventId}` — see legacyDocId().
+ */
+function scopedDocId(userId: string, eventId: string, isTickler: boolean): string {
+  const kind = isTickler ? 'tickler' : 'google';
+  return `${userId}::${kind}-${eventId}`;
+}
+
+function legacyDocId(eventId: string, isTickler: boolean): string {
+  return isTickler ? `tickler-${eventId}` : `google-${eventId}`;
+}
+
+/**
  * ES calendar event repository for the unified calendar layer.
  * Reads and writes to the shared ll5_awareness_calendar_events index.
  */
@@ -139,7 +157,7 @@ export class ESCalendarEventRepository {
     isTickler: boolean = false,
   ): Promise<void> {
     const now = new Date().toISOString();
-    const docId = isTickler ? `tickler-${event.event_id}` : `google-${event.event_id}`;
+    const docId = scopedDocId(userId, event.event_id, isTickler);
 
     const doc: CalendarEventDoc = {
       user_id: userId,
@@ -165,12 +183,27 @@ export class ESCalendarEventRepository {
       updated_at: now,
     };
 
+    logger.info('[calendarEventRepo] upsertFromGoogle', { user_id: userId, doc_id: docId, is_tickler: isTickler });
+
     await this.es.index({
       index: INDEX,
       id: docId,
       document: doc,
       refresh: false,
     });
+  }
+
+  /**
+   * Delete a calendar event for a specific user. Removes both the new
+   * user-scoped doc id and the legacy unscoped doc id (migration-safe: old
+   * docs written before the scheme change are still cleaned up).
+   */
+  async deleteForUser(userId: string, eventId: string, isTickler: boolean = false): Promise<void> {
+    const scoped = scopedDocId(userId, eventId, isTickler);
+    const legacy = legacyDocId(eventId, isTickler);
+    logger.info('[calendarEventRepo] deleteForUser', { user_id: userId, doc_id: scoped, legacy_doc_id: legacy });
+    await this.deleteByDocId(scoped);
+    await this.deleteByDocId(legacy);
   }
 
   async deleteByDocId(docId: string): Promise<void> {

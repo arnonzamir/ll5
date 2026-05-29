@@ -20,7 +20,7 @@ import {
 import { createAdminRouter } from './admin.js';
 import { createAuthRouter } from './auth.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
-import { processCalendar } from './processors/calendar.js';
+import { processCalendar, phoneEventId } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
 import { ContactRoutingResolver } from './processors/contact-routing.js';
@@ -386,18 +386,38 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
 
     try {
+      // For an INSERT (new row) we need sensible defaults; for an UPDATE we must
+      // leave omitted fields UNCHANGED. COALESCE($n, existing) only preserves
+      // the existing value when the bound param is NULL — so omitted fields are
+      // bound NULL, and the INSERT defaults are applied via the table DEFAULT /
+      // an explicit COALESCE on the insert side.
+      const insertRouting = routing ?? 'batch';
+      const insertPermission = permission ?? 'input';
+      const insertDownloadMedia = download_media ?? false;
       await pgPool.query(
         `INSERT INTO contact_settings (user_id, target_type, target_id, routing, permission, download_media, display_name, platform)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (user_id, target_type, target_id) DO UPDATE SET
-           routing = COALESCE($4, contact_settings.routing),
-           permission = COALESCE($5, contact_settings.permission),
-           download_media = COALESCE($6, contact_settings.download_media),
+           routing = COALESCE($9, contact_settings.routing),
+           permission = COALESCE($10, contact_settings.permission),
+           download_media = COALESCE($11, contact_settings.download_media),
            display_name = COALESCE($7, contact_settings.display_name),
            platform = COALESCE($8, contact_settings.platform),
            updated_at = now()`,
-        [userId, target_type, target_id, routing ?? 'batch', permission ?? 'input', download_media ?? false, display_name ?? null, platform ?? null],
+        [
+          userId, target_type, target_id,
+          insertRouting, insertPermission, insertDownloadMedia,
+          display_name ?? null, platform ?? null,
+          // Update-only binds: NULL when omitted so COALESCE keeps the existing value.
+          routing ?? null, permission ?? null, download_media ?? null,
+        ],
       );
+      logger.info('[server][putContactSettings] Contact settings upserted', {
+        userId, target_type, target_id,
+        routing_changed: routing !== undefined,
+        permission_changed: permission !== undefined,
+        download_media_changed: download_media !== undefined,
+      });
 
       logAudit({
         user_id: userId,
@@ -532,10 +552,20 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
       const commandId = await queueDeviceCommand(pgPool, userId, 'check_availability', payload);
 
+      // Abort the poll loop if the client disconnects, so we stop holding a
+      // pool connection (and stop querying) for a request nobody is waiting on.
+      let aborted = false;
+      req.on('close', () => {
+        aborted = true;
+        logger.info('[server][checkAvailability] Client disconnected, aborting poll', { commandId });
+      });
+
       // Poll for result
       const startTime = Date.now();
       while (Date.now() - startTime < maxTimeout) {
+        if (aborted) return;
         await new Promise((r) => setTimeout(r, 500));
+        if (aborted) return;
 
         const result = await pgPool.query<{ status: string; result_data: unknown; error: string | null }>(
           `SELECT status, result_data, error FROM device_commands WHERE id = $1 AND user_id = $2`,
@@ -612,19 +642,21 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   });
 
   app.get('/media/:id/links', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
     try {
       const mediaId = req.params.id as string;
       const result = await esClient.search({
         index: 'll5_media_links',
         query: {
           bool: {
-            filter: [{ term: { media_id: mediaId } }],
+            filter: [{ term: { media_id: mediaId } }, { term: { user_id: userId } }],
           },
         },
         size: 100,
       });
 
       const links = (result.hits.hits as Array<{ _source?: Record<string, unknown> }>).map((h) => h._source);
+      logger.debug('[server][getMediaLinks] Media links fetched', { mediaId, count: links.length });
       res.json({ links });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -635,12 +667,13 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // --- Agent Journal API ---
   app.get('/journal', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
     try {
       const { type, status, topic, since, limit: limitStr } = req.query as Record<string, string | undefined>;
       const limit = Math.min(parseInt(limitStr || '50', 10), 200);
       const statusFilter = status ?? 'open';
 
-      const filters: Record<string, unknown>[] = [];
+      const filters: Record<string, unknown>[] = [{ term: { user_id: userId } }];
       if (type) {
         filters.push({ term: { type } });
       }
@@ -683,20 +716,44 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   });
 
   app.patch('/journal/:id', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const entryId = req.params.id as string;
     try {
       const { status } = req.body;
       if (!status || !['resolved', 'open', 'consolidated'].includes(status)) {
         res.status(400).json({ error: 'status must be one of: resolved, open, consolidated' });
         return;
       }
+
+      // Ownership check: fetch the entry and confirm it belongs to the caller.
+      // On a miss return 404 (not 403) so we never disclose existence.
+      let ownerUserId: string | undefined;
+      try {
+        const existing = await esClient.get<{ user_id?: string }>({ index: 'll5_agent_journal', id: entryId });
+        ownerUserId = existing._source?.user_id;
+      } catch {
+        ownerUserId = undefined;
+      }
+      if (ownerUserId !== userId) {
+        logger.warn('[server][updateJournal] cross_user_access_denied', {
+          actor_user_id: userId,
+          owner_user_id: ownerUserId ?? null,
+          resource: 'agent_journal',
+          id: entryId,
+        });
+        res.status(404).json({ error: 'Not found' });
+        return;
+      }
+
       await esClient.update({
         index: 'll5_agent_journal',
-        id: req.params.id as string,
+        id: entryId,
         doc: {
           status,
           updated_at: new Date().toISOString(),
         },
       });
+      logger.info('[server][updateJournal] Journal entry updated', { id: entryId, status });
       res.json({ updated: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -789,14 +846,29 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   });
 
   app.get('/sessions/:id', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const sessionId = req.params.id as string;
     try {
-      const result = await esClient.get({
+      const result = await esClient.get<{ user_id?: string }>({
         index: 'll5_session_history',
-        id: req.params.id as string,
+        id: sessionId,
       });
+      const ownerUserId = result._source?.user_id;
+      if (ownerUserId !== userId) {
+        // Cross-user/ownership miss → 404 (not 403) to avoid existence disclosure.
+        logger.warn('[server][getSession] cross_user_access_denied', {
+          actor_user_id: userId,
+          owner_user_id: ownerUserId ?? null,
+          resource: 'session_history',
+          id: sessionId,
+        });
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      logger.debug('[server][getSession] Session fetched', { id: sessionId });
       res.json(result._source);
     } catch (err) {
-      logger.warn('[server][getSession] Session fetch failed', { id: req.params.id, error: err instanceof Error ? err.message : String(err) });
+      logger.warn('[server][getSession] Session fetch failed', { id: sessionId, error: err instanceof Error ? err.message : String(err) });
       res.status(404).json({ error: 'Session not found' });
     }
   });
@@ -1009,15 +1081,11 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         .map((r) => r.data as PushCalendarItem);
 
       if (calendarItems.length > 0) {
-        const cryptoMod = await import('node:crypto');
-        const pushedIds = new Set(calendarItems.map((item) => {
-          const end = item.end ?? item.start;
-          const hash = cryptoMod.createHash('sha256')
-            .update(`${item.title}|${item.start}|${end}`)
-            .digest('hex')
-            .slice(0, 16);
-          return `phone-${hash}`;
-        }));
+        // Reconstruct ids via the SAME helper processCalendar uses to write them,
+        // so the must_not exclusion stays aligned (incl. the userId in the hash).
+        const pushedIds = new Set(calendarItems.map((item) =>
+          phoneEventId(userId, item.title, item.start, item.end ?? item.start),
+        ));
 
         // Find the time window from pushed events
         const starts = calendarItems.map((i) => new Date(i.start).getTime());

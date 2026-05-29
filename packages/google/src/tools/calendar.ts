@@ -576,7 +576,7 @@ export function registerCalendarTools(
 
       // Remove from ES
       if (esRepo) {
-        await esRepo.deleteByDocId(`google-${event_id}`);
+        await esRepo.deleteForUser(userId, event_id, false);
       }
 
       return {

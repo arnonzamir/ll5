@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { validateToken, isTokenExpiredError } from './token.js';
+import { timingSafeEqualStr } from './api-key.js';
 import type { AuthConfig } from './types.js';
 
 export interface TokenAuthConfig {
@@ -44,16 +45,17 @@ export function tokenAuthMiddleware(config: TokenAuthConfig) {
       return;
     }
 
-    // Fall back to legacy API_KEY auth
+    // Fall back to legacy API_KEY auth (constant-time compare; see api-key.ts)
     if (config.legacy) {
       const key = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-      if (key && key === config.legacy.apiKey) {
+      if (key && timingSafeEqualStr(key, config.legacy.apiKey)) {
         (req as AuthenticatedRequest).userId = config.legacy.userId;
         next();
         return;
       }
     }
 
+    console.debug('[tokenAuthMiddleware] Auth failed: no valid token or legacy key');
     res.status(401).json({ error: 'Invalid credentials' });
   };
 }

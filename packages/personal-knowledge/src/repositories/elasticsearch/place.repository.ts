@@ -180,11 +180,12 @@ export class ElasticsearchPlaceRepository
         highlights?.address?.[0] ??
         highlights?.notes?.[0] ??
         place.name;
-      const maxScore = hits[0]?._score ?? 1;
+      // Carry the raw BM25 _score; the search tool normalizes globally so
+      // cross-entity ranking is comparable (see fact.repository.search).
       return {
         entityType: 'place' as const,
         entityId: place.id,
-        score: (hit._score ?? 0) / (maxScore || 1),
+        score: hit._score ?? 0,
         highlight,
         summary: `${place.name} (${place.type})${place.address ? ' - ' + place.address : ''}`,
         data: place,

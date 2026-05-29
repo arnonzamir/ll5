@@ -169,6 +169,7 @@ function makeESCalendarRepo(overrides: Partial<ESCalendarEventRepository> = {}):
     query: vi.fn().mockResolvedValue([]),
     upsertFromGoogle: vi.fn(),
     deleteByDocId: vi.fn(),
+    deleteForUser: vi.fn(),
     ...overrides,
   } as unknown as ESCalendarEventRepository;
 }
@@ -658,9 +659,9 @@ describe('complete_tickler tool handler', () => {
         makeCalendarConfig({ calendar_id: 'tickler-cal-id', role: 'tickler' }),
       ),
     });
-    const deleteByDocId = vi.fn();
-    const esRepo = makeESCalendarRepo({ deleteByDocId });
-    return { calendarConfigRepo, esRepo, deleteByDocId };
+    const deleteForUser = vi.fn();
+    const esRepo = makeESCalendarRepo({ deleteForUser });
+    return { calendarConfigRepo, esRepo, deleteForUser };
   }
 
   it('deletes a single instance (not series); fetches tickler-calendar for USER_ID', async () => {
@@ -714,7 +715,7 @@ describe('complete_tickler tool handler', () => {
 
   it('removes from ES after completion', async () => {
     mockEventsDelete.mockResolvedValue({});
-    const { calendarConfigRepo, esRepo, deleteByDocId } = setupCompleteTickler();
+    const { calendarConfigRepo, esRepo, deleteForUser } = setupCompleteTickler();
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
@@ -725,7 +726,8 @@ describe('complete_tickler tool handler', () => {
       event_id: 'tickler-del',
     });
 
-    expect(deleteByDocId).toHaveBeenCalledWith('tickler-tickler-del');
+    // user-scoped delete (was previously an unscoped deleteByDocId — bug #2)
+    expect(deleteForUser).toHaveBeenCalledWith(USER_ID, 'tickler-del', true);
   });
 
   it('returns error when no tickler calendar configured (scoped to USER_ID)', async () => {

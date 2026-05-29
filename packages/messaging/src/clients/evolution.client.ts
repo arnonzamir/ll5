@@ -168,10 +168,23 @@ export class EvolutionClient {
         'GET',
         `/instance/connectionState/${this.instanceName}`,
       );
+      // A successful HTTP response reflects the real WhatsApp link state
+      // (e.g. 'open', 'connecting', 'close'). 'close' here is a genuine
+      // logout/disconnect and is returned verbatim.
       return { state: result?.instance?.state ?? 'unknown' };
     } catch (err) {
-      logger.warn('[evolution] connectionState check failed', { error: err instanceof Error ? err.message : String(err) });
-      return { state: 'disconnected' };
+      // A thrown error is a TRANSPORT failure (network blip, Evolution down,
+      // 5xx) — NOT a WhatsApp logout. Returning 'disconnected' here would be a
+      // silent error: callers could not distinguish "phone unlinked" from "we
+      // couldn't reach Evolution", and would wrongly trigger re-pairing flows.
+      // Surface it distinctly so callers can retry instead of re-pairing.
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn('[evolution] connectionState transient transport error', {
+        instance: this.instanceName,
+        error: message,
+        transient: true,
+      });
+      return { state: 'transient_error' };
     }
   }
 

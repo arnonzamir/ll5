@@ -815,7 +815,7 @@ describe('sync_health_data tool handler', () => {
     expect(hrCall.document.user_id).toBe(USER_ID);
 
     const actCall = indexCalls.find((c) => c.index === 'll5_health_activities')!;
-    expect(actCall.id).toBe('garmin-activity-a-1');
+    expect(actCall.id).toBe('garmin-activity-user-test-1-a-1');
     expect(actCall.document.user_id).toBe(USER_ID);
 
     expect(response.isError).toBeUndefined();
@@ -867,6 +867,10 @@ describe('sync_health_data tool handler', () => {
     expect(updateCall.doc_as_upsert).toBe(true);
     expect(updateCall.doc.stress_average).toBe(32);
     expect(updateCall.doc.stress_max).toBe(65);
+    // Scoping fields must be seeded so a stress-first upsert is not an orphan.
+    expect(updateCall.doc.user_id).toBe(USER_ID);
+    expect(updateCall.doc.date).toBe('2026-04-06');
+    expect(updateCall.doc.source).toBe('garmin');
   });
 
   it('captures per-source-per-fetch errors without failing the whole sync', async () => {

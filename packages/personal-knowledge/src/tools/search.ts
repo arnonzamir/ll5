@@ -71,6 +71,23 @@ export function registerSearchTools(
       const searchResults = await Promise.all(searches);
       let merged = searchResults.flat();
 
+      // Repos carry raw BM25 _score, which is comparable across entity types
+      // for the same query (same multi_match + fuzziness). Normalize against
+      // the single global max across ALL entity types so the resulting score
+      // is a comparable 0..1 relevance and min_score (0..1) is meaningful.
+      // Per-repo normalization would make every type's top hit 1.0 and break
+      // cross-entity ranking.
+      const globalMax = merged.reduce((m, r) => (r.score > m ? r.score : m), 0);
+      logger.info('[search][searchKnowledge] Scoring basis', {
+        scoringBasis: 'raw_bm25_global_normalized',
+        globalMax,
+        candidates: merged.length,
+      });
+      merged = merged.map((r) => ({
+        ...r,
+        score: globalMax > 0 ? r.score / globalMax : 0,
+      }));
+
       // Filter by min score
       merged = merged.filter((r) => r.score >= minScore);
 

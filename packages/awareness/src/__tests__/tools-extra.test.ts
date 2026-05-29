@@ -612,7 +612,9 @@ describe('link_media / unlink_media tool handlers', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('link_media writes a deterministic ID and audit log', async () => {
-    const es = makeMockEsClient();
+    const es = makeMockEsClient({
+      get: vi.fn().mockResolvedValue({ _id: 'm-1', _source: { user_id: USER_ID } }),
+    });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tools = captureTools((s) => registerMediaTools(s, es as any, getUserId));
 
@@ -632,17 +634,19 @@ describe('link_media / unlink_media tool handlers', () => {
     }));
   });
 
-  it('unlink_media deletes by the same deterministic ID', async () => {
-    const del = vi.fn().mockResolvedValue({ result: 'deleted' });
-    const es = makeMockEsClient({ delete: del });
+  it('unlink_media deletes by the deterministic ID scoped to user_id', async () => {
+    const delByQuery = vi.fn().mockResolvedValue({ deleted: 1 });
+    const es = makeMockEsClient({ deleteByQuery: delByQuery });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tools = captureTools((s) => registerMediaTools(s, es as any, getUserId));
 
     await tools.get('unlink_media')!({ media_id: 'm-1', entity_type: 'person', entity_id: 'p-7' });
 
-    expect(del).toHaveBeenCalledWith(expect.objectContaining({
-      index: 'll5_media_links', id: 'm-1_person_p-7', refresh: 'wait_for',
-    }));
+    const arg = delByQuery.mock.calls[0][0];
+    expect(arg.index).toBe('ll5_media_links');
+    const body = JSON.stringify(arg.query);
+    expect(body).toContain(USER_ID);
+    expect(body).toContain('m-1_person_p-7');
     expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
       action: 'delete', entity_type: 'media_link',
     }));
@@ -719,10 +723,11 @@ describe('delete_media tool handler', () => {
     const response = await tools.get('delete_media')!({ media_id: 'm-1' });
 
     expect(es.get).toHaveBeenCalledWith({ index: 'll5_media', id: 'm-1' });
-    expect(es.deleteByQuery).toHaveBeenCalledWith(expect.objectContaining({
-      index: 'll5_media_links',
-      query: { term: { media_id: 'm-1' } },
-    }));
+    const dbqArg = (es.deleteByQuery as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(dbqArg.index).toBe('ll5_media_links');
+    const dbqBody = JSON.stringify(dbqArg.query);
+    expect(dbqBody).toContain(USER_ID);
+    expect(dbqBody).toContain('m-1');
     expect(es.delete).toHaveBeenCalledWith({ index: 'll5_media', id: 'm-1' });
     expect(parseToolResponse<{ deleted: boolean; id: string }>(response)).toEqual({ deleted: true, id: 'm-1' });
     expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({

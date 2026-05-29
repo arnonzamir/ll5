@@ -27,6 +27,13 @@ export interface OAuthTokenRepository {
   /** Update tokens after a refresh. Encrypts the new access token. */
   updateAccessToken(userId: string, accessToken: string, expiresAt: Date): Promise<void>;
 
+  /**
+   * Persist a rotated refresh token. Encrypts before storage.
+   * Called when Google returns a new refresh_token during a refresh so the
+   * stored token does not go stale (stale token → permanent invalid_grant).
+   */
+  updateRefreshToken(userId: string, refreshToken: string): Promise<void>;
+
   /** Delete all tokens for a user. */
   delete(userId: string): Promise<void>;
 }

@@ -1,10 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { decideTokenAction } from "@/lib/auth-decision";
 
 /** Paths that don't require a login session. */
 const PUBLIC_PATHS = new Set<string>(["/login"]);
-
-/** Refresh the token when it has less than this many seconds of life left. */
-const REFRESH_WINDOW_SECONDS = 2 * 24 * 60 * 60; // 2 days
 
 const COOKIE_NAME = "ll5_token";
 
@@ -45,11 +43,17 @@ function withPathname(response: NextResponse, pathname: string): NextResponse {
 /**
  * Edge middleware:
  *   1. Redirects any non-public page to /login if the ll5_token cookie is missing.
- *   2. Auto-refreshes the token when it's within REFRESH_WINDOW_SECONDS of
- *      expiry (or has just expired — gateway grants a 7-day grace). Writes the
- *      new token back into both the incoming request and the outgoing response
- *      so the current request's server actions see it too. Beyond the grace
- *      window, clears the cookie and redirects to /login.
+ *   2. Runs decideTokenAction() over the decoded token to pick exactly one of:
+ *        - pass:    valid and not near expiry — serve as-is (no logging).
+ *        - refresh: near expiry, or expired-but-within the gateway's grace
+ *                   window — try /auth/refresh. On success, write the new token
+ *                   into both the incoming request (so this request's server
+ *                   actions see it) and the outgoing response (so the browser
+ *                   persists it). On failure, serve the old token only if it's
+ *                   still valid (gateway transiently down); otherwise re-login.
+ *        - reauth:  expired beyond grace, or malformed (missing exp) — clear the
+ *                   cookie and redirect to /login. A missing exp is handled as
+ *                   reauth rather than refresh-spamming every request.
  *   3. Injects x-pathname for server-side layouts.
  */
 export async function middleware(request: NextRequest) {
@@ -69,14 +73,45 @@ export async function middleware(request: NextRequest) {
   }
 
   const payload = decodeTokenPayload(token);
-  const exp = payload?.exp ?? 0;
+  const hasExp = typeof payload?.exp === "number";
   const now = Math.floor(Date.now() / 1000);
-  const secondsLeft = exp - now;
+  // When exp is missing, secondsLeft is meaningless; the decision helper keys
+  // off hasExp and treats it as reauth, so the value here is irrelevant.
+  const secondsLeft = hasExp ? (payload!.exp as number) - now : 0;
 
-  if (secondsLeft >= REFRESH_WINDOW_SECONDS) {
+  const action = decideTokenAction(secondsLeft, hasExp);
+
+  // (a) Valid and not near expiry — serve as-is, no logging noise.
+  if (action === "pass") {
     return withPathname(NextResponse.next(), pathname);
   }
 
+  const buildReauthRedirect = (reason: string): NextResponse => {
+    console.warn(
+      `[middleware] auth reauth: ${reason} (path=${pathname}, secondsLeft=${secondsLeft}, hasExp=${hasExp})`,
+    );
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    url.searchParams.set("next", pathname === "/" ? "/dashboard" : pathname);
+    const redirect = NextResponse.redirect(url);
+    redirect.cookies.delete(COOKIE_NAME);
+    return redirect;
+  };
+
+  // (c) Expired beyond grace (or malformed / missing exp) — clear cookie and
+  // force a clean re-login. Public paths never reach here (handled above), but
+  // guard anyway so /login itself is never redirect-looped.
+  if (action === "reauth") {
+    if (isPublic) return withPathname(NextResponse.next(), pathname);
+    return buildReauthRedirect(
+      hasExp ? "expired beyond grace" : "token missing exp claim",
+    );
+  }
+
+  // (b) Near expiry, or expired-but-within-grace — attempt a refresh.
+  console.warn(
+    `[middleware] auth refresh attempt (path=${pathname}, secondsLeft=${secondsLeft})`,
+  );
   const gatewayUrl = process.env.GATEWAY_URL ?? "https://gateway.noninoni.click";
   const fresh = await refreshToken(gatewayUrl, token);
 
@@ -96,19 +131,20 @@ export async function middleware(request: NextRequest) {
     return withPathname(response, pathname);
   }
 
-  if (secondsLeft <= 0 && !isPublic) {
-    // Expired beyond grace period — force re-login.
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("next", pathname);
-    const redirect = NextResponse.redirect(url);
-    redirect.cookies.delete(COOKIE_NAME);
-    return redirect;
+  // Refresh failed. Distinguish near-expiry (still valid) from expired-in-grace:
+  //   - Still valid (secondsLeft > 0): gateway likely transiently down — serve
+  //     the old token; next navigation retries. The token has not expired, so
+  //     downstream calls won't 401.
+  //   - Already expired (secondsLeft <= 0): serving it would only produce
+  //     downstream 401s and broken pages — force a clean re-login instead.
+  if (secondsLeft > 0 && !isPublic) {
+    console.warn(
+      `[middleware] auth refresh miss, token still valid — serving stale (path=${pathname}, secondsLeft=${secondsLeft})`,
+    );
+    return withPathname(NextResponse.next(), pathname);
   }
 
-  // Valid-but-near-expiry refresh miss (gateway down?) — serve with the old
-  // token; next navigation will retry.
-  return withPathname(NextResponse.next(), pathname);
+  return buildReauthRedirect("refresh failed for expired token");
 }
 
 export const config = {

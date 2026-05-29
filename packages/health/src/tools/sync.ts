@@ -117,13 +117,20 @@ async function writeDailyStatsToES(esClient: Client, userId: string, sourceId: s
 }
 
 async function writeActivityToES(esClient: Client, userId: string, sourceId: string, data: ActivityData): Promise<void> {
-  const docId = `${sourceId}-activity-${data.sourceActivityId}`;
+  // sourceId is the source TYPE (e.g. 'garmin'), NOT a per-user id. The doc id
+  // MUST include userId or two users whose provider activity ids collide would
+  // overwrite each other (last-writer-wins) and a delete/reindex keyed on this
+  // id would cross tenants. Same class as the writeStressToES orphan fix.
+  const docId = `${sourceId}-activity-${userId}-${data.sourceActivityId}`;
+  const date = data.startTime.slice(0, 10);
+  logger.debug('[writeActivityToES] activity_upsert', { user_id: userId, source: sourceId, activity_id: data.sourceActivityId });
   await esClient.index({
     index: 'll5_health_activities',
     id: docId,
     document: {
       user_id: userId,
       source: sourceId,
+      date,
       source_id: data.sourceActivityId,
       activity_type: data.activityType,
       name: data.name,
@@ -161,12 +168,21 @@ async function writeBodyCompToES(esClient: Client, userId: string, sourceId: str
 }
 
 async function writeStressToES(esClient: Client, userId: string, sourceId: string, data: StressData): Promise<void> {
-  // Stress data is written into the daily stats index as supplementary fields
+  // Stress data is written into the daily stats index as supplementary fields.
+  // doc_as_upsert means `doc` is ALSO the inserted document when no daily_stats
+  // doc exists yet (stress synced first). It MUST therefore seed user_id/date/
+  // source, or the inserted doc is an orphan invisible to every user_id-scoped
+  // read (daily-stats.ts, trends.ts filter on term user_id). Seeding on merge is
+  // idempotent — it rewrites the same scoping values an existing doc already has.
   const docId = `${sourceId}-daily-${userId}-${data.date}`;
+  logger.debug('[writeStressToES] stress_upsert', { user_id: userId, date: data.date });
   await esClient.update({
     index: 'll5_health_daily_stats',
     id: docId,
     doc: {
+      user_id: userId,
+      source: sourceId,
+      date: data.date,
       stress_average: data.average,
       stress_max: data.max,
       stress_readings: data.readings,

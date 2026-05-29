@@ -359,17 +359,21 @@ export class ChatSearchIndexer {
       created_at: string;
     };
     const PAGE = 1000;
-    let cursor: string | null = null;
+    // Stable keyset cursor over (created_at, id). A single-column
+    // `created_at < $1` cursor silently drops rows that share the boundary
+    // created_at across a page edge; the tuple comparison keeps them.
+    // Matches ORDER BY created_at DESC, id DESC.
+    let cursor: { created_at: string; id: string } | null = null;
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const whereClause: string = cursor ? 'WHERE created_at < $1' : '';
-      const pageParams: unknown[] = cursor ? [cursor] : [];
+      const whereClause: string = cursor ? 'WHERE (created_at, id) < ($1, $2)' : '';
+      const pageParams: unknown[] = cursor ? [cursor.created_at, cursor.id] : [];
       const pageRes: { rows: MsgRow[] } = await this.pool.query<MsgRow>(
         `SELECT id, user_id, conversation_id, channel, direction, role, content,
                 reaction, reply_to_id, display_compact, created_at
            FROM chat_messages
            ${whereClause}
-          ORDER BY created_at DESC
+          ORDER BY created_at DESC, id DESC
           LIMIT ${PAGE}`,
         pageParams,
       );
@@ -405,7 +409,13 @@ export class ChatSearchIndexer {
       }
 
       if (pageRes.rows.length < PAGE) break;
-      cursor = pageRes.rows[pageRes.rows.length - 1].created_at;
+      const last = pageRes.rows[pageRes.rows.length - 1];
+      cursor = { created_at: last.created_at, id: last.id };
+      logger.info('[ChatSearchIndexer][backfill] Page indexed', {
+        cursor_created_at: cursor.created_at,
+        cursor_id: cursor.id,
+        messages,
+      });
     }
 
     logger.info('[ChatSearchIndexer][backfill] Complete', { messages, conversations });

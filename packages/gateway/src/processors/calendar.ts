@@ -8,6 +8,7 @@ interface CalendarHit {
   _source?: {
     title?: string;
     description?: string;
+    location?: string;
     source?: string;
     start_time?: string;
     end_time?: string;
@@ -17,10 +18,15 @@ interface CalendarHit {
 /**
  * Generate a deterministic ID for phone-pushed calendar events
  * to prevent duplicate pushes of the same event.
+ *
+ * The userId is part of the hash input so two tenants with an identically-titled,
+ * same-time event get distinct doc ids in the shared ES index instead of
+ * colliding and overwriting each other. The stale-cleanup deleteByQuery in
+ * server.ts MUST reconstruct ids with this same input shape.
  */
-function phoneEventId(title: string, start: string, end: string): string {
+export function phoneEventId(userId: string, title: string, start: string, end: string): string {
   const hash = crypto.createHash('sha256')
-    .update(`${title}|${start}|${end}`)
+    .update(`${userId}|${title}|${start}|${end}`)
     .digest('hex')
     .slice(0, 16);
   return `phone-${hash}`;
@@ -87,19 +93,31 @@ export async function processCalendar(
       );
 
       if (isGeneric) {
+        // Fall back to the EXISTING location, never the existing title — the
+        // old code wrote the previous title into location, corrupting the doc
+        // (e.g. "Sprint Planning" @ "(no title)").
+        const mergedLocation = item.location ?? existing.location;
+        const locationSource: 'push' | 'existing' | 'none' = item.location
+          ? 'push'
+          : existing.location
+            ? 'existing'
+            : 'none';
+        const doc: Record<string, unknown> = {
+          title: item.title,
+          source: 'merged',
+          updated_at: now,
+        };
+        if (mergedLocation !== undefined) {
+          doc.location = mergedLocation;
+        }
         await es.update({
           index: 'll5_awareness_calendar_events',
           id: hit._id,
-          doc: {
-            title: item.title,
-            location: item.location ?? existing.title,
-            source: 'merged',
-            updated_at: now,
-          },
+          doc,
         });
-        logger.debug('[processCalendar][handle] Enriched Google event with phone data', {
-          docId: hit._id,
-          title: item.title,
+        logger.info('[processCalendar][handle] calendar_merge', {
+          event_id: hit._id,
+          location_source: locationSource,
         });
         return;
       }
@@ -150,7 +168,7 @@ export async function processCalendar(
 
   await es.index({
     index: 'll5_awareness_calendar_events',
-    id: phoneEventId(item.title, item.start, item.end ?? item.start),
+    id: phoneEventId(userId, item.title, item.start, item.end ?? item.start),
     document: doc,
     refresh: false,
   });

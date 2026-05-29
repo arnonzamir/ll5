@@ -559,6 +559,7 @@ describe('resolve_journal tool handler', () => {
 
   it('updates a single entry by entry_id', async () => {
     const esClient = makeMockEsClient({
+      get: vi.fn().mockResolvedValue({ _id: 'j1', _source: { user_id: USER_ID, status: 'open' } }),
       update: vi.fn().mockResolvedValue({ result: 'updated' }),
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -613,19 +614,21 @@ describe('resolve_journal tool handler', () => {
     expect(parsed.resolved_count).toBe(0);
   });
 
-  it('emits an audit log even when nothing was resolved', async () => {
-    const esClient = makeMockEsClient();
+  it('emits an audit log even when nothing was resolved (topic branch)', async () => {
+    const esClient = makeMockEsClient({
+      updateByQuery: vi.fn().mockResolvedValue({ updated: 0 }),
+    });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
 
-    await tools.get('resolve_journal')!({ entry_id: 'j1' });
+    await tools.get('resolve_journal')!({ topic: 'Nothing' });
 
     expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
       user_id: USER_ID,
       source: 'awareness',
       action: 'update',
       entity_type: 'journal',
-      entity_id: 'j1',
+      entity_id: 'topic:Nothing',
     }));
   });
 });

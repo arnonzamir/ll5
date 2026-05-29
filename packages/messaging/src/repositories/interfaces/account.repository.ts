@@ -58,8 +58,8 @@ export interface AccountRepository {
     platform: 'whatsapp' | 'telegram',
   ): Promise<void>;
 
-  /** Get message count sent today for an account. */
-  getMessageCountToday(accountId: string): Promise<number>;
+  /** Get message count sent today for an account, scoped to the owning user. */
+  getMessageCountToday(userId: string, accountId: string): Promise<number>;
 
   /** Log a sent message. */
   logSentMessage(

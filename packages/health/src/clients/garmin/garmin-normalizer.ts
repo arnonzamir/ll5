@@ -200,6 +200,34 @@ export function normalizeDailyStats(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const resp = extras?.respiration as any;
 
+    // Active seconds source selection. Prefer the direct field, then highly-active
+    // seconds, then derive from intensity minutes. The intensity-minutes branch is
+    // guarded so an undefined moderateIntensityMinutes can never yield NaN.
+    // (Bug: an unparenthesized `?? ?? a ? b : c` chain made `??` bind tighter than
+    // `?:`, so the minutes computation ran whenever the chain was truthy — and went
+    // NaN when moderateIntensityMinutes was undefined. LIVE: every doc had 0.)
+    let activeSeconds: number;
+    let activeSecondsSource: 'activeSeconds' | 'highlyActiveSeconds' | 'intensityMinutes' | 'none';
+    if (summary?.activeSeconds != null) {
+      activeSeconds = summary.activeSeconds;
+      activeSecondsSource = 'activeSeconds';
+    } else if (summary?.highlyActiveSeconds != null) {
+      activeSeconds = summary.highlyActiveSeconds;
+      activeSecondsSource = 'highlyActiveSeconds';
+    } else if (summary?.moderateIntensityMinutes != null) {
+      activeSeconds = ((summary.moderateIntensityMinutes ?? 0) + (summary.vigorousIntensityMinutes ?? 0)) * 60;
+      activeSecondsSource = 'intensityMinutes';
+    } else {
+      activeSeconds = 0;
+      activeSecondsSource = 'none';
+    }
+
+    logger.debug('[GarminNormalizer][normalizeDailyStats] active_seconds source selected', {
+      date: summary?.calendarDate ?? dateOverride ?? '',
+      activeSecondsSource,
+      activeSeconds,
+    });
+
     return {
       date: summary?.calendarDate ?? dateOverride ?? '',
       steps: stepsCount ?? summary?.totalSteps ?? 0,
@@ -207,10 +235,7 @@ export function normalizeDailyStats(
       floorsClimbed: summary?.floorsAscended ?? summary?.floorsClimbed ?? undefined,
       activeCalories: summary?.activeKilocalories ?? summary?.activeCalories ?? 0,
       totalCalories: summary?.totalKilocalories ?? summary?.totalCalories ?? 0,
-      activeSeconds: summary?.activeSeconds ?? summary?.highlyActiveSeconds ??
-        summary?.moderateIntensityMinutes
-          ? (summary.moderateIntensityMinutes + (summary.vigorousIntensityMinutes ?? 0)) * 60
-          : 0,
+      activeSeconds,
       stressAverage: summary?.averageStressLevel ?? undefined,
       stressMax: summary?.maxStressLevel ?? undefined,
       energyLevel,

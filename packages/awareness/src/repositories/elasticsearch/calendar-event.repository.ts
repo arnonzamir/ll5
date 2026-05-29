@@ -6,6 +6,7 @@ import type {
   CalendarEventQueryParams,
 } from '../interfaces/calendar-event.repository.js';
 import type { CalendarEvent } from '../../types/calendar-event.js';
+import { logger } from '../../utils/logger.js';
 
 const INDEX = 'll5_awareness_calendar_events';
 
@@ -97,6 +98,24 @@ export class ElasticsearchCalendarEventRepository
     },
   ): Promise<CalendarEvent> {
     const id = data.id ?? this.generateId();
+
+    // When the caller supplies an id, verify ownership before overwriting.
+    // indexDoc writes by id and would otherwise silently clobber another
+    // tenant's doc (the new doc would carry the caller's user_id). Mirror the
+    // network/narrative ownership discipline.
+    if (data.id) {
+      const existingOwner = await this.getOwnerById(id);
+      if (existingOwner !== null && existingOwner !== userId) {
+        logger.warn('cross_user_access_denied', {
+          actor_user_id: userId,
+          owner_user_id: existingOwner,
+          resource: 'calendar_event',
+          id,
+        });
+        throw new Error('calendar event id belongs to another user');
+      }
+    }
+
     const now = this.nowISO();
 
     const doc: CalendarEventDoc = {
@@ -117,6 +136,23 @@ export class ElasticsearchCalendarEventRepository
     await this.indexDoc(id, doc as unknown as Record<string, unknown>);
 
     return this.mapToCalendarEvent(id, doc, userId);
+  }
+
+  /**
+   * Return the user_id of the doc at `id`, or null if it does not exist.
+   * Unlike base.getById, this surfaces the existing owner so a cross-tenant
+   * overwrite can be rejected and logged with the real owner.
+   */
+  private async getOwnerById(id: string): Promise<string | null> {
+    try {
+      const response = await this.client.get<CalendarEventDoc>({ index: this.index, id });
+      const owner = response._source?.user_id;
+      return owner ?? null;
+    } catch (err: unknown) {
+      const error = err as { meta?: { statusCode?: number } };
+      if (error.meta?.statusCode === 404) return null;
+      throw err;
+    }
   }
 
   private mapToCalendarEvent(id: string, doc: CalendarEventDoc, userId: string): CalendarEvent {
