@@ -49,7 +49,12 @@ export class CalendarSyncScheduler {
       const operations: Record<string, unknown>[] = [];
 
       for (const event of events) {
-        const docId = `google-${event.event_id}`;
+        // User-namespaced doc id — MUST match the google MCP's
+        // ESCalendarEventRepository scheme (`${userId}::google-${eventId}`) so the
+        // two writers of ll5_awareness_calendar_events converge on one doc per
+        // event instead of producing a legacy/scoped duplicate pair. See
+        // docs/decisions/DECISION-006.
+        const docId = `${this.userId}::google-${event.event_id}`;
         const attendees = event.attendees.map((a) => a.name ?? a.email);
 
         // Partial update doc: only the volatile scheduling fields. Crucially it

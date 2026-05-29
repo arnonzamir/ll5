@@ -122,4 +122,20 @@ describe('CalendarSyncScheduler — non-destructive sync (bug #5)', () => {
     const upsert = updatePair.body.upsert as Record<string, unknown>;
     expect(upsert.user_id).toBe(USER_ID);
   });
+
+  it('uses the user-namespaced doc id matching the google MCP repo (no legacy/scoped duplicate)', async () => {
+    const es = makeEs();
+    const scheduler = new CalendarSyncScheduler(es, makeGoogleClient([sampleEvent()]), USER_ID);
+
+    await scheduler.sync();
+
+    const ops = (es.bulk.mock.calls[0][0] as { operations: unknown[] }).operations;
+    const updatePair = bulkPairs(ops).find((p) => 'update' in p.action)!;
+    const action = updatePair.action as { update: { _id: string } };
+    // MUST equal the google MCP ESCalendarEventRepository scheme so the two
+    // writers converge on one doc per event (DECISION-006). A bare
+    // `google-<id>` here would re-introduce the cross-writer duplicate.
+    expect(action.update._id).toBe(`${USER_ID}::google-evt-1`);
+    expect(action.update._id).not.toMatch(/^google-/);
+  });
 });
