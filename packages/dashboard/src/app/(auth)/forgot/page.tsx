@@ -1,0 +1,17 @@
+import { ForgotForm } from "./forgot-form";
+
+export const metadata = { title: "Forgot Password - LL5" };
+
+export default function ForgotPage() {
+  return (
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 text-center">
+          <h1 className="text-3xl font-bold text-primary">LL5</h1>
+          <p className="mt-2 text-sm text-gray-500">Personal Assistant</p>
+        </div>
+        <ForgotForm />
+      </div>
+    </div>
+  );
+}

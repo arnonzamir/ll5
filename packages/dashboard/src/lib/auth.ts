@@ -43,6 +43,33 @@ export async function login(
   return res.json() as Promise<{ token: string }>;
 }
 
+/** Email + password login — the primary human login path (P1 identity). */
+export async function loginWithPassword(
+  email: string,
+  password: string
+): Promise<{ token: string }> {
+  const res = await fetch(`${env.GATEWAY_URL}/auth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    // Surface a friendly message for rate-limit / bad-credentials.
+    let message = "Login failed";
+    try {
+      const data = (await res.json()) as { error?: string };
+      if (data?.error) message = data.error;
+    } catch {
+      /* non-JSON body — keep default */
+    }
+    if (res.status === 429 && message === "Login failed") {
+      message = "Too many attempts. Please try again later.";
+    }
+    throw new Error(message);
+  }
+  return res.json() as Promise<{ token: string }>;
+}
+
 /** Decode the JWT payload without verification (for display purposes only). */
 export function decodeTokenPayload(
   token: string

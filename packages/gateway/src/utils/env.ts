@@ -36,6 +36,9 @@ export interface EnvConfig {
   /** Shared secret required in X-Webhook-Secret on POST /webhook/whatsapp.
    *  Required — fail-closed on misconfiguration. */
   whatsappWebhookSecret: string;
+  /** Public dashboard origin used to build emailed links (reset/invite/accept).
+   *  Defaults to the live dashboard. */
+  dashboardUrl: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -121,5 +124,6 @@ export function loadEnv(): EnvConfig {
     fcmServerKey: process.env.FCM_SERVER_KEY,
     encryptionKey: process.env.ENCRYPTION_KEY,
     whatsappWebhookSecret,
+    dashboardUrl: process.env.DASHBOARD_URL ?? 'https://ll5.noninoni.click',
   };
 }

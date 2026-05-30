@@ -1,11 +1,21 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 import { generateToken, validateToken, isTokenExpiredError } from '@ll5/shared';
 import { logger } from './utils/logger.js';
+import { getEmailSender } from './utils/email.js';
 
 const REFRESH_GRACE_PERIOD_DAYS = 7; // Allow refresh up to 7 days after expiry
+const BCRYPT_SALT_ROUNDS = 12;
+const MIN_PASSWORD_LENGTH = 8;
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+/** sha256 hex of a raw token — what we store; raw token is only emailed. */
+function hashToken(raw: string): string {
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
 
 /**
  * A pre-computed bcrypt hash used as a decoy when the requested user does not
@@ -72,6 +82,7 @@ function clearAttempts(loginId: string): void {
 interface AuthUser {
   user_id: string;
   pin_hash: string;
+  password_hash: string | null;
   name: string | null;
   token_ttl_days: number;
   role: string;
@@ -81,13 +92,83 @@ interface AuthUser {
 }
 
 /**
+ * Email+password login path. Same rate-limit + decoy-timing + unified-401
+ * discipline as the PIN path: always run bcrypt.compare (against a decoy hash
+ * when the user is missing or has no password set) and collapse all failure
+ * modes into one 401 so neither timing nor status enumerates accounts.
+ */
+async function handleEmailPasswordLogin(
+  pool: Pool,
+  authSecret: string,
+  res: Response,
+  email: string,
+  password: string,
+): Promise<void> {
+  const rateKey = `email:${email.trim().toLowerCase()}`;
+
+  if (isRateLimited(rateKey)) {
+    logger.warn('[auth][emailLogin] Rate limited');
+    res.status(429).json({ error: 'Too many failed attempts. Try again later.' });
+    return;
+  }
+
+  try {
+    const result = await pool.query<AuthUser>(
+      'SELECT user_id, pin_hash, password_hash, name, token_ttl_days, role, enabled, username, display_name FROM auth_users WHERE lower(email) = lower($1) AND enabled = true',
+      [email],
+    );
+
+    const user: AuthUser | null = result.rows.length > 0 ? result.rows[0] : null;
+    // Run bcrypt.compare unconditionally to keep timing uniform across the
+    // missing-user, no-password, and wrong-password branches.
+    const hashToCompare = user?.password_hash ?? DECOY_PIN_HASH;
+    const passwordValid = await bcrypt.compare(password, hashToCompare);
+
+    if (!user || !user.password_hash || !passwordValid) {
+      recordFailedAttempt(rateKey);
+      logger.warn('[auth][emailLogin] Invalid credentials attempt', { userExists: !!user });
+      res.status(401).json({ error: 'Invalid credentials' });
+      return;
+    }
+
+    clearAttempts(rateKey);
+
+    const token = generateToken(user.user_id, authSecret, user.token_ttl_days, user.role);
+    const expiresAt = new Date(Date.now() + user.token_ttl_days * 86400 * 1000).toISOString();
+
+    logger.info('[auth][emailLogin] Token issued', { userId: user.user_id, ttlDays: user.token_ttl_days });
+
+    res.json({ token, user_id: user.user_id, expires_at: expiresAt });
+  } catch (err) {
+    logger.error('[auth][emailLogin] Auth token error', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+/**
  * Create the /auth router with token issuance endpoint.
  */
-export function createAuthRouter(pool: Pool, authSecret: string): Router {
+export function createAuthRouter(pool: Pool, authSecret: string, dashboardUrl: string): Router {
   const router = Router();
+  const emailSender = getEmailSender();
 
   router.post('/token', async (req: Request, res: Response) => {
-    const { user_id, username, pin } = req.body as { user_id?: string; username?: string; pin?: string };
+    const { user_id, username, pin, email, password } = req.body as {
+      user_id?: string;
+      username?: string;
+      pin?: string;
+      email?: string;
+      password?: string;
+    };
+
+    // Branch on which credential set was supplied. Email+password is the new
+    // human-login path; user_id/username+pin is the retained phone path.
+    if (email && password) {
+      return handleEmailPasswordLogin(pool, authSecret, res, email, password);
+    }
+
     const loginId = user_id || username;
 
     if (!loginId || !pin) {
@@ -109,7 +190,7 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
 
     try {
       const result = await pool.query<AuthUser>(
-        'SELECT user_id, pin_hash, name, token_ttl_days, role, enabled, username, display_name FROM auth_users WHERE (user_id::text = $1 OR username = $1) AND enabled = true',
+        'SELECT user_id, pin_hash, password_hash, name, token_ttl_days, role, enabled, username, display_name FROM auth_users WHERE (user_id::text = $1 OR username = $1) AND enabled = true',
         [loginId],
       );
 
@@ -150,6 +231,107 @@ export function createAuthRouter(pool: Pool, authSecret: string): Router {
       });
     } catch (err) {
       logger.error('[auth][issueToken] Auth token error', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /auth/forgot — request a password reset. Always returns 200 (no user
+  // enumeration). The reset link is only delivered to the EmailSender.
+  router.post('/forgot', async (req: Request, res: Response) => {
+    const { email } = req.body as { email?: string };
+
+    if (!email || typeof email !== 'string') {
+      res.status(400).json({ error: 'email is required' });
+      return;
+    }
+
+    try {
+      const result = await pool.query<{ user_id: string }>(
+        'SELECT user_id FROM auth_users WHERE lower(email) = lower($1) AND enabled = true',
+        [email],
+      );
+
+      if (result.rows.length > 0) {
+        const userId = result.rows[0].user_id;
+        const rawToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = hashToken(rawToken);
+        const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS).toISOString();
+
+        await pool.query(
+          `INSERT INTO auth_tokens (token_hash, user_id, kind, expires_at)
+           VALUES ($1, $2, 'password_reset', $3)`,
+          [tokenHash, userId, expiresAt],
+        );
+
+        const link = `${dashboardUrl}/reset?token=${rawToken}`;
+        logger.info('[auth][forgot] Password reset requested', { userId });
+        await emailSender.send({
+          to: email,
+          subject: 'Reset your LL5 password',
+          text: `Reset your password using this link (valid for 1 hour):\n\n${link}\n\nIf you did not request this, ignore this email.`,
+        });
+      } else {
+        // Unknown / disabled email — do nothing, but log for ops visibility.
+        logger.info('[auth][forgot] Password reset requested for unknown/disabled email');
+      }
+    } catch (err) {
+      // Log but still return 200 — never reveal that the request failed for a
+      // specific email vs. succeeded for another.
+      logger.error('[auth][forgot] Error processing reset request', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Always the same response, regardless of whether the email matched.
+    res.json({ ok: true });
+  });
+
+  // POST /auth/reset — consume a reset token and set a new password.
+  router.post('/reset', async (req: Request, res: Response) => {
+    const { token, password } = req.body as { token?: string; password?: string };
+
+    if (!token || !password) {
+      res.status(400).json({ error: 'token and password are required' });
+      return;
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+      return;
+    }
+
+    try {
+      const tokenHash = hashToken(token);
+      const tokenRow = await pool.query<{ user_id: string }>(
+        `SELECT user_id FROM auth_tokens
+         WHERE token_hash = $1 AND kind = 'password_reset'
+           AND used_at IS NULL AND expires_at > now()`,
+        [tokenHash],
+      );
+
+      if (tokenRow.rows.length === 0) {
+        logger.warn('[auth][reset] Invalid, expired, or already-used reset token');
+        res.status(400).json({ error: 'Invalid or expired token' });
+        return;
+      }
+
+      const userId = tokenRow.rows[0].user_id;
+      const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+
+      await pool.query(
+        'UPDATE auth_users SET password_hash = $1, updated_at = now() WHERE user_id = $2',
+        [passwordHash, userId],
+      );
+      await pool.query(
+        'UPDATE auth_tokens SET used_at = now() WHERE token_hash = $1',
+        [tokenHash],
+      );
+
+      logger.info('[auth][reset] Password reset completed', { userId });
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error('[auth][reset] Error processing reset', {
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Internal server error' });

@@ -19,6 +19,7 @@ import {
 } from '@ll5/shared';
 import { createAdminRouter } from './admin.js';
 import { createAuthRouter } from './auth.js';
+import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { processCalendar, phoneEventId } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
@@ -200,10 +201,13 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   app.use(express.static(path.join(__dirname, 'public')));
 
   // Mount auth routes
-  app.use('/auth', createAuthRouter(pgPool, config.authSecret));
+  app.use('/auth', createAuthRouter(pgPool, config.authSecret, config.dashboardUrl));
 
   // Mount admin routes
   app.use('/admin', createAdminRouter(pgPool, config.authSecret));
+
+  // Mount invites routes (owns both /admin/invites* and public /invites/*).
+  app.use(createInvitesRouter(pgPool, config.authSecret, config.dashboardUrl));
 
   // Serve uploaded files — auth + per-file ownership check enforced.
   // See uploads-route.ts for the filename → owner mapping.

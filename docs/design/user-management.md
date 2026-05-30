@@ -283,6 +283,8 @@ When an admin creates a user:
 
 ### Phase 6: Channel MCP Per-User Agent
 
+> **SUPERSEDED (2026-05-30).** This phase's "keep single agent / future agent pool" recommendation is replaced by the **BYO-agent platform model** — LL5 hosts a per-user Claude Code container and the user brings their own Claude credential. See `docs/design/byo-agent-tenant-platform.md` and `docs/decisions/DECISION-007`. The text below is retained for history.
+
 #### Architecture Decision: One Claude Code Agent Per User
 
 The `ll5-channel.mjs` runs as a stdio subprocess of a specific Claude Code session. It reads a single token from `~/.ll5/token`. This is fundamentally per-user by design.

@@ -2,7 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { decideTokenAction } from "@/lib/auth-decision";
 
 /** Paths that don't require a login session. */
-const PUBLIC_PATHS = new Set<string>(["/login"]);
+const PUBLIC_PATHS = new Set<string>([
+  "/login",
+  "/forgot",
+  "/reset",
+  "/accept-invite",
+]);
 
 const COOKIE_NAME = "ll5_token";
 
