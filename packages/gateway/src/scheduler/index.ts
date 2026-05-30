@@ -258,7 +258,7 @@ async function startSchedulersForUser(
   const dailyReviewScheduler = new DailyReviewScheduler(pgPool, googleClient, {
     reviewHour: s('morning_briefing_hour', config.dailyReviewHour),
     timezone, userId,
-  });
+  }, es);
   dailyReviewScheduler.start();
   schedulers.push(dailyReviewScheduler);
 
