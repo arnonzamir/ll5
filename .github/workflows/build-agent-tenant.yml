@@ -2,6 +2,10 @@
 # Deliberately NOT on push — building/cutting-over the tenant image is a manual,
 # operator-controlled step. The existing ll5-agent image (admin agent) is never
 # touched by this workflow.
+#
+# Auth: the base image (ghcr.io/arnonzamir/ll5-agent, from the ll5-run repo) is
+# PULLED with the read-only GHCR_READ_PAT; the new image is PUSHED with the
+# job's GITHUB_TOKEN (packages: write).
 name: build-agent-tenant
 on:
   workflow_dispatch:
@@ -21,12 +25,19 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Log in to GHCR
-        run: echo "${{ secrets.GHCR_READ_PAT || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u arnonzamir --password-stdin
-      - name: Build tenant image
+
+      - name: Log in to GHCR (read) to pull the base image
+        run: echo "${{ secrets.GHCR_READ_PAT }}" | docker login ghcr.io -u arnonzamir --password-stdin
+
+      - name: Pull base + build tenant image
         run: |
+          docker pull '${{ inputs.base_image }}'
           docker build -f docker/agent-runtime/Dockerfile.agent-tenant \
             --build-arg BASE_IMAGE='${{ inputs.base_image }}' \
             -t ghcr.io/arnonzamir/ll5-agent-tenant:'${{ inputs.tag }}' .
+
+      - name: Log in to GHCR (write) to push the new image
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+
       - name: Push
         run: docker push ghcr.io/arnonzamir/ll5-agent-tenant:'${{ inputs.tag }}'
