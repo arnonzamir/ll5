@@ -512,6 +512,172 @@ describe('delete_location_point tool handler', () => {
 });
 
 // ===========================================================================
+// STAY-POINT TOOLS (query_visits + suggest_frequent_places)
+// ===========================================================================
+
+const SP_LAT = 32.0853;
+const SP_LON = 34.7818;
+const SP_NEAR = 0.0005; // ~55m
+const SP_FAR = 0.01; // ~1.1km
+
+function locDoc(
+  minutesFromBase: number,
+  over: { lat?: number; lon?: number; matchedPlaceId?: string; matchedPlace?: string } = {},
+) {
+  const base = new Date('2026-05-01T08:00:00Z').getTime();
+  return {
+    id: `loc-${minutesFromBase}`,
+    userId: USER_ID,
+    location: { lat: over.lat ?? SP_LAT, lon: over.lon ?? SP_LON },
+    matchedPlaceId: over.matchedPlaceId,
+    matchedPlace: over.matchedPlace,
+    timestamp: new Date(base + minutesFromBase * 60_000).toISOString(),
+  };
+}
+
+describe('query_visits tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('fetches the range and returns clustered visits with duration/centroid/point_count', async () => {
+    const query = vi.fn(async () => [
+      locDoc(0),
+      locDoc(10, { lat: SP_LAT + SP_NEAR }),
+      locDoc(20),
+    ]);
+    const tools = captureTools((s) => registerLocationTools(
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never),
+    ));
+
+    const response = await tools.get('query_visits')!({
+      from: '2026-05-01T00:00:00Z',
+      to: '2026-05-01T23:59:59Z',
+    });
+
+    expect(query).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
+      startTime: '2026-05-01T00:00:00Z',
+      endTime: '2026-05-01T23:59:59Z',
+    }));
+
+    const parsed = parseToolResponse<{ visits: Array<Record<string, unknown>>; total: number }>(response);
+    expect(parsed.total).toBe(1);
+    expect(parsed.visits[0].point_count).toBe(3);
+    expect(parsed.visits[0].duration_minutes).toBe(20);
+    expect(parsed.visits[0].place_name).toBeNull();
+  });
+
+  it('honors override threshold params (shorter dwell yields a visit)', async () => {
+    const query = vi.fn(async () => [locDoc(0), locDoc(5, { lat: SP_LAT + SP_NEAR })]);
+    const tools = captureTools((s) => registerLocationTools(
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never),
+    ));
+
+    const response = await tools.get('query_visits')!({
+      from: '2026-05-01T00:00:00Z',
+      to: '2026-05-01T23:59:59Z',
+      min_dwell_minutes: 4,
+    });
+    const parsed = parseToolResponse<{ total: number }>(response);
+    expect(parsed.total).toBe(1);
+  });
+
+  it('returns no visits when no dwell qualifies', async () => {
+    const query = vi.fn(async () => [locDoc(0), locDoc(5, { lat: SP_LAT + SP_NEAR })]);
+    const tools = captureTools((s) => registerLocationTools(
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never),
+    ));
+    const response = await tools.get('query_visits')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-05-01T23:59:59Z',
+    });
+    expect(parseToolResponse<{ total: number }>(response).total).toBe(0);
+  });
+});
+
+describe('suggest_frequent_places tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // Build N visits (each a 20-min dwell) at `lat`, on N different days.
+  function visitsAt(lat: number, days: number) {
+    const pts: ReturnType<typeof locDoc>[] = [];
+    for (let d = 0; d < days; d++) {
+      const dayOffset = d * 24 * 60; // minutes
+      pts.push(locDoc(dayOffset, { lat }));
+      pts.push(locDoc(dayOffset + 20, { lat: lat + SP_NEAR }));
+    }
+    return pts;
+  }
+
+  it('returns unknown frequent locations and respects min_visits', async () => {
+    // 4 visits at an unknown spot; gaps between days exceed MAX_GAP so each day
+    // is its own visit.
+    const query = vi.fn(async () => visitsAt(SP_LAT, 4));
+    const es = makeMockEsClient({ search: vi.fn().mockResolvedValue({ hits: { hits: [] } }) });
+    const tools = captureTools((s) => registerLocationTools(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never), es as any,
+    ));
+
+    const response = await tools.get('suggest_frequent_places')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-06-01T00:00:00Z', min_visits: 3,
+    });
+    const parsed = parseToolResponse<{ candidates: Array<{ visit_count: number }>; total: number }>(response);
+    expect(parsed.total).toBe(1);
+    expect(parsed.candidates[0].visit_count).toBe(4);
+  });
+
+  it('filters out groups below min_visits', async () => {
+    const query = vi.fn(async () => visitsAt(SP_LAT, 2));
+    const es = makeMockEsClient({ search: vi.fn().mockResolvedValue({ hits: { hits: [] } }) });
+    const tools = captureTools((s) => registerLocationTools(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never), es as any,
+    ));
+
+    const response = await tools.get('suggest_frequent_places')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-06-01T00:00:00Z', min_visits: 3,
+    });
+    expect(parseToolResponse<{ total: number }>(response).total).toBe(0);
+  });
+
+  it('excludes visits already matching a known place (via matched_place on the dwell)', async () => {
+    const pts: ReturnType<typeof locDoc>[] = [];
+    for (let d = 0; d < 4; d++) {
+      const dayOffset = d * 24 * 60;
+      pts.push(locDoc(dayOffset, { lat: SP_LAT, matchedPlaceId: 'home', matchedPlace: 'Home' }));
+      pts.push(locDoc(dayOffset + 20, { lat: SP_LAT + SP_NEAR, matchedPlaceId: 'home', matchedPlace: 'Home' }));
+    }
+    const query = vi.fn(async () => pts);
+    const es = makeMockEsClient({ search: vi.fn().mockResolvedValue({ hits: { hits: [] } }) });
+    const tools = captureTools((s) => registerLocationTools(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never), es as any,
+    ));
+
+    const response = await tools.get('suggest_frequent_places')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-06-01T00:00:00Z', min_visits: 3,
+    });
+    // All dwells carried a matched place -> excluded before ES check.
+    expect(parseToolResponse<{ total: number }>(response).total).toBe(0);
+  });
+
+  it('excludes candidates whose centroid is within 100m of a known place (ES geo match)', async () => {
+    const query = vi.fn(async () => visitsAt(SP_LAT, 4));
+    // ES reports a nearby known place -> candidate dropped.
+    const search = vi.fn().mockResolvedValue({ hits: { hits: [{ _id: 'place-x' }] } });
+    const es = makeMockEsClient({ search });
+    const tools = captureTools((s) => registerLocationTools(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never), es as any,
+    ));
+
+    const response = await tools.get('suggest_frequent_places')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-06-01T00:00:00Z', min_visits: 3,
+    });
+    expect(search).toHaveBeenCalled();
+    expect(parseToolResponse<{ total: number }>(response).total).toBe(0);
+  });
+});
+
+// ===========================================================================
 // MEDIA TOOLS
 // ===========================================================================
 

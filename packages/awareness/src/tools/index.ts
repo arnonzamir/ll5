@@ -42,7 +42,7 @@ export function registerAllTools(
     throw new Error('esClient is required for LocationService');
   }
   const locationService = new LocationService(repos.location, repos.wifi, esClient);
-  registerLocationTools(server, repos.location, getUserId, locationService);
+  registerLocationTools(server, repos.location, getUserId, locationService, esClient);
   registerMessageTools(server, repos.message, getUserId);
   registerEntityStatusTools(server, repos.entityStatus, getUserId);
   // Calendar tools retired — unified calendar reads/writes go through the calendar MCP
