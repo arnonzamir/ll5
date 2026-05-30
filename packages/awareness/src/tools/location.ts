@@ -55,6 +55,7 @@ export function registerLocationTools(
                 confidence: fused.confidence,
                 source: fused.source,
                 reasoning: fused.reasoning,
+                gps: fused.gps ?? null,
                 wifi: fused.wifi ?? null,
               },
             }),

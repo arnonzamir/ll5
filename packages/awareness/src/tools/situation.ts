@@ -3,6 +3,7 @@ import type { LocationRepository } from '../repositories/interfaces/location.rep
 import type { CalendarEventRepository } from '../repositories/interfaces/calendar-event.repository.js';
 import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
 import type { MessageRepository } from '../repositories/interfaces/message.repository.js';
+import type { LocationService } from '../services/location-service.js';
 import { computeFreshness } from '../types/location.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -22,6 +23,7 @@ export function registerSituationTools(
   },
   getUserId: () => string,
   timezone: string,
+  locationService: LocationService,
 ): void {
   server.tool(
     'get_situation',
@@ -54,21 +56,39 @@ export function registerSituationTools(
       const dayType = getDayType(dayOfWeek);
       const suggestedEnergy = getSuggestedEnergy(timePeriod);
 
-      // Fetch current location
+      // Fetch current location via the fusion service (GPS + wifi BSSID) so the
+      // snapshot agrees with where_is_user / get_current_location instead of the
+      // raw last GPS point. Keeps the legacy flat fields for backward compat and
+      // surfaces the fused confidence/source/reasoning + wifi-derived place.
       let currentLocation = null;
       try {
-        const latest = await repos.location.getLatest(userId);
-        if (latest) {
+        const fused = await locationService.getCurrentLocation(userId);
+        if (fused.source !== 'none') {
+          const gps = fused.gps;
+          const gpsTimestamp = gps
+            ? new Date(Date.now() - gps.age_s * 1000).toISOString()
+            : null;
           currentLocation = {
-            lat: latest.location.lat,
-            lon: latest.location.lon,
-            accuracy: latest.accuracy,
-            timestamp: latest.timestamp,
-            freshness: computeFreshness(latest.timestamp),
-            place_name: latest.matchedPlace ?? null,
+            lat: gps?.lat ?? null,
+            lon: gps?.lon ?? null,
+            accuracy: gps?.accuracy_m ?? null,
+            timestamp: gpsTimestamp,
+            freshness: gpsTimestamp ? computeFreshness(gpsTimestamp) : null,
+            place_name: fused.place,
             place_type: null,
-            address: latest.address ?? null,
+            address: gps?.address ?? null,
+            confidence: fused.confidence,
+            source: fused.source,
+            reasoning: fused.reasoning,
+            wifi_place: fused.wifi?.place_from_bssid?.place_name ?? null,
+            recently_left: fused.recently_left ?? null,
           };
+          if (fused.source === 'wifi' || fused.source === 'gps+wifi') {
+            logger.debug('[situation] Location resolved with wifi assist', {
+              source: fused.source,
+              confidence: fused.confidence,
+            });
+          }
         }
       } catch (err) {
         logger.warn('[situation] Location fetch failed', { error: err instanceof Error ? err.message : String(err) });

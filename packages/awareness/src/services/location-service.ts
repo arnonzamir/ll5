@@ -28,6 +28,12 @@ export interface WifiBlock {
   place_from_bssid?: { place_id: string; place_name: string } | null;
 }
 
+export interface RecentlyLeft {
+  place_name: string;
+  place_id: string;
+  age_s: number;
+}
+
 export interface CurrentLocation {
   place: string | null;
   place_id: string | null;
@@ -36,6 +42,13 @@ export interface CurrentLocation {
   reasoning: string;
   gps?: GpsBlock;
   wifi?: WifiBlock;
+  /**
+   * Additive context only: set when GPS is not fresh and the most recent wifi
+   * event is a recent DISCONNECT whose BSSID maps to a known place. Never
+   * changes the chosen place/confidence/source — it is a "where the user was
+   * just before this stale/unknown reading" hint.
+   */
+  recently_left?: RecentlyLeft;
 }
 
 interface NetworkDoc {
@@ -83,6 +96,7 @@ export class LocationService {
       : undefined;
 
     let wifiBlock: WifiBlock | undefined;
+    let recentlyLeft: RecentlyLeft | undefined;
     if (latestWifi && latestWifi.connected) {
       const wifiAgeMs = now - new Date(latestWifi.timestamp).getTime();
       const placeFromBssid =
@@ -96,12 +110,49 @@ export class LocationService {
         age_s: Math.floor(wifiAgeMs / 1000),
         place_from_bssid: placeFromBssid,
       };
+    } else if (latestWifi && !latestWifi.connected) {
+      // Disconnected wifi: ignored for the place decision, but a recent
+      // disconnect from a known network is a useful "recently left" hint when
+      // GPS is stale/unknown. Only resolve when GPS is NOT fresh (cheap guard
+      // first) and the disconnect is recent with a BSSID that maps to a place.
+      const gpsFresh = gpsBlock?.freshness === 'fresh';
+      const wifiAgeMs = now - new Date(latestWifi.timestamp).getTime();
+      if (!gpsFresh && latestWifi.bssid && wifiAgeMs < WIFI_FRESH_MS) {
+        const place = await this.lookupBssidPlace(userId, latestWifi.bssid);
+        if (place) {
+          recentlyLeft = {
+            place_name: place.place_name,
+            place_id: place.place_id,
+            age_s: Math.floor(wifiAgeMs / 1000),
+          };
+          logger.debug('[LocationService][getCurrentLocation] recently_left hint added', {
+            place_name: place.place_name,
+            age_s: recentlyLeft.age_s,
+          });
+        }
+      }
     }
 
-    return this.fuse(gpsBlock, wifiBlock);
+    return this.fuse(gpsBlock, wifiBlock, recentlyLeft);
   }
 
-  private fuse(gps: GpsBlock | undefined, wifi: WifiBlock | undefined): CurrentLocation {
+  private fuse(
+    gps: GpsBlock | undefined,
+    wifi: WifiBlock | undefined,
+    recentlyLeft?: RecentlyLeft,
+  ): CurrentLocation {
+    const result = this.decide(gps, wifi);
+    // recentlyLeft is only ever populated when GPS is NOT fresh (the caller
+    // guards on this), so it never collides with a confident fresh-GPS answer.
+    // Attach it as additive context to the stale/unknown tiers.
+    if (recentlyLeft) {
+      result.recently_left = recentlyLeft;
+      result.reasoning += `; recently left ${recentlyLeft.place_name} (wifi disconnect ${recentlyLeft.age_s}s ago)`;
+    }
+    return result;
+  }
+
+  private decide(gps: GpsBlock | undefined, wifi: WifiBlock | undefined): CurrentLocation {
     const gpsFresh = gps?.freshness === 'fresh';
     const gpsUsable = gps && gps.freshness !== 'very_stale';
     const wifiFresh = wifi && wifi.age_s * 1000 < WIFI_FRESH_MS;

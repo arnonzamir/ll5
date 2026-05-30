@@ -57,6 +57,7 @@ export function registerAllTools(
     },
     getUserId,
     timezone,
+    locationService,
   );
   if (esClient) {
     registerJournalTools(server, esClient, getUserId);

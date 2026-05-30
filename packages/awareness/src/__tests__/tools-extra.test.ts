@@ -35,6 +35,7 @@ import type { NotableEventRepository } from '../repositories/interfaces/notable-
 import type { PhoneStatusRepository } from '../repositories/interfaces/phone-status.repository.js';
 import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
 import type { LocationService } from '../services/location-service.js';
+import { LocationService as LocationServiceImpl } from '../services/location-service.js';
 
 const USER_ID = 'user-test-1';
 const getUserId = () => USER_ID;
@@ -352,6 +353,24 @@ describe('get_current_location tool handler', () => {
     expect(parsed.location.address).toBe('Tel Aviv');
     expect(parsed.fused.confidence).toBe('high');
     expect(parsed.fused.source).toBe('gps');
+    // A5: fused now exposes the gps block (parity with where_is_user).
+    expect(parsed.fused.gps).toEqual({
+      lat: 32.0853, lon: 34.7818, accuracy_m: 10, age_s: 60,
+      freshness: 'fresh', matched_place: 'Home', address: 'Tel Aviv',
+    });
+  });
+
+  it('A5: fused.gps is null when source != none but no gps block (wifi-only)', async () => {
+    const svc = makeLocationService({
+      place: 'Office', place_id: 'p-2', confidence: 'medium', source: 'wifi',
+      reasoning: 'wifi only',
+      wifi: { bssid: 'aa:bb:cc:dd:ee:ff', ssid: 'OfficeWifi', connected: true, age_s: 30 },
+    });
+    const tools = captureTools((s) => registerLocationTools(s, makeLocationRepo(), getUserId, svc));
+
+    const response = await tools.get('get_current_location')!({});
+    const parsed = parseToolResponse<{ fused: Record<string, unknown> }>(response);
+    expect(parsed.fused.gps).toBeNull();
   });
 
   it('returns location:null when source != none but gps is missing (wifi-only)', async () => {
@@ -1072,5 +1091,97 @@ describe('get_wifi_history tool handler', () => {
     expect(parsed.wifi_events[0].connected).toBe(true);
     expect(parsed.wifi_events[1].ssid).toBeNull();
     expect(parsed.wifi_events[1].rssi_dbm).toBeNull();
+  });
+});
+
+// ===========================================================================
+// LOCATION SERVICE — A7 "recently_left" disconnect hint
+// ===========================================================================
+
+describe('LocationService.getCurrentLocation — recently_left hint (A7)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const NETWORK_DOC = {
+    user_id: USER_ID,
+    manual_place_id: 'p-home',
+    manual_place_name: 'Home',
+  };
+
+  function buildService(over: {
+    gps?: Awaited<ReturnType<LocationRepository['getLatest']>>;
+    wifi?: Awaited<ReturnType<WifiRepository['getLatest']>>;
+    networkDoc?: unknown | null;
+  }) {
+    const locationRepo = makeLocationRepo({ getLatest: vi.fn(async () => over.gps ?? null) });
+    const wifiRepo = makeWifiRepo({ getLatest: vi.fn(async () => over.wifi ?? null) });
+    const es = makeMockEsClient({
+      get: over.networkDoc === null
+        ? vi.fn().mockResolvedValue({ _source: undefined })
+        : vi.fn().mockResolvedValue({ _source: over.networkDoc ?? NETWORK_DOC }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new LocationServiceImpl(locationRepo, wifiRepo, es as any);
+  }
+
+  it('adds recently_left when GPS is stale and the latest wifi is a recent known-place DISCONNECT', async () => {
+    const staleGpsTs = new Date(Date.now() - 12 * 60_000).toISOString(); // 12m → not fresh (freshness='stale')
+    const disconnectTs = new Date(Date.now() - 60_000).toISOString();    // 1 min ago, within WIFI_FRESH (10m)
+    const svc = buildService({
+      gps: {
+        id: 'loc-1', userId: USER_ID,
+        location: { lat: 32.1, lon: 34.8 }, accuracy: 20,
+        timestamp: staleGpsTs, matchedPlace: null, address: null,
+      } as unknown as Awaited<ReturnType<LocationRepository['getLatest']>>,
+      wifi: {
+        id: 'w-d', userId: USER_ID, connected: false,
+        ssid: null, bssid: 'aa:bb:cc:dd:ee:ff', timestamp: disconnectTs,
+      },
+    });
+
+    const result = await svc.getCurrentLocation(USER_ID);
+    expect(result.recently_left).toBeDefined();
+    expect(result.recently_left!.place_name).toBe('Home');
+    expect(result.recently_left!.place_id).toBe('p-home');
+    expect(result.recently_left!.age_s).toBeGreaterThanOrEqual(55);
+    expect(result.reasoning).toMatch(/recently left Home/);
+  });
+
+  it('does NOT add recently_left when GPS is fresh (hint is for stale/unknown tiers only)', async () => {
+    const freshGpsTs = new Date(Date.now() - 30_000).toISOString(); // 30s — fresh
+    const disconnectTs = new Date(Date.now() - 60_000).toISOString();
+    const svc = buildService({
+      gps: {
+        id: 'loc-1', userId: USER_ID,
+        location: { lat: 32.1, lon: 34.8 }, accuracy: 20,
+        timestamp: freshGpsTs, matchedPlace: 'Gym', address: null,
+      } as unknown as Awaited<ReturnType<LocationRepository['getLatest']>>,
+      wifi: {
+        id: 'w-d', userId: USER_ID, connected: false,
+        ssid: null, bssid: 'aa:bb:cc:dd:ee:ff', timestamp: disconnectTs,
+      },
+    });
+
+    const result = await svc.getCurrentLocation(USER_ID);
+    expect(result.recently_left).toBeUndefined();
+    expect(result.place).toBe('Gym'); // fresh-GPS decision is unchanged
+  });
+
+  it('does NOT add recently_left when the disconnect is stale (older than WIFI_FRESH)', async () => {
+    const staleGpsTs = new Date(Date.now() - 12 * 60_000).toISOString();
+    const oldDisconnectTs = new Date(Date.now() - 20 * 60_000).toISOString(); // 20m > 10m
+    const svc = buildService({
+      gps: {
+        id: 'loc-1', userId: USER_ID,
+        location: { lat: 32.1, lon: 34.8 }, accuracy: 20,
+        timestamp: staleGpsTs, matchedPlace: null, address: null,
+      } as unknown as Awaited<ReturnType<LocationRepository['getLatest']>>,
+      wifi: {
+        id: 'w-d', userId: USER_ID, connected: false,
+        ssid: null, bssid: 'aa:bb:cc:dd:ee:ff', timestamp: oldDisconnectTs,
+      },
+    });
+
+    const result = await svc.getCurrentLocation(USER_ID);
+    expect(result.recently_left).toBeUndefined();
   });
 });
