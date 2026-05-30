@@ -65,9 +65,44 @@ interface TenantRow {
   last_active_at: string | null;
 }
 
+/**
+ * Run the enrichment SELECT for a single user_id and return the raw row
+ * (or null if the user does not exist). Shared by /admin/tenants/:id and the
+ * self-scoped /me/onboarding so both derive channel/onboarding flags identically.
+ */
+export async function enrichUser(pool: Pool, userId: string): Promise<TenantRow | null> {
+  const result = await pool.query<TenantRow>(
+    `${TENANT_SELECT} WHERE au.user_id = $1`,
+    [userId],
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Derive the {completed, steps} onboarding shape from a raw row. */
+export function deriveOnboarding(row: Pick<TenantRow, 'onboarding'>): {
+  completed: boolean;
+  steps: Record<string, unknown>;
+} {
+  const onboarding = row.onboarding ?? {};
+  return {
+    completed: onboarding.completed === true,
+    steps: onboarding.steps ?? {},
+  };
+}
+
+/** Derive the {google, whatsapp, health} channel flags from a raw row. */
+export function deriveChannels(
+  row: Pick<TenantRow, 'chan_google' | 'chan_whatsapp' | 'chan_health'>,
+): { google: boolean; whatsapp: boolean; health: boolean } {
+  return {
+    google: row.chan_google,
+    whatsapp: row.chan_whatsapp,
+    health: row.chan_health,
+  };
+}
+
 /** Shape the console consumes. */
 function toTenant(row: TenantRow) {
-  const onboarding = row.onboarding ?? {};
   return {
     user_id: row.user_id,
     email: row.email,
@@ -76,15 +111,8 @@ function toTenant(row: TenantRow) {
     role: row.role,
     enabled: row.enabled,
     created_at: row.created_at,
-    onboarding: {
-      completed: onboarding.completed === true,
-      steps: onboarding.steps ?? {},
-    },
-    channels: {
-      google: row.chan_google,
-      whatsapp: row.chan_whatsapp,
-      health: row.chan_health,
-    },
+    onboarding: deriveOnboarding(row),
+    channels: deriveChannels(row),
     last_active_at: row.last_active_at,
   };
 }
@@ -118,15 +146,12 @@ export function createTenantsRouter(pool: Pool, authSecret: string): Router {
   // ---------------------------------------------------------------------------
   router.get('/admin/tenants/:id', superadmin, async (req: Request, res: Response) => {
     try {
-      const result = await pool.query<TenantRow>(
-        `${TENANT_SELECT} WHERE au.user_id = $1`,
-        [req.params.id],
-      );
-      if (result.rows.length === 0) {
+      const row = await enrichUser(pool, String(req.params.id));
+      if (!row) {
         res.status(404).json({ error: 'Tenant not found' });
         return;
       }
-      res.json({ tenant: toTenant(result.rows[0]) });
+      res.json({ tenant: toTenant(row) });
     } catch (err) {
       logger.error('[tenants][get] Failed', {
         error: err instanceof Error ? err.message : String(err),

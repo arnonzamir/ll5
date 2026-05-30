@@ -18,7 +18,7 @@ import {
   type IndexDefinition,
 } from '@ll5/shared';
 import { createAdminRouter } from './admin.js';
-import { createTenantsRouter } from './tenants.js';
+import { createTenantsRouter, enrichUser, deriveOnboarding, deriveChannels } from './tenants.js';
 import { createAuthRouter } from './auth.js';
 import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
@@ -275,6 +275,70 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[server][fcmUnregister] Failed to unregister FCM token', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // --- Self-scoped onboarding status (unified onboarding wizard) ---
+  //
+  // Returns the CALLER's own onboarding + channel + phone + profile state.
+  // Strictly self-scoped: userId comes from the auth token claim (NOT a param),
+  // and every query filters user_id = <caller uid>. NOT admin-gated — any
+  // authenticated user reads only their own row. Reuses the same channel/
+  // onboarding derivation as /admin/tenants via enrichUser/deriveChannels.
+  app.get('/me/onboarding', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const [enriched, settingsResult, fcmResult] = await Promise.all([
+        enrichUser(pgPool, userId),
+        pgPool.query('SELECT settings FROM user_settings WHERE user_id = $1', [userId]),
+        pgPool.query<{ device_count: string }>(
+          'SELECT COUNT(*) AS device_count FROM fcm_tokens WHERE user_id = $1',
+          [userId],
+        ),
+      ]);
+
+      const onboarding = enriched
+        ? deriveOnboarding(enriched)
+        : { completed: false, steps: {} };
+      const channels = enriched
+        ? deriveChannels(enriched)
+        : { google: false, whatsapp: false, health: false };
+
+      const settings = (settingsResult.rows[0]?.settings ?? {}) as Record<string, unknown>;
+      const deviceCount = Number(fcmResult.rows[0]?.device_count ?? 0);
+
+      const profile = {
+        display_name: (settings.display_name as string | undefined) ?? null,
+        timezone: (settings.timezone as string | undefined) ?? null,
+        work_week: (settings.work_week as object | undefined) ?? null,
+        self_names: (settings.self_names as unknown[] | undefined) ?? null,
+      };
+
+      logger.debug('[server][meOnboarding] Derived self-scoped onboarding status', {
+        userId,
+        onboardingCompleted: onboarding.completed,
+        onboardingSteps: Object.keys(onboarding.steps),
+        channels,
+        phoneLinked: deviceCount > 0,
+        deviceCount,
+        hasProfile: {
+          display_name: profile.display_name !== null,
+          timezone: profile.timezone !== null,
+          work_week: profile.work_week !== null,
+          self_names: profile.self_names !== null,
+        },
+      });
+
+      res.json({
+        onboarding,
+        channels,
+        phone: { linked: deviceCount > 0, device_count: deviceCount },
+        profile,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][meOnboarding] Failed', { error: message });
       res.status(500).json({ error: message });
     }
   });

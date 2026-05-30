@@ -1,207 +1,126 @@
 "use server";
 
 import { getToken } from "@/lib/auth";
-import { mcpCallJsonSafe } from "@/lib/api";
 import { env } from "@/lib/env";
+import type { MeOnboarding, StepKey, OnboardingState } from "./onboarding-types";
 
-/* ---------- types ---------- */
+/* ---------- gateway helpers ---------- */
 
-export interface OnboardingSteps {
-  profile_set: boolean;
-  timezone_configured: boolean;
-  google_connected: boolean;
-  android_installed: boolean;
-}
-
-export interface OnboardingState {
-  completed: boolean;
-  steps: OnboardingSteps;
-}
-
-export interface OnboardingData {
-  onboarding: OnboardingState;
-  displayName: string;
-  timezone: string;
-  googleConnected: boolean;
-}
-
-/* ---------- helpers ---------- */
-
-async function gatewayGet(path: string, token: string): Promise<Record<string, unknown> | null> {
+async function gatewayGet(path: string): Promise<Record<string, unknown> | null> {
+  const token = await getToken();
+  if (!token) return null;
   try {
     const res = await fetch(`${env.GATEWAY_URL}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
     });
     if (!res.ok) return null;
     return (await res.json()) as Record<string, unknown>;
-  } catch {
+  } catch (err) {
+    console.error(`[onboarding] GET ${path} failed:`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }
 
-async function gatewayPut(path: string, body: unknown, token: string): Promise<boolean> {
+async function gatewayPut(path: string, body: unknown): Promise<boolean> {
+  const token = await getToken();
+  if (!token) return false;
   try {
     const res = await fetch(`${env.GATEWAY_URL}${path}`, {
       method: "PUT",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (!res.ok) {
+      console.error(`[onboarding] PUT ${path} failed:`, res.status, await res.text().catch(() => ""));
+    }
     return res.ok;
-  } catch {
+  } catch (err) {
+    console.error(`[onboarding] PUT ${path} failed:`, err instanceof Error ? err.message : String(err));
     return false;
   }
 }
 
-/* ---------- fetch onboarding state ---------- */
+/* ---------- live onboarding status (drives progress + verification) ---------- */
 
-export async function fetchOnboardingState(): Promise<OnboardingData> {
-  const defaults: OnboardingData = {
-    onboarding: {
-      completed: false,
-      steps: {
-        profile_set: false,
-        timezone_configured: false,
-        google_connected: false,
-        android_installed: false,
-      },
-    },
-    displayName: "",
-    timezone: "",
-    googleConnected: false,
-  };
+const EMPTY_ME: MeOnboarding = {
+  onboarding: { completed: false, steps: {} },
+  channels: { google: false, whatsapp: false, health: false },
+  phone: { linked: false, device_count: 0 },
+  profile: { display_name: null, timezone: null, work_week: null, self_names: null },
+};
 
-  const token = await getToken();
-  if (!token) return defaults;
-
-  // Fetch user settings, profile, and Google connection status in parallel
-  const [settings, profileData, googleStatus] = await Promise.all([
-    gatewayGet("/user-settings", token),
-    mcpCallJsonSafe<{ profile: { name?: string; display_name?: string } | null }>(
-      "knowledge",
-      "get_profile"
-    ),
-    fetchGoogleConnectionStatusInternal(token),
-  ]);
-
-  // Extract onboarding state from settings
-  const raw = (settings?.onboarding ?? {}) as Record<string, unknown>;
-  const steps = (raw.steps ?? {}) as Record<string, boolean>;
-
-  // Check actual status from live data
-  const profileName = profileData?.profile?.name ?? profileData?.profile?.display_name ?? "";
-  const hasProfile = profileName.length > 0;
-  const timezone = (settings?.timezone as string) ?? "";
-  const hasTimezone = timezone.length > 0;
-  const googleConnected = googleStatus;
-
+/**
+ * Fetch the self-scoped GET /me/onboarding snapshot. Drives both the initial
+ * resume (first incomplete step) and the live polling for phone/channel
+ * verification. Returns empty defaults on any failure so the wizard still loads.
+ */
+export async function fetchMeOnboarding(): Promise<MeOnboarding> {
+  const raw = await gatewayGet("/me/onboarding");
+  if (!raw) return EMPTY_ME;
+  const onboarding = (raw.onboarding ?? {}) as Partial<OnboardingState>;
+  const channels = (raw.channels ?? {}) as Record<string, unknown>;
+  const phone = (raw.phone ?? {}) as Record<string, unknown>;
+  const profile = (raw.profile ?? {}) as Record<string, unknown>;
   return {
     onboarding: {
-      completed: raw.completed === true,
-      steps: {
-        profile_set: steps.profile_set === true || hasProfile,
-        timezone_configured: steps.timezone_configured === true || hasTimezone,
-        google_connected: steps.google_connected === true || googleConnected,
-        android_installed: steps.android_installed === true,
-      },
+      completed: onboarding.completed === true,
+      steps: (onboarding.steps ?? {}) as MeOnboarding["onboarding"]["steps"],
     },
-    displayName: profileName,
-    timezone,
-    googleConnected,
+    channels: {
+      google: channels.google === true,
+      whatsapp: channels.whatsapp === true,
+      health: channels.health === true,
+    },
+    phone: {
+      linked: phone.linked === true,
+      device_count: Number(phone.device_count ?? 0),
+    },
+    profile: {
+      display_name: (profile.display_name as string | null) ?? null,
+      timezone: (profile.timezone as string | null) ?? null,
+      work_week: profile.work_week ?? null,
+      self_names: profile.self_names ?? null,
+    },
   };
 }
 
-async function fetchGoogleConnectionStatusInternal(token: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${env.MCP_CALENDAR_URL}/api/connection-status`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { connected: boolean };
-    return data.connected === true;
-  } catch {
-    return false;
-  }
+/* ---------- step completion (deep-merge PUT /user-settings) ---------- */
+
+/** Read the current onboarding object so we can merge step-by-step without
+ *  clobbering sibling keys (the gateway deep-merges, but we still preserve the
+ *  full onboarding object shape on each write). */
+async function currentOnboarding(): Promise<OnboardingState> {
+  const settings = await gatewayGet("/user-settings");
+  return (settings?.onboarding ?? { completed: false, steps: {} }) as OnboardingState;
 }
 
-/* ---------- complete a single step ---------- */
-
-export async function completeOnboardingStep(
-  step: keyof OnboardingSteps
+/** Mark a single onboarding step done (or explicitly not-done). */
+export async function setOnboardingStep(
+  step: StepKey,
+  done: boolean = true,
 ): Promise<{ ok: boolean }> {
-  const token = await getToken();
-  if (!token) return { ok: false };
-
-  // Read current settings first
-  const settings = await gatewayGet("/user-settings", token);
-  const currentOnboarding = (settings?.onboarding ?? { completed: false, steps: {} }) as OnboardingState;
-  const updatedSteps = { ...currentOnboarding.steps, [step]: true };
-
-  const ok = await gatewayPut(
-    "/user-settings",
-    { onboarding: { ...currentOnboarding, steps: updatedSteps } },
-    token
-  );
+  const current = await currentOnboarding();
+  const ok = await gatewayPut("/user-settings", {
+    onboarding: { ...current, steps: { ...current.steps, [step]: done } },
+  });
   return { ok };
 }
 
-/* ---------- mark onboarding complete ---------- */
-
+/** Mark the whole onboarding flow complete. */
 export async function completeOnboarding(): Promise<{ ok: boolean }> {
-  const token = await getToken();
-  if (!token) return { ok: false };
-
-  const settings = await gatewayGet("/user-settings", token);
-  const currentOnboarding = (settings?.onboarding ?? { completed: false, steps: {} }) as OnboardingState;
-
-  const ok = await gatewayPut(
-    "/user-settings",
-    { onboarding: { ...currentOnboarding, completed: true } },
-    token
-  );
+  const current = await currentOnboarding();
+  const ok = await gatewayPut("/user-settings", {
+    onboarding: { ...current, completed: true },
+  });
   return { ok };
 }
 
-/* ---------- update timezone ---------- */
-
-export async function updateTimezone(tz: string): Promise<{ ok: boolean }> {
-  const token = await getToken();
-  if (!token) return { ok: false };
-
-  // Update gateway user_settings with timezone
-  const ok = await gatewayPut("/user-settings", { timezone: tz }, token);
-
-  // Also update calendar MCP timezone
-  if (ok) {
-    await mcpCallJsonSafe("ll5-calendar", "set_timezone", { timezone: tz });
-  }
-
-  return { ok };
-}
-
-/* ---------- update display name ---------- */
-
-export async function updateDisplayName(
-  name: string
-): Promise<{ ok: boolean; name: string }> {
-  try {
-    const data = await mcpCallJsonSafe<{ profile: { name?: string } }>(
-      "knowledge",
-      "update_profile",
-      { name }
-    );
-    return { ok: true, name: data?.profile?.name ?? name };
-  } catch (err) {
-    console.error("[onboarding] updateDisplayName failed:", err instanceof Error ? err.message : String(err));
-    return { ok: false, name };
-  }
-}
-
-/* ---------- get Google auth URL ---------- */
+/* ---------- Google connect (reuse onboarding popup/poll pattern) ---------- */
 
 export async function getGoogleAuthUrl(): Promise<{ auth_url: string | null; error: string | null }> {
   const token = await getToken();
   if (!token) return { auth_url: null, error: "Not authenticated" };
-
   try {
     const res = await fetch(`${env.MCP_CALENDAR_URL}/api/auth-url`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -219,10 +138,18 @@ export async function getGoogleAuthUrl(): Promise<{ auth_url: string | null; err
   }
 }
 
-/* ---------- check Google connection ---------- */
-
 export async function checkGoogleConnection(): Promise<{ connected: boolean }> {
   const token = await getToken();
   if (!token) return { connected: false };
-  return { connected: await fetchGoogleConnectionStatusInternal(token) };
+  try {
+    const res = await fetch(`${env.MCP_CALENDAR_URL}/api/connection-status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return { connected: false };
+    const data = (await res.json()) as { connected: boolean };
+    return { connected: data.connected === true };
+  } catch (err) {
+    console.error("[onboarding] checkGoogleConnection failed:", err instanceof Error ? err.message : String(err));
+    return { connected: false };
+  }
 }
