@@ -21,23 +21,34 @@ import {
   KeyRound,
   Link2,
   Loader2,
+  Play,
   RefreshCw,
   Server,
+  Square,
   Trash2,
 } from "lucide-react";
 import { ClaudeKeyForm } from "./claude-key-form";
 import {
   fetchAgentCredentials,
   fetchLlmCredential,
+  fetchRuntime,
   generateConnection,
+  provisionRuntime,
   revokeAgentCredential,
+  stopRuntime,
 } from "./agent-server-actions";
 import {
+  canProvision,
+  canStop,
   formatMcpConfig,
+  isTransientRuntime,
+  runtimeStatusBadge,
   type AgentCredential,
+  type AgentRuntime,
   type ConnectionKit,
   type LlmCredentialStatus,
 } from "./agent-types";
+import { relativeTime } from "@/app/(admin)/admin/tenants/tenants-types";
 
 export function AgentSettingsView() {
   const [llm, setLlm] = useState<LlmCredentialStatus>({ configured: false });
@@ -96,22 +107,143 @@ export function AgentSettingsView() {
         onChanged={load}
       />
 
-      {/* ---- Runtime status (placeholder) ---- */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Server className="h-5 w-5 text-gray-400" /> Runtime status
-          </CardTitle>
-          <CardDescription>The LL5-hosted agent runtime.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2 rounded-md bg-gray-50 p-4 text-sm text-gray-500">
-            <Badge variant="secondary">Coming soon</Badge>
-            Hosted runtime — coming soon.
-          </div>
-        </CardContent>
-      </Card>
+      {/* ---- Hosted runtime ---- */}
+      <RuntimeSection llmConfigured={llm.configured} />
     </div>
+  );
+}
+
+/* ---------- Hosted runtime section ---------- */
+
+const POLL_MS = 4000;
+
+function RuntimeSection({ llmConfigured }: { llmConfigured: boolean }) {
+  const [runtime, setRuntime] = useState<AgentRuntime>({ status: "none" });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const load = useCallback(async () => {
+    const rt = await fetchRuntime();
+    setRuntime(rt);
+    setLoading(false);
+    return rt;
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // While provisioning, poll until the runtime settles (running/error/etc.).
+  useEffect(() => {
+    if (!isTransientRuntime(runtime.status)) return;
+    const id = setInterval(() => {
+      void load();
+    }, POLL_MS);
+    return () => clearInterval(id);
+  }, [runtime.status, load]);
+
+  function handleProvision() {
+    setError(null);
+    startTransition(async () => {
+      const result = await provisionRuntime();
+      if (result.ok && result.runtime) {
+        setRuntime(result.runtime);
+      } else {
+        setError(result.error ?? "Could not provision the runtime.");
+      }
+    });
+  }
+
+  function handleStop() {
+    setError(null);
+    startTransition(async () => {
+      const result = await stopRuntime();
+      if (result.ok && result.runtime) {
+        setRuntime(result.runtime);
+      } else {
+        setError(result.error ?? "Could not stop the runtime.");
+      }
+    });
+  }
+
+  const badge = runtimeStatusBadge(runtime.status);
+  const provisionEnabled = canProvision(llmConfigured, runtime.status) && !isPending;
+  const showStop = canStop(runtime.status);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Server className="h-5 w-5 text-primary" /> Hosted runtime
+        </CardTitle>
+        <CardDescription>
+          The LL5-hosted agent container that runs with your Claude credential.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Status line */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge variant={badge.variant} className="gap-1">
+            {runtime.status === "provisioning" && (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            )}
+            {badge.label}
+          </Badge>
+          {runtime.last_seen_at && (
+            <span className="text-xs text-gray-400">
+              Last seen {relativeTime(runtime.last_seen_at)}
+            </span>
+          )}
+          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-300" />}
+        </div>
+
+        {/* Last error (from the runtime, not a UI error) */}
+        {runtime.last_error && (
+          <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span className="break-words">{runtime.last_error}</span>
+          </div>
+        )}
+
+        {/* Gating hint */}
+        {!llmConfigured && (
+          <p className="text-xs text-gray-500">
+            Connect your Claude API key above before provisioning the runtime.
+          </p>
+        )}
+
+        {/* Actions */}
+        <div className="flex items-center gap-2">
+          <Button onClick={handleProvision} disabled={!provisionEnabled}>
+            {isPending && !showStop ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <>
+                <Play className="h-4 w-4 mr-1.5" />
+                {runtime.status === "stopped" || runtime.status === "error"
+                  ? "Re-provision"
+                  : "Provision"}
+              </>
+            )}
+          </Button>
+          {showStop && (
+            <Button variant="outline" onClick={handleStop} disabled={isPending} className="text-red-600">
+              {isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <Square className="h-3.5 w-3.5 mr-1.5" /> Stop
+                </>
+              )}
+            </Button>
+          )}
+        </div>
+
+        {/* UI/network error */}
+        {error && <p className="text-xs text-red-600">{error}</p>}
+      </CardContent>
+    </Card>
   );
 }
 

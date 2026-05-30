@@ -6,6 +6,12 @@ import { generateToken } from '@ll5/shared';
 import { chatAuthMiddleware } from './chat.js';
 import { encryptSecret } from './utils/encryption.js';
 import { logger } from './utils/logger.js';
+import {
+  defaultOrchestratorClient,
+  OrchestratorNotConfiguredError,
+  type OrchestratorClient,
+  type OrchestratorRuntime,
+} from './utils/orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Agent connection plane (P3) — the kit a per-user container needs to act as a
@@ -67,14 +73,87 @@ function looksLikeAnthropicKey(key: string): boolean {
 }
 
 /**
+ * Mint a fresh 90-day agent token for `userId`/`role` and record it (hash only)
+ * in agent_credentials. Returns the raw token (caller must not store/log it
+ * beyond handing it to the orchestrator). Shared by the connection-kit endpoint
+ * and the provision endpoints so there is one mint path.
+ */
+export async function mintAgentToken(
+  pool: Pool,
+  authSecret: string,
+  userId: string,
+  role: string,
+  name = 'agent',
+): Promise<{ token: string; credentialId: string; createdAt: string }> {
+  const token = generateToken(userId, authSecret, AGENT_TOKEN_TTL_DAYS, role);
+  const tokenHash = sha256(token);
+  const result = await pool.query<{ id: string; created_at: string }>(
+    `INSERT INTO agent_credentials (user_id, name, token_hash)
+     VALUES ($1, $2, $3)
+     RETURNING id, created_at`,
+    [userId, name, tokenHash],
+  );
+  return { token, credentialId: result.rows[0].id, createdAt: result.rows[0].created_at };
+}
+
+/**
+ * Upsert the agent_runtimes row from an orchestrator result. Maps the
+ * orchestrator's returned status/container/host into the row and returns the
+ * console-shaped runtime view.
+ */
+export async function upsertRuntimeRow(
+  pool: Pool,
+  userId: string,
+  runtime: OrchestratorRuntime,
+): Promise<RuntimeView> {
+  await pool.query(
+    `INSERT INTO agent_runtimes (user_id, container_id, host, status, last_error, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now())
+     ON CONFLICT (user_id) DO UPDATE SET
+       container_id = EXCLUDED.container_id,
+       host = EXCLUDED.host,
+       status = EXCLUDED.status,
+       last_error = EXCLUDED.last_error,
+       updated_at = now()`,
+    [
+      userId,
+      runtime.container_id ?? null,
+      runtime.host ?? null,
+      runtime.status,
+      runtime.last_error ?? null,
+    ],
+  );
+  return {
+    status: runtime.status,
+    container_id: runtime.container_id ?? null,
+    host: runtime.host ?? null,
+    last_seen_at: runtime.last_seen_at ?? null,
+    last_error: runtime.last_error ?? null,
+  };
+}
+
+/** The agent_runtimes view returned to the dashboard. */
+export interface RuntimeView {
+  status: string;
+  container_id: string | null;
+  host: string | null;
+  last_seen_at: string | null;
+  last_error: string | null;
+}
+
+/**
  * Create the agent-connection router. Mounted at the root; every route is
  * behind the chat auth middleware (self-scoped).
+ *
+ * @param orchestrator injectable orchestrator client (defaults to the env-backed
+ *   real client; tests inject a mock).
  */
 export function createAgentRouter(
   pool: Pool,
   authSecret: string,
   encryptionKey: string | undefined,
   mcpBaseDomain: string,
+  orchestrator: OrchestratorClient = defaultOrchestratorClient,
 ): Router {
   const router = Router();
   const authMw = chatAuthMiddleware(authSecret);
@@ -89,30 +168,20 @@ export function createAgentRouter(
     const credName = typeof name === 'string' && name.trim().length > 0 ? name.trim().slice(0, 100) : 'agent';
 
     try {
-      const token = generateToken(userId, authSecret, AGENT_TOKEN_TTL_DAYS, role);
-      const tokenHash = sha256(token);
-
-      const result = await pool.query<{ id: string; created_at: string }>(
-        `INSERT INTO agent_credentials (user_id, name, token_hash)
-         VALUES ($1, $2, $3)
-         RETURNING id, created_at`,
-        [userId, credName, tokenHash],
-      );
-
-      const row = result.rows[0];
+      const { token, credentialId, createdAt } = await mintAgentToken(pool, authSecret, userId, role, credName);
       const mcpConfig = buildMcpConfig(token, mcpBaseDomain);
 
       logger.info('[agent][mintConnection] Agent credential minted', {
         userId,
-        credentialId: row.id,
+        credentialId,
         name: credName,
       });
 
       // token + mcp_config returned ONCE here — never stored raw, never logged.
       res.status(201).json({
-        credential_id: row.id,
+        credential_id: credentialId,
         name: credName,
-        created_at: row.created_at,
+        created_at: createdAt,
         token,
         mcp_config: mcpConfig,
       });
@@ -161,6 +230,30 @@ export function createAgentRouter(
         return;
       }
       logger.info('[agent][revokeCredential] Agent credential revoked', { userId, credentialId: id });
+
+      // P5 lifecycle: revoking the agent credential pulls the container's MCP
+      // access on its next token refresh anyway, but stopping is immediate.
+      // Best-effort — never fail the revoke on an orchestrator hiccup.
+      try {
+        const runtime = await orchestrator.stop(userId);
+        await upsertRuntimeRow(pool, userId, runtime);
+        logger.info('[agent][revokeCredential] runtime_stopped', {
+          userId,
+          reason: 'credential_revoked',
+          status: runtime.status,
+        });
+      } catch (stopErr) {
+        if (stopErr instanceof OrchestratorNotConfiguredError) {
+          logger.info('[agent][revokeCredential] runtime stop skipped (orchestrator not configured)', { userId });
+        } else {
+          logger.warn('[agent][revokeCredential] runtime stop failed (non-fatal)', {
+            userId,
+            reason: 'credential_revoked',
+            error: stopErr instanceof Error ? stopErr.message : String(stopErr),
+          });
+        }
+      }
+
       res.json({ revoked: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -240,6 +333,112 @@ export function createAgentRouter(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[agent][deleteLlmCredential] Failed', { userId, error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /me/agent/provision — provision the caller's agent container.
+  // Requires a configured BYO Claude credential first. Mints a fresh agent
+  // token, asks the orchestrator to launch, and records the runtime state.
+  // ---------------------------------------------------------------------------
+  router.post('/me/agent/provision', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const role = (req as Request & { userRole?: string }).userRole ?? 'user';
+    try {
+      const cred = await pool.query(
+        'SELECT 1 FROM agent_llm_credentials WHERE user_id = $1',
+        [userId],
+      );
+      if (cred.rows.length === 0) {
+        res.status(400).json({ error: 'connect your Claude API key first' });
+        return;
+      }
+
+      const { token } = await mintAgentToken(pool, authSecret, userId, role);
+      const runtime = await orchestrator.provision(userId, token);
+      const view = await upsertRuntimeRow(pool, userId, runtime);
+      logger.info('[agent][provision]', { userId, status: view.status });
+      res.json({ runtime: view });
+    } catch (err) {
+      if (err instanceof OrchestratorNotConfiguredError) {
+        logger.warn('[agent][provision] orchestrator not configured', { userId });
+        res.status(503).json({ error: 'Agent runtime is not configured yet' });
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[agent][provision] Failed', { userId, error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /me/agent/stop — stop the caller's agent container.
+  // ---------------------------------------------------------------------------
+  router.post('/me/agent/stop', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    try {
+      const runtime = await orchestrator.stop(userId);
+      const view = await upsertRuntimeRow(pool, userId, runtime);
+      logger.info('[agent][stop]', { userId, status: view.status });
+      res.json({ runtime: view });
+    } catch (err) {
+      if (err instanceof OrchestratorNotConfiguredError) {
+        logger.warn('[agent][stop] orchestrator not configured', { userId });
+        res.status(503).json({ error: 'Agent runtime is not configured yet' });
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[agent][stop] Failed', { userId, error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /me/agent/runtime — the caller's agent_runtimes row (or {status:'none'}).
+  // ---------------------------------------------------------------------------
+  router.get('/me/agent/runtime', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    try {
+      const result = await pool.query<RuntimeView>(
+        `SELECT status, container_id, host, last_seen_at, last_error
+         FROM agent_runtimes WHERE user_id = $1`,
+        [userId],
+      );
+      if (result.rows.length === 0) {
+        res.json({ runtime: { status: 'none', container_id: null, host: null, last_seen_at: null, last_error: null } });
+        return;
+      }
+      res.json({ runtime: result.rows[0] });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[agent][runtime] Failed', { userId, error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /me/agent/heartbeat — called BY the in-container channel MCP using its
+  // own agent token. Marks the runtime running + bumps last_seen_at, scoped to
+  // the caller's user_id (from the token claim, never a body field).
+  // ---------------------------------------------------------------------------
+  router.post('/me/agent/heartbeat', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    try {
+      await pool.query(
+        `INSERT INTO agent_runtimes (user_id, status, last_seen_at, updated_at)
+         VALUES ($1, 'running', now(), now())
+         ON CONFLICT (user_id) DO UPDATE SET
+           last_seen_at = now(),
+           status = 'running',
+           updated_at = now()`,
+        [userId],
+      );
+      logger.info('[agent][heartbeat]', { userId, status: 'running' });
+      res.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[agent][heartbeat] Failed', { userId, error: message });
       res.status(500).json({ error: message });
     }
   });

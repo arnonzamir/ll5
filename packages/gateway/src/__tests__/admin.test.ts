@@ -681,6 +681,63 @@ describe('createAdminRouter', () => {
       expect((res._json as { role: string }).role).toBe('admin');
     });
 
+    it('disabling a user (enabled=false) triggers orchestrator.stop without failing the PATCH', async () => {
+      pool = makePgPool({
+        rows: [{ user_id: 'user-1', username: 'u', display_name: 'U', role: 'user', enabled: false }],
+      });
+      const orch = {
+        stop: vi.fn(async () => ({ status: 'stopped' })),
+        provision: vi.fn(), status: vi.fn(),
+      };
+      const router = createAdminRouter(pool, AUTH_SECRET, orch as any);
+      const handler = findHandler(router, 'patch', '/users/:id');
+
+      const req = makeReq({ params: { id: 'user-1' }, body: { enabled: false } });
+      const res = makeRes();
+
+      await handler!(req, res);
+
+      expect(res._status).toBe(200);
+      expect(orch.stop).toHaveBeenCalledWith('user-1');
+      // The runtime row was marked stopped, scoped to the user.
+      const stopUpdate = (pool.query as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => String(c[0]).includes('UPDATE agent_runtimes') && String(c[0]).includes("status = 'stopped'"),
+      );
+      expect(stopUpdate).toBeDefined();
+      expect(stopUpdate![1]).toEqual(['user-1']);
+    });
+
+    it('still returns 200 on PATCH enabled=false when orchestrator.stop throws', async () => {
+      pool = makePgPool({
+        rows: [{ user_id: 'user-1', username: 'u', display_name: 'U', role: 'user', enabled: false }],
+      });
+      const orch = {
+        stop: vi.fn(async () => { throw new Error('orchestrator down'); }),
+        provision: vi.fn(), status: vi.fn(),
+      };
+      const router = createAdminRouter(pool, AUTH_SECRET, orch as any);
+      const handler = findHandler(router, 'patch', '/users/:id');
+      const req = makeReq({ params: { id: 'user-1' }, body: { enabled: false } });
+      const res = makeRes();
+      await handler!(req, res);
+      expect(res._status).toBe(200);
+      expect(orch.stop).toHaveBeenCalled();
+    });
+
+    it('does NOT call orchestrator.stop when enabling a user', async () => {
+      pool = makePgPool({
+        rows: [{ user_id: 'user-1', username: 'u', display_name: 'U', role: 'user', enabled: true }],
+      });
+      const orch = { stop: vi.fn(), provision: vi.fn(), status: vi.fn() };
+      const router = createAdminRouter(pool, AUTH_SECRET, orch as any);
+      const handler = findHandler(router, 'patch', '/users/:id');
+      const req = makeReq({ params: { id: 'user-1' }, body: { enabled: true } });
+      const res = makeRes();
+      await handler!(req, res);
+      expect(res._status).toBe(200);
+      expect(orch.stop).not.toHaveBeenCalled();
+    });
+
     it('updates user fields', async () => {
       pool = makePgPool({
         rows: [{

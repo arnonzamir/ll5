@@ -178,6 +178,14 @@ Each step writes `user_settings.onboarding.steps.*` so the flow is resumable. No
 
 Each phase is independently shippable; the existing single admin agent keeps working throughout (it becomes "tenant 0" under the same orchestrator once P4 lands).
 
+### Build status (2026-05-30) — P1–P5 implemented (branch `feat/tenant-p1-identity`, not yet deployed)
+- **P1** identity & invite, **W1** superadmin + tenant console, **P2** unified onboarding, **P3** connection plane, **P4** orchestrator (`packages/agent-orchestrator`) + gateway runtime control, **P5** lifecycle hooks — all built and unit-tested (847 tests, typecheck clean). The orchestrator is tested against a `MockRuntime`; `DockerRuntime` (Docker socket over `node:http`) is built but not exercised.
+- **Remaining to go live (not code in this repo):**
+  1. **ll5-run base-image companion change** — the per-user container image must (a) read creds from the mounted `0600` env-file at `$LL5_AGENT_ENV_FILE` (`set -a; . "$file"; set +a`) — never argv; (b) render `.mcp.json` from `LL5_USER_ID`/`LL5_AGENT_TOKEN`/`MCP_BASE_DOMAIN`; (c) keep the supervisor + mcp-autoheal; (d) have the channel MCP `POST /me/agent/heartbeat` periodically.
+  2. **Dedicated agent host** with the Docker socket; deploy `packages/agent-orchestrator` there via `docker/agent-orchestrator.compose.yml` (NOT on the data-plane Coolify stack). Set `ORCHESTRATOR_URL`/`ORCHESTRATOR_SECRET` on the gateway.
+  3. **Email provider** (SMTP) for real invite/reset delivery (today: log + dashboard accept-url).
+  4. **Deploy** the gateway/dashboard branch (migrations 028–031 run on boot).
+
 ## 9. Open questions for review
 1. **ToS:** OK to run a user's Claude *subscription* token in our container, or API-key-only for hosted (subscription → self-host)? (Blocks P4 shape.)
 2. **Agent hosts:** dedicate a box (or small pool) for agent containers, separate from the data-plane Coolify host? (Recommended.)

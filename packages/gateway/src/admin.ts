@@ -5,6 +5,11 @@ import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 import { validateLl5Token } from '@ll5/shared';
 import { logger } from './utils/logger.js';
+import {
+  defaultOrchestratorClient,
+  OrchestratorNotConfiguredError,
+  type OrchestratorClient,
+} from './utils/orchestrator.js';
 import { getHealthSnapshot } from './scheduler/mcp-health-monitor.js';
 import { getAllWhatsAppFlowSnapshots } from './scheduler/whatsapp-flow-monitor.js';
 import { getAllPhoneLivenessSnapshots } from './scheduler/phone-liveness-monitor.js';
@@ -162,9 +167,47 @@ const USER_SELECT_FIELDS = 'user_id, username, display_name, role, enabled, crea
 /**
  * Create the /admin router with user and family management endpoints.
  */
-export function createAdminRouter(pool: Pool, authSecret: string): Router {
+export function createAdminRouter(
+  pool: Pool,
+  authSecret: string,
+  orchestrator: OrchestratorClient = defaultOrchestratorClient,
+): Router {
   const router = Router();
   const admin = requireAdmin(authSecret);
+
+  /**
+   * P5 lifecycle: when a user is disabled, best-effort stop their agent
+   * container and mark the runtime stopped. Never throws — a runtime hiccup
+   * must not block the disable.
+   */
+  async function teardownRuntimeOnDisable(targetUserId: string, reason: string): Promise<void> {
+    try {
+      await orchestrator.stop(targetUserId);
+    } catch (err) {
+      if (err instanceof OrchestratorNotConfiguredError) {
+        logger.info('[admin][lifecycle] runtime stop skipped (orchestrator not configured)', { target_user_id: targetUserId, reason });
+      } else {
+        logger.warn('[admin][lifecycle] orchestrator stop failed (non-fatal)', {
+          target_user_id: targetUserId,
+          reason,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    // Reflect stopped state regardless of orchestrator outcome (best-effort).
+    try {
+      await pool.query(
+        `UPDATE agent_runtimes SET status = 'stopped', updated_at = now() WHERE user_id = $1`,
+        [targetUserId],
+      );
+    } catch (err) {
+      logger.warn('[admin][lifecycle] runtime status update failed (non-fatal)', {
+        target_user_id: targetUserId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    logger.info('[admin][lifecycle] runtime_stopped', { target_user_id: targetUserId, reason, status: 'stopped' });
+  }
 
   // ---------------------------------------------------------------------------
   // GET /admin/health — aggregate health of all MCPs, gateway, DBs, agent flow
@@ -461,6 +504,10 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
             target_user_id: req.params.id,
             new_role: role,
           });
+        }
+        // P5 lifecycle: disabling a user tears down their agent container.
+        if (enabled === false) {
+          await teardownRuntimeOnDisable(String(req.params.id), 'user_disabled');
         }
         res.json(result.rows[0]);
       } else {

@@ -4,6 +4,16 @@
 // client view.
 
 import type { BadgeProps } from "@/components/ui/badge";
+import {
+  runtimeStatusBadge,
+  normalizeRuntimeStatus,
+  type AgentRuntimeStatus,
+} from "@/app/(user)/settings/agent/agent-types";
+
+// Re-export the shared runtime helpers so the tenant console imports them from a
+// single place (the settings page owns the canonical agent runtime helpers).
+export { runtimeStatusBadge, normalizeRuntimeStatus };
+export type { AgentRuntimeStatus };
 
 export interface TenantOnboarding {
   completed: boolean;
@@ -14,6 +24,12 @@ export interface TenantChannels {
   google: boolean;
   whatsapp: boolean;
   health: boolean;
+}
+
+/** Per-tenant hosted-agent runtime summary (trimmed from `agent_runtimes`). */
+export interface TenantAgentRuntime {
+  status: AgentRuntimeStatus;
+  last_seen_at: string | null;
 }
 
 export interface Tenant {
@@ -27,6 +43,8 @@ export interface Tenant {
   onboarding: TenantOnboarding;
   channels: TenantChannels;
   last_active_at: string | null;
+  /** Hosted-agent runtime status; absent on older gateway responses. */
+  agent_runtime?: TenantAgentRuntime;
 }
 
 export interface MutationResult {

@@ -138,6 +138,8 @@ const ENRICHED_ROW = {
   chan_whatsapp: false,
   chan_health: true,
   last_active_at: '2026-05-01T00:00:00Z',
+  runtime_status: 'running',
+  runtime_last_seen_at: '2026-05-29T12:00:00Z',
 };
 
 let app: any;
@@ -171,6 +173,7 @@ describe('GET /me/onboarding — self-scoped shape', () => {
     expect(res._json).toEqual({
       onboarding: { completed: true, steps: { profile: true, google: true } },
       channels: { google: true, whatsapp: false, health: true },
+      agent_runtime: { status: 'running', last_seen_at: '2026-05-29T12:00:00Z' },
       phone: { linked: true, device_count: 2 },
       profile: {
         display_name: 'Owner',

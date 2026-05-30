@@ -3,6 +3,12 @@ import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { requireSuperadmin } from './admin.js';
 import { logger } from './utils/logger.js';
+import { mintAgentToken, upsertRuntimeRow } from './agent.js';
+import {
+  defaultOrchestratorClient,
+  OrchestratorNotConfiguredError,
+  type OrchestratorClient,
+} from './utils/orchestrator.js';
 
 /**
  * Tenant-management API (superadmin-gated, read/enrichment only).
@@ -44,9 +50,12 @@ const TENANT_SELECT = `
     ) AS chan_health,
     (
       SELECT MAX(cm.created_at) FROM chat_messages cm WHERE cm.user_id = au.user_id
-    ) AS last_active_at
+    ) AS last_active_at,
+    ar.status        AS runtime_status,
+    ar.last_seen_at  AS runtime_last_seen_at
   FROM auth_users au
   LEFT JOIN user_settings us ON us.user_id = au.user_id
+  LEFT JOIN agent_runtimes ar ON ar.user_id = au.user_id
 `;
 
 /** Row as returned by the enrichment query. */
@@ -63,6 +72,8 @@ interface TenantRow {
   chan_whatsapp: boolean;
   chan_health: boolean;
   last_active_at: string | null;
+  runtime_status: string | null;
+  runtime_last_seen_at: string | null;
 }
 
 /**
@@ -101,6 +112,16 @@ export function deriveChannels(
   };
 }
 
+/** Derive the {status, last_seen_at} agent runtime view from a raw row. */
+export function deriveAgentRuntime(
+  row: Pick<TenantRow, 'runtime_status' | 'runtime_last_seen_at'>,
+): { status: string; last_seen_at: string | null } {
+  return {
+    status: row.runtime_status ?? 'none',
+    last_seen_at: row.runtime_last_seen_at ?? null,
+  };
+}
+
 /** Shape the console consumes. */
 function toTenant(row: TenantRow) {
   return {
@@ -113,6 +134,7 @@ function toTenant(row: TenantRow) {
     created_at: row.created_at,
     onboarding: deriveOnboarding(row),
     channels: deriveChannels(row),
+    agent_runtime: deriveAgentRuntime(row),
     last_active_at: row.last_active_at,
   };
 }
@@ -120,7 +142,11 @@ function toTenant(row: TenantRow) {
 /**
  * Create the /admin/tenants router (superadmin only).
  */
-export function createTenantsRouter(pool: Pool, authSecret: string): Router {
+export function createTenantsRouter(
+  pool: Pool,
+  authSecret: string,
+  orchestrator: OrchestratorClient = defaultOrchestratorClient,
+): Router {
   const router = Router();
   const superadmin = requireSuperadmin(authSecret);
 
@@ -154,6 +180,82 @@ export function createTenantsRouter(pool: Pool, authSecret: string): Router {
       res.json({ tenant: toTenant(row) });
     } catch (err) {
       logger.error('[tenants][get] Failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /admin/tenants/:id/agent/provision — provision any tenant's agent
+  // container (superadmin). Mints an agent token bound to the tenant's role,
+  // asks the orchestrator to launch, records the runtime state.
+  // ---------------------------------------------------------------------------
+  router.post('/admin/tenants/:id/agent/provision', superadmin, async (req: Request, res: Response) => {
+    const targetUserId = String(req.params.id);
+    try {
+      const userRow = await pool.query<{ role: string }>(
+        'SELECT role FROM auth_users WHERE user_id = $1',
+        [targetUserId],
+      );
+      if (userRow.rows.length === 0) {
+        res.status(404).json({ error: 'Tenant not found' });
+        return;
+      }
+      const cred = await pool.query(
+        'SELECT 1 FROM agent_llm_credentials WHERE user_id = $1',
+        [targetUserId],
+      );
+      if (cred.rows.length === 0) {
+        res.status(400).json({ error: 'tenant must connect a Claude API key first' });
+        return;
+      }
+
+      const { token } = await mintAgentToken(pool, authSecret, targetUserId, userRow.rows[0].role);
+      const runtime = await orchestrator.provision(targetUserId, token);
+      const view = await upsertRuntimeRow(pool, targetUserId, runtime);
+      logger.info('[tenants][agentProvision]', {
+        actor_user_id: (req as Request & { adminUserId?: string }).adminUserId,
+        target_user_id: targetUserId,
+        status: view.status,
+      });
+      res.json({ runtime: view });
+    } catch (err) {
+      if (err instanceof OrchestratorNotConfiguredError) {
+        logger.warn('[tenants][agentProvision] orchestrator not configured', { target_user_id: targetUserId });
+        res.status(503).json({ error: 'Agent runtime is not configured yet' });
+        return;
+      }
+      logger.error('[tenants][agentProvision] Failed', {
+        target_user_id: targetUserId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /admin/tenants/:id/agent/stop — stop any tenant's agent (superadmin).
+  // ---------------------------------------------------------------------------
+  router.post('/admin/tenants/:id/agent/stop', superadmin, async (req: Request, res: Response) => {
+    const targetUserId = String(req.params.id);
+    try {
+      const runtime = await orchestrator.stop(targetUserId);
+      const view = await upsertRuntimeRow(pool, targetUserId, runtime);
+      logger.info('[tenants][agentStop]', {
+        actor_user_id: (req as Request & { adminUserId?: string }).adminUserId,
+        target_user_id: targetUserId,
+        status: view.status,
+      });
+      res.json({ runtime: view });
+    } catch (err) {
+      if (err instanceof OrchestratorNotConfiguredError) {
+        logger.warn('[tenants][agentStop] orchestrator not configured', { target_user_id: targetUserId });
+        res.status(503).json({ error: 'Agent runtime is not configured yet' });
+        return;
+      }
+      logger.error('[tenants][agentStop] Failed', {
+        target_user_id: targetUserId,
         error: err instanceof Error ? err.message : String(err),
       });
       res.status(500).json({ error: 'Internal server error' });

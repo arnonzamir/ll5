@@ -18,7 +18,7 @@ import {
   type IndexDefinition,
 } from '@ll5/shared';
 import { createAdminRouter } from './admin.js';
-import { createTenantsRouter, enrichUser, deriveOnboarding, deriveChannels } from './tenants.js';
+import { createTenantsRouter, enrichUser, deriveOnboarding, deriveChannels, deriveAgentRuntime } from './tenants.js';
 import { createAuthRouter } from './auth.js';
 import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
@@ -308,6 +308,9 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       const channels = enriched
         ? deriveChannels(enriched)
         : { google: false, whatsapp: false, health: false };
+      const agentRuntime = enriched
+        ? deriveAgentRuntime(enriched)
+        : { status: 'none', last_seen_at: null };
 
       const settings = (settingsResult.rows[0]?.settings ?? {}) as Record<string, unknown>;
       const deviceCount = Number(fcmResult.rows[0]?.device_count ?? 0);
@@ -337,6 +340,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       res.json({
         onboarding,
         channels,
+        agent_runtime: agentRuntime,
         phone: { linked: deviceCount > 0, device_count: deviceCount },
         profile,
       });

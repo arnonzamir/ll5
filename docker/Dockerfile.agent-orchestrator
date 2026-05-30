@@ -1,0 +1,32 @@
+# -- Build stage --
+FROM node:20-slim AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json tsconfig.json ./
+COPY packages/agent-orchestrator/ packages/agent-orchestrator/
+
+RUN npm ci --workspace=packages/agent-orchestrator
+RUN npm run build --workspace=packages/agent-orchestrator
+
+# -- Runtime stage --
+FROM node:20-alpine AS runtime
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+COPY --from=build /app/packages/agent-orchestrator/dist ./dist
+COPY --from=build /app/packages/agent-orchestrator/package.json ./
+COPY --from=build /app/node_modules ./node_modules
+
+# Runs as root: it needs access to the Docker socket on the agent host.
+# (The host's docker.sock is owned by root/docker; keeping the process root
+# avoids gid-matching brittleness on a dedicated, isolated agent host.)
+
+EXPOSE 3100
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3100/health || exit 1
+
+CMD ["node", "dist/index.js"]

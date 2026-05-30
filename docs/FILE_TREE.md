@@ -264,3 +264,5 @@ ll5/
 <!-- 2026-05-30 W2: gateway GET /me/onboarding (self onboarding status, reuses tenants.ts enrichUser); dashboard (user)/onboarding rebuilt as resumable 7-step wizard with live phone/channel verification. -->
 
 <!-- 2026-05-30 W3: gateway migration 030 + src/agent.ts (agent_credentials, agent_llm_credentials, /me/agent/* connection+llm-credential), auth.ts refresh revocation check, utils/encryption.ts encryptSecret/decryptSecret. dashboard (user)/settings/agent (API key + connection kit) + onboarding agent step wired. -->
+
+<!-- 2026-05-30 W4 (P4/P5): NEW packages/agent-orchestrator (Runtime iface, DockerRuntime via node:http socket, MockRuntime, Orchestrator: decrypt key + 0600 env-file cred injection + capacity cap + heartbeat reconcile; HTTP API bearer-auth; docker/Dockerfile.agent-orchestrator + docker/agent-orchestrator.compose.yml for a dedicated host). gateway migration 031 agent_runtimes + src/utils/orchestrator.ts + /me/agent/{provision,stop,runtime,heartbeat} + /admin/tenants/:id/agent/* + disable/revoke lifecycle stops. dashboard /settings/agent runtime panel + tenant-console Agent column. -->

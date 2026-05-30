@@ -4,7 +4,9 @@ import { getToken } from "@/lib/auth";
 import { env } from "@/lib/env";
 import {
   isLikelyAnthropicApiKey,
+  parseRuntime,
   type AgentCredential,
+  type AgentRuntime,
   type ConnectionKit,
   type LlmCredentialStatus,
 } from "./agent-types";
@@ -183,5 +185,97 @@ export async function revokeAgentCredential(id: string): Promise<{ ok: boolean }
   } catch (err) {
     console.error("[agent] revokeAgentCredential failed:", err instanceof Error ? err.message : String(err));
     return { ok: false };
+  }
+}
+
+/* ---------- Hosted agent runtime (self) ---------- */
+
+/** Pull the `{ runtime: {...} }` envelope (or a bare runtime object) out of a
+ *  parsed gateway body. */
+function unwrapRuntime(raw: unknown): AgentRuntime {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  return parseRuntime("runtime" in body ? body.runtime : body);
+}
+
+/** GET /me/agent/runtime — current hosted-runtime state for the signed-in user. */
+export async function fetchRuntime(): Promise<AgentRuntime> {
+  const headers = await authHeaders();
+  if (!headers) return { status: "none" };
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/runtime`, {
+      headers,
+      cache: "no-store",
+    });
+    if (!res.ok) return { status: "none" };
+    return unwrapRuntime(await res.json());
+  } catch (err) {
+    console.error("[agent] fetchRuntime failed:", err instanceof Error ? err.message : String(err));
+    return { status: "none" };
+  }
+}
+
+/**
+ * POST /me/agent/provision — ask the orchestrator to provision the hosted agent.
+ * 400 => Claude key missing; 503 => runtime not configured (no agent host yet).
+ */
+export async function provisionRuntime(): Promise<{
+  ok: boolean;
+  runtime?: AgentRuntime;
+  error?: string;
+}> {
+  const headers = await authHeaders();
+  if (!headers) return { ok: false, error: "Not authenticated" };
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/provision`, {
+      method: "POST",
+      headers,
+    });
+    if (!res.ok) {
+      if (res.status === 400) {
+        return { ok: false, error: "Connect your Claude API key first." };
+      }
+      if (res.status === 503) {
+        return {
+          ok: false,
+          error: "The hosted runtime isn't configured yet — contact your admin.",
+        };
+      }
+      console.error("[agent] provisionRuntime failed:", res.status);
+      return { ok: false, error: `Provision failed (${res.status}).` };
+    }
+    return { ok: true, runtime: unwrapRuntime(await res.json()) };
+  } catch (err) {
+    console.error("[agent] provisionRuntime failed:", err instanceof Error ? err.message : String(err));
+    return { ok: false, error: "Network error while provisioning the runtime." };
+  }
+}
+
+/** POST /me/agent/stop — stop the hosted agent container. 503 => not configured. */
+export async function stopRuntime(): Promise<{
+  ok: boolean;
+  runtime?: AgentRuntime;
+  error?: string;
+}> {
+  const headers = await authHeaders();
+  if (!headers) return { ok: false, error: "Not authenticated" };
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/stop`, {
+      method: "POST",
+      headers,
+    });
+    if (!res.ok) {
+      if (res.status === 503) {
+        return {
+          ok: false,
+          error: "The hosted runtime isn't configured yet — contact your admin.",
+        };
+      }
+      console.error("[agent] stopRuntime failed:", res.status);
+      return { ok: false, error: `Stop failed (${res.status}).` };
+    }
+    return { ok: true, runtime: unwrapRuntime(await res.json()) };
+  } catch (err) {
+    console.error("[agent] stopRuntime failed:", err instanceof Error ? err.message : String(err));
+    return { ok: false, error: "Network error while stopping the runtime." };
   }
 }

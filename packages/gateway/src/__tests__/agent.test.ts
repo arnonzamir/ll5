@@ -4,6 +4,7 @@ import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { createAgentRouter } from '../agent.js';
 import { decryptSecret } from '../utils/encryption.js';
+import { OrchestratorNotConfiguredError } from '../utils/orchestrator.js';
 
 const AUTH_SECRET = 'test-secret-key-at-least-32-characters-long!!';
 const ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
@@ -271,6 +272,214 @@ describe('agent connection plane', () => {
       expect(res._json).toEqual({ configured: false });
       const call = query.mock.calls.find((c) => String(c[0]).includes('DELETE FROM agent_llm_credentials'));
       expect(call![1]).toEqual(['user-a']);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // P4/P5: runtime control + lifecycle
+  // -------------------------------------------------------------------------
+  /** A mock orchestrator client recording calls + returning a canned runtime. */
+  function makeOrchestrator(runtime: Record<string, unknown> = { status: 'running' }) {
+    return {
+      provision: vi.fn(async (_u: string, _t: string) => runtime),
+      stop: vi.fn(async (_u: string) => ({ status: 'stopped' })),
+      status: vi.fn(async (_u: string) => runtime),
+    };
+  }
+
+  describe('POST /me/agent/provision', () => {
+    it('400s when no llm-credential is configured (orchestrator NOT called)', async () => {
+      const orch = makeOrchestrator();
+      const { pool } = makePool([
+        (sql) => (sql.includes('FROM agent_llm_credentials') ? { rows: [] } : undefined),
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN, orch);
+      const chain = getChain(router, 'post', '/me/agent/provision');
+      const req = makeReq({ headers: authHeader(userToken('user-a')) });
+      const res = makeRes();
+      await chain(req, res);
+
+      expect(res._status).toBe(400);
+      expect((res._json as any).error).toContain('Claude API key');
+      expect(orch.provision).not.toHaveBeenCalled();
+    });
+
+    it('mints a token, calls the orchestrator, and upserts the runtime as running', async () => {
+      const orch = makeOrchestrator({ status: 'running', container_id: 'c-1', host: 'agent-host-1' });
+      let mintedHash = '';
+      let upserted: unknown[] = [];
+      const { pool, query } = makePool([
+        (sql) => (sql.includes('FROM agent_llm_credentials') ? { rows: [{ '?column?': 1 }] } : undefined),
+        (sql, params) => {
+          if (sql.includes('INSERT INTO agent_credentials')) {
+            mintedHash = params[2] as string;
+            return { rows: [{ id: 'cred-9', created_at: 'x' }] };
+          }
+          return undefined;
+        },
+        (sql, params) => {
+          if (sql.includes('INSERT INTO agent_runtimes')) {
+            upserted = params;
+            return { rows: [], rowCount: 1 };
+          }
+          return undefined;
+        },
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN, orch);
+      const chain = getChain(router, 'post', '/me/agent/provision');
+      const req = makeReq({ headers: authHeader(userToken('user-a', 'admin')) });
+      const res = makeRes();
+      await chain(req, res);
+
+      expect(res._status).toBe(200);
+      expect((res._json as any).runtime).toEqual({
+        status: 'running', container_id: 'c-1', host: 'agent-host-1', last_seen_at: null, last_error: null,
+      });
+      // orchestrator was handed the freshly-minted token (not its hash).
+      expect(orch.provision).toHaveBeenCalledTimes(1);
+      const [uid, token] = orch.provision.mock.calls[0];
+      expect(uid).toBe('user-a');
+      expect(crypto.createHash('sha256').update(token).digest('hex')).toBe(mintedHash);
+      // upsert recorded status running, scoped to the caller.
+      expect(upserted[0]).toBe('user-a');
+      expect(upserted[3]).toBe('running');
+      // The llm-credential check was scoped to the caller.
+      const credCall = query.mock.calls.find((c) => String(c[0]).includes('FROM agent_llm_credentials'));
+      expect(credCall![1]).toEqual(['user-a']);
+    });
+
+    it('503s with a clear message when the orchestrator is not configured', async () => {
+      const orch = {
+        provision: vi.fn(async () => { throw new OrchestratorNotConfiguredError(); }),
+        stop: vi.fn(),
+        status: vi.fn(),
+      };
+      const { pool } = makePool([
+        (sql) => (sql.includes('FROM agent_llm_credentials') ? { rows: [{ x: 1 }] } : undefined),
+        (sql) => (sql.includes('INSERT INTO agent_credentials') ? { rows: [{ id: 'c', created_at: 'x' }] } : undefined),
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN, orch as any);
+      const chain = getChain(router, 'post', '/me/agent/provision');
+      const req = makeReq({ headers: authHeader(userToken('user-a')) });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(503);
+    });
+  });
+
+  describe('POST /me/agent/stop', () => {
+    it('calls the orchestrator and marks the runtime stopped', async () => {
+      const orch = makeOrchestrator();
+      let upserted: unknown[] = [];
+      const { pool } = makePool([
+        (sql, params) => {
+          if (sql.includes('INSERT INTO agent_runtimes')) { upserted = params; return { rows: [], rowCount: 1 }; }
+          return undefined;
+        },
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN, orch);
+      const chain = getChain(router, 'post', '/me/agent/stop');
+      const req = makeReq({ headers: authHeader(userToken('user-a')) });
+      const res = makeRes();
+      await chain(req, res);
+
+      expect(res._status).toBe(200);
+      expect((res._json as any).runtime.status).toBe('stopped');
+      expect(orch.stop).toHaveBeenCalledWith('user-a');
+      expect(upserted[0]).toBe('user-a');
+      expect(upserted[3]).toBe('stopped');
+    });
+  });
+
+  describe('GET /me/agent/runtime', () => {
+    it('returns the caller row scoped by user_id', async () => {
+      const { pool, query } = makePool([
+        (sql) => (sql.includes('FROM agent_runtimes')
+          ? { rows: [{ status: 'running', container_id: 'c1', host: 'h1', last_seen_at: 't', last_error: null }] }
+          : undefined),
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'get', '/me/agent/runtime');
+      const req = makeReq({ headers: authHeader(userToken('user-a')) });
+      const res = makeRes();
+      await chain(req, res);
+
+      expect((res._json as any).runtime.status).toBe('running');
+      const call = query.mock.calls.find((c) => String(c[0]).includes('FROM agent_runtimes'));
+      expect(String(call![0])).toMatch(/WHERE user_id = \$1/);
+      expect(call![1]).toEqual(['user-a']);
+    });
+
+    it('returns {status:none} when there is no row', async () => {
+      const { pool } = makePool([
+        (sql) => (sql.includes('FROM agent_runtimes') ? { rows: [] } : undefined),
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'get', '/me/agent/runtime');
+      const req = makeReq({ headers: authHeader(userToken('user-a')) });
+      const res = makeRes();
+      await chain(req, res);
+      expect((res._json as any).runtime.status).toBe('none');
+    });
+  });
+
+  describe('POST /me/agent/heartbeat', () => {
+    it('bumps last_seen_at + sets running, scoped to the caller', async () => {
+      let hb: unknown[] = [];
+      const { pool } = makePool([
+        (sql, params) => {
+          if (sql.includes('INSERT INTO agent_runtimes')) { hb = params; return { rows: [], rowCount: 1 }; }
+          return undefined;
+        },
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'post', '/me/agent/heartbeat');
+      const req = makeReq({ headers: authHeader(userToken('agent-user')) });
+      const res = makeRes();
+      await chain(req, res);
+
+      expect(res._json).toEqual({ ok: true });
+      expect(hb[0]).toBe('agent-user');
+      // The heartbeat upsert sets last_seen_at = now() + status running, scoped to user_id.
+      const sql = String((pool.query as any).mock.calls.find((c: any) => String(c[0]).includes('agent_runtimes'))[0]);
+      expect(sql).toMatch(/last_seen_at = now\(\)/);
+      expect(sql).toMatch(/status = 'running'/);
+    });
+  });
+
+  describe('DELETE /me/agent/credentials/:id — lifecycle stop on revoke', () => {
+    it('best-effort stops the runtime after a successful revoke', async () => {
+      const orch = makeOrchestrator();
+      const { pool } = makePool([
+        (sql) => (sql.includes('UPDATE agent_credentials') ? { rows: [{ id: 'c1' }], rowCount: 1 } : undefined),
+        (sql) => (sql.includes('INSERT INTO agent_runtimes') ? { rows: [], rowCount: 1 } : undefined),
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN, orch);
+      const chain = getChain(router, 'delete', '/me/agent/credentials/:id');
+      const req = makeReq({ headers: authHeader(userToken('user-a')), params: { id: 'c1' } });
+      const res = makeRes();
+      await chain(req, res);
+
+      expect(res._status).toBe(200);
+      expect((res._json as any).revoked).toBe(true);
+      expect(orch.stop).toHaveBeenCalledWith('user-a');
+    });
+
+    it('still revokes (200) if the orchestrator stop fails', async () => {
+      const orch = {
+        stop: vi.fn(async () => { throw new Error('orchestrator down'); }),
+        provision: vi.fn(), status: vi.fn(),
+      };
+      const { pool } = makePool([
+        (sql) => (sql.includes('UPDATE agent_credentials') ? { rows: [{ id: 'c1' }], rowCount: 1 } : undefined),
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN, orch as any);
+      const chain = getChain(router, 'delete', '/me/agent/credentials/:id');
+      const req = makeReq({ headers: authHeader(userToken('user-a')), params: { id: 'c1' } });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(200);
+      expect((res._json as any).revoked).toBe(true);
     });
   });
 });

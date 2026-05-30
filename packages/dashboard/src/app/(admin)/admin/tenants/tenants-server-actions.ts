@@ -3,6 +3,10 @@
 import { env } from "@/lib/env";
 import { getToken } from "@/lib/auth";
 import type { Tenant, MutationResult, InviteResult } from "./tenants-types";
+import {
+  parseRuntime,
+  type AgentRuntime,
+} from "@/app/(user)/settings/agent/agent-types";
 
 /** Admin-authenticated gateway call (bearer = current session token). */
 async function adminFetch(path: string, options?: RequestInit) {
@@ -52,6 +56,79 @@ export async function setTenantEnabled(
       return { success: false, error: text };
     }
     return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/* ---------- Per-tenant hosted runtime (superadmin) ---------- */
+
+export interface RuntimeActionResult {
+  success: boolean;
+  runtime?: AgentRuntime;
+  error?: string;
+}
+
+function unwrapRuntime(raw: unknown): AgentRuntime {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  return parseRuntime("runtime" in body ? body.runtime : body);
+}
+
+/**
+ * POST /admin/tenants/:id/agent/provision — provision a tenant's hosted agent.
+ * 400 => tenant has no Claude key; 404 => unknown tenant; 503 => runtime not
+ * configured (no agent host yet). Superadmin-gated on the gateway.
+ */
+export async function provisionTenantRuntime(
+  userId: string
+): Promise<RuntimeActionResult> {
+  try {
+    const res = await adminFetch(
+      `/admin/tenants/${encodeURIComponent(userId)}/agent/provision`,
+      { method: "POST" }
+    );
+    if (!res) return { success: false, error: "Not authenticated" };
+    if (!res.ok) {
+      if (res.status === 400) {
+        return { success: false, error: "Tenant has no Claude API key configured." };
+      }
+      if (res.status === 404) {
+        return { success: false, error: "Tenant not found." };
+      }
+      if (res.status === 503) {
+        return { success: false, error: "Agent runtime is not configured yet." };
+      }
+      return { success: false, error: `Provision failed (${res.status}).` };
+    }
+    return { success: true, runtime: unwrapRuntime(await res.json()) };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/** POST /admin/tenants/:id/agent/stop — stop a tenant's hosted agent. 503 => not configured. */
+export async function stopTenantRuntime(
+  userId: string
+): Promise<RuntimeActionResult> {
+  try {
+    const res = await adminFetch(
+      `/admin/tenants/${encodeURIComponent(userId)}/agent/stop`,
+      { method: "POST" }
+    );
+    if (!res) return { success: false, error: "Not authenticated" };
+    if (!res.ok) {
+      if (res.status === 503) {
+        return { success: false, error: "Agent runtime is not configured yet." };
+      }
+      return { success: false, error: `Stop failed (${res.status}).` };
+    }
+    return { success: true, runtime: unwrapRuntime(await res.json()) };
   } catch (err) {
     return {
       success: false,

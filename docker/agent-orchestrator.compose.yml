@@ -1,0 +1,47 @@
+# Deploys to a DEDICATED agent host, NOT the data-plane Coolify stack
+# (it needs the Docker socket — privileged). Keep this off
+# docker/docker-compose.prod.yml. The agent host must be network-isolated from
+# the data plane (it holds the Docker socket and decrypts users' Claude keys).
+#
+# Provisions per-user ll5-agent containers via the local Docker Engine API.
+# Secrets (per-user 0600 env-files) live on a tmpfs at /run/ll5 so the user's
+# API key + agent token are NEVER visible via `ps`/`docker inspect` and never
+# touch persistent disk.
+
+services:
+  agent-orchestrator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent-orchestrator
+    image: ll5-agent-orchestrator:latest
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      PORT: "3100"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Shared PG (read agent_llm_credentials / read+write agent_runtimes).
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
+      # Same AES-256-GCM key as the gateway/google/health encryptors (hex).
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY required}
+      # Shared bearer the gateway presents server-to-server.
+      ORCHESTRATOR_SECRET: ${ORCHESTRATOR_SECRET:?ORCHESTRATOR_SECRET required}
+      AGENT_IMAGE: ${AGENT_IMAGE:-ghcr.io/arnonzamir/ll5-agent:latest}
+      AGENT_HOST_NAME: ${AGENT_HOST_NAME:-agent-host-1}
+      MAX_CONTAINERS_PER_HOST: ${MAX_CONTAINERS_PER_HOST:-25}
+      AGENT_MEMORY_BYTES: ${AGENT_MEMORY_BYTES:-2147483648}
+      LL5_GATEWAY_URL: ${LL5_GATEWAY_URL:-https://ll5.noninoni.click}
+      MCP_BASE_DOMAIN: ${MCP_BASE_DOMAIN:-noninoni.click}
+      HEARTBEAT_TIMEOUT_SEC: ${HEARTBEAT_TIMEOUT_SEC:-180}
+      RESTART_COOLDOWN_SEC: ${RESTART_COOLDOWN_SEC:-300}
+      RECONCILE_INTERVAL_MS: ${RECONCILE_INTERVAL_MS:-60000}
+      SECRETS_DIR: /run/ll5
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+    volumes:
+      # Privileged: drive the local Docker Engine API to run per-user agents.
+      - /var/run/docker.sock:/var/run/docker.sock
+    tmpfs:
+      # Per-user secret env-files (0600). tmpfs = never hits persistent disk.
+      # Must be a real mount on the host too so child containers can bind-mount
+      # the env-files read-only (the orchestrator writes here; agents read it).
+      - /run/ll5:mode=0700

@@ -5,6 +5,12 @@ import {
   maskedKeyDisplay,
   llmStatusLabel,
   formatMcpConfig,
+  runtimeStatusBadge,
+  canProvision,
+  canStop,
+  isTransientRuntime,
+  normalizeRuntimeStatus,
+  parseRuntime,
 } from "./agent-types";
 
 describe("isLikelyAnthropicApiKey", () => {
@@ -62,5 +68,96 @@ describe("formatMcpConfig", () => {
     const circular: Record<string, unknown> = {};
     circular.self = circular;
     expect(typeof formatMcpConfig(circular)).toBe("string");
+  });
+});
+
+describe("normalizeRuntimeStatus", () => {
+  it("passes through known statuses", () => {
+    for (const s of ["none", "provisioning", "running", "stopped", "error"]) {
+      expect(normalizeRuntimeStatus(s)).toBe(s);
+    }
+  });
+
+  it("falls back to 'none' for unknown/garbage input", () => {
+    expect(normalizeRuntimeStatus("bogus")).toBe("none");
+    expect(normalizeRuntimeStatus(undefined)).toBe("none");
+    expect(normalizeRuntimeStatus(42)).toBe("none");
+  });
+});
+
+describe("runtimeStatusBadge", () => {
+  it("maps each status to a sensible badge variant + label", () => {
+    expect(runtimeStatusBadge("running")).toEqual({ variant: "success", label: "Running" });
+    expect(runtimeStatusBadge("provisioning")).toEqual({ variant: "warning", label: "Provisioning" });
+    expect(runtimeStatusBadge("stopped")).toEqual({ variant: "secondary", label: "Stopped" });
+    expect(runtimeStatusBadge("error")).toEqual({ variant: "destructive", label: "Error" });
+    expect(runtimeStatusBadge("none")).toEqual({ variant: "outline", label: "Not provisioned" });
+  });
+});
+
+describe("canProvision", () => {
+  it("is false without a configured Claude key", () => {
+    expect(canProvision(false, "none")).toBe(false);
+    expect(canProvision(false, "stopped")).toBe(false);
+  });
+
+  it("is true with a key when not already up/coming up", () => {
+    expect(canProvision(true, "none")).toBe(true);
+    expect(canProvision(true, "stopped")).toBe(true);
+    expect(canProvision(true, "error")).toBe(true);
+  });
+
+  it("is false when already running or provisioning", () => {
+    expect(canProvision(true, "running")).toBe(false);
+    expect(canProvision(true, "provisioning")).toBe(false);
+  });
+});
+
+describe("canStop", () => {
+  it("allows stop only for running/provisioning", () => {
+    expect(canStop("running")).toBe(true);
+    expect(canStop("provisioning")).toBe(true);
+    expect(canStop("none")).toBe(false);
+    expect(canStop("stopped")).toBe(false);
+    expect(canStop("error")).toBe(false);
+  });
+});
+
+describe("isTransientRuntime", () => {
+  it("treats provisioning as transient (poll-worthy)", () => {
+    expect(isTransientRuntime("provisioning")).toBe(true);
+    expect(isTransientRuntime("running")).toBe(false);
+    expect(isTransientRuntime("none")).toBe(false);
+  });
+});
+
+describe("parseRuntime", () => {
+  it("coerces a full gateway object", () => {
+    expect(
+      parseRuntime({
+        status: "running",
+        container_id: "abc",
+        host: "agent-1",
+        last_seen_at: "2026-05-30T00:00:00Z",
+        last_error: null,
+      })
+    ).toEqual({
+      status: "running",
+      container_id: "abc",
+      host: "agent-1",
+      last_seen_at: "2026-05-30T00:00:00Z",
+      last_error: null,
+    });
+  });
+
+  it("defaults to status 'none' and nulls on empty/garbage input", () => {
+    expect(parseRuntime(undefined)).toEqual({
+      status: "none",
+      container_id: null,
+      host: null,
+      last_seen_at: null,
+      last_error: null,
+    });
+    expect(parseRuntime({ status: "weird" }).status).toBe("none");
   });
 });

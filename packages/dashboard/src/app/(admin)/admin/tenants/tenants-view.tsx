@@ -25,16 +25,23 @@ import {
   Calendar,
   MessageSquare,
   HeartPulse,
+  Loader2,
+  Play,
+  Square,
 } from "lucide-react";
 import {
   fetchTenants,
   setTenantEnabled,
   inviteTenant,
+  provisionTenantRuntime,
+  stopTenantRuntime,
 } from "./tenants-server-actions";
 import {
   roleBadgeVariant,
   onboardingProgress,
   relativeTime,
+  runtimeStatusBadge,
+  normalizeRuntimeStatus,
   type Tenant,
 } from "./tenants-types";
 
@@ -119,6 +126,27 @@ function ChannelChips({ tenant }: { tenant: Tenant }) {
           {label}
         </span>
       ))}
+    </div>
+  );
+}
+
+// --- Agent runtime cell (status badge + last seen) ---
+
+function AgentCell({ tenant }: { tenant: Tenant }) {
+  const status = normalizeRuntimeStatus(tenant.agent_runtime?.status);
+  const badge = runtimeStatusBadge(status);
+  const lastSeen = tenant.agent_runtime?.last_seen_at ?? null;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <Badge variant={badge.variant} className="w-fit gap-1">
+        {status === "provisioning" && <Loader2 className="h-3 w-3 animate-spin" />}
+        {badge.label}
+      </Badge>
+      {lastSeen && (
+        <span className="text-[11px] text-gray-400">
+          seen {relativeTime(lastSeen)}
+        </span>
+      )}
     </div>
   );
 }
@@ -245,13 +273,22 @@ function TenantRow({
   tenant,
   onToggleEnabled,
   onInvite,
+  onProvision,
+  onStop,
   isPending,
 }: {
   tenant: Tenant;
   onToggleEnabled: (tenant: Tenant) => void;
   onInvite: (tenant: Tenant) => void;
+  onProvision: (tenant: Tenant) => void;
+  onStop: (tenant: Tenant) => void;
   isPending: boolean;
 }) {
+  const runtimeStatus = normalizeRuntimeStatus(tenant.agent_runtime?.status);
+  const canProvisionRow =
+    runtimeStatus !== "provisioning" && runtimeStatus !== "running";
+  const canStopRow =
+    runtimeStatus === "running" || runtimeStatus === "provisioning";
   return (
     <tr className="border-b border-gray-100 last:border-0 align-middle">
       <td className="py-2.5 pr-3">
@@ -282,12 +319,38 @@ function TenantRow({
         <ChannelChips tenant={tenant} />
       </td>
       <td className="py-2.5 pr-3">
+        <AgentCell tenant={tenant} />
+      </td>
+      <td className="py-2.5 pr-3">
         <span className="text-xs text-gray-400">
           {relativeTime(tenant.last_active_at)}
         </span>
       </td>
       <td className="py-2.5 text-right">
         <div className="flex items-center justify-end gap-1">
+          {canStopRow ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onStop(tenant)}
+              disabled={isPending}
+              className="h-7 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+            >
+              <Square className="h-3 w-3 mr-1" />
+              Stop
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onProvision(tenant)}
+              disabled={isPending || !canProvisionRow}
+              className="h-7 px-2 text-xs text-green-600 hover:text-green-700 hover:bg-green-50"
+            >
+              <Play className="h-3 w-3 mr-1" />
+              Provision
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -389,6 +452,48 @@ export function TenantsView() {
     });
   }
 
+  /** Optimistically reflect the runtime returned by a provision/stop action so
+   *  the row's badge updates without a full reload. */
+  function applyRuntime(userId: string, status: string, lastSeen?: string | null) {
+    setTenants((prev) =>
+      prev.map((t) =>
+        t.user_id === userId
+          ? {
+              ...t,
+              agent_runtime: {
+                status: normalizeRuntimeStatus(status),
+                last_seen_at: lastSeen ?? t.agent_runtime?.last_seen_at ?? null,
+              },
+            }
+          : t
+      )
+    );
+  }
+
+  function handleProvision(tenant: Tenant) {
+    setError(null);
+    startTransition(async () => {
+      const result = await provisionTenantRuntime(tenant.user_id);
+      if (!result.success || !result.runtime) {
+        setError(result.error ?? "Failed to provision agent runtime");
+        return;
+      }
+      applyRuntime(tenant.user_id, result.runtime.status, result.runtime.last_seen_at);
+    });
+  }
+
+  function handleStop(tenant: Tenant) {
+    setError(null);
+    startTransition(async () => {
+      const result = await stopTenantRuntime(tenant.user_id);
+      if (!result.success || !result.runtime) {
+        setError(result.error ?? "Failed to stop agent runtime");
+        return;
+      }
+      applyRuntime(tenant.user_id, result.runtime.status, result.runtime.last_seen_at);
+    });
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -448,6 +553,9 @@ export function TenantsView() {
                       Channels
                     </th>
                     <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide pb-2 pr-3">
+                      Agent
+                    </th>
+                    <th className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide pb-2 pr-3">
                       Last active
                     </th>
                     <th className="text-right text-xs font-medium text-gray-500 uppercase tracking-wide pb-2">
@@ -462,6 +570,8 @@ export function TenantsView() {
                       tenant={tenant}
                       onToggleEnabled={handleToggleEnabled}
                       onInvite={handleInviteClick}
+                      onProvision={handleProvision}
+                      onStop={handleStop}
                       isPending={isPending}
                     />
                   ))}

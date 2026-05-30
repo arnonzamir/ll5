@@ -322,6 +322,10 @@ services:
       WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET}
       # Base domain for mcp-*.<domain> endpoints baked into the agent .mcp.json.
       MCP_BASE_DOMAIN: ${MCP_BASE_DOMAIN:-noninoni.click}
+      # Agent-orchestrator service (separate). Optional — empty disables the
+      # runtime-control plane with a clear "runtime not configured" error.
+      ORCHESTRATOR_URL: ${ORCHESTRATOR_URL:-}
+      ORCHESTRATOR_SECRET: ${ORCHESTRATOR_SECRET:-}
       GOOGLE_MCP_URL: http://google:3000
       GOOGLE_MCP_API_KEY: ${API_KEY}
       WEBHOOK_TOKENS: ${WEBHOOK_TOKENS:-{}}
