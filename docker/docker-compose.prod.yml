@@ -331,6 +331,15 @@ services:
       WEBHOOK_TOKENS: ${WEBHOOK_TOKENS:-{}}
       GEOCODING_API_KEY: ${GEOCODING_API_KEY:-}
       FCM_SERVICE_ACCOUNT_PATH: /etc/fcm/fcm-service-account.json
+      # SMTP for invite/password-reset emails (provider-agnostic: Brevo/Resend/
+      # SES/any SMTP). All optional — when SMTP_HOST + SMTP_FROM are empty the
+      # gateway falls back to logging the links instead of sending mail.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_FROM: ${SMTP_FROM:-}
     volumes:
       - /data/coolify/services/xkkcc0g4o48kkcows8488so4/fcm-service-account.json:/etc/fcm/fcm-service-account.json:ro
     depends_on:

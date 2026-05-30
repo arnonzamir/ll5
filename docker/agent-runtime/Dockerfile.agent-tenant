@@ -1,0 +1,24 @@
+# LL5 per-tenant agent runtime image (BYO-agent platform, P4).
+#
+# Built FROM the existing single-admin agent image — the existing image and its
+# deployment are NOT modified. This image only overrides the entrypoint to:
+#   - read the tenant's creds from a mounted 0600 env-file (not argv),
+#   - use the orchestrator-issued agent token + the tenant's ANTHROPIC_API_KEY,
+#   - heartbeat to the gateway.
+# Everything else (workspace, persona, skills, supervisor, channel MCP,
+# mcp-autoheal) is inherited unchanged from the base image.
+#
+# Build (manual / CI, see .github/workflows/build-agent-tenant.yml):
+#   docker build -f docker/agent-runtime/Dockerfile.agent-tenant \
+#     --build-arg BASE_IMAGE=ghcr.io/arnonzamir/ll5-agent:latest \
+#     -t ghcr.io/arnonzamir/ll5-agent-tenant:latest .
+ARG BASE_IMAGE=ghcr.io/arnonzamir/ll5-agent:latest
+FROM ${BASE_IMAGE}
+
+USER root
+COPY docker/agent-runtime/tenant-entrypoint.sh /usr/local/bin/tenant-entrypoint.sh
+RUN chmod +x /usr/local/bin/tenant-entrypoint.sh
+USER node
+
+WORKDIR /workspace/ll5-run
+ENTRYPOINT ["/usr/local/bin/tenant-entrypoint.sh"]

@@ -48,6 +48,26 @@ export interface EnvConfig {
   orchestratorUrl: string | undefined;
   /** Bearer secret for orchestrator calls. Optional. */
   orchestratorSecret: string | undefined;
+  /** SMTP transport config for outbound invite/reset emails. Provider-agnostic
+   *  (Brevo / Resend / SES / any SMTP). When host + from are both set,
+   *  getEmailSender() returns a real SMTP sender; otherwise it falls back to the
+   *  log-only sender. All optional. */
+  smtp: SmtpConfig;
+}
+
+/**
+ * SMTP transport configuration. Provider-agnostic — supply host/port/user/pass
+ * from whatever SMTP relay you use. `from` is the envelope/header From address
+ * (e.g. "LL5 <no-reply@yourdomain>").
+ */
+export interface SmtpConfig {
+  host: string | undefined;
+  port: number;
+  user: string | undefined;
+  pass: string | undefined;
+  /** true => implicit TLS (usually port 465). false => STARTTLS (usually 587). */
+  secure: boolean;
+  from: string | undefined;
 }
 
 export function loadEnv(): EnvConfig {
@@ -137,5 +157,22 @@ export function loadEnv(): EnvConfig {
     mcpBaseDomain: process.env.MCP_BASE_DOMAIN ?? 'noninoni.click',
     orchestratorUrl: process.env.ORCHESTRATOR_URL,
     orchestratorSecret: process.env.ORCHESTRATOR_SECRET,
+    smtp: loadSmtpConfig(),
+  };
+}
+
+/**
+ * Read SMTP config from the environment. Kept separate so the email factory can
+ * resolve config independently of the full gateway env (which has required vars
+ * the email module should not depend on).
+ */
+export function loadSmtpConfig(): SmtpConfig {
+  return {
+    host: process.env.SMTP_HOST || undefined,
+    port: parseInt(process.env.SMTP_PORT ?? '587', 10),
+    user: process.env.SMTP_USER || undefined,
+    pass: process.env.SMTP_PASS || undefined,
+    secure: process.env.SMTP_SECURE === 'true',
+    from: process.env.SMTP_FROM || undefined,
   };
 }

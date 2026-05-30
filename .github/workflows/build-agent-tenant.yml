@@ -1,0 +1,32 @@
+# Manual (workflow_dispatch) build of the per-tenant agent runtime image.
+# Deliberately NOT on push — building/cutting-over the tenant image is a manual,
+# operator-controlled step. The existing ll5-agent image (admin agent) is never
+# touched by this workflow.
+name: build-agent-tenant
+on:
+  workflow_dispatch:
+    inputs:
+      base_image:
+        description: Base image to build FROM
+        default: ghcr.io/arnonzamir/ll5-agent:latest
+      tag:
+        description: Tag for the new tenant image
+        default: latest
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GHCR_READ_PAT || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u arnonzamir --password-stdin
+      - name: Build tenant image
+        run: |
+          docker build -f docker/agent-runtime/Dockerfile.agent-tenant \
+            --build-arg BASE_IMAGE='${{ inputs.base_image }}' \
+            -t ghcr.io/arnonzamir/ll5-agent-tenant:'${{ inputs.tag }}' .
+      - name: Push
+        run: docker push ghcr.io/arnonzamir/ll5-agent-tenant:'${{ inputs.tag }}'

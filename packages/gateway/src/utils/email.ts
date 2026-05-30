@@ -1,4 +1,6 @@
+import nodemailer from 'nodemailer';
 import { logger } from './logger.js';
+import { loadSmtpConfig, type SmtpConfig } from './env.js';
 
 /**
  * A single outbound email message.
@@ -50,30 +52,119 @@ export class LogEmailSender implements EmailSender {
 }
 
 /**
- * TODO(P1+): Real SMTP transport. Wire this once a provider (Postmark/SES/any
- * SMTP) and env config (SMTP_HOST/PORT/USER/PASS/FROM) are chosen. Do NOT add
- * a mail dependency until then; the shape below documents the intended seam.
- * `getEmailSender()` should return this when SMTP_HOST is set.
- *
- * Sketch:
- *   export class SmtpEmailSender implements EmailSender {
- *     constructor(private cfg: SmtpConfig) {}
- *     async send(msg: EmailMessage): Promise<void> {
- *       // connect via configured SMTP, send msg.{to,subject,text,html};
- *       // log to+subject on success, log error (never throw) on failure.
- *     }
- *   }
+ * Minimal transport seam — the subset of a nodemailer transport this sender
+ * uses. Injectable so tests can pass a fake transport instead of opening a real
+ * SMTP connection.
  */
-
-let cached: EmailSender | undefined;
+export interface MailTransport {
+  sendMail(opts: {
+    from: string;
+    to: string;
+    subject: string;
+    text: string;
+    html?: string;
+  }): Promise<unknown>;
+}
 
 /**
- * Factory for the process-wide email sender. P1: always LogEmailSender.
- * When SMTP support lands, branch on env here and return SmtpEmailSender.
+ * Build a real nodemailer transport from SMTP config. Auth is included only
+ * when both user and pass are present (some relays use IP allow-listing).
+ */
+function createNodemailerTransport(cfg: SmtpConfig): MailTransport {
+  return nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: cfg.user && cfg.pass ? { user: cfg.user, pass: cfg.pass } : undefined,
+  });
+}
+
+/**
+ * Real SMTP sender. Provider-agnostic — works with Brevo/Resend/SES/any SMTP.
+ *
+ * Unlike LogEmailSender, this DOES rethrow on a transport failure: the
+ * invite/reset callers already wrap send() in a best-effort try/catch, so a
+ * thrown error is logged-and-swallowed there (the user still gets a generic
+ * response) while remaining observable here. We never log secrets or the raw
+ * token body — only `to` + `subject`.
+ */
+export class SmtpEmailSender implements EmailSender {
+  private readonly transport: MailTransport;
+  private readonly from: string;
+
+  /**
+   * @param cfg       SMTP config. `from` MUST be set (the factory guarantees it).
+   * @param transport Injectable transport — defaults to a real nodemailer
+   *                  transport built from `cfg`. Tests pass a fake.
+   */
+  constructor(cfg: SmtpConfig, transport?: MailTransport) {
+    if (!cfg.from) {
+      throw new Error('SmtpEmailSender requires SMTP_FROM to be configured');
+    }
+    this.from = cfg.from;
+    this.transport = transport ?? createNodemailerTransport(cfg);
+  }
+
+  async send(msg: EmailMessage): Promise<void> {
+    try {
+      await this.transport.sendMail({
+        from: this.from,
+        to: msg.to,
+        subject: msg.subject,
+        text: msg.text,
+        ...(msg.html ? { html: msg.html } : {}),
+      });
+      logger.info('[email][SmtpEmailSender] Email sent', {
+        to: msg.to,
+        subject: msg.subject,
+      });
+    } catch (err) {
+      // Log without secrets or body, then rethrow — callers are best-effort.
+      logger.error('[email][SmtpEmailSender] Failed to send email', {
+        to: msg.to,
+        subject: msg.subject,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  }
+}
+
+let cached: EmailSender | undefined;
+let loggedNoSmtp = false;
+
+/**
+ * Resolve the appropriate sender from SMTP config (pure — no caching, no env
+ * read). Returns SmtpEmailSender when both host and from are set, else the
+ * log-only fallback. Exposed for testing the selection logic without touching
+ * process.env or the module cache.
+ */
+export function createEmailSender(cfg: SmtpConfig): EmailSender {
+  if (cfg.host && cfg.from) {
+    return new SmtpEmailSender(cfg);
+  }
+  if (!loggedNoSmtp) {
+    logger.info(
+      '[email] SMTP not configured (SMTP_HOST/SMTP_FROM unset) — invite/reset links will only be logged, not emailed',
+    );
+    loggedNoSmtp = true;
+  }
+  return new LogEmailSender();
+}
+
+/**
+ * Factory for the process-wide email sender. Returns a cached SmtpEmailSender
+ * when SMTP is configured, else a cached LogEmailSender. Reads config from env.
  */
 export function getEmailSender(): EmailSender {
   if (!cached) {
-    cached = new LogEmailSender();
+    cached = createEmailSender(loadSmtpConfig());
   }
   return cached;
+}
+
+/** Test-only: reset the module-level cache and the one-time log flag. */
+export function resetEmailSenderForTests(): void {
+  cached = undefined;
+  loggedNoSmtp = false;
 }

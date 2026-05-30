@@ -41,7 +41,7 @@ export function loadEnv(): OrchestratorEnv {
     databaseUrl: required('DATABASE_URL'),
     encryptionKey: required('ENCRYPTION_KEY'),
     orchestratorSecret: required('ORCHESTRATOR_SECRET'),
-    image: process.env.AGENT_IMAGE || 'ghcr.io/arnonzamir/ll5-agent:latest',
+    image: process.env.AGENT_IMAGE || 'ghcr.io/arnonzamir/ll5-agent-tenant:latest',
     maxContainersPerHost: num('MAX_CONTAINERS_PER_HOST', 25),
     // 2 GiB default per agent container.
     memoryBytes: num('AGENT_MEMORY_BYTES', 2 * 1024 * 1024 * 1024),
