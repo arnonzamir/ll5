@@ -111,6 +111,9 @@ export function chatAuthMiddleware(authSecret: string) {
     }
 
     (req as AuthenticatedRequest).userId = result.claims.uid;
+    // Expose the caller's role too — the agent-connection router mints a new
+    // agent token carrying the caller's role.
+    (req as Request & { userRole?: string }).userRole = result.claims.role;
     next();
   };
 }

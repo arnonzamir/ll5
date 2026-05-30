@@ -39,6 +39,9 @@ export interface EnvConfig {
   /** Public dashboard origin used to build emailed links (reset/invite/accept).
    *  Defaults to the live dashboard. */
   dashboardUrl: string;
+  /** Base domain for the public MCP endpoints (mcp-*.<domain>) baked into the
+   *  generated agent .mcp.json. Defaults to the live deploy domain. */
+  mcpBaseDomain: string;
 }
 
 export function loadEnv(): EnvConfig {
@@ -125,5 +128,6 @@ export function loadEnv(): EnvConfig {
     encryptionKey: process.env.ENCRYPTION_KEY,
     whatsappWebhookSecret,
     dashboardUrl: process.env.DASHBOARD_URL ?? 'https://ll5.noninoni.click',
+    mcpBaseDomain: process.env.MCP_BASE_DOMAIN ?? 'noninoni.click',
   };
 }

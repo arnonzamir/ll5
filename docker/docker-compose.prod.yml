@@ -320,6 +320,8 @@ services:
       ELASTICSEARCH_URL: http://elasticsearch:9200
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET}
+      # Base domain for mcp-*.<domain> endpoints baked into the agent .mcp.json.
+      MCP_BASE_DOMAIN: ${MCP_BASE_DOMAIN:-noninoni.click}
       GOOGLE_MCP_URL: http://google:3000
       GOOGLE_MCP_API_KEY: ${API_KEY}
       WEBHOOK_TOKENS: ${WEBHOOK_TOKENS:-{}}

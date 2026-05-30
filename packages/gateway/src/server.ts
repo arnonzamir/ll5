@@ -22,6 +22,7 @@ import { createTenantsRouter, enrichUser, deriveOnboarding, deriveChannels } fro
 import { createAuthRouter } from './auth.js';
 import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
+import { createAgentRouter } from './agent.js';
 import { processCalendar, phoneEventId } from './processors/calendar.js';
 import { processLocation } from './processors/location.js';
 import { processMessage } from './processors/message.js';
@@ -227,6 +228,9 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Mount chat routes
   app.use('/chat', createChatRouter(pgPool, config.authSecret, esClient));
+
+  // Mount agent-connection plane (self-scoped; owns /me/agent/*).
+  app.use(createAgentRouter(pgPool, config.authSecret, config.encryptionKey, config.mcpBaseDomain));
 
   // Resolves message routing/media from contact_settings (the unified source of truth).
   const notificationMatcher = new ContactRoutingResolver(pgPool);

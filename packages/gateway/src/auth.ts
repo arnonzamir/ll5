@@ -373,6 +373,31 @@ export function createAuthRouter(pool: Pool, authSecret: string, dashboardUrl: s
         return;
       }
 
+      // Agent-credential revocation enforcement. The presented token may be a
+      // long-lived agent token tracked in agent_credentials (by sha256). If a
+      // matching row is revoked → deny the refresh (this is what makes the
+      // dashboard "revoke" real). If it matches a live row → stamp last_used_at.
+      // Non-agent tokens never match a row, so they're unaffected.
+      const presentedToken = authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7)
+        : authHeader;
+      const presentedHash = hashToken(presentedToken);
+      const agentCred = await pool.query<{ revoked_at: string | null }>(
+        'SELECT revoked_at FROM agent_credentials WHERE token_hash = $1',
+        [presentedHash],
+      );
+      if (agentCred.rows.length > 0) {
+        if (agentCred.rows[0].revoked_at !== null) {
+          logger.warn('[auth][refresh] Revoked agent credential refused', { userId: payload.uid });
+          res.status(401).json({ error: 'Credential revoked' });
+          return;
+        }
+        await pool.query(
+          'UPDATE agent_credentials SET last_used_at = now() WHERE token_hash = $1',
+          [presentedHash],
+        );
+      }
+
       // Look up user to get current TTL and role, verify still enabled
       const result = await pool.query<AuthUser>(
         'SELECT user_id, token_ttl_days, role, enabled, username, display_name FROM auth_users WHERE user_id = $1 AND enabled = true',

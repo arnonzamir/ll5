@@ -66,6 +66,9 @@ import {
   connectHealthSource,
   type HealthSource,
 } from "../health/health-server-actions";
+import { fetchLlmCredential } from "../settings/agent/agent-server-actions";
+import { ClaudeKeyForm } from "../settings/agent/claude-key-form";
+import type { LlmCredentialStatus } from "../settings/agent/agent-types";
 
 const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   profile: User,
@@ -140,6 +143,9 @@ export function OnboardingView() {
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthBusy, setHealthBusy] = useState(false);
 
+  // --- Agent: Claude credential ---
+  const [llm, setLlm] = useState<LlmCredentialStatus>({ configured: false });
+
   const steps = me?.onboarding.steps ?? {};
   const completed = me?.onboarding.completed ?? false;
   const currentStep = WIZARD_STEPS[stepIdx];
@@ -147,13 +153,16 @@ export function OnboardingView() {
   // ---- Initial load: pull /me/onboarding, hydrate forms, resume ----
   useEffect(() => {
     startTransition(async () => {
-      const [snap, notifResult, sources] = await Promise.all([
+      const [snap, notifResult, sources, llmStatus] = await Promise.all([
         fetchMeOnboarding(),
         fetchNotificationSettings(),
         fetchHealthSources().catch(() => [] as HealthSource[]),
+        fetchLlmCredential().catch(() => ({ configured: false }) as LlmCredentialStatus),
       ]);
       setMe(snap);
       setHealthSources(sources);
+      setLlm(llmStatus);
+      if (llmStatus.configured) markStep("agent_connected");
       if (notifResult.settings) setNotif(notifResult.settings);
 
       // Hydrate profile from /me/onboarding (falls back to defaults).
@@ -387,9 +396,16 @@ export function OnboardingView() {
     goNext();
   }
 
-  // ---------- Step 6: Agent (placeholder) ----------
+  // ---------- Step 6: Agent — capture Claude API key ----------
+  function handleAgentStatusChange(next: LlmCredentialStatus) {
+    setLlm(next);
+    // `agent_connected` is true once a Claude credential is configured.
+    markStep("agent_connected", next.configured);
+  }
+
   function handleSkipAgent() {
-    // P3 will implement real agent connection; for now Skip/Continue advances.
+    // Connecting the agent is optional; users can finish setup and do it later
+    // from /settings/agent. Skipping does not mark agent_connected.
     goNext();
   }
 
@@ -736,16 +752,19 @@ export function OnboardingView() {
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Bot className="h-5 w-5 text-primary" /> Your agent
               </CardTitle>
-              <CardDescription>Coming next: connect your assistant.</CardDescription>
+              <CardDescription>
+                Connect your Claude credential so your assistant can run. Optional — you can do this later.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="rounded-md bg-gray-50 p-4 text-sm text-gray-600">
-                Connecting your own Claude-powered assistant lands in an upcoming release.
-                You can finish setup now and connect it later from settings.
-              </div>
-              <Button onClick={handleSkipAgent} className="w-full">
-                Continue <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
+              <ClaudeKeyForm status={llm} onStatusChange={handleAgentStatusChange} compact />
+              {llm.configured ? (
+                <Button onClick={goNext} className="w-full">
+                  Continue <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              ) : (
+                <SkipLink onClick={handleSkipAgent} />
+              )}
             </CardContent>
           </Card>
         )}
@@ -769,6 +788,7 @@ export function OnboardingView() {
                 <SummaryRow done={me.channels.whatsapp} label="WhatsApp paired" />
                 <SummaryRow done={me.channels.health} label="Garmin connected" />
                 <SummaryRow done={me.phone.linked} label="Phone linked" />
+                <SummaryRow done={llm.configured} label="Agent connected" />
               </div>
               <Button onClick={handleFinish} disabled={isPending} className="w-full" size="lg">
                 {isPending ? "Finishing..." : "Go to Dashboard"}
