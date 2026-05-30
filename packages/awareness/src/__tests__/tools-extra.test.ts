@@ -35,6 +35,7 @@ import type { NotableEventRepository } from '../repositories/interfaces/notable-
 import type { PhoneStatusRepository } from '../repositories/interfaces/phone-status.repository.js';
 import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
 import type { LocationService } from '../services/location-service.js';
+import { LocationService as LocationServiceImpl } from '../services/location-service.js';
 
 const USER_ID = 'user-test-1';
 const getUserId = () => USER_ID;
@@ -352,6 +353,24 @@ describe('get_current_location tool handler', () => {
     expect(parsed.location.address).toBe('Tel Aviv');
     expect(parsed.fused.confidence).toBe('high');
     expect(parsed.fused.source).toBe('gps');
+    // A5: fused now exposes the gps block (parity with where_is_user).
+    expect(parsed.fused.gps).toEqual({
+      lat: 32.0853, lon: 34.7818, accuracy_m: 10, age_s: 60,
+      freshness: 'fresh', matched_place: 'Home', address: 'Tel Aviv',
+    });
+  });
+
+  it('A5: fused.gps is null when source != none but no gps block (wifi-only)', async () => {
+    const svc = makeLocationService({
+      place: 'Office', place_id: 'p-2', confidence: 'medium', source: 'wifi',
+      reasoning: 'wifi only',
+      wifi: { bssid: 'aa:bb:cc:dd:ee:ff', ssid: 'OfficeWifi', connected: true, age_s: 30 },
+    });
+    const tools = captureTools((s) => registerLocationTools(s, makeLocationRepo(), getUserId, svc));
+
+    const response = await tools.get('get_current_location')!({});
+    const parsed = parseToolResponse<{ fused: Record<string, unknown> }>(response);
+    expect(parsed.fused.gps).toBeNull();
   });
 
   it('returns location:null when source != none but gps is missing (wifi-only)', async () => {
@@ -489,6 +508,172 @@ describe('delete_location_point tool handler', () => {
     expect(response.isError).toBe(true);
     expect(parseToolResponse<{ error: string }>(response).error).toMatch(/not found|deleted/i);
     expect(logAudit).not.toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// STAY-POINT TOOLS (query_visits + suggest_frequent_places)
+// ===========================================================================
+
+const SP_LAT = 32.0853;
+const SP_LON = 34.7818;
+const SP_NEAR = 0.0005; // ~55m
+const SP_FAR = 0.01; // ~1.1km
+
+function locDoc(
+  minutesFromBase: number,
+  over: { lat?: number; lon?: number; matchedPlaceId?: string; matchedPlace?: string } = {},
+) {
+  const base = new Date('2026-05-01T08:00:00Z').getTime();
+  return {
+    id: `loc-${minutesFromBase}`,
+    userId: USER_ID,
+    location: { lat: over.lat ?? SP_LAT, lon: over.lon ?? SP_LON },
+    matchedPlaceId: over.matchedPlaceId,
+    matchedPlace: over.matchedPlace,
+    timestamp: new Date(base + minutesFromBase * 60_000).toISOString(),
+  };
+}
+
+describe('query_visits tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('fetches the range and returns clustered visits with duration/centroid/point_count', async () => {
+    const query = vi.fn(async () => [
+      locDoc(0),
+      locDoc(10, { lat: SP_LAT + SP_NEAR }),
+      locDoc(20),
+    ]);
+    const tools = captureTools((s) => registerLocationTools(
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never),
+    ));
+
+    const response = await tools.get('query_visits')!({
+      from: '2026-05-01T00:00:00Z',
+      to: '2026-05-01T23:59:59Z',
+    });
+
+    expect(query).toHaveBeenCalledWith(USER_ID, expect.objectContaining({
+      startTime: '2026-05-01T00:00:00Z',
+      endTime: '2026-05-01T23:59:59Z',
+    }));
+
+    const parsed = parseToolResponse<{ visits: Array<Record<string, unknown>>; total: number }>(response);
+    expect(parsed.total).toBe(1);
+    expect(parsed.visits[0].point_count).toBe(3);
+    expect(parsed.visits[0].duration_minutes).toBe(20);
+    expect(parsed.visits[0].place_name).toBeNull();
+  });
+
+  it('honors override threshold params (shorter dwell yields a visit)', async () => {
+    const query = vi.fn(async () => [locDoc(0), locDoc(5, { lat: SP_LAT + SP_NEAR })]);
+    const tools = captureTools((s) => registerLocationTools(
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never),
+    ));
+
+    const response = await tools.get('query_visits')!({
+      from: '2026-05-01T00:00:00Z',
+      to: '2026-05-01T23:59:59Z',
+      min_dwell_minutes: 4,
+    });
+    const parsed = parseToolResponse<{ total: number }>(response);
+    expect(parsed.total).toBe(1);
+  });
+
+  it('returns no visits when no dwell qualifies', async () => {
+    const query = vi.fn(async () => [locDoc(0), locDoc(5, { lat: SP_LAT + SP_NEAR })]);
+    const tools = captureTools((s) => registerLocationTools(
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never),
+    ));
+    const response = await tools.get('query_visits')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-05-01T23:59:59Z',
+    });
+    expect(parseToolResponse<{ total: number }>(response).total).toBe(0);
+  });
+});
+
+describe('suggest_frequent_places tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // Build N visits (each a 20-min dwell) at `lat`, on N different days.
+  function visitsAt(lat: number, days: number) {
+    const pts: ReturnType<typeof locDoc>[] = [];
+    for (let d = 0; d < days; d++) {
+      const dayOffset = d * 24 * 60; // minutes
+      pts.push(locDoc(dayOffset, { lat }));
+      pts.push(locDoc(dayOffset + 20, { lat: lat + SP_NEAR }));
+    }
+    return pts;
+  }
+
+  it('returns unknown frequent locations and respects min_visits', async () => {
+    // 4 visits at an unknown spot; gaps between days exceed MAX_GAP so each day
+    // is its own visit.
+    const query = vi.fn(async () => visitsAt(SP_LAT, 4));
+    const es = makeMockEsClient({ search: vi.fn().mockResolvedValue({ hits: { hits: [] } }) });
+    const tools = captureTools((s) => registerLocationTools(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never), es as any,
+    ));
+
+    const response = await tools.get('suggest_frequent_places')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-06-01T00:00:00Z', min_visits: 3,
+    });
+    const parsed = parseToolResponse<{ candidates: Array<{ visit_count: number }>; total: number }>(response);
+    expect(parsed.total).toBe(1);
+    expect(parsed.candidates[0].visit_count).toBe(4);
+  });
+
+  it('filters out groups below min_visits', async () => {
+    const query = vi.fn(async () => visitsAt(SP_LAT, 2));
+    const es = makeMockEsClient({ search: vi.fn().mockResolvedValue({ hits: { hits: [] } }) });
+    const tools = captureTools((s) => registerLocationTools(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never), es as any,
+    ));
+
+    const response = await tools.get('suggest_frequent_places')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-06-01T00:00:00Z', min_visits: 3,
+    });
+    expect(parseToolResponse<{ total: number }>(response).total).toBe(0);
+  });
+
+  it('excludes visits already matching a known place (via matched_place on the dwell)', async () => {
+    const pts: ReturnType<typeof locDoc>[] = [];
+    for (let d = 0; d < 4; d++) {
+      const dayOffset = d * 24 * 60;
+      pts.push(locDoc(dayOffset, { lat: SP_LAT, matchedPlaceId: 'home', matchedPlace: 'Home' }));
+      pts.push(locDoc(dayOffset + 20, { lat: SP_LAT + SP_NEAR, matchedPlaceId: 'home', matchedPlace: 'Home' }));
+    }
+    const query = vi.fn(async () => pts);
+    const es = makeMockEsClient({ search: vi.fn().mockResolvedValue({ hits: { hits: [] } }) });
+    const tools = captureTools((s) => registerLocationTools(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never), es as any,
+    ));
+
+    const response = await tools.get('suggest_frequent_places')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-06-01T00:00:00Z', min_visits: 3,
+    });
+    // All dwells carried a matched place -> excluded before ES check.
+    expect(parseToolResponse<{ total: number }>(response).total).toBe(0);
+  });
+
+  it('excludes candidates whose centroid is within 100m of a known place (ES geo match)', async () => {
+    const query = vi.fn(async () => visitsAt(SP_LAT, 4));
+    // ES reports a nearby known place -> candidate dropped.
+    const search = vi.fn().mockResolvedValue({ hits: { hits: [{ _id: 'place-x' }] } });
+    const es = makeMockEsClient({ search });
+    const tools = captureTools((s) => registerLocationTools(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      s, makeLocationRepo({ query }), getUserId, makeLocationService({} as never), es as any,
+    ));
+
+    const response = await tools.get('suggest_frequent_places')!({
+      from: '2026-05-01T00:00:00Z', to: '2026-06-01T00:00:00Z', min_visits: 3,
+    });
+    expect(search).toHaveBeenCalled();
+    expect(parseToolResponse<{ total: number }>(response).total).toBe(0);
   });
 });
 
@@ -1072,5 +1257,97 @@ describe('get_wifi_history tool handler', () => {
     expect(parsed.wifi_events[0].connected).toBe(true);
     expect(parsed.wifi_events[1].ssid).toBeNull();
     expect(parsed.wifi_events[1].rssi_dbm).toBeNull();
+  });
+});
+
+// ===========================================================================
+// LOCATION SERVICE — A7 "recently_left" disconnect hint
+// ===========================================================================
+
+describe('LocationService.getCurrentLocation — recently_left hint (A7)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const NETWORK_DOC = {
+    user_id: USER_ID,
+    manual_place_id: 'p-home',
+    manual_place_name: 'Home',
+  };
+
+  function buildService(over: {
+    gps?: Awaited<ReturnType<LocationRepository['getLatest']>>;
+    wifi?: Awaited<ReturnType<WifiRepository['getLatest']>>;
+    networkDoc?: unknown | null;
+  }) {
+    const locationRepo = makeLocationRepo({ getLatest: vi.fn(async () => over.gps ?? null) });
+    const wifiRepo = makeWifiRepo({ getLatest: vi.fn(async () => over.wifi ?? null) });
+    const es = makeMockEsClient({
+      get: over.networkDoc === null
+        ? vi.fn().mockResolvedValue({ _source: undefined })
+        : vi.fn().mockResolvedValue({ _source: over.networkDoc ?? NETWORK_DOC }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new LocationServiceImpl(locationRepo, wifiRepo, es as any);
+  }
+
+  it('adds recently_left when GPS is stale and the latest wifi is a recent known-place DISCONNECT', async () => {
+    const staleGpsTs = new Date(Date.now() - 12 * 60_000).toISOString(); // 12m → not fresh (freshness='stale')
+    const disconnectTs = new Date(Date.now() - 60_000).toISOString();    // 1 min ago, within WIFI_FRESH (10m)
+    const svc = buildService({
+      gps: {
+        id: 'loc-1', userId: USER_ID,
+        location: { lat: 32.1, lon: 34.8 }, accuracy: 20,
+        timestamp: staleGpsTs, matchedPlace: null, address: null,
+      } as unknown as Awaited<ReturnType<LocationRepository['getLatest']>>,
+      wifi: {
+        id: 'w-d', userId: USER_ID, connected: false,
+        ssid: null, bssid: 'aa:bb:cc:dd:ee:ff', timestamp: disconnectTs,
+      },
+    });
+
+    const result = await svc.getCurrentLocation(USER_ID);
+    expect(result.recently_left).toBeDefined();
+    expect(result.recently_left!.place_name).toBe('Home');
+    expect(result.recently_left!.place_id).toBe('p-home');
+    expect(result.recently_left!.age_s).toBeGreaterThanOrEqual(55);
+    expect(result.reasoning).toMatch(/recently left Home/);
+  });
+
+  it('does NOT add recently_left when GPS is fresh (hint is for stale/unknown tiers only)', async () => {
+    const freshGpsTs = new Date(Date.now() - 30_000).toISOString(); // 30s — fresh
+    const disconnectTs = new Date(Date.now() - 60_000).toISOString();
+    const svc = buildService({
+      gps: {
+        id: 'loc-1', userId: USER_ID,
+        location: { lat: 32.1, lon: 34.8 }, accuracy: 20,
+        timestamp: freshGpsTs, matchedPlace: 'Gym', address: null,
+      } as unknown as Awaited<ReturnType<LocationRepository['getLatest']>>,
+      wifi: {
+        id: 'w-d', userId: USER_ID, connected: false,
+        ssid: null, bssid: 'aa:bb:cc:dd:ee:ff', timestamp: disconnectTs,
+      },
+    });
+
+    const result = await svc.getCurrentLocation(USER_ID);
+    expect(result.recently_left).toBeUndefined();
+    expect(result.place).toBe('Gym'); // fresh-GPS decision is unchanged
+  });
+
+  it('does NOT add recently_left when the disconnect is stale (older than WIFI_FRESH)', async () => {
+    const staleGpsTs = new Date(Date.now() - 12 * 60_000).toISOString();
+    const oldDisconnectTs = new Date(Date.now() - 20 * 60_000).toISOString(); // 20m > 10m
+    const svc = buildService({
+      gps: {
+        id: 'loc-1', userId: USER_ID,
+        location: { lat: 32.1, lon: 34.8 }, accuracy: 20,
+        timestamp: staleGpsTs, matchedPlace: null, address: null,
+      } as unknown as Awaited<ReturnType<LocationRepository['getLatest']>>,
+      wifi: {
+        id: 'w-d', userId: USER_ID, connected: false,
+        ssid: null, bssid: 'aa:bb:cc:dd:ee:ff', timestamp: oldDisconnectTs,
+      },
+    });
+
+    const result = await svc.getCurrentLocation(USER_ID);
+    expect(result.recently_left).toBeUndefined();
   });
 });

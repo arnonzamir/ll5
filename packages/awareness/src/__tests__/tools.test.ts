@@ -35,6 +35,7 @@ import type { MessageRepository } from '../repositories/interfaces/message.repos
 import type { LocationRepository } from '../repositories/interfaces/location.repository.js';
 import type { CalendarEventRepository } from '../repositories/interfaces/calendar-event.repository.js';
 import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
+import type { LocationService, CurrentLocation } from '../services/location-service.js';
 
 const USER_ID = 'user-test-1';
 const getUserId = () => USER_ID;
@@ -92,6 +93,21 @@ function makeNotableRepo(overrides: Partial<NotableEventRepository> = {}): Notab
     ...overrides,
   } as NotableEventRepository;
 }
+
+/** Stub LocationService — get_situation only calls getCurrentLocation. */
+function makeLocationService(
+  returnValue: CurrentLocation | (() => Promise<CurrentLocation>),
+): LocationService {
+  const getCurrentLocation =
+    typeof returnValue === 'function'
+      ? vi.fn(returnValue)
+      : vi.fn(async () => returnValue);
+  return { getCurrentLocation } as unknown as LocationService;
+}
+
+const NONE_LOCATION: CurrentLocation = {
+  place: null, place_id: null, confidence: 'unknown', source: 'none', reasoning: 'No recent GPS or wifi signal',
+};
 
 // ===========================================================================
 // PURE HELPER TESTS (kept from original — these were already real)
@@ -279,36 +295,36 @@ describe('get_situation tool handler', () => {
   beforeEach(() => vi.clearAllMocks());
 
   function buildRepos(over: {
-    location?: LocationRepository;
     calendar?: CalendarEventRepository;
     notableEvent?: NotableEventRepository;
     message?: MessageRepository;
   } = {}) {
     return {
-      location: over.location ?? makeLocationRepo({ getLatest: vi.fn(async () => null) }),
+      // location repo is no longer read directly by get_situation (fusion service
+      // owns the read) — keep an unstubbed stub so an accidental direct call throws.
+      location: makeLocationRepo(),
       calendar: over.calendar ?? makeCalendarRepo({ getNext: vi.fn(async () => null) }),
       notableEvent: over.notableEvent ?? makeNotableRepo({ queryUnacknowledged: vi.fn(async () => []) }),
       message: over.message ?? makeMessageRepo({ countActiveConversations: vi.fn(async () => 0) }),
     };
   }
 
-  it('forwards user_id to every repository call', async () => {
-    const getLatest = vi.fn(async () => null);
+  it('forwards user_id to every data source (location via fusion service)', async () => {
     const getNext = vi.fn(async () => null);
     const queryUnacknowledged = vi.fn(async () => []);
     const countActiveConversations = vi.fn(async () => 0);
 
     const repos = buildRepos({
-      location: makeLocationRepo({ getLatest }),
       calendar: makeCalendarRepo({ getNext }),
       notableEvent: makeNotableRepo({ queryUnacknowledged }),
       message: makeMessageRepo({ countActiveConversations }),
     });
+    const svc = makeLocationService(NONE_LOCATION);
 
-    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC'));
+    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC', svc));
     await tools.get('get_situation')!({});
 
-    expect(getLatest).toHaveBeenCalledWith(USER_ID);
+    expect(svc.getCurrentLocation).toHaveBeenCalledWith(USER_ID);
     expect(getNext).toHaveBeenCalledWith(USER_ID);
     expect(queryUnacknowledged).toHaveBeenCalledWith(USER_ID, {});
     expect(countActiveConversations).toHaveBeenCalledTimes(1);
@@ -321,14 +337,6 @@ describe('get_situation tool handler', () => {
     const locationTs = new Date(Date.now() - 2 * 60_000).toISOString();
     const eventStart = new Date(Date.now() + 30 * 60_000).toISOString();
     const repos = buildRepos({
-      location: makeLocationRepo({
-        getLatest: vi.fn(async () => ({
-          id: 'loc-1', userId: USER_ID,
-          location: { lat: 32.0853, lon: 34.7818 },
-          accuracy: 10, timestamp: locationTs,
-          matchedPlace: 'Home', address: 'Tel Aviv',
-        })),
-      }),
       calendar: makeCalendarRepo({
         getNext: vi.fn(async () => ({
           id: 'evt-1', userId: USER_ID, title: 'Team standup',
@@ -350,8 +358,16 @@ describe('get_situation tool handler', () => {
       }),
       message: makeMessageRepo({ countActiveConversations: vi.fn(async () => 3) }),
     });
+    const svc = makeLocationService({
+      place: 'Home', place_id: 'p-1', confidence: 'high', source: 'gps',
+      reasoning: 'GPS fix (120s old) at Home',
+      gps: {
+        lat: 32.0853, lon: 34.7818, accuracy_m: 10, age_s: 120,
+        freshness: 'fresh', matched_place: 'Home', address: 'Tel Aviv',
+      },
+    });
 
-    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC'));
+    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC', svc));
     const response = await tools.get('get_situation')!({});
 
     const parsed = parseToolResponse<{ situation: Record<string, unknown> }>(response);
@@ -362,6 +378,10 @@ describe('get_situation tool handler', () => {
     expect(loc.lon).toBe(34.7818);
     expect(loc.place_name).toBe('Home');
     expect(loc.freshness).toBe('live');
+    // New fused fields surfaced into the snapshot.
+    expect(loc.confidence).toBe('high');
+    expect(loc.source).toBe('gps');
+    expect(loc.reasoning).toBe('GPS fix (120s old) at Home');
 
     const ev = sit.next_event as Record<string, unknown>;
     expect(ev.title).toBe('Team standup');
@@ -375,9 +395,38 @@ describe('get_situation tool handler', () => {
     expect(sit.active_conversations).toBe(3);
   });
 
-  it('treats null location/event as missing, not as error', async () => {
+  it('surfaces confidence/source/reasoning and resolves place via wifi BSSID when GPS is stale', async () => {
     const repos = buildRepos();
-    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC'));
+    const svc = makeLocationService({
+      place: 'Office', place_id: 'p-2', confidence: 'medium', source: 'wifi',
+      reasoning: 'GPS stale (1200s), wifi BSSID maps to Office',
+      gps: {
+        lat: 32.1, lon: 34.8, accuracy_m: 20, age_s: 1200,
+        freshness: 'stale', matched_place: null, address: null,
+      },
+      wifi: {
+        bssid: 'aa:bb:cc:dd:ee:ff', ssid: 'OfficeWifi', connected: true, age_s: 30,
+        place_from_bssid: { place_id: 'p-2', place_name: 'Office' },
+      },
+    });
+
+    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC', svc));
+    const response = await tools.get('get_situation')!({});
+
+    const loc = parseToolResponse<{ situation: { current_location: Record<string, unknown> } }>(response)
+      .situation.current_location;
+    // Place comes from the wifi BSSID resolution, not raw GPS (which had none).
+    expect(loc.place_name).toBe('Office');
+    expect(loc.wifi_place).toBe('Office');
+    expect(loc.confidence).toBe('medium');
+    expect(loc.source).toBe('wifi');
+    expect(loc.reasoning).toMatch(/wifi BSSID maps to Office/);
+  });
+
+  it('treats source=none location and null event as missing, not as error', async () => {
+    const repos = buildRepos();
+    const svc = makeLocationService(NONE_LOCATION);
+    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC', svc));
 
     const response = await tools.get('get_situation')!({});
     expect(response.isError).toBeUndefined();
@@ -390,13 +439,13 @@ describe('get_situation tool handler', () => {
 
   it('swallows per-source errors and still returns a partial situation', async () => {
     const repos = buildRepos({
-      location: makeLocationRepo({ getLatest: vi.fn(async () => { throw new Error('es down'); }) }),
       calendar: makeCalendarRepo({ getNext: vi.fn(async () => { throw new Error('cal down'); }) }),
       notableEvent: makeNotableRepo({ queryUnacknowledged: vi.fn(async () => []) }),
       message: makeMessageRepo({ countActiveConversations: vi.fn(async () => 7) }),
     });
+    const svc = makeLocationService(async () => { throw new Error('es down'); });
 
-    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC'));
+    const tools = captureTools((s) => registerSituationTools(s, repos, getUserId, 'UTC', svc));
     const response = await tools.get('get_situation')!({});
 
     expect(response.isError).toBeUndefined();
