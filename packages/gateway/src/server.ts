@@ -18,6 +18,7 @@ import {
   type IndexDefinition,
 } from '@ll5/shared';
 import { createAdminRouter } from './admin.js';
+import { createTenantsRouter } from './tenants.js';
 import { createAuthRouter } from './auth.js';
 import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
@@ -208,6 +209,9 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Mount invites routes (owns both /admin/invites* and public /invites/*).
   app.use(createInvitesRouter(pgPool, config.authSecret, config.dashboardUrl));
+
+  // Mount tenant-management routes (superadmin-gated; owns /admin/tenants*).
+  app.use(createTenantsRouter(pgPool, config.authSecret));
 
   // Serve uploaded files — auth + per-file ownership check enforced.
   // See uploads-route.ts for the filename → owner mapping.

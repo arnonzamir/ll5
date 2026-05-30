@@ -47,6 +47,7 @@ import {
   type User,
   type Family,
 } from "./users-server-actions";
+import { roleBadgeVariant } from "../tenants/tenants-types";
 
 // --- Error Banner ---
 
@@ -218,6 +219,7 @@ function UserFormDialog({
               <SelectContent>
                 <SelectItem value="user">User</SelectItem>
                 <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="superadmin">Superadmin</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -549,7 +551,7 @@ function UserRow({
         </span>
       </td>
       <td className="py-2.5 pr-3">
-        <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+        <Badge variant={roleBadgeVariant(user.role)}>
           {user.role}
         </Badge>
       </td>

@@ -20,6 +20,7 @@ import {
   revokeInvite,
 } from "./invites-server-actions";
 import type { Invite } from "./invites-types";
+import { roleBadgeVariant } from "../tenants/tenants-types";
 
 function ErrorBanner({
   message,
@@ -96,7 +97,7 @@ function InviteRow({
         <span className="text-sm font-medium">{invite.email}</span>
       </td>
       <td className="py-2.5 pr-3">
-        <Badge variant={invite.role === "admin" ? "default" : "secondary"}>
+        <Badge variant={roleBadgeVariant(invite.role)}>
           {invite.role}
         </Badge>
       </td>

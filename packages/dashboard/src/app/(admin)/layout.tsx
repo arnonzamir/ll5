@@ -20,7 +20,9 @@ export default async function AdminLayout({
   }
 
   const payload = decodeTokenPayload(token);
-  if (payload?.role !== "admin") {
+  // superadmin ⊇ admin: both roles may enter the (admin) area. The gateway is
+  // still the authoritative check on every /admin/* call (see comment above).
+  if (payload?.role !== "admin" && payload?.role !== "superadmin") {
     redirect("/dashboard");
   }
 

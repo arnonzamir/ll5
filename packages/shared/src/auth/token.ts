@@ -116,7 +116,7 @@ export function isTokenExpiredError(err: unknown): err is TokenExpiredError {
 
 export interface TokenClaims {
   uid: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'user' | 'superadmin';
   iat: number;
   exp: number;
 }
@@ -227,8 +227,8 @@ export function validateLl5Token(
   }
 
   // Tokens minted before the role field existed default to 'user'.
-  const role: 'admin' | 'user' =
-    roleRaw === 'admin' ? 'admin' : 'user';
+  const role: 'admin' | 'user' | 'superadmin' =
+    roleRaw === 'superadmin' ? 'superadmin' : roleRaw === 'admin' ? 'admin' : 'user';
 
   const now = opts.now ?? Date.now() / 1000;
   const grace = opts.gracePeriodSeconds ?? 0;

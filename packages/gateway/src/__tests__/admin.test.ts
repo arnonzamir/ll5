@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import crypto from 'node:crypto';
-import { createAdminRouter, requireAdmin } from '../admin.js';
+import { createAdminRouter, requireAdmin, requireSuperadmin } from '../admin.js';
 import type { Request, Response } from 'express';
 import type { Pool } from 'pg';
 
@@ -192,6 +192,92 @@ describe('requireAdmin', () => {
     const req = makeReq({
       headers: { authorization: `Bearer ${tampered}` },
     });
+    const res = makeRes();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(401);
+  });
+
+  it('accepts a superadmin token (superadmin ⊇ admin) and sets adminRole', () => {
+    const token = generateTestToken('super-1', 'superadmin');
+    const req = makeReq({ headers: { authorization: `Bearer ${token}` } });
+    const res = makeRes();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect((req as unknown as { adminUserId: string }).adminUserId).toBe('super-1');
+    expect((req as unknown as { adminRole: string }).adminRole).toBe('superadmin');
+  });
+
+  it('sets adminRole to admin for a plain admin token', () => {
+    const token = generateTestToken('admin-1', 'admin');
+    const req = makeReq({ headers: { authorization: `Bearer ${token}` } });
+    const res = makeRes();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect((req as unknown as { adminRole: string }).adminRole).toBe('admin');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// requireSuperadmin middleware
+// ---------------------------------------------------------------------------
+
+describe('requireSuperadmin', () => {
+  let middleware: ReturnType<typeof requireSuperadmin>;
+
+  beforeEach(() => {
+    middleware = requireSuperadmin(AUTH_SECRET);
+  });
+
+  it('accepts a superadmin token and calls next()', () => {
+    const token = generateTestToken('super-1', 'superadmin');
+    const req = makeReq({ headers: { authorization: `Bearer ${token}` } });
+    const res = makeRes();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect((req as unknown as { adminUserId: string }).adminUserId).toBe('super-1');
+    expect((req as unknown as { adminRole: string }).adminRole).toBe('superadmin');
+  });
+
+  it('403s a plain admin token', () => {
+    const token = generateTestToken('admin-1', 'admin');
+    const req = makeReq({ headers: { authorization: `Bearer ${token}` } });
+    const res = makeRes();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(403);
+    expect((res._json as { error: string }).error).toContain('Superadmin');
+  });
+
+  it('403s a regular user token', () => {
+    const token = generateTestToken('user-1', 'user');
+    const req = makeReq({ headers: { authorization: `Bearer ${token}` } });
+    const res = makeRes();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(403);
+  });
+
+  it('401s when no token is provided', () => {
+    const req = makeReq();
     const res = makeRes();
     const next = vi.fn();
 
@@ -528,7 +614,7 @@ describe('createAdminRouter', () => {
 
       const req = makeReq({
         params: { id: 'user-1' },
-        body: { role: 'superadmin' },
+        body: { role: 'wizard' },
       });
       const res = makeRes();
 
@@ -536,6 +622,63 @@ describe('createAdminRouter', () => {
 
       expect(res._status).toBe(400);
       expect((res._json as { error: string }).error).toContain('Invalid role');
+    });
+
+    it('403s a non-superadmin trying to grant superadmin role', async () => {
+      pool = makePgPool();
+      const router = createAdminRouter(pool, AUTH_SECRET);
+      const handler = findHandler(router, 'patch', '/users/:id');
+
+      // Caller is a plain admin (adminRole='admin'), set by the middleware.
+      const req = makeReq({
+        params: { id: 'user-1' },
+        body: { role: 'superadmin' },
+      });
+      (req as unknown as { adminRole: string }).adminRole = 'admin';
+      const res = makeRes();
+
+      await handler!(req, res);
+
+      expect(res._status).toBe(403);
+      expect((res._json as { error: string }).error).toContain('superadmin');
+    });
+
+    it('403s a non-superadmin trying to grant admin role', async () => {
+      pool = makePgPool();
+      const router = createAdminRouter(pool, AUTH_SECRET);
+      const handler = findHandler(router, 'patch', '/users/:id');
+
+      const req = makeReq({
+        params: { id: 'user-1' },
+        body: { role: 'admin' },
+      });
+      (req as unknown as { adminRole: string }).adminRole = 'admin';
+      const res = makeRes();
+
+      await handler!(req, res);
+
+      expect(res._status).toBe(403);
+    });
+
+    it('lets a superadmin grant the admin role', async () => {
+      pool = makePgPool({
+        rows: [{ user_id: 'user-1', username: 'u', display_name: 'U', role: 'admin', enabled: true }],
+      });
+      const router = createAdminRouter(pool, AUTH_SECRET);
+      const handler = findHandler(router, 'patch', '/users/:id');
+
+      const req = makeReq({
+        params: { id: 'user-1' },
+        body: { role: 'admin' },
+      });
+      (req as unknown as { adminRole: string; adminUserId: string }).adminRole = 'superadmin';
+      (req as unknown as { adminUserId: string }).adminUserId = 'super-1';
+      const res = makeRes();
+
+      await handler!(req, res);
+
+      expect(res._status).toBe(200);
+      expect((res._json as { role: string }).role).toBe('admin');
     });
 
     it('updates user fields', async () => {
@@ -575,7 +718,7 @@ describe('createAdminRouter', () => {
       const handler = findHandler(router, 'post', '/users');
 
       const req = makeReq({
-        body: { username: 'test', display_name: 'Test', pin: '987654', role: 'superadmin' },
+        body: { username: 'test', display_name: 'Test', pin: '987654', role: 'wizard' },
       });
       const res = makeRes();
 
@@ -585,7 +728,46 @@ describe('createAdminRouter', () => {
       expect((res._json as { error: string }).error).toContain('Invalid role');
     });
 
-    it('accepts valid roles (user, admin, child)', async () => {
+    it('403s a non-superadmin creating an admin user', async () => {
+      pool = makePgPool();
+      const router = createAdminRouter(pool, AUTH_SECRET);
+      const handler = findHandler(router, 'post', '/users');
+
+      const req = makeReq({
+        body: { username: 'test', display_name: 'Test', pin: '987654', role: 'admin' },
+      });
+      (req as unknown as { adminRole: string; adminUserId: string }).adminRole = 'admin';
+      (req as unknown as { adminUserId: string }).adminUserId = 'admin-1';
+      const res = makeRes();
+
+      await handler!(req, res);
+
+      expect(res._status).toBe(403);
+      expect((res._json as { error: string }).error).toContain('superadmin');
+    });
+
+    it('lets a superadmin create a superadmin user', async () => {
+      const mockQuery = vi.fn()
+        .mockResolvedValueOnce({ rows: [] }) // no duplicate
+        .mockResolvedValueOnce({ rows: [{ user_id: 'new', username: 'sa', role: 'superadmin' }] })
+        .mockResolvedValueOnce({ rows: [] }); // user_settings
+      pool = { query: mockQuery } as unknown as Pool;
+      const router = createAdminRouter(pool, AUTH_SECRET);
+      const handler = findHandler(router, 'post', '/users');
+
+      const req = makeReq({
+        body: { username: 'sa', display_name: 'SA', pin: '987654', role: 'superadmin' },
+      });
+      (req as unknown as { adminRole: string; adminUserId: string }).adminRole = 'superadmin';
+      (req as unknown as { adminUserId: string }).adminUserId = 'super-1';
+      const res = makeRes();
+
+      await handler!(req, res);
+
+      expect(res._status).toBe(201);
+    });
+
+    it('accepts valid roles (user, admin, child) for a superadmin caller', async () => {
       const validRoles = ['user', 'admin', 'child'];
       for (const role of validRoles) {
         const mockQuery = vi.fn()
@@ -600,6 +782,9 @@ describe('createAdminRouter', () => {
         const req = makeReq({
           body: { username: `test-${role}`, display_name: 'Test', pin: '987654', role },
         });
+        // admin is a privileged role → caller must be superadmin.
+        (req as unknown as { adminRole: string; adminUserId: string }).adminRole = 'superadmin';
+        (req as unknown as { adminUserId: string }).adminUserId = 'super-1';
         const res = makeRes();
 
         await handler!(req, res);

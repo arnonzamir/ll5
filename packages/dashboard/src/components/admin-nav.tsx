@@ -6,6 +6,7 @@ import { useState } from "react";
 import {
   Activity,
   Users,
+  Building2,
   Mail,
   Wrench,
   ScrollText,
@@ -22,6 +23,7 @@ const adminLinks = [
   { href: "/admin/logs", label: "App Logs", icon: ScrollText },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList },
   { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/tenants", label: "Tenants", icon: Building2 },
   { href: "/admin/invites", label: "Invites", icon: Mail },
   { href: "/admin/tools", label: "MCP Tools", icon: Wrench },
   { href: "/admin/gps-cleanup", label: "GPS Cleanup", icon: MapPin },

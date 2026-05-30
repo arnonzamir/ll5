@@ -18,6 +18,9 @@ import { getWebhookStats } from './utils/webhook-stats.js';
 const BCRYPT_SALT_ROUNDS = 12;
 const MIN_PIN_LENGTH = 6;
 
+/** Roles only a superadmin may grant. */
+const PRIVILEGED_ROLES = new Set(['admin', 'superadmin']);
+
 /** Common weak PINs that should be rejected. */
 const WEAK_PIN_BLOCKLIST = new Set([
   '1234', '0000', '1111', '2222', '3333', '4444',
@@ -41,13 +44,50 @@ function validatePinStrength(pin: string): string | null {
 
 interface AdminRequest extends Request {
   adminUserId: string;
+  /** Effective role of the authenticated caller: 'admin' or 'superadmin'. */
+  adminRole: 'admin' | 'superadmin';
 }
 
 /**
- * Middleware that validates the token and checks for admin role.
- * Sets req.adminUserId on success.
+ * Read the real role string from a *signature-verified* ll5 token payload.
+ *
+ * `validateLl5Token` (in @ll5/shared) narrows its `claims.role` to the historic
+ * `'admin' | 'user'` set and collapses anything else (e.g. 'superadmin') to
+ * 'user'. Superadmin must be distinguishable here, so after the shared
+ * validator has confirmed the HMAC we re-read the role field off the already
+ * base64url-decoded payload. The signature is verified at this point, so the
+ * payload is trusted; we only widen the role enum the gateway recognizes.
  */
-export function requireAdmin(authSecret: string) {
+function effectiveRoleFromToken(rawToken: string): string {
+  const parts = rawToken.split('.');
+  if (parts.length !== 3) return 'user';
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as {
+      role?: unknown;
+    };
+    return typeof payload.role === 'string' ? payload.role : 'user';
+  } catch {
+    return 'user';
+  }
+}
+
+/** Roles, lowest → highest. A role satisfies any gate at or below its level. */
+const ROLE_RANK: Record<string, number> = {
+  user: 0,
+  child: 0,
+  admin: 1,
+  superadmin: 2,
+};
+
+/**
+ * Shared token-gate builder. Validates the ll5 token, then enforces a minimum
+ * effective role. On success sets req.adminUserId + req.adminRole.
+ *
+ * @param minRole the lowest role allowed through ('admin' or 'superadmin').
+ */
+function requireRole(authSecret: string, minRole: 'admin' | 'superadmin') {
+  const minRank = ROLE_RANK[minRole];
+  const tag = minRole === 'superadmin' ? 'requireSuperadmin' : 'requireAdmin';
   return (req: Request, res: Response, next: () => void): void => {
     const authHeader = req.headers.authorization;
     const queryToken = req.query.token as string | undefined;
@@ -70,19 +110,50 @@ export function requireAdmin(authSecret: string) {
         res.status(401).json({ error: 'Invalid token format' });
         return;
       }
-      logger.warn('[admin][requireAdmin] Token validation error', { reason: result.reason });
+      logger.warn(`[admin][${tag}] Token validation error`, { reason: result.reason });
       res.status(401).json({ error: 'Invalid token' });
       return;
     }
 
-    if (result.claims.role !== 'admin') {
-      res.status(403).json({ error: 'Admin access required' });
+    // Signature verified → trust the raw payload role (widens the shared
+    // validator's 'admin'|'user' narrowing to include 'superadmin').
+    const role = effectiveRoleFromToken(rawToken);
+    const rank = ROLE_RANK[role] ?? 0;
+
+    if (rank < minRank) {
+      logger.warn(`[admin][${tag}] access_denied`, {
+        actor_user_id: result.claims.uid,
+        actor_role: role,
+        required_role: minRole,
+      });
+      res.status(403).json({
+        error: minRole === 'superadmin' ? 'Superadmin access required' : 'Admin access required',
+      });
       return;
     }
 
-    (req as AdminRequest).adminUserId = result.claims.uid;
+    const adminReq = req as AdminRequest;
+    adminReq.adminUserId = result.claims.uid;
+    adminReq.adminRole = rank >= ROLE_RANK.superadmin ? 'superadmin' : 'admin';
     next();
   };
+}
+
+/**
+ * Middleware that validates the token and requires the admin role.
+ * Superadmin ⊇ admin: a superadmin passes this gate too.
+ * Sets req.adminUserId + req.adminRole on success.
+ */
+export function requireAdmin(authSecret: string) {
+  return requireRole(authSecret, 'admin');
+}
+
+/**
+ * Middleware that validates the token and requires the superadmin role.
+ * Sets req.adminUserId + req.adminRole on success.
+ */
+export function requireSuperadmin(authSecret: string) {
+  return requireRole(authSecret, 'superadmin');
 }
 
 /** Fields safe to return for a user (never pin_hash). */
@@ -230,10 +301,20 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
       return;
     }
 
-    const validRoles = ['user', 'admin', 'child'];
+    const validRoles = ['user', 'admin', 'child', 'superadmin'];
     const userRole = role || 'user';
     if (!validRoles.includes(userRole)) {
       res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+      return;
+    }
+    // Only a superadmin may grant elevated roles.
+    if (PRIVILEGED_ROLES.has(userRole) && (req as AdminRequest).adminRole !== 'superadmin') {
+      logger.warn('[admin][createUser] privileged_role_denied', {
+        actor_user_id: (req as AdminRequest).adminUserId,
+        actor_role: (req as AdminRequest).adminRole,
+        attempted_role: userRole,
+      });
+      res.status(403).json({ error: 'Only a superadmin may assign the admin or superadmin role' });
       return;
     }
 
@@ -275,6 +356,14 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
       );
 
       logger.info('[admin][createUser] User created', { userId, username, role: userRole });
+      if (PRIVILEGED_ROLES.has(userRole)) {
+        logger.info('[admin][createUser] role_granted', {
+          actor_user_id: (req as AdminRequest).adminUserId,
+          actor_role: (req as AdminRequest).adminRole,
+          target_user_id: userId,
+          granted_role: userRole,
+        });
+      }
       res.status(201).json(result.rows[0]);
     } catch (err) {
       logger.error('[admin][createUser] Failed', { error: err instanceof Error ? err.message : String(err) });
@@ -307,9 +396,20 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
       params.push(display_name);
     }
     if (role !== undefined) {
-      const validRoles = ['user', 'admin', 'child'];
+      const validRoles = ['user', 'admin', 'child', 'superadmin'];
       if (!validRoles.includes(role)) {
         res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+        return;
+      }
+      // Only a superadmin may grant elevated roles.
+      if (PRIVILEGED_ROLES.has(role) && (req as AdminRequest).adminRole !== 'superadmin') {
+        logger.warn('[admin][updateUser] privileged_role_denied', {
+          actor_user_id: (req as AdminRequest).adminUserId,
+          actor_role: (req as AdminRequest).adminRole,
+          target_user_id: req.params.id,
+          attempted_role: role,
+        });
+        res.status(403).json({ error: 'Only a superadmin may assign the admin or superadmin role' });
         return;
       }
       updates.push(`role = $${paramIdx++}`);
@@ -354,6 +454,14 @@ export function createAdminRouter(pool: Pool, authSecret: string): Router {
         }
 
         logger.info('[admin][updateUser] User updated', { userId: req.params.id, fields: Object.keys(req.body) });
+        if (role !== undefined) {
+          logger.info('[admin][updateUser] role_changed', {
+            actor_user_id: (req as AdminRequest).adminUserId,
+            actor_role: (req as AdminRequest).adminRole,
+            target_user_id: req.params.id,
+            new_role: role,
+          });
+        }
         res.json(result.rows[0]);
       } else {
         // Only timezone update — verify user exists first
