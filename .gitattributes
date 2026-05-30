@@ -1,0 +1,6 @@
+# Living docs are append-heavy and conflict on every parallel-branch merge.
+# Use the built-in union merge driver: keep both sides' changes, no conflict
+# markers. Reconcile/tidy in a follow-up commit if needed.
+docs/PROGRESS.md  merge=union
+docs/HANDOFF.md   merge=union
+docs/FILE_TREE.md merge=union
