@@ -2,6 +2,12 @@ import type { Client } from '@elastic/elasticsearch';
 import crypto from 'node:crypto';
 import type { PushWifiItem } from '../types/index.js';
 import { logger } from '../utils/logger.js';
+import { gatewayKeyMutex } from '../utils/key-mutex.js';
+
+// G8: cap place_observations so a promiscuous BSSID (public hotspot seen at many
+// places) can't bloat the doc. We keep the top N by count desc, last_seen desc —
+// the dominant-place logic still works on the strongest signals.
+const MAX_PLACE_OBSERVATIONS = 20;
 
 const WIFI_INDEX = 'll5_awareness_wifi_connections';
 const NETWORKS_INDEX = 'll5_knowledge_networks';
@@ -92,6 +98,23 @@ async function upsertNetworkObservation(
   timestamp: string,
 ): Promise<void> {
   const docId = `${userId}::${bssid}`;
+
+  // G5: serialize the per-(user::bssid) read-modify-write. Concurrent wifi events
+  // for the same network must not interleave, or observation counts get lost.
+  await gatewayKeyMutex.runExclusive(`network-obs:${docId}`, async () => {
+    await upsertNetworkObservationInner(es, userId, bssid, ssid, matchedPlace, timestamp, docId);
+  });
+}
+
+async function upsertNetworkObservationInner(
+  es: Client,
+  userId: string,
+  bssid: string,
+  ssid: string | null,
+  matchedPlace: { place_id: string; place_name: string } | null,
+  timestamp: string,
+  docId: string,
+): Promise<void> {
   const now = new Date().toISOString();
 
   let existing: NetworkDoc | null = null;
@@ -129,11 +152,29 @@ async function upsertNetworkObservation(
     }
   }
 
+  // G8: cap to the strongest observations so promiscuous BSSIDs can't bloat the
+  // doc. Sort by count desc, then last_seen desc, then keep the top N.
+  let capped = observations;
+  if (observations.length > MAX_PLACE_OBSERVATIONS) {
+    capped = [...observations]
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime();
+      })
+      .slice(0, MAX_PLACE_OBSERVATIONS);
+    logger.debug('[wifi][upsertNetworkObservation] pruned place_observations', {
+      bssid,
+      before: observations.length,
+      after: capped.length,
+      cap: MAX_PLACE_OBSERVATIONS,
+    });
+  }
+
   const doc: NetworkDoc = {
     user_id: userId,
     bssid,
     ssid: ssid ?? existing?.ssid,
-    place_observations: observations,
+    place_observations: capped,
     manual_place_id: existing?.manual_place_id,
     manual_place_name: existing?.manual_place_name,
     label: existing?.label,

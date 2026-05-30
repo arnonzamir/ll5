@@ -9,6 +9,12 @@ const PushLocationItemSchema = z.object({
   lon: z.number().min(-180).max(180),
   accuracy_m: z.number().nonnegative().optional(),
   battery_pct: z.number().min(0).max(100).optional(),
+  // Device-reported motion (G3). The phone already collects these; accepting
+  // them lets the deviation logic trust real fast travel instead of guessing
+  // from successive GPS fixes alone.
+  speed_mps: z.number().nonnegative().optional(),
+  bearing_deg: z.number().min(0).max(360).optional(),
+  altitude_m: z.number().optional(),
 });
 
 const PushMessageItemSchema = z.object({

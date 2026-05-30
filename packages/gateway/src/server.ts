@@ -24,7 +24,7 @@ import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { createAgentRouter } from './agent.js';
 import { processCalendar, phoneEventId } from './processors/calendar.js';
-import { processLocation } from './processors/location.js';
+import { processLocation, type StoredPoint } from './processors/location.js';
 import { processMessage } from './processors/message.js';
 import { ContactRoutingResolver } from './processors/contact-routing.js';
 import { processPhoneContacts } from './processors/phone-contacts.js';
@@ -124,6 +124,10 @@ async function processItem(
   config: EnvConfig,
   pgPool?: pg.Pool,
   matcher?: ContactRoutingResolver,
+  // G1/G2: the chronological predecessor within this batch for location items.
+  // Mutated through `prevPointRef.current` so the caller can chain it across the
+  // ordered location sub-sequence regardless of original array index.
+  prevPointRef?: { current: StoredPoint | null },
 ): Promise<ItemResult> {
   try {
     // Check data source toggles (user_settings.data_sources)
@@ -141,9 +145,20 @@ async function processItem(
     }
 
     switch (item.type) {
-      case 'location':
-        await processLocation(es, userId, item, config.geocodingApiKey, pgPool);
+      case 'location': {
+        const stored = await processLocation(
+          es,
+          userId,
+          item,
+          config.geocodingApiKey,
+          pgPool,
+          prevPointRef?.current ?? null,
+        );
+        // Only advance the predecessor when the point was actually stored;
+        // a dropped glitch must not seed the next item's drift check.
+        if (prevPointRef && stored) prevPointRef.current = stored;
         break;
+      }
       case 'message':
         await processMessage(es, userId, item, pgPool, matcher);
         break;
@@ -1114,9 +1129,19 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       throw err;
     }
 
-    // Validate and process items individually — bad items are skipped, not fatal
-    const results: ItemResult[] = [];
+    // Validate and process items individually — bad items are skipped, not fatal.
+    //
+    // G1/G2: location points within a batch must be ingested in chronological
+    // order so each point's drift check compares against the actual previous
+    // point (not a stale ES latest), and out-of-order points don't bypass the
+    // check. We therefore parse all items first, then process LOCATION items in
+    // ascending-timestamp order while every result is written back at its
+    // ORIGINAL index — so `results` order and other item types are unaffected.
+    const results: ItemResult[] = new Array<ItemResult>(payload.items.length);
     const typeCounts: Record<string, number> = {};
+
+    interface ParsedEntry { index: number; item: PushItem; }
+    const validEntries: ParsedEntry[] = [];
 
     for (let i = 0; i < payload.items.length; i++) {
       const parsed = PushItemSchema.safeParse(payload.items[i]);
@@ -1124,13 +1149,40 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         const errors = parsed.error.errors.map((e: { path: (string | number)[]; message: string }) => `${e.path.join('.')}: ${e.message}`).join('; ');
         const rawType = (payload.items[i] as Record<string, unknown>)?.type;
         logger.warn('[startServer][webhook] Skipping invalid webhook item', { index: i, type: rawType, errors });
-        results.push({ index: i, type: (payload.items[i] as Record<string, unknown>)?.type as string ?? 'unknown', status: 'error', error: errors });
+        results[i] = { index: i, type: (payload.items[i] as Record<string, unknown>)?.type as string ?? 'unknown', status: 'error', error: errors };
         continue;
       }
       const item = parsed.data;
       typeCounts[item.type] = (typeCounts[item.type] ?? 0) + 1;
-      const result = await processItem(esClient, userId, item, i, config, pgPool, notificationMatcher);
-      results.push(result);
+      validEntries.push({ index: i, item });
+    }
+
+    // Build the processing order: non-location items keep their original order;
+    // location items are pulled out and re-sequenced by timestamp ascending.
+    const locationEntries = validEntries
+      .filter((e) => e.item.type === 'location')
+      .sort((a, b) => {
+        const ta = new Date((a.item as { timestamp: string }).timestamp).getTime();
+        const tb = new Date((b.item as { timestamp: string }).timestamp).getTime();
+        if (ta !== tb) return ta - tb;
+        return a.index - b.index; // stable for equal timestamps
+      });
+    const nonLocationEntries = validEntries.filter((e) => e.item.type !== 'location');
+
+    if (locationEntries.length > 1) {
+      logger.debug('[startServer][webhook] Ordered location batch chronologically', {
+        count: locationEntries.length,
+      });
+    }
+
+    // Thread the in-batch predecessor across the ordered location sub-sequence.
+    const prevPointRef: { current: StoredPoint | null } = { current: null };
+
+    for (const entry of nonLocationEntries) {
+      results[entry.index] = await processItem(esClient, userId, entry.item, entry.index, config, pgPool, notificationMatcher);
+    }
+    for (const entry of locationEntries) {
+      results[entry.index] = await processItem(esClient, userId, entry.item, entry.index, config, pgPool, notificationMatcher, prevPointRef);
     }
 
     // Batch process phone contacts — enrich messaging_contacts display_name

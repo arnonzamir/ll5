@@ -1,8 +1,10 @@
+import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 import { timeBanner } from '@ll5/shared';
+import { buildLocationLine } from './location-state.js';
 
 interface DailyReviewConfig {
   reviewHour: number;
@@ -22,6 +24,9 @@ export class DailyReviewScheduler {
     private pool: Pool,
     private googleClient: GoogleCalendarClient,
     private config: DailyReviewConfig,
+    // Optional: enables the A3 current-place line. Omitted in unit tests that
+    // don't exercise location.
+    private es?: Client,
   ) {}
 
   start(): void {
@@ -83,6 +88,16 @@ export class DailyReviewScheduler {
         `[Morning Briefing] ${timeBanner(now, this.config.timezone)}`,
         'Good morning. Today\'s frame:',
       ];
+
+      // A3: brief current-place line (shared helper with the heartbeat).
+      if (this.es) {
+        try {
+          const locationLine = await buildLocationLine(this.es, this.config.userId, this.config.timezone);
+          if (locationLine) lines.push(locationLine);
+        } catch (err) {
+          logger.debug('[DailyReviewScheduler][tick] location line skipped', { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
 
       if (todayEvents.length > 0) {
         lines.push('');

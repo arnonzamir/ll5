@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 import { timeBanner, formatTime } from '@ll5/shared';
+import { buildLocationLine } from './location-state.js';
 
 interface HeartbeatConfig {
   silenceMinutes: number;
@@ -86,6 +87,14 @@ export class HeartbeatScheduler {
         `[Time Check] ${banner}`,
         `Anchoring rule: every "local" you see is in ${this.config.timezone}; every "utc" is UTC. "today/yesterday/tomorrow" resolve in local. If a tool returned only ISO UTC, convert before talking to the user.`,
       ];
+
+      // A2: include the user's current semantic place when known + recent.
+      try {
+        const locationLine = await buildLocationLine(this.es, this.config.userId, this.config.timezone);
+        if (locationLine) parts.push(locationLine);
+      } catch (err) {
+        logger.debug('[HeartbeatScheduler][tick] location line skipped', { error: err instanceof Error ? err.message : String(err) });
+      }
 
       // Query upcoming + recent events from ES
       const lookbackMs = this.config.lookbackHours * 60 * 60 * 1000;
