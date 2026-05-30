@@ -10,6 +10,7 @@ import {
   type GpsScanResult,
   type TimeRange,
 } from "./gps-cleanup-server-actions";
+import { DEFAULT_GEO_BOUNDS } from "./gps-bounds";
 
 type ScanState =
   | { kind: "idle" }
@@ -36,15 +37,48 @@ export function GpsCleanupView() {
   const [del, setDel] = useState<DeleteState>({ kind: "idle" });
   const [isPending, startTransition] = useTransition();
   const [timeRange, setTimeRange] = useState<TimeRange>("3d");
+  // Gap G7: geo-boundary criterion is OFF by default so the scan is safe to
+  // run while/after traveling abroad. Enable it to flag out-of-bounds points.
+  const [geoEnabled, setGeoEnabled] = useState(false);
+  const [bounds, setBounds] = useState({
+    minLat: String(DEFAULT_GEO_BOUNDS.minLat),
+    maxLat: String(DEFAULT_GEO_BOUNDS.maxLat),
+    minLon: String(DEFAULT_GEO_BOUNDS.minLon),
+    maxLon: String(DEFAULT_GEO_BOUNDS.maxLon),
+  });
   const [selected, setSelected] = useState<Set<BadReason>>(
-    new Set(["speed", "out_of_israel"]),
+    new Set(["speed"]),
   );
+
+  const geoArg = () =>
+    geoEnabled
+      ? ({ enabled: true, bounds: parsedBounds() } as const)
+      : ({ enabled: false } as const);
+
+  // Parse the bounds inputs; fall back to defaults for any blank/invalid field.
+  const parsedBounds = () => {
+    const num = (s: string, fallback: number) => {
+      const n = Number(s);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    return {
+      minLat: num(bounds.minLat, DEFAULT_GEO_BOUNDS.minLat),
+      maxLat: num(bounds.maxLat, DEFAULT_GEO_BOUNDS.maxLat),
+      minLon: num(bounds.minLon, DEFAULT_GEO_BOUNDS.minLon),
+      maxLon: num(bounds.maxLon, DEFAULT_GEO_BOUNDS.maxLon),
+    };
+  };
 
   const runScan = () => {
     setScan({ kind: "scanning" });
     setDel({ kind: "idle" });
     startTransition(async () => {
-      const res = await scanBadGpsPoints(timeRange);
+      const res = await scanBadGpsPoints(
+        timeRange,
+        geoEnabled
+          ? { enabled: true, bounds: parsedBounds() }
+          : { enabled: false },
+      );
       if (!res.ok) {
         setScan({ kind: "error", message: res.error });
       } else {
@@ -59,17 +93,25 @@ export function GpsCleanupView() {
       alert("Select at least one criterion.");
       return;
     }
+    if (criteria.includes("out_of_israel") && !geoEnabled) {
+      alert("Enable the geo-boundary filter to delete out-of-bounds points.");
+      return;
+    }
     if (!confirm(`One-click: scan ${humanRange(timeRange)} and DELETE points matching [${criteria.join(", ")}]?\n\nThis runs without a preview.`)) return;
 
     setDel({ kind: "deleting" });
     startTransition(async () => {
-      const res = await scanAndDelete(timeRange, criteria);
+      const res = await scanAndDelete(
+        timeRange,
+        criteria,
+        geoEnabled ? parsedBounds() : undefined,
+      );
       if (!res.ok) {
         setDel({ kind: "error", message: res.error });
       } else {
         setDel({ kind: "done", deleted: res.deleted, perCriterion: res.perCriterion });
         // Re-scan to show the post-delete state
-        const after = await scanBadGpsPoints(timeRange);
+        const after = await scanBadGpsPoints(timeRange, geoArg());
         if (after.ok) {
           setScan({
             kind: "scanned",
@@ -103,7 +145,7 @@ export function GpsCleanupView() {
         setDel({ kind: "error", message: res.error });
       } else {
         setDel({ kind: "done", deleted: res.deleted });
-        const after = await scanBadGpsPoints(timeRange);
+        const after = await scanBadGpsPoints(timeRange, geoArg());
         if (after.ok) {
           setScan({
             kind: "scanned",
@@ -136,7 +178,7 @@ export function GpsCleanupView() {
           <li><strong>Accuracy</strong> — accuracy &gt; 100 m</li>
           <li><strong>Implausible speed</strong> — &gt; 150 km/h between consecutive points within 10 min</li>
           <li><strong>Place drift</strong> — &gt; 500 m from a known-place point within 5 min</li>
-          <li><strong>Outside Israel</strong> — lat/lon outside 29.4°–33.4°N, 34.2°–35.9°E (Eilat to Hermon, Mediterranean to Dead Sea)</li>
+          <li><strong>Outside bounds</strong> — lat/lon outside the bounding box. <em>Opt-in</em> (off by default so it never wrongly flags points while traveling abroad); enable below to use the Israel default or a custom box.</li>
         </ul>
       </div>
 
@@ -177,6 +219,60 @@ export function GpsCleanupView() {
           <span className="text-xs text-gray-500">
             Last scan {new Date(scan.scannedAt).toLocaleTimeString()} · {humanRange(scan.result.timeRange)}
           </span>
+        )}
+      </div>
+
+      {/* Gap G7: geo-boundary filter is opt-in so the scan never wrongly flags
+          legitimate points while/after traveling abroad. */}
+      <div className="rounded-md border border-gray-200 bg-white p-3">
+        <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-800">
+          <input
+            type="checkbox"
+            checked={geoEnabled}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setGeoEnabled(on);
+              // Keep the criterion selection in sync with the filter toggle.
+              setSelected((prev) => {
+                const next = new Set(prev);
+                if (on) next.add("out_of_israel");
+                else next.delete("out_of_israel");
+                return next;
+              });
+            }}
+          />
+          Enable geo-boundary filter (flag points outside the bounding box)
+        </label>
+        {geoEnabled && (
+          <div className="mt-3 flex flex-wrap gap-3">
+            {(
+              [
+                ["minLat", "Min lat"],
+                ["maxLat", "Max lat"],
+                ["minLon", "Min lon"],
+                ["maxLon", "Max lon"],
+              ] as const
+            ).map(([key, label]) => (
+              <div key={key}>
+                <label className="block text-xs text-gray-500">{label}</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={bounds[key]}
+                  onChange={(e) =>
+                    setBounds((prev) => ({ ...prev, [key]: e.target.value }))
+                  }
+                  className="mt-1 w-24 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                />
+              </div>
+            ))}
+            <p className="w-full text-xs text-gray-400">
+              Defaults to the Israel bounding box ({DEFAULT_GEO_BOUNDS.minLat}–
+              {DEFAULT_GEO_BOUNDS.maxLat}°N, {DEFAULT_GEO_BOUNDS.minLon}–
+              {DEFAULT_GEO_BOUNDS.maxLon}°E). Blank/invalid fields fall back to
+              the default.
+            </p>
+          </div>
         )}
       </div>
 
@@ -225,9 +321,10 @@ export function GpsCleanupView() {
               onToggle={() => toggleCategory("place_drift")}
             />
             <CheckCard
-              label="Outside Israel"
+              label={geoEnabled ? "Outside bounds" : "Outside bounds (off)"}
               value={scan.result.badOutOfIsrael.length}
               checked={selected.has("out_of_israel")}
+              disabled={!geoEnabled}
               onToggle={() => toggleCategory("out_of_israel")}
             />
           </div>
@@ -283,22 +380,25 @@ function CheckCard({
   value,
   checked,
   onToggle,
+  disabled = false,
 }: {
   label: string;
   value: number;
   checked: boolean;
   onToggle: () => void;
+  disabled?: boolean;
 }) {
   return (
     <label
-      className={`flex cursor-pointer items-start gap-2 rounded-md border p-3 ${
-        checked ? "border-admin bg-amber-50" : "border-gray-200 bg-white"
-      }`}
+      className={`flex items-start gap-2 rounded-md border p-3 ${
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+      } ${checked ? "border-admin bg-amber-50" : "border-gray-200 bg-white"}`}
     >
       <input
         type="checkbox"
         className="mt-1"
         checked={checked}
+        disabled={disabled}
         onChange={onToggle}
       />
       <div>

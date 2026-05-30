@@ -57,7 +57,7 @@ Dashboard (Next.js 15)
   ├── /narratives — read-only list with status/kind/search filters + /narratives/detail?kind=&ref= per-subject detail (summary, mood, open_threads, recent_decisions, observations timeline with source/confidence/sensitive markers, close/dormant/reopen actions)
   ├── /export — full data backup download (JSON)
   ├── /profile — user settings
-  └── /admin — system health, users, tools, logs, audit, gps-cleanup (time-range + outside-Israel filter + one-click scan-and-delete)
+  └── /admin — system health, users, tools, logs, audit, gps-cleanup (time-range + OPT-IN geo-boundary filter [default off; default Israel box or custom min/max lat-lon] + one-click scan-and-delete)
 ```
 
 ## Repos

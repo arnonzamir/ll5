@@ -2,6 +2,7 @@
 
 import { env } from "@/lib/env";
 import { getToken, decodeTokenPayload } from "@/lib/auth";
+import { DEFAULT_GEO_BOUNDS, isOutOfBounds, type GeoBounds } from "./gps-bounds";
 
 /**
  * Dashboard-side GPS cleanup. Applies the same filters the gateway processor
@@ -17,15 +18,21 @@ const DRIFT_WINDOW_MS = 10 * 60 * 1000;
 const PLACE_DRIFT_DISTANCE_KM = 0.5;
 const PLACE_DRIFT_WINDOW_MS = 5 * 60 * 1000;
 
-// Israel bounding box (generous — includes Golan, Eilat, Dead Sea).
-const ISRAEL_BBOX = {
-  minLat: 29.4,
-  maxLat: 33.4,
-  minLon: 34.2,
-  maxLon: 35.9,
-};
+export type { GeoBounds };
 
 export type TimeRange = "1d" | "3d" | "7d" | "30d" | "all";
+
+/**
+ * Optional geo-boundary criterion (gap G7). The out-of-bounds check is OPT-IN:
+ * when `enabled` is false (the default), no point is flagged as out-of-bounds,
+ * making the scan safe to run while or after traveling abroad. When enabled,
+ * `bounds` defaults to {@link DEFAULT_GEO_BOUNDS} (Israel) but the caller may
+ * pass its own box.
+ */
+export interface GeoFilterOptions {
+  enabled: boolean;
+  bounds?: GeoBounds;
+}
 
 const TIME_RANGE_MS: Record<Exclude<TimeRange, "all">, number> = {
   "1d": 24 * 60 * 60 * 1000,
@@ -150,9 +157,14 @@ async function fetchAllPoints(userId: string, timeRange: TimeRange): Promise<Loc
 
 export async function scanBadGpsPoints(
   timeRange: TimeRange = "all",
+  // Gap G7: out-of-bounds is opt-in. Omit/disable to never flag points as
+  // out-of-bounds (safe while traveling abroad).
+  geoFilter: GeoFilterOptions = { enabled: false },
 ): Promise<{ ok: true; result: GpsScanResult } | { ok: false; error: string }> {
   const userId = await getCurrentUserId();
   if (!userId) return { ok: false, error: "Not authenticated" };
+
+  const geoBounds = geoFilter.enabled ? geoFilter.bounds ?? DEFAULT_GEO_BOUNDS : null;
 
   try {
     const points = await fetchAllPoints(userId, timeRange);
@@ -180,13 +192,9 @@ export async function scanBadGpsPoints(
         });
       }
 
-      // Criterion D — outside Israel bounding box
-      const outside =
-        src.location.lat < ISRAEL_BBOX.minLat ||
-        src.location.lat > ISRAEL_BBOX.maxLat ||
-        src.location.lon < ISRAEL_BBOX.minLon ||
-        src.location.lon > ISRAEL_BBOX.maxLon;
-      if (outside) {
+      // Criterion D — outside geo bounding box (opt-in; gap G7). When
+      // geoBounds is null the criterion is disabled and nothing is flagged.
+      if (geoBounds && isOutOfBounds(src.location, geoBounds)) {
         badOutOfIsrael.push({
           id: cur._id,
           timestamp: src.timestamp,
@@ -195,7 +203,7 @@ export async function scanBadGpsPoints(
           accuracy: src.accuracy,
           matched_place: src.matched_place,
           reason: "out_of_israel",
-          detail: `(${src.location.lat.toFixed(3)}, ${src.location.lon.toFixed(3)}) outside IL bbox`,
+          detail: `(${src.location.lat.toFixed(3)}, ${src.location.lon.toFixed(3)}) outside bbox`,
         });
       }
 
@@ -254,6 +262,14 @@ export async function scanBadGpsPoints(
       ]),
     );
 
+    console.log(
+      `[gps-cleanup] scan range=${timeRange} scanned=${points.length} ` +
+        `accuracy=${badAccuracy.length} speed=${badSpeed.length} ` +
+        `place_drift=${badPlaceDrift.length} ` +
+        `out_of_bounds=${geoBounds ? badOutOfIsrael.length : "off"} ` +
+        `unique=${uniqueBadIds.length}`,
+    );
+
     return {
       ok: true,
       result: {
@@ -267,6 +283,10 @@ export async function scanBadGpsPoints(
       },
     };
   } catch (err) {
+    console.error(
+      "[gps-cleanup] scan failed:",
+      err instanceof Error ? err.message : String(err),
+    );
     return {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
@@ -283,11 +303,18 @@ export async function scanBadGpsPoints(
 export async function scanAndDelete(
   timeRange: TimeRange,
   criteria: BadReason[],
+  // Optional bounds for the out_of_israel criterion. When that criterion is
+  // requested, the geo filter is enabled (defaulting to DEFAULT_GEO_BOUNDS);
+  // otherwise it stays off so no out-of-bounds point is flagged (gap G7).
+  geoBounds?: GeoBounds,
 ): Promise<
   | { ok: true; scanned: number; deleted: number; perCriterion: Record<BadReason, number> }
   | { ok: false; error: string }
 > {
-  const scan = await scanBadGpsPoints(timeRange);
+  const geoFilter: GeoFilterOptions = criteria.includes("out_of_israel")
+    ? { enabled: true, bounds: geoBounds }
+    : { enabled: false };
+  const scan = await scanBadGpsPoints(timeRange, geoFilter);
   if (!scan.ok) return scan;
 
   const wanted = new Set(criteria);
@@ -327,6 +354,11 @@ export async function scanAndDelete(
 
   const del = await deleteGpsPoints([...ids]);
   if (!del.ok) return del;
+
+  console.log(
+    `[gps-cleanup] scanAndDelete range=${timeRange} criteria=[${criteria.join(",")}] ` +
+      `geo_filter=${geoFilter.enabled ? "on" : "off"} deleted=${del.deleted}`,
+  );
 
   return {
     ok: true,
