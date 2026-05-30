@@ -94,7 +94,8 @@ If the stack goes down and a redeploy gets "manifest unknown" (image SHA pruned 
 
 | Item | Value |
 |------|-------|
-| AUTH_SECRET | `b2cf0d60414119aeb9df4828f952cdae712bad545251a943bd5bdb4e312dc4e2` |
+| AUTH_SECRET | `b2cf0d60414119aeb9df4828f952cdae712bad545251a943bd5bdb4e312dc4e2` — **THE live value** (all client/agent tokens use it). The Coolify store and host `.env` are both aligned to it as of 2026-05-30. |
+| ⚠️ AUTH_SECRET drift incident (2026-05-30) | The Coolify store had a *different* `AUTH_SECRET` (`04d83bee…`) since the 2026-05-18 recovery, but the host `.env` kept `b2cf0d60…`, so the running stack used `b2cf0d60` for ~12 days (all tokens signed with it). A Coolify-MCP deploy regenerated `.env` from the store → flipped all 7 services to `04d83bee` → **every token (dashboard/Android/agent) broke** (`bad_signature`). Fix: set the store back to `b2cf0d60`, redeploy. ENCRYPTION_KEY was never affected. Lesson: keep store ⇄ `.env` ⇄ this doc in sync; a Coolify-MCP deploy regenerates `.env` from the store. |
 | Admin user_id | `f08f46b3-0a9c-41ae-9e6a-294c697424e4` |
 | Admin PIN | `1234` |
 | Token format | `ll5.<base64url {uid,role,iat,exp}>.<32char hmac>` |
