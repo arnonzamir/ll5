@@ -35,9 +35,12 @@ export interface AgentOutputSnapshot {
   /** Hours since last assistant outbound; null if never. */
   hours_since_last_outbound: number | null;
   /**
-   * True if the agent wrote/updated a journal entry within the silence window.
-   * Journal writes are the agent's silent-work signal (consolidation, ambient
-   * journaling) — they prove it's alive even when it produces no chat outbound.
+   * True if the agent wrote/updated a journal entry within the journal-alive
+   * window (max(silenceHours, JOURNAL_ALIVE_FLOOR_HOURS) — deliberately more
+   * generous than the chat-silence threshold so the agent's ~hourly overnight
+   * journaling cadence still registers as alive). Journal writes are the agent's
+   * silent-work signal (consolidation, ambient journaling) — they prove it's
+   * alive even when it produces no chat outbound.
    */
   journal_active_in_window: boolean;
   /**
@@ -47,6 +50,15 @@ export interface AgentOutputSnapshot {
   stale: boolean;
   checked_at: string;
 }
+
+/**
+ * Minimum window (hours) for the journal-alive liveness check, independent of
+ * the chat-silence threshold. The agent journals on a roughly hourly cadence
+ * overnight; a window shorter than that produces false "agent silent" alarms in
+ * the gaps between journals. 2h covers the natural cadence with margin while a
+ * genuinely dead agent (no journal for 2h+) still trips the alert.
+ */
+const JOURNAL_ALIVE_FLOOR_HOURS = 2;
 
 const CACHED_SNAPSHOT: Map<string, AgentOutputSnapshot> = new Map();
 
@@ -148,10 +160,19 @@ export class AgentOutputMonitor {
 
       // Is the agent doing silent work? Journal writes/updates (consolidation,
       // ambient journaling) prove it's alive even with zero chat outbound — the
-      // false positive this monitor used to fire on. Treat a journal touch in
-      // the silence window as "alive". On ES error, don't suppress (preserve the
-      // failsafe) — a rare false alarm beats masking a real outage.
-      const silenceSince = new Date(Date.now() - silenceMs).toISOString();
+      // false positive this monitor used to fire on. On ES error, don't suppress
+      // (preserve the failsafe) — a rare false alarm beats masking a real outage.
+      //
+      // IMPORTANT: journaling is sparser than chat. Overnight the agent journals
+      // on a roughly hourly cadence (consolidation/ambient notes), so checking
+      // for journal activity only within the short chat-silence window
+      // (`silenceHours`, often ~0.5h) misses the agent's own liveness signal in
+      // the gaps between hourly journals and fires false "agent silent" alarms.
+      // Give the journal-alive check its own GENEROUS window (floored at
+      // JOURNAL_ALIVE_FLOOR_HOURS) so normal journaling reliably counts as alive,
+      // while a genuinely dead agent (no journal for hours) still trips the alert.
+      const journalWindowMs = Math.max(silenceMs, JOURNAL_ALIVE_FLOOR_HOURS * 60 * 60 * 1000);
+      const journalSince = new Date(Date.now() - journalWindowMs).toISOString();
       let journalActive = false;
       try {
         const journalResult = await this.es.count({
@@ -160,8 +181,8 @@ export class AgentOutputMonitor {
             bool: {
               filter: [{ term: { user_id: this.config.userId } }],
               should: [
-                { range: { created_at: { gte: silenceSince } } },
-                { range: { updated_at: { gte: silenceSince } } },
+                { range: { created_at: { gte: journalSince } } },
+                { range: { updated_at: { gte: journalSince } } },
               ],
               minimum_should_match: 1,
             },

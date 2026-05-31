@@ -220,6 +220,8 @@ cd ~/workspace/ll5-run
 ./ll5  # starts listener + Claude with greeting
 ```
 
+- **AgentOutputMonitor** (`scheduler/agent-output-monitor.ts`): the journal-alive liveness check uses a generous window `max(silenceHours, 2h)` (NOT the short chat-silence threshold) so the agent's ~hourly overnight journaling registers as alive and does not false-fire "LL5 agent silent". A genuine outage (no chat AND no journal for 2h+ while triggers land) still alerts.
+
 ## Multi-tenancy & scoping conventions (2026-05-29)
 
 Established by the cross-tenant contamination audit (`docs/reviews/2026-05-29/`, `docs/decisions/DECISION-001` & `DECISION-006`). Follow these for any new data-access code:

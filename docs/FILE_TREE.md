@@ -275,3 +275,5 @@ ll5/
 <!-- 2026-05-30 W5: docker/agent-runtime/ (Dockerfile.agent-tenant FROM untouched admin image + tenant-entrypoint.sh: 0600 env-file creds, agent token, ANTHROPIC_API_KEY, heartbeat + README); .github/workflows/build-agent-tenant.yml (manual). gateway SMTP EmailSender (nodemailer, SMTP_* env). orchestrator AGENT_IMAGE default -> ll5-agent-tenant:latest. -->
 
 <!-- 2026-05-30 W5b: SMTP wired live via Brevo (Coolify gateway service env). NOTE: deploy via git push so CI scp-s the repo compose; a Coolify-MCP deploy reverts the host compose to a stale stored copy and dropped the gateway SMTP env lines. -->
+
+<!-- 2026-05-31: AgentOutputMonitor false "agent silent" alarm fixed — journal-alive check now uses max(silenceHours,2h) window so ~hourly overnight journaling registers as alive; failsafe (no chat+no journal 2h+) preserved. scheduler/agent-output-monitor.ts + test. -->
