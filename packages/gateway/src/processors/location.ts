@@ -30,7 +30,7 @@ interface PlaceHit {
   };
 }
 
-interface PlaceMatchResult {
+export interface PlaceMatchResult {
   place_id: string;
   place_name: string;
 }
@@ -68,7 +68,7 @@ function haversine(
 /**
  * Query ll5_knowledge_places for a known place within 100m of the given coordinates.
  */
-async function matchKnownPlace(
+export async function matchKnownPlace(
   es: Client,
   userId: string,
   lat: number,

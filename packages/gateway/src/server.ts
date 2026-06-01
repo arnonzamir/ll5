@@ -31,6 +31,7 @@ import { processPhoneContacts } from './processors/phone-contacts.js';
 import { processPhoneStatus } from './processors/phone-status.js';
 import { processWifi } from './processors/wifi.js';
 import { processCameraPhoto } from './processors/camera-photo.js';
+import { processTrackedDevice } from './processors/findhub.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
@@ -138,6 +139,7 @@ async function processItem(
       phone_status: 'phone_status',
       wifi: 'wifi',
       camera_photo: 'camera_photos',
+      tracked_device: 'findhub',
     };
     const sourceKey = sourceMap[item.type];
     if (sourceKey && pgPool && !await isSourceEnabled(pgPool, userId, sourceKey)) {
@@ -179,6 +181,9 @@ async function processItem(
         break;
       case 'camera_photo':
         await processCameraPhoto(es, pgPool, userId, item);
+        break;
+      case 'tracked_device':
+        await processTrackedDevice(es, userId, item, config.geocodingApiKey);
         break;
     }
     return { index: itemIndex, type: item.type, status: 'ok' };
@@ -1426,7 +1431,7 @@ export async function startServer(config: EnvConfig): Promise<void> {
     logger.info(`[startServer][listen] Gateway listening on port ${config.port}`, {
       env: config.nodeEnv,
       tokenCount: Object.keys(config.webhookTokens).length,
-      webhook_item_types: ['location', 'message', 'calendar_event', 'device_calendar', 'phone_contact', 'phone_status', 'wifi'],
+      webhook_item_types: ['location', 'message', 'calendar_event', 'device_calendar', 'phone_contact', 'phone_status', 'wifi', 'tracked_device'],
     });
   });
 }

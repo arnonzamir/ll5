@@ -100,6 +100,28 @@ const PushCameraPhotoSchema = z.object({
   bucket: z.string().optional(),                     // album/folder (e.g. "Camera", "Screenshots")
 });
 
+// Tracked device — current location of a device or Bluetooth tag from the
+// Google Find Hub (Find My Device) network, pushed by the findhub-poller
+// sidecar. Unlike a `location` item (the USER's GPS), this is "where a THING
+// is": phones/tablets/watches on the account and registered trackers. Upserted
+// as current-state per device, NOT appended to the user's location stream.
+const PushTrackedDeviceSchema = z.object({
+  type: z.literal('tracked_device'),
+  // Stable Google canonic id for the device — the upsert key. Required so we
+  // never create duplicate docs for the same physical device.
+  device_id: z.string().min(1),
+  name: z.string().min(1),
+  device_type: z.enum(['phone', 'tablet', 'watch', 'tracker', 'unknown']).optional(),
+  // When the Find Hub network last located the device (network freshness).
+  timestamp: z.string().datetime({ offset: true }),
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+  accuracy_m: z.number().nonnegative().optional(),
+  battery_pct: z.number().min(0).max(100).optional(),
+  // Google's own semantic location label for the fix, when the network gives one.
+  semantic_name: z.string().nullable().optional(),
+});
+
 const PushItemSchema = z.discriminatedUnion('type', [
   PushLocationItemSchema,
   PushMessageItemSchema,
@@ -109,6 +131,7 @@ const PushItemSchema = z.discriminatedUnion('type', [
   PushPhoneStatusItemSchema,
   PushWifiItemSchema,
   PushCameraPhotoSchema,
+  PushTrackedDeviceSchema,
 ]);
 
 export const WebhookPayloadSchema = z.object({
@@ -126,6 +149,7 @@ export type PushPhoneContactItem = z.infer<typeof PushPhoneContactSchema>;
 export type PushPhoneStatusItem = z.infer<typeof PushPhoneStatusItemSchema>;
 export type PushWifiItem = z.infer<typeof PushWifiItemSchema>;
 export type PushCameraPhotoItem = z.infer<typeof PushCameraPhotoSchema>;
+export type PushTrackedDeviceItem = z.infer<typeof PushTrackedDeviceSchema>;
 export type PushItem = z.infer<typeof PushItemSchema>;
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 

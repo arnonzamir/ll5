@@ -17,6 +17,7 @@ import { ElasticsearchCalendarEventRepository } from './repositories/elasticsear
 import { ElasticsearchNotableEventRepository } from './repositories/elasticsearch/notable-event.repository.js';
 import { ElasticsearchPhoneStatusRepository } from './repositories/elasticsearch/phone-status.repository.js';
 import { ElasticsearchWifiRepository } from './repositories/elasticsearch/wifi.repository.js';
+import { ElasticsearchTrackedDeviceRepository } from './repositories/elasticsearch/tracked-device.repository.js';
 import { registerAllTools } from './tools/index.js';
 
 // Per-request userId storage using AsyncLocalStorage for proper request isolation.
@@ -89,6 +90,7 @@ export async function startServer(): Promise<void> {
     notableEvent: new ElasticsearchNotableEventRepository(esClient),
     phoneStatus: new ElasticsearchPhoneStatusRepository(esClient),
     wifi: new ElasticsearchWifiRepository(esClient),
+    trackedDevice: new ElasticsearchTrackedDeviceRepository(esClient),
   };
 
   logger.info('[startServer][init] Repositories initialized');
