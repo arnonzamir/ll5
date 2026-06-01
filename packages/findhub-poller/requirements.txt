@@ -1,0 +1,6 @@
+# LL5 findhub-poller dependencies.
+#
+# GoogleFindMyTools is installed straight from git (it is not published to
+# PyPI). Pin to a commit in the Dockerfile build arg for reproducibility; the
+# upstream API is experimental and changes often.
+requests>=2.31,<3

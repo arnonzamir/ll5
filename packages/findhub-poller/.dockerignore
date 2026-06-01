@@ -1,0 +1,6 @@
+.env
+Auth/
+secrets.json
+__pycache__/
+*.pyc
+README.md

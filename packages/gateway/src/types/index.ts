@@ -7,6 +7,7 @@ export {
   type PushPhoneStatusItem,
   type PushWifiItem,
   type PushCameraPhotoItem,
+  type PushTrackedDeviceItem,
   type PushItem,
   type WebhookPayload,
   type ItemResult,

@@ -7,6 +7,7 @@ import type { CalendarEventRepository } from '../repositories/interfaces/calenda
 import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
 import type { PhoneStatusRepository } from '../repositories/interfaces/phone-status.repository.js';
 import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
+import type { TrackedDeviceRepository } from '../repositories/interfaces/tracked-device.repository.js';
 import { LocationService } from '../services/location-service.js';
 import { registerLocationTools } from './location.js';
 import { registerMessageTools } from './messages.js';
@@ -18,6 +19,7 @@ import { registerMediaTools } from './media.js';
 import { registerGeoSearchTools } from './geo-search.js';
 import { registerPhoneStatusTools } from './phone-status.js';
 import { registerWifiTools } from './wifi.js';
+import { registerTrackedDeviceTools } from './tracked-devices.js';
 
 export interface Repositories {
   location: LocationRepository;
@@ -27,6 +29,7 @@ export interface Repositories {
   notableEvent: NotableEventRepository;
   phoneStatus: PhoneStatusRepository;
   wifi: WifiRepository;
+  trackedDevice: TrackedDeviceRepository;
 }
 
 export function registerAllTools(
@@ -66,4 +69,5 @@ export function registerAllTools(
   registerGeoSearchTools(server, getUserId);
   registerPhoneStatusTools(server, repos.phoneStatus, getUserId);
   registerWifiTools(server, repos.wifi, getUserId);
+  registerTrackedDeviceTools(server, repos.trackedDevice, getUserId);
 }

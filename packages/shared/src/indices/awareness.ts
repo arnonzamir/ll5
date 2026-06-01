@@ -178,6 +178,43 @@ export const AWARENESS_INDICES: IndexDefinition[] = [
       },
     },
   },
+  {
+    // Current location of trackable devices and Bluetooth tags reported by the
+    // Google Find Hub (Find My Device) network — phones/tablets/watches shared
+    // to the account and registered trackers (keys, bag, car tag, ESP32 etc.).
+    //
+    // This is deliberately SEPARATE from ll5_awareness_locations: those docs are
+    // "where the USER is" (append-only GPS stream). These are "where a THING is"
+    // and are upserted as current-state, one doc per device
+    // (id = `${user_id}:${device_id}`), since the Find Hub network only ever
+    // gives us the latest crowd-sourced fix per device. Source = the
+    // findhub-poller sidecar via the gateway `tracked_device` push item.
+    index: 'll5_awareness_tracked_devices',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        device_id: { type: 'keyword' },
+        name: {
+          type: 'text',
+          analyzer: 'multilingual',
+          fields: { keyword: { type: 'keyword' } },
+        },
+        device_type: { type: 'keyword' }, // phone | tablet | watch | tracker | unknown
+        location: { type: 'geo_point' },
+        accuracy: { type: 'float' },
+        battery_pct: { type: 'float' },
+        // Google's own semantic location label for the fix, when provided.
+        semantic_name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+        address: { type: 'text' },
+        matched_place_id: { type: 'keyword' },
+        matched_place: { type: 'keyword' },
+        // When the Find Hub network last located the device (network freshness).
+        last_seen: { type: 'date' },
+        // When we ingested this fix (pipeline freshness).
+        updated_at: { type: 'date' },
+      },
+    },
+  },
 ];
 
 /**
