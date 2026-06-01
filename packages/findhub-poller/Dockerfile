@@ -26,10 +26,13 @@ RUN git clone https://github.com/leonboe1/GoogleFindMyTools.git /opt/GoogleFindM
     && git checkout "$FINDMY_REF" \
     && pip install --no-cache-dir -r requirements.txt
 
-COPY requirements.txt ./
+# Build context is the REPO ROOT (CI builds every image with `context: .`), so
+# paths are repo-root-relative. Build locally with:
+#   docker build -f packages/findhub-poller/Dockerfile -t ll5-findhub-poller .
+COPY packages/findhub-poller/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY poller.py findhub_client.py ./
+COPY packages/findhub-poller/poller.py packages/findhub-poller/findhub_client.py ./
 
 # Auth/secrets.json is provided at runtime (mount or copy into this path).
 # GoogleFindMyTools reads it relative to its own dir.

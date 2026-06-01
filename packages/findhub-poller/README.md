@@ -36,11 +36,26 @@ generate the file on a desktop and bring it in.
 
 ```bash
 cp .env.example .env          # fill in gateway URL + ll5 token
-docker build -t ll5-findhub-poller .
+# Build from the REPO ROOT (the image's COPY paths are repo-root-relative,
+# matching how CI builds every image with context = .):
+docker build -f packages/findhub-poller/Dockerfile -t ll5-findhub-poller .
 docker run --rm --env-file .env \
   -v /abs/path/to/Auth:/opt/GoogleFindMyTools/Auth \
   ll5-findhub-poller
 ```
+
+## Secrets in production (no file mount)
+
+When the deploy host can't be given the `Auth/` dir directly, pass the
+already-authenticated `secrets.json` as a base64 env var — the poller writes it
+to `FINDHUB_SECRETS_PATH` (default `/opt/GoogleFindMyTools/Auth/secrets.json`)
+at startup:
+
+```bash
+FINDHUB_SECRETS_B64=$(base64 -i Auth/secrets.json)
+```
+
+This is how the LL5 compose deploy injects it (set on the `ll5` Coolify service).
 
 ## Configuration
 

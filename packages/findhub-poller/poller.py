@@ -19,6 +19,7 @@ Auth: GoogleFindMyTools reads its own Auth/secrets.json (generated once locally
 with Chrome — see README). Mount/copy it into the container before first run.
 """
 
+import base64
 import json
 import logging
 import os
@@ -28,6 +29,11 @@ import time
 import requests
 
 import findhub_client as fh
+
+# Where GoogleFindMyTools reads its auth cache (token_cache.py resolves
+# secrets.json relative to its own Auth/ dir). In the container that's
+# /opt/GoogleFindMyTools/Auth/secrets.json.
+DEFAULT_SECRETS_PATH = "/opt/GoogleFindMyTools/Auth/secrets.json"
 
 # A custom UA is REQUIRED: the gateway sits behind Cloudflare, which 403s the
 # default python-requests / urllib user agents (see the LL5 Cloudflare-403
@@ -124,11 +130,36 @@ def push_items(webhook_url: str, token: str, items: list[dict]) -> None:
         log.warning("Some items failed: %s", body.get("results"))
 
 
+def _materialize_secrets() -> None:
+    """Write Auth/secrets.json from FINDHUB_SECRETS_B64 if provided.
+
+    Lets the container receive the (already-authenticated) secrets.json as a
+    base64 env var instead of a mounted file — the only practical channel when
+    the deploy host can't be SSH'd to drop the file in place. No-op if the env
+    var is absent (e.g. a real file is mounted instead).
+    """
+    b64 = os.environ.get("FINDHUB_SECRETS_B64")
+    if not b64:
+        return
+    path = os.environ.get("FINDHUB_SECRETS_PATH", DEFAULT_SECRETS_PATH)
+    try:
+        raw = base64.b64decode(b64)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(raw)
+        log.info("Wrote secrets.json from FINDHUB_SECRETS_B64 to %s (%d bytes)", path, len(raw))
+    except Exception as err:
+        log.error("Failed to materialize secrets.json from FINDHUB_SECRETS_B64: %s", err)
+        sys.exit(2)
+
+
 def main() -> None:
     logging.basicConfig(
         level=getattr(logging, (_env("LOG_LEVEL", default="info") or "info").upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+    _materialize_secrets()
 
     webhook_url = _env("LL5_GATEWAY_WEBHOOK_URL", required=True)
     token = _env("LL5_WEBHOOK_TOKEN", required=True)

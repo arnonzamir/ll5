@@ -365,6 +365,32 @@ services:
       - "traefik.http.routers.ll5-gateway.tls.certresolver=letsencrypt"
       - "traefik.http.services.ll5-gateway.loadbalancer.server.port=3000"
 
+  # ---------- Find Hub poller (Python sidecar) ----------
+  # Polls Google Find Hub via GoogleFindMyTools and POSTs tracked_device items
+  # to the gateway over the INTERNAL network (no Cloudflare). secrets.json is
+  # injected as base64 (FINDHUB_SECRETS_B64) and written at startup, since the
+  # host can't be SSH'd to drop the Auth/ dir. See packages/findhub-poller/.
+  findhub-poller:
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-findhub-poller:latest
+    environment:
+      TZ: ${TZ:-Asia/Jerusalem}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LL5_GATEWAY_WEBHOOK_URL: http://gateway:3000/webhook
+      LL5_WEBHOOK_TOKEN: ${FINDHUB_WEBHOOK_TOKEN}
+      FINDHUB_SECRETS_B64: ${FINDHUB_SECRETS_B64}
+      FINDHUB_POLL_INTERVAL_SEC: ${FINDHUB_POLL_INTERVAL_SEC:-900}
+      FINDHUB_LOCATE_TIMEOUT_SEC: ${FINDHUB_LOCATE_TIMEOUT_SEC:-30}
+      FINDHUB_DEVICE_TYPES: ${FINDHUB_DEVICE_TYPES:-}
+    depends_on:
+      gateway:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
   # ---------- Dashboard ----------
 
   dashboard:

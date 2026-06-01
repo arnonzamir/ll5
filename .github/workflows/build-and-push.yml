@@ -26,7 +26,7 @@ jobs:
 
       - id: set-matrix
         run: |
-          PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "gateway" "dashboard")
+          PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "gateway" "dashboard" "findhub-poller")
 
           # On manual dispatch with specific packages, use those
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.packages }}" ]]; then
@@ -138,22 +138,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # findhub-poller is Python — skip all Node build steps for it.
       - name: Set up Node.js
+        if: matrix.package != 'findhub-poller'
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
       - name: Install dependencies
+        if: matrix.package != 'findhub-poller'
         run: npm ci
 
       - name: Build shared package
+        if: matrix.package != 'findhub-poller'
         run: npm run build --workspace=packages/shared
 
       - name: Typecheck target package
+        if: matrix.package != 'findhub-poller'
         run: npx tsc --noEmit --project packages/${{ matrix.package }}/tsconfig.json
 
       - name: Build target package
+        if: matrix.package != 'findhub-poller'
         run: npm run build --workspace=packages/${{ matrix.package }}
 
       - name: Log in to GHCR
@@ -171,6 +177,9 @@ jobs:
         run: |
           if [[ "${{ matrix.package }}" == "gateway" ]]; then
             echo "file=docker/Dockerfile.gateway" >> "$GITHUB_OUTPUT"
+            echo "build_args=" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ matrix.package }}" == "findhub-poller" ]]; then
+            echo "file=packages/findhub-poller/Dockerfile" >> "$GITHUB_OUTPUT"
             echo "build_args=" >> "$GITHUB_OUTPUT"
           elif [[ "${{ matrix.package }}" == "dashboard" ]]; then
             echo "file=docker/Dockerfile.dashboard" >> "$GITHUB_OUTPUT"
