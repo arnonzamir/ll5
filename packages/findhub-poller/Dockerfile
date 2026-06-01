@@ -5,7 +5,8 @@
 FROM python:3.12-slim AS runtime
 
 # Build-time pin. Override with --build-arg FINDMY_REF=<sha>.
-ARG FINDMY_REF=main
+# Pinned to the commit the local auth (secrets.json) was generated against.
+ARG FINDMY_REF=d46e952
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
