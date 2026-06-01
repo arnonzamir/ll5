@@ -250,7 +250,7 @@ jobs:
             # Only pull our GHCR-built images — never databases (postgres, ES) or
             # third-party images (evolution). A new patch of postgres:16-alpine
             # would otherwise trigger a container recreate → downtime.
-            for img in gateway dashboard personal-knowledge gtd awareness google messaging health; do
+            for img in gateway dashboard personal-knowledge gtd awareness google messaging health findhub-poller; do
               docker pull ghcr.io/arnonzamir/ll5-$img:latest 2>/dev/null || true
             done
             # NEVER use --remove-orphans here. On 2026-05-18 a --remove-orphans run
