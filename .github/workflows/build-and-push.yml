@@ -233,11 +233,17 @@ jobs:
           # next pull after expiry fails `denied`. This was the recurring GHCR
           # outage — keep this on GHCR_READ_PAT. See HANDOFF "GHCR credential".
           GHCR_TOKEN: ${{ secrets.GHCR_READ_PAT }}
+          # findhub-poller secrets. Coolify does NOT sync API-added env vars to
+          # the on-host .env that `docker compose up` reads, so we inject them
+          # here from GitHub secrets (idempotent upsert below).
+          FINDHUB_WEBHOOK_TOKEN: ${{ secrets.FINDHUB_WEBHOOK_TOKEN }}
+          FINDHUB_SECRETS_B64: ${{ secrets.FINDHUB_SECRETS_B64 }}
+          FINDHUB_DEVICE_TYPES: ${{ secrets.FINDHUB_DEVICE_TYPES }}
         with:
           host: ${{ vars.SERVER_HOST }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: GHCR_TOKEN
+          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES
           command_timeout: 15m
           script: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u arnonzamir --password-stdin
@@ -246,6 +252,22 @@ jobs:
             # docker-compose.prod.yml; we want docker-compose.yml).
             if [ -f docker-compose.prod.yml ]; then
               mv docker-compose.prod.yml docker-compose.yml
+            fi
+            # Inject findhub-poller env into .env (idempotent: strip old FINDHUB_
+            # lines, re-append). Only when the token secret is present, so a
+            # misconfigured run never blanks a working .env.
+            if [ -n "$FINDHUB_WEBHOOK_TOKEN" ]; then
+              touch .env
+              grep -v '^FINDHUB_' .env > .env.findhub.tmp 2>/dev/null || true
+              mv .env.findhub.tmp .env
+              {
+                printf 'FINDHUB_WEBHOOK_TOKEN=%s\n' "$FINDHUB_WEBHOOK_TOKEN"
+                printf 'FINDHUB_SECRETS_B64=%s\n' "$FINDHUB_SECRETS_B64"
+                printf "FINDHUB_DEVICE_TYPES='%s'\n" "$FINDHUB_DEVICE_TYPES"
+              } >> .env
+              echo "Injected FINDHUB_* into .env"
+            else
+              echo "WARN: FINDHUB_WEBHOOK_TOKEN secret empty — leaving .env untouched"
             fi
             # Only pull our GHCR-built images — never databases (postgres, ES) or
             # third-party images (evolution). A new patch of postgres:16-alpine
