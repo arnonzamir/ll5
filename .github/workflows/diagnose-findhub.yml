@@ -1,0 +1,31 @@
+name: Diagnose findhub-poller
+
+# Manual, read-only diagnostic: SSH to the box (reusing the deploy key) and dump
+# the findhub-poller container state + logs, plus which FINDHUB_* env KEYS are
+# present in the on-host .env (names only, never values). No mutation.
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH diagnose
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ vars.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            cd /data/coolify/services/${{ secrets.COOLIFY_SERVICE_UUID }} || { echo "service dir missing"; exit 0; }
+            echo "=== FINDHUB_* keys present in .env (names only) ==="
+            grep -oE '^FINDHUB_[A-Z_]+=' .env 2>/dev/null | sort || echo "(none)"
+            echo "FINDHUB key count: $(grep -c 'FINDHUB_' .env 2>/dev/null || echo 0)"
+            echo "LL5_WEBHOOK / token presence (name only): $(grep -oE '^FINDHUB_WEBHOOK_TOKEN=' .env 2>/dev/null || echo MISSING)"
+            echo
+            echo "=== findhub-poller container state ==="
+            docker compose ps findhub-poller 2>&1 || docker ps -a --filter name=findhub --format '{{.Names}}\t{{.Status}}'
+            echo
+            echo "=== findhub-poller logs (tail 100) ==="
+            docker compose logs --tail 100 findhub-poller 2>&1 || docker logs --tail 100 "$(docker ps -aqf name=findhub | head -1)" 2>&1 || echo "(no container)"
