@@ -14,6 +14,7 @@ export interface DataSources {
   calendar: DataSourceConfig;
   health: DataSourceConfig;
   whatsapp: DataSourceConfig;
+  findhub: DataSourceConfig;
 }
 
 export const DEFAULTS: DataSources = {
@@ -22,4 +23,14 @@ export const DEFAULTS: DataSources = {
   calendar: { enabled: true },
   health: { enabled: true },
   whatsapp: { enabled: true },
+  findhub: { enabled: true },
 };
+
+// Sources collected on the phone (toggling these queues an Android device
+// command). Server-side sources like `findhub` (the poller) are NOT here —
+// toggling them only gates gateway ingestion.
+export const PHONE_COLLECTED_SOURCES: ReadonlySet<keyof DataSources> = new Set([
+  "gps",
+  "im_capture",
+  "calendar",
+]);

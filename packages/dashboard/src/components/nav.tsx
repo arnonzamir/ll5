@@ -35,6 +35,7 @@ import {
   ToggleLeft,
   Sparkles,
   Bot,
+  Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logoutAction } from "@/app/(user)/logout-action";
@@ -93,6 +94,7 @@ function buildNavGroups(): NavGroup[] {
         { href: "/narratives", label: "Narratives", icon: Sparkles },
         { href: "/settings/contacts", label: "Contacts & Routing", icon: BookUser },
         { href: "/locations", label: "Locations", icon: Navigation },
+        { href: "/tracked-devices", label: "Tracked Devices", icon: Tag },
         { href: "/places", label: "Places", icon: MapPin },
       ],
     },

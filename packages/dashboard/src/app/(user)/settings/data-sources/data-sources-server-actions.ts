@@ -22,6 +22,7 @@ export async function fetchDataSources(): Promise<DataSources> {
       calendar: ds.calendar ?? DEFAULTS.calendar,
       health: ds.health ?? DEFAULTS.health,
       whatsapp: ds.whatsapp ?? DEFAULTS.whatsapp,
+      findhub: ds.findhub ?? DEFAULTS.findhub,
     };
   } catch {
     return DEFAULTS;

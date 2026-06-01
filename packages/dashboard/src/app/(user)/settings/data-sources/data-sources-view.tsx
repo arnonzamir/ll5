@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, MapPin, MessageSquare, Calendar, Heart, Phone } from "lucide-react";
+import { RefreshCw, MapPin, MessageSquare, Calendar, Heart, Phone, Tag } from "lucide-react";
 import {
   fetchDataSources,
   updateDataSources,
   syncDataSourceToDevice,
 } from "./data-sources-server-actions";
-import { DEFAULTS, type DataSources } from "./data-sources-types";
+import { DEFAULTS, PHONE_COLLECTED_SOURCES, type DataSources } from "./data-sources-types";
 
 const SOURCE_META: Array<{
   key: keyof DataSources;
@@ -21,6 +21,7 @@ const SOURCE_META: Array<{
   { key: "calendar", label: "Calendar Events", description: "Phone pushes calendar events for schedule awareness", icon: Calendar },
   { key: "health", label: "Health Data", description: "Garmin and other health sources sync sleep, HR, activities", icon: Heart },
   { key: "whatsapp", label: "WhatsApp Messages", description: "Evolution API webhook processes WhatsApp messages", icon: Phone },
+  { key: "findhub", label: "Find Hub Trackers", description: "Google Find Hub locations for Bluetooth trackers and devices (keys, bag, car, tablets)", icon: Tag },
 ];
 
 export function DataSourcesView() {
@@ -43,8 +44,12 @@ export function DataSourcesView() {
 
     setSaving(true);
     await updateDataSources(updated);
-    // Sync to Android app via device command (fire-and-forget)
-    syncDataSourceToDevice(key, enabled);
+    // Sync to Android app via device command (fire-and-forget) — only for
+    // phone-collected sources. Server-side sources (e.g. findhub) are gated at
+    // the gateway only; the phone has nothing to toggle.
+    if (PHONE_COLLECTED_SOURCES.has(key)) {
+      syncDataSourceToDevice(key, enabled);
+    }
     setSaving(false);
   }
 

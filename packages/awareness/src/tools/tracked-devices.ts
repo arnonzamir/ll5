@@ -17,6 +17,12 @@ function presentDevice(d: TrackedDevice) {
     d.address ??
     `${d.location.lat.toFixed(5)}, ${d.location.lon.toFixed(5)}`;
 
+  // `last_seen` is when the Find Hub NETWORK located the device; `updated_at`
+  // is when the poller last INGESTED a fix. They differ when the network has no
+  // newer report — surfacing both lets a reader tell "stale because nobody saw
+  // it" from "stale because the poller stopped".
+  const sinceUpdateMs = d.updatedAt ? Date.now() - new Date(d.updatedAt).getTime() : null;
+
   return {
     name: d.name,
     device_type: d.deviceType,
@@ -29,6 +35,8 @@ function presentDevice(d: TrackedDevice) {
     last_seen: d.lastSeen,
     age_minutes: Math.round(ageMs / 60_000),
     freshness: computeFreshness(d.lastSeen),
+    updated_at: d.updatedAt ?? null,
+    since_update_minutes: sinceUpdateMs != null ? Math.round(sinceUpdateMs / 60_000) : null,
   };
 }
 
