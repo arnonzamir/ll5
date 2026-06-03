@@ -1,14 +1,17 @@
 import type { Client } from '@elastic/elasticsearch';
 import type { LocationRepository } from '../repositories/interfaces/location.repository.js';
 import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
+import {
+  resolveLocation,
+  GPS_FRESH_MS,
+  GPS_STALE_USABLE_MS,
+  WIFI_FRESH_MS,
+  type GpsSignal,
+  type WifiSignal,
+  type Confidence,
+  type LocationSource,
+} from '@ll5/shared';
 import { logger } from '../utils/logger.js';
-
-const GPS_FRESH_MS = 5 * 60 * 1000;
-const GPS_STALE_USABLE_MS = 15 * 60 * 1000;
-const WIFI_FRESH_MS = 10 * 60 * 1000;
-
-type Confidence = 'high' | 'medium' | 'low' | 'unknown';
-type Source = 'gps' | 'wifi' | 'gps+wifi' | 'stale_gps' | 'none';
 
 export interface GpsBlock {
   lat: number;
@@ -38,15 +41,14 @@ export interface CurrentLocation {
   place: string | null;
   place_id: string | null;
   confidence: Confidence;
-  source: Source;
+  source: LocationSource;
   reasoning: string;
   gps?: GpsBlock;
   wifi?: WifiBlock;
   /**
    * Additive context only: set when GPS is not fresh and the most recent wifi
-   * event is a recent DISCONNECT whose BSSID maps to a known place. Never
-   * changes the chosen place/confidence/source — it is a "where the user was
-   * just before this stale/unknown reading" hint.
+   * event is a recent DISCONNECT whose BSSID maps to a known place. A "where the
+   * user was just before this stale/unknown reading" hint.
    */
   recently_left?: RecentlyLeft;
 }
@@ -63,6 +65,13 @@ interface NetworkDoc {
   }>;
 }
 
+/**
+ * Read-path location resolver for the awareness MCP. It fetches the latest GPS +
+ * wifi from the repositories, resolves the BSSID→place binding, then delegates
+ * the actual "where am I" decision to the shared canonical resolver
+ * (`@ll5/shared` `resolveLocation`) — the exact same brain the gateway's
+ * write/transition path uses, so the agent and the notifications can't disagree.
+ */
 export class LocationService {
   constructor(
     private readonly locationRepo: LocationRepository,
@@ -78,178 +87,96 @@ export class LocationService {
 
     const now = Date.now();
 
+    // --- GPS: response block + shared signal ---
+    const gpsAgeMs = latestGps ? now - new Date(latestGps.timestamp).getTime() : 0;
+    const gpsFresh = !!latestGps && gpsAgeMs < GPS_FRESH_MS;
+
     const gpsBlock: GpsBlock | undefined = latestGps
       ? {
           lat: latestGps.location.lat,
           lon: latestGps.location.lon,
           accuracy_m: latestGps.accuracy,
-          age_s: Math.floor((now - new Date(latestGps.timestamp).getTime()) / 1000),
+          age_s: Math.floor(gpsAgeMs / 1000),
           freshness:
-            now - new Date(latestGps.timestamp).getTime() < GPS_FRESH_MS
-              ? 'fresh'
-              : now - new Date(latestGps.timestamp).getTime() < GPS_STALE_USABLE_MS
-                ? 'stale'
-                : 'very_stale',
+            gpsAgeMs < GPS_FRESH_MS ? 'fresh' : gpsAgeMs < GPS_STALE_USABLE_MS ? 'stale' : 'very_stale',
           matched_place: latestGps.matchedPlace ?? null,
           address: latestGps.address ?? null,
         }
       : undefined;
 
+    const gpsSignal: GpsSignal | undefined = latestGps
+      ? {
+          lat: latestGps.location.lat,
+          lon: latestGps.location.lon,
+          accuracyM: latestGps.accuracy,
+          ageMs: gpsAgeMs,
+          matchedPlace: latestGps.matchedPlace
+            ? { placeId: latestGps.matchedPlaceId ?? '', placeName: latestGps.matchedPlace }
+            : null,
+        }
+      : undefined;
+
+    // --- Wifi: resolve BSSID→place, build response block + shared signal ---
     let wifiBlock: WifiBlock | undefined;
-    let recentlyLeft: RecentlyLeft | undefined;
-    if (latestWifi && latestWifi.connected) {
+    let wifiSignal: WifiSignal | undefined;
+    if (latestWifi) {
       const wifiAgeMs = now - new Date(latestWifi.timestamp).getTime();
-      const placeFromBssid =
-        latestWifi.bssid && wifiAgeMs < WIFI_FRESH_MS
-          ? await this.lookupBssidPlace(userId, latestWifi.bssid)
-          : null;
-      wifiBlock = {
+      // Resolve only when fresh, and (connected, or disconnected-but-GPS-not-fresh
+      // for the recently-left hint) — mirrors the prior behaviour's ES-call gating.
+      const shouldResolve =
+        !!latestWifi.bssid && wifiAgeMs < WIFI_FRESH_MS && (latestWifi.connected || !gpsFresh);
+      const bssidPlace = shouldResolve
+        ? await this.lookupBssidPlace(userId, latestWifi.bssid!)
+        : null;
+
+      if (latestWifi.connected) {
+        wifiBlock = {
+          bssid: latestWifi.bssid,
+          ssid: latestWifi.ssid,
+          connected: latestWifi.connected,
+          age_s: Math.floor(wifiAgeMs / 1000),
+          place_from_bssid: bssidPlace,
+        };
+      }
+
+      wifiSignal = {
         bssid: latestWifi.bssid,
         ssid: latestWifi.ssid,
         connected: latestWifi.connected,
-        age_s: Math.floor(wifiAgeMs / 1000),
-        place_from_bssid: placeFromBssid,
-      };
-    } else if (latestWifi && !latestWifi.connected) {
-      // Disconnected wifi: ignored for the place decision, but a recent
-      // disconnect from a known network is a useful "recently left" hint when
-      // GPS is stale/unknown. Only resolve when GPS is NOT fresh (cheap guard
-      // first) and the disconnect is recent with a BSSID that maps to a place.
-      const gpsFresh = gpsBlock?.freshness === 'fresh';
-      const wifiAgeMs = now - new Date(latestWifi.timestamp).getTime();
-      if (!gpsFresh && latestWifi.bssid && wifiAgeMs < WIFI_FRESH_MS) {
-        const place = await this.lookupBssidPlace(userId, latestWifi.bssid);
-        if (place) {
-          recentlyLeft = {
-            place_name: place.place_name,
-            place_id: place.place_id,
-            age_s: Math.floor(wifiAgeMs / 1000),
-          };
-          logger.debug('[LocationService][getCurrentLocation] recently_left hint added', {
-            place_name: place.place_name,
-            age_s: recentlyLeft.age_s,
-          });
-        }
-      }
-    }
-
-    return this.fuse(gpsBlock, wifiBlock, recentlyLeft);
-  }
-
-  private fuse(
-    gps: GpsBlock | undefined,
-    wifi: WifiBlock | undefined,
-    recentlyLeft?: RecentlyLeft,
-  ): CurrentLocation {
-    const result = this.decide(gps, wifi);
-    // recentlyLeft is only ever populated when GPS is NOT fresh (the caller
-    // guards on this), so it never collides with a confident fresh-GPS answer.
-    // Attach it as additive context to the stale/unknown tiers.
-    if (recentlyLeft) {
-      result.recently_left = recentlyLeft;
-      result.reasoning += `; recently left ${recentlyLeft.place_name} (wifi disconnect ${recentlyLeft.age_s}s ago)`;
-    }
-    return result;
-  }
-
-  private decide(gps: GpsBlock | undefined, wifi: WifiBlock | undefined): CurrentLocation {
-    const gpsFresh = gps?.freshness === 'fresh';
-    const gpsUsable = gps && gps.freshness !== 'very_stale';
-    const wifiFresh = wifi && wifi.age_s * 1000 < WIFI_FRESH_MS;
-    const wifiPlace = wifi?.place_from_bssid ?? null;
-
-    // 1. Fresh GPS + matched place + wifi agrees
-    if (
-      gpsFresh &&
-      gps.matched_place &&
-      wifiFresh &&
-      wifiPlace?.place_name === gps.matched_place
-    ) {
-      return {
-        place: gps.matched_place,
-        place_id: wifiPlace.place_id,
-        confidence: 'high',
-        source: 'gps+wifi',
-        reasoning: `GPS (${gps.age_s}s) at ${gps.matched_place}, wifi confirms`,
-        gps,
-        wifi,
+        ageMs: wifiAgeMs,
+        // lookupBssidPlace already applies the manual / >=3-observations threshold,
+        // so any place it returns is confident.
+        bssidPlace: bssidPlace
+          ? { placeId: bssidPlace.place_id, placeName: bssidPlace.place_name, confident: true }
+          : null,
       };
     }
 
-    // 2. Fresh GPS + matched place
-    if (gpsFresh && gps.matched_place) {
-      return {
-        place: gps.matched_place,
-        place_id: null,
-        confidence: 'high',
-        source: 'gps',
-        reasoning: `GPS fix (${gps.age_s}s old) at ${gps.matched_place}`,
-        gps,
-        wifi,
-      };
+    // No `prior` on the read path → pure fusion (no departure hysteresis).
+    const resolved = resolveLocation({ gps: gpsSignal, wifi: wifiSignal });
+
+    if (resolved.source === 'wifi' || resolved.source === 'gps+wifi') {
+      logger.debug('[LocationService][getCurrentLocation] resolved with wifi assist', {
+        source: resolved.source,
+        confidence: resolved.confidence,
+      });
     }
 
-    // 3. Stale GPS, wifi fresh, BSSID resolves
-    if (!gpsFresh && wifiFresh && wifiPlace) {
-      return {
-        place: wifiPlace.place_name,
-        place_id: wifiPlace.place_id,
-        confidence: 'medium',
-        source: 'wifi',
-        reasoning: `GPS stale (${gps?.age_s ?? 'n/a'}s), wifi BSSID maps to ${wifiPlace.place_name}`,
-        gps,
-        wifi,
-      };
-    }
-
-    // 4. Fresh GPS without matched place + wifi resolves
-    if (gpsFresh && !gps.matched_place && wifiFresh && wifiPlace) {
-      return {
-        place: wifiPlace.place_name,
-        place_id: wifiPlace.place_id,
-        confidence: 'medium',
-        source: 'gps+wifi',
-        reasoning: `GPS fresh but no place match; wifi BSSID → ${wifiPlace.place_name}`,
-        gps,
-        wifi,
-      };
-    }
-
-    // 5. Fresh GPS without matched place, no wifi
-    if (gpsFresh && !gps.matched_place) {
-      return {
-        place: null,
-        place_id: null,
-        confidence: 'low',
-        source: 'gps',
-        reasoning: `GPS fresh at (${gps.lat.toFixed(4)}, ${gps.lon.toFixed(4)}) — no known place`,
-        gps,
-        wifi,
-      };
-    }
-
-    // 6. Stale GPS, no wifi signal
-    if (gpsUsable) {
-      return {
-        place: gps.matched_place ?? null,
-        place_id: null,
-        confidence: 'low',
-        source: 'stale_gps',
-        reasoning: `GPS stale (${gps.age_s}s old), no wifi`,
-        gps,
-        wifi,
-      };
-    }
-
-    // 7. Nothing
     return {
-      place: null,
-      place_id: null,
-      confidence: 'unknown',
-      source: 'none',
-      reasoning: 'No recent GPS or wifi signal',
-      gps,
-      wifi,
+      place: resolved.place,
+      place_id: resolved.placeId,
+      confidence: resolved.confidence,
+      source: resolved.source,
+      reasoning: resolved.reasoning,
+      gps: gpsBlock,
+      wifi: wifiBlock,
+      recently_left: resolved.recentlyLeft
+        ? {
+            place_name: resolved.recentlyLeft.placeName,
+            place_id: resolved.recentlyLeft.placeId,
+            age_s: resolved.recentlyLeft.ageS,
+          }
+        : undefined,
     };
   }
 
@@ -262,9 +189,6 @@ export class LocationService {
       const got = await this.es.get<NetworkDoc>({ index: 'll5_knowledge_networks', id: docId });
       const src = got._source;
       if (!src) return null;
-      // Recheck ownership: the id is server-derived, but mirror the network
-      // repository discipline so a doc whose stored user_id diverges from the
-      // caller is never leaked across tenants.
       if (src.user_id !== userId) {
         logger.warn('cross_user_access_denied', {
           actor_user_id: userId,

@@ -19,6 +19,10 @@ export * from './mcp/index.js';
 // Common utilities
 export * from './utils/index.js';
 
+// Location domain: the canonical resolver + all thresholds (constants, geo,
+// filtering, fusion). Imported by gateway (write path) and awareness (read path).
+export * from './location/index.js';
+
 // Audit log
 export * from './audit.js';
 

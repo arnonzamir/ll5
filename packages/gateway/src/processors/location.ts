@@ -9,6 +9,18 @@ import { insertSystemMessage } from '../utils/system-message.js';
 import { sendFCMNotification } from '../utils/fcm-sender.js';
 import { writeNotableEvent } from './notable.js';
 import { gatewayKeyMutex } from '../utils/key-mutex.js';
+import {
+  resolveLocation,
+  gateAccuracy,
+  detectDriftGlitch,
+  haversineMeters,
+  DEFAULT_PLACE_RADIUS_M,
+  TRANSITION_DEDUP_MS,
+  WIFI_FRESH_MS,
+  BSSID_MIN_OBSERVATIONS,
+  type WifiSignal,
+  type PriorLabel,
+} from '@ll5/shared';
 
 /**
  * A point as stored, threaded as the in-batch predecessor for the next item's
@@ -27,8 +39,15 @@ interface PlaceHit {
   _source?: {
     name?: string;
     user_id?: string;
+    geo?: { lat: number; lon: number };
+    radius_m?: number;
   };
 }
+
+// Candidate search cap — covers the largest configurable per-place radius (the
+// upsert tool caps radius_m at 2000m). We then post-filter by each place's own
+// radius (default DEFAULT_PLACE_RADIUS_M).
+const PLACE_CANDIDATE_CAP_M = 2000;
 
 export interface PlaceMatchResult {
   place_id: string;
@@ -42,27 +61,6 @@ interface PreviousLocationHit {
     matched_place?: string;
     timestamp?: string;
   };
-}
-
-/**
- * Haversine distance between two points in km.
- */
-function haversine(
-  a: { lat: number; lon: number },
-  b: { lat: number; lon: number },
-): number {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
-  const sinLat = Math.sin(dLat / 2);
-  const sinLon = Math.sin(dLon / 2);
-  const h =
-    sinLat * sinLat +
-    Math.cos((a.lat * Math.PI) / 180) *
-      Math.cos((b.lat * Math.PI) / 180) *
-      sinLon *
-      sinLon;
-  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 /**
@@ -81,24 +79,25 @@ export async function matchKnownPlace(
         bool: {
           filter: [
             { term: { user_id: userId } },
-            {
-              geo_distance: {
-                distance: '100m',
-                geo: { lat, lon },
-              },
-            },
+            { geo_distance: { distance: `${PLACE_CANDIDATE_CAP_M}m`, geo: { lat, lon } } },
           ],
         },
       },
-      size: 1,
+      sort: [{ _geo_distance: { geo: { lat, lon }, order: 'asc', unit: 'm' } }],
+      size: 10,
     });
 
+    // Return the NEAREST place whose own radius (per-place radius_m, default
+    // DEFAULT_PLACE_RADIUS_M) actually contains the point.
     const hits = response.hits.hits as PlaceHit[];
-    if (hits.length > 0 && hits[0]._id && hits[0]._source?.name) {
-      return {
-        place_id: hits[0]._id,
-        place_name: hits[0]._source.name,
-      };
+    for (const hit of hits) {
+      const src = hit._source;
+      if (!hit._id || !src?.name || !src.geo) continue;
+      const radius = typeof src.radius_m === 'number' && src.radius_m > 0 ? src.radius_m : DEFAULT_PLACE_RADIUS_M;
+      const dist = haversineMeters({ lat, lon }, { lat: src.geo.lat, lon: src.geo.lon });
+      if (dist <= radius) {
+        return { place_id: hit._id, place_name: src.name };
+      }
     }
 
     return null;
@@ -146,6 +145,80 @@ async function getPreviousLocation(
 }
 
 
+interface NetworkDoc {
+  user_id?: string;
+  manual_place_id?: string;
+  manual_place_name?: string;
+  place_observations?: Array<{ place_id: string; place_name: string; count: number }>;
+}
+
+/**
+ * Build the latest-wifi signal for the resolver: the most recent wifi event plus
+ * its BSSID→place binding (manual, or a learned place with >= BSSID_MIN_OBSERVATIONS
+ * observations). Resilient — any failure yields `undefined` so a wifi hiccup never
+ * blocks a location push. This is what lets the transition path anchor to a place
+ * by wifi and stop home GPS-jitter flapping.
+ */
+async function getWifiSignal(es: Client, userId: string): Promise<WifiSignal | undefined> {
+  try {
+    const res = await es.search({
+      index: 'll5_awareness_wifi_connections',
+      query: { bool: { filter: [{ term: { user_id: userId } }] } },
+      sort: [{ timestamp: { order: 'desc' } }],
+      size: 1,
+    });
+    const hit = res.hits.hits[0]?._source as
+      | { bssid?: string; ssid?: string; connected?: boolean; timestamp?: string }
+      | undefined;
+    if (!hit?.timestamp) return undefined;
+
+    const ageMs = Date.now() - new Date(hit.timestamp).getTime();
+    let bssidPlace: WifiSignal['bssidPlace'] = null;
+    if (hit.bssid && ageMs < WIFI_FRESH_MS) {
+      bssidPlace = await resolveBssidPlace(es, userId, hit.bssid);
+    }
+    return {
+      bssid: hit.bssid ?? null,
+      ssid: hit.ssid ?? null,
+      connected: hit.connected === true,
+      ageMs,
+      bssidPlace,
+    };
+  } catch (err) {
+    logger.debug('[location][getWifiSignal] failed (continuing without wifi)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+}
+
+/** Resolve a BSSID to a confident known place (manual binding or >= N observations). */
+async function resolveBssidPlace(
+  es: Client,
+  userId: string,
+  bssid: string,
+): Promise<WifiSignal['bssidPlace']> {
+  try {
+    const got = await es.get<NetworkDoc>({ index: 'll5_knowledge_networks', id: `${userId}::${bssid}` });
+    const src = got._source;
+    if (!src || src.user_id !== userId) return null;
+    if (src.manual_place_id && src.manual_place_name) {
+      return { placeId: src.manual_place_id, placeName: src.manual_place_name, confident: true };
+    }
+    if (src.place_observations && src.place_observations.length > 0) {
+      const dominant = [...src.place_observations].sort((a, b) => b.count - a.count)[0];
+      if (dominant.count >= BSSID_MIN_OBSERVATIONS) {
+        return { placeId: dominant.place_id, placeName: dominant.place_name, confident: true };
+      }
+    }
+    return null;
+  } catch (err: unknown) {
+    const e = err as { meta?: { statusCode?: number } };
+    if (e.meta?.statusCode === 404) return null;
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Place/region state machine.
 //
@@ -158,9 +231,7 @@ async function getPreviousLocation(
 // event on every in-place jitter push.
 // ---------------------------------------------------------------------------
 const LOCATION_STATE_INDEX = 'll5_awareness_location_state';
-// Anti-flap: don't re-push the same label within this window (handles A→B→A
-// oscillation at a boundary, and survives a quick out-and-back).
-const TRANSITION_DEDUP_MS = 5 * 60 * 1000;
+// TRANSITION_DEDUP_MS (anti-flap window) now lives in @ll5/shared.
 
 interface LocationState {
   user_id: string;
@@ -181,20 +252,6 @@ interface CurrentLabel {
   kind: 'place' | 'city';
   place_id?: string;
   city?: string;
-}
-
-/** The user's current semantic label: known place > city; null = in transit. */
-export function deriveLabel(
-  placeMatch: PlaceMatchResult | null,
-  geocode: GeocodingResult | null,
-): CurrentLabel | null {
-  if (placeMatch) {
-    return { label: placeMatch.place_name, kind: 'place', place_id: placeMatch.place_id, city: geocode?.city };
-  }
-  if (geocode?.city) {
-    return { label: geocode.city, kind: 'city', city: geocode.city };
-  }
-  return null; // unknown / in transit — awareness only, no push
 }
 
 /** Friendly push body. "Home" → "You're home"; place → "You're at X"; city → "You're in X". */
@@ -237,13 +294,14 @@ async function detectPlaceTransitionAndNotify(
   item: PushLocationItem,
   geocode: GeocodingResult | null,
   placeMatch: PlaceMatchResult | null,
+  wifiSignal: WifiSignal | undefined,
 ): Promise<void> {
   // Serialize the per-user state read-modify-write (G5): concurrent webhooks for
   // the same user must not interleave a read with another's write, or we'd
   // double-fire the transition push / clobber last_push_at.
   try {
     await gatewayKeyMutex.runExclusive(`location-state:${userId}`, async () => {
-      await runTransition(es, pool, userId, item, geocode, placeMatch);
+      await runTransition(es, pool, userId, item, geocode, placeMatch, wifiSignal);
     });
   } catch (err) {
     logger.warn('[location][transition] transition detection failed (non-blocking)', {
@@ -259,13 +317,41 @@ async function runTransition(
   item: PushLocationItem,
   geocode: GeocodingResult | null,
   placeMatch: PlaceMatchResult | null,
+  wifiSignal: WifiSignal | undefined,
 ): Promise<void> {
-    const cur = deriveLabel(placeMatch, geocode);
     const state = await getLocationState(es, userId);
+
+    // Resolve the current label through the SHARED resolver — wifi-anchored +
+    // departure hysteresis. The push is "now", so GPS age is 0 (fresh); we pass
+    // its accuracy so a low-accuracy edge fix can't release a held place, and the
+    // prior committed label so we don't flap off a place on a single weak fix.
+    const prior: PriorLabel | null = state
+      ? { label: state.label, kind: state.kind, placeId: state.place_id }
+      : null;
+    const resolved = resolveLocation({
+      gps: {
+        lat: item.lat,
+        lon: item.lon,
+        accuracyM: item.accuracy_m,
+        ageMs: 0,
+        matchedPlace: placeMatch
+          ? { placeId: placeMatch.place_id, placeName: placeMatch.place_name }
+          : null,
+        city: geocode?.city ?? null,
+      },
+      wifi: wifiSignal,
+      prior,
+    });
 
     // In transit / unknown: keep the last confirmed label so the next known
     // place/city still reads as a transition. No event, no push.
-    if (!cur) return;
+    if (!resolved.label || !resolved.labelKind) return;
+    const cur: CurrentLabel = {
+      label: resolved.label,
+      kind: resolved.labelKind,
+      place_id: resolved.placeId ?? undefined,
+      city: geocode?.city,
+    };
 
     // Same place as last confirmed: just refresh coordinates/last_seen.
     if (state && state.label === cur.label) {
@@ -337,38 +423,9 @@ async function runTransition(
     logger.info('[location][transition] place/region transition pushed', { from: prevLabel ?? '(none)', to: cur.label, kind: cur.kind });
 }
 
-// ---------------------------------------------------------------------------
-// Accuracy / plausibility constants. Named + commented so the rationale is
-// explicit and tunable.
-// ---------------------------------------------------------------------------
-
-// Above this, a fix is "low accuracy" (indoor drift, cell-tower fallback). G9:
-// rather than dropping it (which left dense-urban/indoor with NO location at
-// all), we STILL store it flagged `low_accuracy: true` so downstream fusion can
-// down-weight it.
-const LOW_ACCURACY_METERS = 100;
-// Above this, the fix is garbage (km-scale cell-sector estimate) — drop it.
-const MAX_ACCURACY_METERS = 2000;
-
-// Drift/speed window: only compare against a predecessor seen this recently.
-const DRIFT_WINDOW_MIN = 10;
-// Speed (km/h) that's implausible for short city hops; used together with
-// device speed to distinguish real fast travel from teleport jitter.
-const IMPLAUSIBLE_SPEED_KMH = 150;
-// Absolute physical ceiling — beyond this NOTHING is real travel (faster than a
-// jetliner), so drop regardless of what the device claims.
-const ABSOLUTE_MAX_SPEED_KMH = 1000;
-// Device speed (km/h) at/below which we consider the device "not really moving"
-// for teleport-jitter detection.
-const DEVICE_STATIONARY_SPEED_KMH = 30;
-// How closely computed and device speed must agree (ratio) to call it confirmed
-// real travel. 0.5 = within a factor of 2 either way — generous, since GPS fixes
-// are noisy and a single hop's computed speed is coarse.
-const SPEED_AGREEMENT_RATIO = 0.5;
-// Drift-from-known-place guard: a >500m hop within 5 min of being AT a known
-// place is almost always stationary jitter.
-const KNOWN_PLACE_DRIFT_KM = 0.5;
-const KNOWN_PLACE_DRIFT_MIN = 5;
+// Accuracy / plausibility / drift thresholds now live in @ll5/shared
+// (LOW_ACCURACY_METERS, MAX_ACCURACY_METERS, speed limits, KNOWN_PLACE_DRIFT_*),
+// applied via the shared gateAccuracy() + detectDriftGlitch() helpers below.
 
 /**
  * Process a location push item:
@@ -392,115 +449,63 @@ export async function processLocation(
   pgPool?: Pool,
   prevPoint?: StoredPoint | null,
 ): Promise<StoredPoint | null> {
-  // G9: accuracy gating. Garbage (> MAX) is dropped; merely low (> LOW) is kept
-  // but flagged. We compute the flag here and let the point flow through.
-  let lowAccuracy = false;
-  if (item.accuracy_m != null && item.accuracy_m > MAX_ACCURACY_METERS) {
+  // G9: accuracy gating via the shared helper — garbage (>MAX) dropped, low
+  // (>LOW) kept but flagged so downstream down-weights it / never transitions off it.
+  const acc = gateAccuracy(item.accuracy_m);
+  if (acc.drop) {
     logger.debug('[location][processLocation] dropping garbage-accuracy GPS point', {
       accuracy_m: item.accuracy_m,
-      ceiling: MAX_ACCURACY_METERS,
       lat: item.lat,
       lon: item.lon,
     });
     return null;
   }
-  if (item.accuracy_m != null && item.accuracy_m > LOW_ACCURACY_METERS) {
-    lowAccuracy = true;
+  const lowAccuracy = acc.lowAccuracy;
+  if (lowAccuracy) {
     logger.debug('[location][processLocation] low-accuracy GPS point kept (flagged)', {
       accuracy_m: item.accuracy_m,
-      threshold: LOW_ACCURACY_METERS,
       lat: item.lat,
       lon: item.lon,
     });
   }
 
-  // Device-reported speed (G3): convert m/s → km/h once for the checks below.
+  // Device-reported speed (G3): convert m/s → km/h for the drift check.
   const deviceSpeedKmh = item.speed_mps != null ? item.speed_mps * 3.6 : null;
 
-  // ---- Drift / teleport filtering (G1/G2/G6) -----------------------------
+  // ---- Drift / teleport filtering (G1/G2/G6) via the shared helper ----------
   // Compare against the in-batch predecessor when provided; otherwise the ES
-  // latest. A dropped GLITCH returns null (not stored). A low-accuracy point
-  // that's otherwise plausible is NOT dropped here.
+  // latest. A dropped GLITCH returns null (not stored).
   try {
-    let prev: { location: { lat: number; lon: number }; timestamp?: string; matched_place?: string } | null = null;
+    let prev: { lat: number; lon: number; timestampMs: number; atKnownPlace: boolean } | null = null;
     if (prevPoint) {
-      prev = { location: { lat: prevPoint.lat, lon: prevPoint.lon }, timestamp: prevPoint.timestamp, matched_place: prevPoint.matched_place };
+      prev = {
+        lat: prevPoint.lat,
+        lon: prevPoint.lon,
+        timestampMs: new Date(prevPoint.timestamp).getTime(),
+        atKnownPlace: !!prevPoint.matched_place,
+      };
     } else {
       const esPrev = await getPreviousLocation(es, userId);
-      if (esPrev?.location) {
-        prev = { location: esPrev.location, timestamp: esPrev.timestamp, matched_place: esPrev.matched_place };
+      if (esPrev?.location && esPrev.timestamp) {
+        prev = {
+          lat: esPrev.location.lat,
+          lon: esPrev.location.lon,
+          timestampMs: new Date(esPrev.timestamp).getTime(),
+          atKnownPlace: !!esPrev.matched_place,
+        };
       }
     }
-
-    if (prev?.location && prev.timestamp) {
-      const distKm = haversine(prev.location, { lat: item.lat, lon: item.lon });
-      const timeDiffMs = new Date(item.timestamp).getTime() - new Date(prev.timestamp).getTime();
-      const timeDiffMin = timeDiffMs / 60000;
-
-      // timeDiff <= 0: still out-of-order after the sort, or clock skew. Skip
-      // the speed math (it'd divide by zero / go negative) but DON'T bypass
-      // storage — process the point normally below.
-      if (timeDiffMin > 0 && timeDiffMin < DRIFT_WINDOW_MIN) {
-        const computedSpeedKmh = distKm / (timeDiffMs / 3600000);
-
-        // Absolute ceiling: physically impossible, always a glitch.
-        if (computedSpeedKmh > ABSOLUTE_MAX_SPEED_KMH) {
-          logger.info('[location][processLocation] dropping glitch: speed over absolute ceiling', {
-            computedSpeedKmh: Math.round(computedSpeedKmh),
-            deviceSpeedKmh: deviceSpeedKmh != null ? Math.round(deviceSpeedKmh) : null,
-            distKm: Math.round(distKm * 10) / 10,
-            timeDiffMin: Math.round(timeDiffMin * 10) / 10,
-          });
-          return null;
-        }
-
-        if (computedSpeedKmh > IMPLAUSIBLE_SPEED_KMH) {
-          // G6: don't blindly drop fast travel. If the DEVICE also reports fast
-          // motion that agrees with the computed speed, it's real highway/train/
-          // flight — keep it. Only treat as a teleport glitch when the device is
-          // (near-)stationary or gives no speed at all.
-          const deviceConfirmsTravel =
-            deviceSpeedKmh != null &&
-            deviceSpeedKmh > DEVICE_STATIONARY_SPEED_KMH &&
-            deviceSpeedKmh >= computedSpeedKmh * SPEED_AGREEMENT_RATIO;
-
-          if (deviceConfirmsTravel) {
-            logger.info('[location][processLocation] fast travel confirmed by device speed, keeping', {
-              computedSpeedKmh: Math.round(computedSpeedKmh),
-              deviceSpeedKmh: Math.round(deviceSpeedKmh),
-              distKm: Math.round(distKm * 10) / 10,
-            });
-          } else {
-            logger.info('[location][processLocation] dropping glitch: implausible jump, device speed low/absent', {
-              computedSpeedKmh: Math.round(computedSpeedKmh),
-              deviceSpeedKmh: deviceSpeedKmh != null ? Math.round(deviceSpeedKmh) : null,
-              distKm: Math.round(distKm * 10) / 10,
-              timeDiffMin: Math.round(timeDiffMin * 10) / 10,
-            });
-            return null;
-          }
-        }
-
-        // Drift from a known place: a big hop right after being AT a place is
-        // jitter — UNLESS the device confirms real motion.
-        if (
-          prev.matched_place &&
-          distKm > KNOWN_PLACE_DRIFT_KM &&
-          timeDiffMin < KNOWN_PLACE_DRIFT_MIN &&
-          !(deviceSpeedKmh != null && deviceSpeedKmh > DEVICE_STATIONARY_SPEED_KMH)
-        ) {
-          logger.info('[location][processLocation] dropping glitch: drift from known place', {
-            place: prev.matched_place,
-            distKm: Math.round(distKm * 10) / 10,
-            timeDiffMin: Math.round(timeDiffMin * 10) / 10,
-          });
-          return null;
-        }
-      } else if (timeDiffMin <= 0) {
-        logger.debug('[location][processLocation] non-positive time delta, skipping speed check', {
-          timeDiffMin: Math.round(timeDiffMin * 100) / 100,
-        });
-      }
+    const verdict = detectDriftGlitch(
+      prev,
+      { lat: item.lat, lon: item.lon, timestampMs: new Date(item.timestamp).getTime() },
+      deviceSpeedKmh,
+    );
+    if (verdict.drop) {
+      logger.info(`[location][processLocation] dropping glitch: ${verdict.reason}`, {
+        lat: item.lat,
+        lon: item.lon,
+      });
+      return null;
     }
   } catch (err) {
     // Non-critical — continue processing if the plausibility check itself fails.
@@ -509,17 +514,18 @@ export async function processLocation(
     });
   }
 
-  // Run geocoding and place matching concurrently (both non-blocking)
-  const [geocodeResult, placeMatch] = await Promise.all([
+  // Run geocoding, place matching, and the latest-wifi fetch concurrently.
+  const [geocodeResult, placeMatch, wifiSignal] = await Promise.all([
     reverseGeocode(item.lat, item.lon, geocodingApiKey),
     matchKnownPlace(es, userId, item.lat, item.lon),
+    getWifiSignal(es, userId),
   ]);
 
   // Detect a place/region transition and notify (awaited — serializes the
-  // per-user state read/write against this push). Uses its own state doc, so
-  // it's independent of the location-doc write below.
+  // per-user state read/write against this push). Now WiFi-aware + hysteresis
+  // via the shared resolver, so home GPS-jitter no longer flaps to city-level.
   if (pgPool) {
-    await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, placeMatch);
+    await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, placeMatch, wifiSignal);
   }
 
   // Build the location document

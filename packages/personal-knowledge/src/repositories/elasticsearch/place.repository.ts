@@ -11,6 +11,7 @@ interface PlaceDoc {
   type: string;
   address?: string;
   geo?: { lat: number; lon: number };
+  radius_m?: number;
   tags: string[];
   notes?: string;
   created_at: string;
@@ -25,6 +26,7 @@ function docToPlace(doc: PlaceDoc, id: string): Place {
     type: doc.type as Place['type'],
     address: doc.address,
     geo: doc.geo,
+    radiusM: doc.radius_m,
     tags: doc.tags ?? [],
     notes: doc.notes,
     createdAt: doc.created_at,
@@ -128,6 +130,7 @@ export class ElasticsearchPlaceRepository
       type: data.type,
       address: data.address ?? existingDoc?.address,
       geo: data.geo ?? existingDoc?.geo,
+      radius_m: data.radiusM ?? existingDoc?.radius_m,
       tags: data.tags ?? existingDoc?.tags ?? [],
       notes: data.notes ?? existingDoc?.notes,
       created_at: existingDoc?.created_at ?? now,

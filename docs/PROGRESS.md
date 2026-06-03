@@ -8,6 +8,29 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Location resolution consolidated into one canonical resolver (2026-06-04)
+"Where is the user / what place" was computed two ways that disagreed: the gateway
+write/transition path (`processors/location.ts`, GPS-only `deriveLabel`) drove the
+`[Location]` pushes/system-messages, while the awareness read path
+(`location-service.ts`, GPS+WiFi fusion) drove the agent tools — and the write path
+ignored WiFi entirely. At home, GPS jitter at the 100 m radius edge flapped
+Home↔"Zikhron Yaakov" every push (spamming notifications) even though the phone was
+continuously on the home WiFi the read path knew about. **Fix:** new pure module
+`packages/shared/src/location/` (constants + `haversineMeters` + `gateAccuracy`/
+`detectDriftGlitch` + `resolveLocation`) is the single brain both paths now call.
+`resolveLocation` = the 7-tier GPS+WiFi fusion **+ WiFi anchoring** (a confident
+BSSID→place wins when GPS has no/stale match → stops the flapping) **+ departure
+hysteresis** (a low-accuracy/stale fix can't flip you off a held place; only a
+fresh good-accuracy "real departure" releases it). The gateway now reads the latest
+WiFi at ingest + passes the prior label; awareness `LocationService` delegates to
+the same function (read-path behaviour unchanged, 166 tests green). Added per-place
+`radius_m` (default 100) on `ll5_knowledge_places` honored by `matchKnownPlace`, and
+the `upsert_place` tool param, so a large home compound can widen its radius.
+All thresholds single-sourced in shared. Tests: shared 72 (incl. new
+`location-resolve.test.ts`), gateway 342 (incl. new `location-transition.test.ts`
+proving no home flapping), awareness 166, personal-knowledge 85. See
+[DECISION-009](decisions/DECISION-009-location-resolution-consolidation.md).
+
 ### Find Hub poller DISABLED (2026-06-03)
 The findhub-poller was disabled because its periodic Find Hub `LocateTracker` requests (every `FINDHUB_POLL_INTERVAL_SEC`=900s) were causing tracked devices/tags to **ring**. Actions taken: stopped the running container on the box (`docker stop` + `docker update --restart=no` on `xkkcc0g4o48kkcows8488so4-findhub-poller-1`), commented the service out of `docker/docker-compose.prod.yml` (deploy uses `docker compose up -d` without `--remove-orphans`, so it won't be recreated), and removed `findhub-poller` from `build-and-push.yml` (PACKAGES build matrix + deploy pull loop). The awareness `tracked_devices` tools + dashboard page remain (read-only; they don't ring anything) but will go stale with no poller feeding them. **Re-enable:** uncomment the compose block + restore it in the workflow, but first raise `FINDHUB_POLL_INTERVAL_SEC` and/or narrow `FINDHUB_DEVICE_TYPES` so locate requests don't ring devices.
 

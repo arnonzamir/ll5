@@ -23,6 +23,8 @@ export interface Place {
   type: PlaceType;
   address?: string;
   geo?: GeoPoint;
+  /** Match radius in meters (default 100 when unset). */
+  radiusM?: number;
   tags: string[];
   notes?: string;
   createdAt: string;
@@ -42,6 +44,7 @@ export interface UpsertPlaceInput {
   type: PlaceType;
   address?: string;
   geo?: GeoPoint;
+  radiusM?: number;
   tags?: string[];
   notes?: string;
 }

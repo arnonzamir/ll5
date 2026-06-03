@@ -88,6 +88,10 @@ const INDICES: IndexDefinition[] = [
         type: { type: 'keyword' },
         address: { type: 'text', analyzer: 'multilingual' },
         geo: { type: 'geo_point' },
+        // Per-place match radius in meters (default 100 when unset). Lets a large
+        // home compound use a wider radius so indoor GPS jitter doesn't read as
+        // "left", and a tiny shop use a tight one.
+        radius_m: { type: 'integer' },
         tags: { type: 'keyword' },
         notes: { type: 'text', analyzer: 'multilingual' },
         created_at: { type: 'date' },

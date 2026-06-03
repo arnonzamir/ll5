@@ -120,6 +120,7 @@ export function registerPlaceTools(
       address: z.string().optional().describe('Full address text'),
       lat: z.number().min(-90).max(90).optional().describe('Latitude'),
       lon: z.number().min(-180).max(180).optional().describe('Longitude'),
+      radius_m: z.number().min(20).max(2000).optional().describe('Match radius in meters (default 100). Widen for a large home/compound so indoor GPS jitter does not read as "left"; tighten for a small shop.'),
       tags: z.array(z.string()).optional().describe('Tags for categorization'),
       notes: z.string().optional().describe('Free-text notes'),
     },
@@ -144,6 +145,7 @@ export function registerPlaceTools(
         type: params.type,
         address: params.address,
         geo,
+        radiusM: params.radius_m,
         tags: params.tags,
         notes: params.notes,
       });

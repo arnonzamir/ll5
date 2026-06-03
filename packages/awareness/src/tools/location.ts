@@ -10,10 +10,12 @@ import {
   type StayPointInput,
   type StayPointParams,
 } from '../services/stay-point-service.js';
-import { logAudit, formatTime, sessionTimezone } from '@ll5/shared';
+import { logAudit, formatTime, sessionTimezone, DEFAULT_PLACE_RADIUS_M } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
-const KNOWN_PLACE_RADIUS_M = 100;
+// Known-place exclusion radius for place suggestions. Single-sourced from
+// @ll5/shared so it tracks the place-match radius used everywhere else.
+const KNOWN_PLACE_RADIUS_M = DEFAULT_PLACE_RADIUS_M;
 
 /**
  * True if any ll5_knowledge_places doc lies within KNOWN_PLACE_RADIUS_M of the
