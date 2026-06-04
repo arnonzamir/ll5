@@ -230,6 +230,16 @@ Google MCP accepts both ll5 signed tokens (same as other MCPs) and legacy API ke
 git push  # triggers CI build + auto-deploy (~3-4 min total)
 ```
 
+- **Browser MCP (Playwright, 2026-06-04):** `browser` compose service runs
+  `mcr.microsoft.com/playwright/mcp` (headless Chromium) at `mcp-browser.noninoni.click/mcp`,
+  behind a **Traefik basicAuth** middleware (no built-in auth in the image). The apr1
+  hash is in the compose label; the plaintext password lives ONLY in the agent's
+  `BROWSER_MCP_BASIC` env (Coolify ll5-agent app), written to `$HOME/.ll5/browser-auth`
+  by the entrypoint and read by `get-browser-auth.sh` (headersHelper in `.mcp.json`).
+  The image is `mcr.microsoft.com/...`, NOT GHCR, so the deploy pull-loop doesn't touch
+  it — `docker compose up` pulls it once on first deploy. To rotate creds: regenerate
+  `openssl passwd -apr1`, update the compose label + `BROWSER_MCP_BASIC`. See DECISION-010.
+
 Deploy is fully automated: push to main triggers build, then SSH deploy with health check.
 
 Manual deploy (if needed):

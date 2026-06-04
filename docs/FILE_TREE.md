@@ -38,7 +38,7 @@ ll5/
 │   ├── Dockerfile.gateway            # Gateway-specific Dockerfile (copies src/migrations to dist)
 │   ├── Dockerfile.dashboard          # Next.js standalone Dockerfile
 │   ├── docker-compose.yml            # Local dev: ES + PG
-│   └── docker-compose.prod.yml       # **Production source of truth** (10 services; dashboard at ll5.noninoni.click; google + messaging need AUTH_SECRET in their env block). CI scp's to host on every deploy; never edit on host.
+│   └── docker-compose.prod.yml       # **Production source of truth** (11 services; dashboard at ll5.noninoni.click; google + messaging need AUTH_SECRET in their env block; `browser` = Playwright MCP at mcp-browser.noninoni.click behind a Traefik basicAuth middleware, DECISION-010). CI scp's to host on every deploy; never edit on host.
 │
 ├── docs/
 │   ├── vision.md                     # What the system does for the user

@@ -428,3 +428,49 @@ services:
       - "traefik.http.routers.ll5-dashboard.tls=true"
       - "traefik.http.routers.ll5-dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.services.ll5-dashboard.loadbalancer.server.port=3000"
+
+  # ---------- Browser (Playwright MCP) ----------
+  # Headless Chromium exposed as an MCP server so the agent can navigate, click,
+  # fill forms, read rendered pages, and screenshot. The image has NO built-in
+  # auth, so it's locked behind a Traefik basicAuth middleware (only the agent,
+  # holding the Basic credential, can drive it). --isolated = ephemeral profile
+  # (no persisted logins) for v1. shm_size avoids Chromium /dev/shm crashes.
+  # See DECISION-010. (SSRF/egress hardening is a tracked follow-up.)
+  browser:
+    <<: *defaults
+    image: mcr.microsoft.com/playwright/mcp:latest
+    container_name: browser-xkkcc0g4o48kkcows8488so4
+    init: true
+    shm_size: "1gb"
+    entrypoint: ["node", "/app/cli.js"]
+    command:
+      - "--headless"
+      - "--browser"
+      - "chromium"
+      - "--no-sandbox"
+      - "--isolated"
+      - "--port"
+      - "8931"
+      - "--host"
+      - "0.0.0.0"
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('net').connect(8931,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ll5-browser.rule=Host(`mcp-browser.noninoni.click`)"
+      - "traefik.http.routers.ll5-browser.tls=true"
+      - "traefik.http.routers.ll5-browser.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ll5-browser.loadbalancer.server.port=8931"
+      - "traefik.http.routers.ll5-browser.middlewares=ll5-browser-auth"
+      # basicAuth — apr1 hash (private repo; the password lives only in the agent's
+      # BROWSER_MCP_BASIC env, never in git). Rotate by regenerating both.
+      - "traefik.http.middlewares.ll5-browser-auth.basicauth.users=ll5:$$apr1$$DGhX.hYN$$bO7SH7IWVNvoKvwvKkDIx/"

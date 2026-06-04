@@ -8,6 +8,18 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Browser access via Playwright MCP (2026-06-04, in deploy)
+Gave the agent a real browser. New `browser` container in `docker/docker-compose.prod.yml`
+running Microsoft's `mcr.microsoft.com/playwright/mcp` (headless Chromium, `--no-sandbox
+--isolated`, `shm_size 1gb`), exposed over streamable-HTTP at `/mcp`. It has no built-in
+auth, so it's fronted by a **Traefik basicAuth** middleware at `mcp-browser.noninoni.click`
+(the password lives only in the agent's `BROWSER_MCP_BASIC` env, never in git; the apr1
+hash is in the Traefik label). The agent (`ll5-run`) gets a `browser` server in `.mcp.json`
+(headersHelper `get-browser-auth.sh`) + `mcp__browser__*` permission. Pairs with Anthropic
+`web_search`/`web_fetch` for read-only tasks. See
+[DECISION-010](decisions/DECISION-010-browser-access.md). Follow-ups: SSRF/egress hardening,
+persistent per-user storage-state for authenticated sessions.
+
 ### Location resolution consolidated into one canonical resolver (2026-06-04)
 "Where is the user / what place" was computed two ways that disagreed: the gateway
 write/transition path (`processors/location.ts`, GPS-only `deriveLabel`) drove the
