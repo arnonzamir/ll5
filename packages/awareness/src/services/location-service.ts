@@ -5,7 +5,7 @@ import {
   resolveLocation,
   GPS_FRESH_MS,
   GPS_STALE_USABLE_MS,
-  WIFI_FRESH_MS,
+  WIFI_CONNECTED_ANCHOR_MS,
   type GpsSignal,
   type WifiSignal,
   type Confidence,
@@ -121,10 +121,10 @@ export class LocationService {
     let wifiSignal: WifiSignal | undefined;
     if (latestWifi) {
       const wifiAgeMs = now - new Date(latestWifi.timestamp).getTime();
-      // Resolve only when fresh, and (connected, or disconnected-but-GPS-not-fresh
-      // for the recently-left hint) — mirrors the prior behaviour's ES-call gating.
+      // Resolve within the connected-anchor window for connected events (sparse
+      // heartbeats), and for a recent disconnect when GPS isn't fresh (recently-left).
       const shouldResolve =
-        !!latestWifi.bssid && wifiAgeMs < WIFI_FRESH_MS && (latestWifi.connected || !gpsFresh);
+        !!latestWifi.bssid && wifiAgeMs < WIFI_CONNECTED_ANCHOR_MS && (latestWifi.connected || !gpsFresh);
       const bssidPlace = shouldResolve
         ? await this.lookupBssidPlace(userId, latestWifi.bssid!)
         : null;

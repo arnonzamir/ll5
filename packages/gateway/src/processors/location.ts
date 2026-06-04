@@ -16,7 +16,7 @@ import {
   haversineMeters,
   DEFAULT_PLACE_RADIUS_M,
   TRANSITION_DEDUP_MS,
-  WIFI_FRESH_MS,
+  WIFI_CONNECTED_ANCHOR_MS,
   BSSID_MIN_OBSERVATIONS,
   type WifiSignal,
   type PriorLabel,
@@ -174,7 +174,9 @@ async function getWifiSignal(es: Client, userId: string): Promise<WifiSignal | u
 
     const ageMs = Date.now() - new Date(hit.timestamp).getTime();
     let bssidPlace: WifiSignal['bssidPlace'] = null;
-    if (hit.bssid && ageMs < WIFI_FRESH_MS) {
+    // Resolve within the (generous) connected-anchor window so the resolver has
+    // the place to anchor on even when heartbeats are sparse.
+    if (hit.bssid && ageMs < WIFI_CONNECTED_ANCHOR_MS) {
       bssidPlace = await resolveBssidPlace(es, userId, hit.bssid);
     }
     return {

@@ -39,8 +39,17 @@ export const KNOWN_PLACE_DRIFT_MIN = 5;
 export const GPS_FRESH_MS = 5 * 60 * 1000;
 /** GPS younger than this is "stale" but still usable; older is "very_stale". */
 export const GPS_STALE_USABLE_MS = 15 * 60 * 1000;
-/** Wifi event younger than this is usable for place inference / recently-left. */
+/** Wifi event younger than this is "fresh" — used for the recently-left disconnect hint. */
 export const WIFI_FRESH_MS = 10 * 60 * 1000;
+/**
+ * How long a CONNECTED wifi event still anchors you to its place. A connect (or
+ * heartbeat-while-connected) means you're on that network until a DISCONNECT
+ * event arrives — and Android's wifi heartbeats are sparse (~30–60 min apart),
+ * so a 10-min window misses them and lets home GPS-jitter flap. Anchoring on a
+ * connected event for up to 2h covers a missed heartbeat; a real departure fires
+ * a disconnect (dropping the anchor) and/or a precise GPS fix elsewhere.
+ */
+export const WIFI_CONNECTED_ANCHOR_MS = 2 * 60 * 60 * 1000;
 
 // --- BSSID -> place confidence -------------------------------------------
 /** A learned BSSID->place binding needs at least this many observations to be
@@ -51,6 +60,16 @@ export const BSSID_MIN_OBSERVATIONS = 3;
 export const STAY_RADIUS_M = 150;
 export const MIN_DWELL_MS = 10 * 60 * 1000;
 export const MAX_GAP_MS = 30 * 60 * 1000;
+
+// --- Departure hysteresis -------------------------------------------------
+/**
+ * To call "you left a known place" off a single GPS fix, the fix must be at least
+ * this precise (m). A fix whose accuracy is near/over the place radius can't tell
+ * inside-from-outside, so it must NOT release a held place — that was the home
+ * jitter (accuracy ~100m at the 100m radius edge). Only a clearly-precise fix
+ * (and fresh, and with no wifi anchor) counts as a real departure.
+ */
+export const DEPARTURE_ACCURACY_M = 50;
 
 // --- Place-transition anti-flap (write-time) ------------------------------
 /** Don't re-push the same label within this window (handles A->B->A bounce). */

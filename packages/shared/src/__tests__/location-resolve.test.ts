@@ -51,10 +51,20 @@ describe('resolveLocation — fusion tiers', () => {
     expect(r.labelKind).toBe('city'); // falls through to city, not Home
   });
 
-  it('stale wifi does NOT anchor', () => {
+  it('REGRESSION: a CONNECTED wifi event up to 2h old still anchors (sparse heartbeats)', () => {
+    // The night-flap bug: latest "connected to home" event was 20-57 min old and
+    // the old 10-min window treated it as stale → no anchor → flap.
     const r = resolveLocation({
       gps: gps({ matchedPlace: null }),
-      wifi: homeWifi({ ageMs: 20 * 60 * 1000 }),
+      wifi: homeWifi({ ageMs: 40 * 60 * 1000 }),
+    });
+    expect(r).toMatchObject({ place: 'Home', labelKind: 'place' });
+  });
+
+  it('a CONNECTED wifi event older than 2h no longer anchors', () => {
+    const r = resolveLocation({
+      gps: gps({ matchedPlace: null }),
+      wifi: homeWifi({ ageMs: 3 * 60 * 60 * 1000 }),
     });
     expect(r.labelKind).toBe('city');
   });
@@ -71,6 +81,12 @@ describe('resolveLocation — departure hysteresis (write path)', () => {
   it('HOLDS Home on a low-accuracy fresh fix that lost the place match', () => {
     const r = resolveLocation({ gps: gps({ matchedPlace: null, accuracyM: 140 }), wifi: null, prior });
     expect(r).toMatchObject({ place: 'Home', label: 'Home', labelKind: 'place', source: 'hold' });
+  });
+
+  it('REGRESSION: HOLDS Home on a ~100m-accuracy edge fix (the home jitter)', () => {
+    // accuracy ~= the 100m radius can't tell inside from outside → must not release.
+    const r = resolveLocation({ gps: gps({ matchedPlace: null, accuracyM: 100 }), wifi: null, prior });
+    expect(r).toMatchObject({ label: 'Home', labelKind: 'place', source: 'hold' });
   });
 
   it('HOLDS Home on a stale fix', () => {

@@ -1,4 +1,10 @@
-import { GPS_FRESH_MS, GPS_STALE_USABLE_MS, WIFI_FRESH_MS, LOW_ACCURACY_METERS } from './constants.js';
+import {
+  GPS_FRESH_MS,
+  GPS_STALE_USABLE_MS,
+  WIFI_FRESH_MS,
+  WIFI_CONNECTED_ANCHOR_MS,
+  DEPARTURE_ACCURACY_M,
+} from './constants.js';
 import type {
   ResolveInput,
   ResolvedLocation,
@@ -39,14 +45,18 @@ export function resolveLocation(input: ResolveInput): ResolvedLocation {
   const gpsPlace: KnownPlaceMatch | null = gps?.matchedPlace ?? null;
   const ageS = gps ? Math.floor(gps.ageMs / 1000) : null;
 
-  const wifiFresh = !!wifi && wifi.ageMs < WIFI_FRESH_MS;
-  // Only a CONFIDENT binding (manual, or >= BSSID_MIN_OBSERVATIONS) anchors.
+  // A CONNECTED wifi event anchors you to its (confident) place until a disconnect
+  // arrives or it ages past WIFI_CONNECTED_ANCHOR_MS — not the tight WIFI_FRESH_MS,
+  // because heartbeats are sparse. recently-left still uses WIFI_FRESH_MS below.
   const wifiPlace: BssidPlace | null =
-    wifi && wifi.connected && wifiFresh && wifi.bssidPlace?.confident ? wifi.bssidPlace : null;
+    wifi && wifi.connected && wifi.ageMs < WIFI_CONNECTED_ANCHOR_MS && wifi.bssidPlace?.confident
+      ? wifi.bssidPlace
+      : null;
 
   const city = gps?.city ?? null;
 
   // recently-left hint: GPS not fresh + a recent wifi DISCONNECT from a known place.
+  const wifiFresh = !!wifi && wifi.ageMs < WIFI_FRESH_MS;
   let recentlyLeft: ResolvedLocation['recentlyLeft'];
   if (!gpsFresh && wifi && !wifi.connected && wifiFresh && wifi.bssidPlace?.confident) {
     recentlyLeft = {
@@ -60,8 +70,10 @@ export function resolveLocation(input: ResolveInput): ResolvedLocation {
 
   // Departure hysteresis (write path only — read path omits `prior`).
   if (prior && prior.kind === 'place' && result.labelKind !== 'place') {
-    const goodAccuracy = gps?.accuracyM != null && gps.accuracyM <= LOW_ACCURACY_METERS;
-    const confidentDeparture = gpsFresh && goodAccuracy; // clean outdoor fix, no known place
+    // A fix can only assert "you left" if it's genuinely precise — accuracy at/over
+    // the place radius (the ~100m home jitter) can't tell inside from outside.
+    const preciseEnough = gps?.accuracyM != null && gps.accuracyM <= DEPARTURE_ACCURACY_M;
+    const confidentDeparture = gpsFresh && preciseEnough; // clean outdoor fix, no known place
     if (!confidentDeparture) {
       result = {
         place: prior.label,

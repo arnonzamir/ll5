@@ -26,10 +26,19 @@ WiFi at ingest + passes the prior label; awareness `LocationService` delegates t
 the same function (read-path behaviour unchanged, 166 tests green). Added per-place
 `radius_m` (default 100) on `ll5_knowledge_places` honored by `matchKnownPlace`, and
 the `upsert_place` tool param, so a large home compound can widen its radius.
-All thresholds single-sourced in shared. Tests: shared 72 (incl. new
+All thresholds single-sourced in shared. Tests: shared 74 (incl. new
 `location-resolve.test.ts`), gateway 342 (incl. new `location-transition.test.ts`
 proving no home flapping), awareness 166, personal-knowledge 85. See
 [DECISION-009](decisions/DECISION-009-location-resolution-consolidation.md).
+- **Follow-up fix (2026-06-04, post-deploy verification):** the first night's live
+  data showed flapping persisted because (a) the WiFi anchor required the connect
+  event `< 10min` old, but Android wifi heartbeats are sparse (~30–60min), so the
+  anchor never engaged at night; and (b) hysteresis treated a 100m-accuracy fix
+  (the actual jitter) as a "confident departure" (`<= LOW_ACCURACY_METERS`=100).
+  Fixes: a CONNECTED wifi event now anchors for up to `WIFI_CONNECTED_ANCHOR_MS`=2h
+  (a connect means you're on that network until a disconnect; heartbeats just
+  refresh it), and a departure now requires `DEPARTURE_ACCURACY_M`=50m precision.
+  +2 regression tests.
 
 ### Find Hub poller DISABLED (2026-06-03)
 The findhub-poller was disabled because its periodic Find Hub `LocateTracker` requests (every `FINDHUB_POLL_INTERVAL_SEC`=900s) were causing tracked devices/tags to **ring**. Actions taken: stopped the running container on the box (`docker stop` + `docker update --restart=no` on `xkkcc0g4o48kkcows8488so4-findhub-poller-1`), commented the service out of `docker/docker-compose.prod.yml` (deploy uses `docker compose up -d` without `--remove-orphans`, so it won't be recreated), and removed `findhub-poller` from `build-and-push.yml` (PACKAGES build matrix + deploy pull loop). The awareness `tracked_devices` tools + dashboard page remain (read-only; they don't ring anything) but will go stale with no poller feeding them. **Re-enable:** uncomment the compose block + restore it in the workflow, but first raise `FINDHUB_POLL_INTERVAL_SEC` and/or narrow `FINDHUB_DEVICE_TYPES` so locate requests don't ring devices.
