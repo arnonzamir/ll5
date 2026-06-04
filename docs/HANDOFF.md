@@ -239,6 +239,9 @@ git push  # triggers CI build + auto-deploy (~3-4 min total)
   The image is `mcr.microsoft.com/...`, NOT GHCR, so the deploy pull-loop doesn't touch
   it — `docker compose up` pulls it once on first deploy. To rotate creds: regenerate
   `openssl passwd -apr1`, update the compose label + `BROWSER_MCP_BASIC`. See DECISION-010.
+  GOTCHA: the container command MUST include `--allowed-hosts mcp-browser.noninoni.click`
+  — the MCP HTTP transport's DNS-rebinding check 403s any Host that isn't the bound host,
+  and Traefik forwards the public Host. (401 = basicAuth; 403 = allowed-hosts.)
 
 Deploy is fully automated: push to main triggers build, then SSH deploy with health check.
 

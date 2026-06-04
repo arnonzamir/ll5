@@ -453,6 +453,10 @@ services:
       - "8931"
       - "--host"
       - "0.0.0.0"
+      # Accept the public Host header (Traefik forwards it); the MCP transport's
+      # DNS-rebinding check otherwise 403s anything that isn't the bound host.
+      - "--allowed-hosts"
+      - "mcp-browser.noninoni.click"
     deploy:
       resources:
         limits:

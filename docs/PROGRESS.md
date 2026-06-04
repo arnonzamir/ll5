@@ -8,7 +8,7 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
-### Browser access via Playwright MCP (2026-06-04, in deploy)
+### Browser access via Playwright MCP (2026-06-04, deployed)
 Gave the agent a real browser. New `browser` container in `docker/docker-compose.prod.yml`
 running Microsoft's `mcr.microsoft.com/playwright/mcp` (headless Chromium, `--no-sandbox
 --isolated`, `shm_size 1gb`), exposed over streamable-HTTP at `/mcp`. It has no built-in
