@@ -10,15 +10,19 @@ Current state of the LL5 personal assistant system.
 
 ### Browser access via Playwright MCP (2026-06-04, deployed)
 Gave the agent a real browser. New `browser` container in `docker/docker-compose.prod.yml`
-running Microsoft's `mcr.microsoft.com/playwright/mcp` (headless Chromium, `--no-sandbox
---isolated`, `shm_size 1gb`), exposed over streamable-HTTP at `/mcp`. It has no built-in
+running Microsoft's `mcr.microsoft.com/playwright/mcp` (headless Chromium, `--no-sandbox`,
+`shm_size 1gb`), exposed over streamable-HTTP at `/mcp`. It has no built-in
 auth, so it's fronted by a **Traefik basicAuth** middleware at `mcp-browser.noninoni.click`
 (the password lives only in the agent's `BROWSER_MCP_BASIC` env, never in git; the apr1
 hash is in the Traefik label). The agent (`ll5-run`) gets a `browser` server in `.mcp.json`
 (headersHelper `get-browser-auth.sh`) + `mcp__browser__*` permission. Pairs with Anthropic
 `web_search`/`web_fetch` for read-only tasks. See
-[DECISION-010](decisions/DECISION-010-browser-access.md). Follow-ups: SSRF/egress hardening,
-persistent per-user storage-state for authenticated sessions.
+[DECISION-010](decisions/DECISION-010-browser-access.md). **Hardened 2026-06-05:** SSRF —
+`--blocked-origins` blocks the metadata IP + internal ll5 services (ES is unauthed on the
+shared net, the acute risk) + `--block-service-workers`; **persistent login** — dropped
+`--isolated`, `--user-data-dir` on a bind-mounted pre-chowned host dir
+`/opt/ll5/browser-profile` so cookies/logins survive restarts. Residual: raw-IP internal
+access (mitigate later via ES auth or a dedicated browser network).
 
 ### Location resolution consolidated into one canonical resolver (2026-06-04)
 "Where is the user / what place" was computed two ways that disagreed: the gateway

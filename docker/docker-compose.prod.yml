@@ -433,9 +433,18 @@ services:
   # Headless Chromium exposed as an MCP server so the agent can navigate, click,
   # fill forms, read rendered pages, and screenshot. The image has NO built-in
   # auth, so it's locked behind a Traefik basicAuth middleware (only the agent,
-  # holding the Basic credential, can drive it). --isolated = ephemeral profile
-  # (no persisted logins) for v1. shm_size avoids Chromium /dev/shm crashes.
-  # See DECISION-010. (SSRF/egress hardening is a tracked follow-up.)
+  # holding the Basic credential, can drive it). shm_size avoids Chromium
+  # /dev/shm crashes. See DECISION-010.
+  #
+  # SSRF hardening (data plane): --blocked-origins stops the browser from loading
+  # the cloud metadata IP AND the internal ll5 services — ES runs UNAUTHED on this
+  # shared Docker network, so a prompt-injected page must not be able to reach
+  # http://elasticsearch:9200. Residual: a raw container IP isn't enumerable here;
+  # full isolation would need ES auth or a dedicated browser network.
+  #
+  # Persistence: --user-data-dir on a bind-mounted, pre-chowned (uid 1000) host
+  # dir so cookies/logins survive restarts. (Single shared profile — fine for the
+  # one-user system.)
   browser:
     <<: *defaults
     image: mcr.microsoft.com/playwright/mcp:latest
@@ -448,7 +457,6 @@ services:
       - "--browser"
       - "chromium"
       - "--no-sandbox"
-      - "--isolated"
       - "--port"
       - "8931"
       - "--host"
@@ -457,6 +465,15 @@ services:
       # DNS-rebinding check otherwise 403s anything that isn't the bound host.
       - "--allowed-hosts"
       - "mcp-browser.noninoni.click"
+      # Persistent profile (logins survive restarts).
+      - "--user-data-dir"
+      - "/home/node/profile"
+      # SSRF hardening: block the browser from loading the metadata IP + internals.
+      - "--block-service-workers"
+      - "--blocked-origins"
+      - "http://169.254.169.254;https://169.254.169.254;http://elasticsearch:9200;http://gateway:3000;http://postgres:5432;http://dashboard:3000;http://awareness:3000;http://personal-knowledge:3000;http://gtd:3000;http://google:3000;http://messaging:3000;http://health:3000"
+    volumes:
+      - /opt/ll5/browser-profile:/home/node/profile
     deploy:
       resources:
         limits:

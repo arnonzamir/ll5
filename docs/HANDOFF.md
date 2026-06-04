@@ -242,6 +242,11 @@ git push  # triggers CI build + auto-deploy (~3-4 min total)
   GOTCHA: the container command MUST include `--allowed-hosts mcp-browser.noninoni.click`
   — the MCP HTTP transport's DNS-rebinding check 403s any Host that isn't the bound host,
   and Traefik forwards the public Host. (401 = basicAuth; 403 = allowed-hosts.)
+  HARDENING (2026-06-05): `--blocked-origins` blocks the metadata IP + internal services
+  (ES is UNAUTHED on the shared net — the acute SSRF target) + `--block-service-workers`;
+  persistent login via `--user-data-dir /home/node/profile` bind-mounted from the host dir
+  `/opt/ll5/browser-profile` (pre-created `chown 1000:1000` — a named volume would mount
+  root-owned and the `node` user couldn't write). If you move hosts, recreate that dir.
 
 Deploy is fully automated: push to main triggers build, then SSH deploy with health check.
 

@@ -58,10 +58,23 @@ for genuine interactive/authenticated flows — cheaper, safer, less attack surf
 - Agent (`ll5-run`): a `browser` server in `.mcp.json` (`type:http`, headersHelper
   `get-browser-auth.sh`), `mcp__browser__*` allowed in `.claude/settings.json`,
   Basic creds via the `BROWSER_MCP_BASIC` env var (Coolify, not git).
-- `--isolated` = ephemeral profile (no persisted logins) for v1 safety; persistent
-  per-user storage-state is a later addition when we need authenticated sessions.
-- **Security follow-ups (tracked, not in v1):** SSRF hardening via an egress
-  allowlist / `--blocked-origins` for RFC1918 + the cloud metadata IP; a
-  navigation allowlist; and treating all extracted page text as untrusted (never
-  let it silently trigger privileged actions). basicAuth covers the control plane;
-  these cover the data plane.
+- **Persistent login (added 2026-06-05):** dropped `--isolated`; the browser now
+  uses `--user-data-dir /home/node/profile` on a bind-mounted, pre-chowned
+  (uid 1000) host dir `/opt/ll5/browser-profile`, so cookies/logins survive
+  restarts. Single shared profile — fine for the one-user system. (Bind mount,
+  not a named volume, to avoid the root-owned-mountpoint perm trap; no custom
+  image, stays non-root.)
+- **SSRF hardening (added 2026-06-05, data plane):** `--blocked-origins` stops the
+  browser from loading the cloud metadata IP **and the internal ll5 services**.
+  The acute risk here is Elasticsearch — it runs UNAUTHED (`xpack.security.enabled
+  =false`) on the same Docker network, so a prompt-injected page must not be able
+  to reach `http://elasticsearch:9200`. Also `--block-service-workers`. basicAuth
+  covers the control plane; this covers the data plane.
+  - **Residual / future:** blocked-origins is host-based, so a *raw container IP*
+    isn't covered (not enumerable here, but not zero). The stronger controls are
+    (a) **put Elasticsearch behind auth**, and/or (b) a dedicated browser network
+    isolated from the service network — both deferred (the latter is awkward under
+    Coolify's shared-Traefik topology). Also still treat extracted page text as
+    untrusted (never let it silently trigger privileged actions).
+- The box (Hetzner dedicated) exposes no cloud metadata endpoint today (probe
+  returned 000), but the metadata IP is blocked anyway as cheap defense-in-depth.
