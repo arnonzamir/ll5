@@ -18,7 +18,7 @@ clients (awareness, personal-knowledge, google, health, gateway) parse it with z
 change; the dashboard's raw-`fetch` ES calls got a `lib/es.ts` helper (strips creds →
 `Authorization: Basic`). `ELASTIC_PASSWORD` is a GitHub secret injected into the on-host
 `.env` by the deploy job (findhub pattern); the `elastic` password was bootstrapped
-post-deploy via `reset-password` to match. Brief all-MCP downtime during the cutover.
+post-deploy via `reset-password` to match. Brief all-MCP downtime during the cutover (depends_on gated on an unauthed ES healthcheck — now authenticated).
 Rollback: `xpack.security.enabled=false` + redeploy. See
 [DECISION-011](decisions/DECISION-011-elasticsearch-auth.md).
 

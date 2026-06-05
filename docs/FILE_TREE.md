@@ -38,7 +38,7 @@ ll5/
 │   ├── Dockerfile.gateway            # Gateway-specific Dockerfile (copies src/migrations to dist)
 │   ├── Dockerfile.dashboard          # Next.js standalone Dockerfile
 │   ├── docker-compose.yml            # Local dev: ES + PG
-│   └── docker-compose.prod.yml       # **Production source of truth** (11 services; dashboard at ll5.noninoni.click; google + messaging need AUTH_SECRET in their env block; `browser` = Playwright MCP at mcp-browser.noninoni.click behind Traefik basicAuth + --allowed-hosts, with --blocked-origins SSRF hardening + a persistent profile bind-mounted from /opt/ll5/browser-profile, DECISION-010). ES now requires auth (xpack.security.enabled=true; clients use inline creds via ELASTICSEARCH_URL=http://elastic:${ELASTIC_PASSWORD}@…; dashboard via lib/es.ts; DECISION-011). CI scp's to host on every deploy; never edit on host.
+│   └── docker-compose.prod.yml       # **Production source of truth** (11 services; dashboard at ll5.noninoni.click; google + messaging need AUTH_SECRET in their env block; `browser` = Playwright MCP at mcp-browser.noninoni.click behind Traefik basicAuth + --allowed-hosts, with --blocked-origins SSRF hardening + a persistent profile bind-mounted from /opt/ll5/browser-profile, DECISION-010). ES now requires auth (xpack.security.enabled=true; clients use inline creds via ELASTICSEARCH_URL=http://elastic:${ELASTIC_PASSWORD}@…; dashboard via lib/es.ts; authed ES healthcheck; DECISION-011). CI scp's to host on every deploy; never edit on host.
 │
 ├── docs/
 │   ├── vision.md                     # What the system does for the user

@@ -59,7 +59,10 @@ services:
           memory: 4096M
           cpus: "1.5"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      # Authenticated now that security is on — an unauthed probe 401s, marks ES
+      # "unhealthy", and gates every depends_on:service_healthy dependent. The
+      # password is compose-interpolated from the on-host .env (ELASTIC_PASSWORD).
+      test: ["CMD-SHELL", "curl -sf -u elastic:${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
