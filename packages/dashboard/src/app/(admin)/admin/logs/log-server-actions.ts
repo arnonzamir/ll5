@@ -1,6 +1,6 @@
 "use server";
 
-import { env } from "@/lib/env";
+import { esBase, esHeaders } from "@/lib/es";
 import { mcpCallJsonSafe } from "@/lib/api";
 
 /* ------------------------------------------------------------------ */
@@ -30,7 +30,7 @@ export interface LogResult {
 /* ------------------------------------------------------------------ */
 
 export async function fetchLogs(params: LogQuery): Promise<LogResult> {
-  const baseUrl = env.ELASTICSEARCH_URL;
+  const baseUrl = esBase();
   const index = params.index;
   const limit = params.limit ?? 100;
   const offset = params.offset ?? 0;
@@ -86,7 +86,7 @@ export async function fetchLogs(params: LogQuery): Promise<LogResult> {
   try {
     const response = await fetch(`${baseUrl}/${index}/_search`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: esHeaders(),
       body: JSON.stringify({
         size: limit,
         from: offset,
@@ -144,11 +144,11 @@ export async function fetchLogById(
   index: string,
   id: string,
 ): Promise<Record<string, unknown> | null> {
-  const baseUrl = env.ELASTICSEARCH_URL;
+  const baseUrl = esBase();
 
   try {
     const response = await fetch(`${baseUrl}/${index}/_doc/${id}`, {
-      headers: { "Content-Type": "application/json" },
+      headers: esHeaders(),
     });
     if (!response.ok) return null;
 
@@ -195,9 +195,9 @@ export async function fetchEntityDetails(
   const index = esLookup[entityType];
   if (index && entityType !== "action") {
     try {
-      const baseUrl = env.ELASTICSEARCH_URL;
+      const baseUrl = esBase();
       const res = await fetch(`${baseUrl}/${index}/_doc/${entityId}`, {
-        headers: { "Content-Type": "application/json" },
+        headers: esHeaders(),
       });
       if (res.ok) {
         const data = await res.json() as { _source: Record<string, unknown> };

@@ -8,6 +8,20 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Elasticsearch authentication enabled (2026-06-05)
+ES ran unauthed (`xpack.security.enabled=false`) on the shared internal Docker net —
+a latent risk, and an acute one once the agent got a browser (a prompt-injected page
+could hit `http://elasticsearch:9200`). Enabled ES security (basic auth, no TLS —
+internal-only + single-node). Every client now uses inline creds in `ELASTICSEARCH_URL`
+= `http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200`: the `@elastic/elasticsearch`
+clients (awareness, personal-knowledge, google, health, gateway) parse it with zero code
+change; the dashboard's raw-`fetch` ES calls got a `lib/es.ts` helper (strips creds →
+`Authorization: Basic`). `ELASTIC_PASSWORD` is a GitHub secret injected into the on-host
+`.env` by the deploy job (findhub pattern); the `elastic` password was bootstrapped
+post-deploy via `reset-password` to match. Brief all-MCP downtime during the cutover.
+Rollback: `xpack.security.enabled=false` + redeploy. See
+[DECISION-011](decisions/DECISION-011-elasticsearch-auth.md).
+
 ### Browser access via Playwright MCP (2026-06-04, deployed)
 Gave the agent a real browser. New `browser` container in `docker/docker-compose.prod.yml`
 running Microsoft's `mcr.microsoft.com/playwright/mcp` (headless Chromium, `--no-sandbox`,

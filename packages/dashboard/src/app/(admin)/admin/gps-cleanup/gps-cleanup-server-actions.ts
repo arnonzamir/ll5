@@ -1,6 +1,6 @@
 "use server";
 
-import { env } from "@/lib/env";
+import { esBase, esHeaders } from "@/lib/es";
 import { getToken, decodeTokenPayload } from "@/lib/auth";
 import { DEFAULT_GEO_BOUNDS, isOutOfBounds, type GeoBounds } from "./gps-bounds";
 
@@ -106,7 +106,7 @@ async function getCurrentUserId(): Promise<string | null> {
 }
 
 async function fetchAllPoints(userId: string, timeRange: TimeRange): Promise<LocHit[]> {
-  const baseUrl = env.ELASTICSEARCH_URL;
+  const baseUrl = esBase();
   const points: LocHit[] = [];
   let searchAfter: unknown[] | null = null;
   const PAGE = 1000;
@@ -135,7 +135,7 @@ async function fetchAllPoints(userId: string, timeRange: TimeRange): Promise<Loc
 
     const res = await fetch(`${baseUrl}/${INDEX}/_search`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: esHeaders(),
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -375,14 +375,14 @@ export async function deleteGpsPoints(
   if (!userId) return { ok: false, error: "Not authenticated" };
   if (ids.length === 0) return { ok: true, deleted: 0 };
 
-  const baseUrl = env.ELASTICSEARCH_URL;
+  const baseUrl = esBase();
 
   try {
     // Bulk delete. user_id scoping is enforced by refusing ids the user doesn't
     // own via a conditional delete_by_query on just those ids.
     const response = await fetch(`${baseUrl}/${INDEX}/_delete_by_query?refresh=true`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: esHeaders(),
       body: JSON.stringify({
         query: {
           bool: {

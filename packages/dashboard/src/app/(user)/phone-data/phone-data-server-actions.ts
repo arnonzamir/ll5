@@ -1,6 +1,6 @@
 "use server";
 
-import { env } from "@/lib/env";
+import { esBase, esHeaders } from "@/lib/es";
 
 export interface PhoneLocationItem {
   type: "location";
@@ -74,11 +74,11 @@ async function queryIndex<T>(
   limit: number,
   sortField = "timestamp"
 ): Promise<ESHit<T>[]> {
-  const baseUrl = env.ELASTICSEARCH_URL;
+  const baseUrl = esBase();
   try {
     const response = await fetch(`${baseUrl}/${index}/_search`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: esHeaders(),
       body: JSON.stringify({
         size: limit,
         sort: [{ [sortField]: { order: "desc" } }],

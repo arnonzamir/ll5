@@ -240,11 +240,15 @@ jobs:
           FINDHUB_WEBHOOK_TOKEN: ${{ secrets.FINDHUB_WEBHOOK_TOKEN }}
           FINDHUB_SECRETS_B64: ${{ secrets.FINDHUB_SECRETS_B64 }}
           FINDHUB_DEVICE_TYPES: ${{ secrets.FINDHUB_DEVICE_TYPES }}
+          # ES auth: the compose interpolates ${ELASTIC_PASSWORD} into every
+          # ELASTICSEARCH_URL (inline creds); Coolify env doesn't reach the on-host
+          # .env, so inject it here like the FINDHUB_* secrets.
+          ELASTIC_PASSWORD: ${{ secrets.ELASTIC_PASSWORD }}
         with:
           host: ${{ vars.SERVER_HOST }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES
+          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES,ELASTIC_PASSWORD
           command_timeout: 15m
           script: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u arnonzamir --password-stdin
@@ -269,6 +273,17 @@ jobs:
               echo "Injected FINDHUB_* into .env"
             else
               echo "WARN: FINDHUB_WEBHOOK_TOKEN secret empty — leaving .env untouched"
+            fi
+            # Inject ELASTIC_PASSWORD (idempotent). Guard on non-empty so a missing
+            # secret never blanks it and breaks every ES client.
+            if [ -n "$ELASTIC_PASSWORD" ]; then
+              touch .env
+              grep -v '^ELASTIC_PASSWORD=' .env > .env.es.tmp 2>/dev/null || true
+              mv .env.es.tmp .env
+              printf 'ELASTIC_PASSWORD=%s\n' "$ELASTIC_PASSWORD" >> .env
+              echo "Injected ELASTIC_PASSWORD into .env"
+            else
+              echo "WARN: ELASTIC_PASSWORD secret empty — leaving .env untouched"
             fi
             # Only pull our GHCR-built images — never databases (postgres, ES) or
             # third-party images (evolution). A new patch of postgres:16-alpine

@@ -42,8 +42,14 @@ services:
     container_name: elasticsearch-xkkcc0g4o48kkcows8488so4
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
+      # Security ON (basic auth required) but no TLS — ES is internal-Docker-only
+      # (no published port, no Traefik), so plaintext on the private network is
+      # fine; single-node discovery exempts transport TLS. The `elastic` password
+      # is bootstrapped post-deploy (reset-password) to match ELASTIC_PASSWORD,
+      # which every client gets via inline creds in ELASTICSEARCH_URL.
+      - xpack.security.enabled=true
       - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
       - ES_JAVA_OPTS=${ES_JAVA_OPTS:--Xms2g -Xmx2g}
     volumes:
       - es-data:/usr/share/elasticsearch/data
@@ -93,7 +99,7 @@ services:
       API_KEY: ${API_KEY}
       USER_ID: ${USER_ID}
       AUTH_SECRET: ${AUTH_SECRET}
-      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -163,7 +169,7 @@ services:
       API_KEY: ${API_KEY}
       USER_ID: ${USER_ID}
       AUTH_SECRET: ${AUTH_SECRET}
-      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
       TZ: ${TZ:-Asia/Jerusalem}
     depends_on:
       elasticsearch:
@@ -201,7 +207,7 @@ services:
       # Calendar reads/writes are cached in ES (ll5_awareness_calendar). Without
       # this, server.ts logs "ELASTICSEARCH_URL not set — calendar reads will fall
       # back to live Google API" and the ES-backed tools return "ES not configured".
-      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://mcp-google.noninoni.click/oauth/callback}
@@ -278,7 +284,7 @@ services:
       API_KEY: ${API_KEY}
       USER_ID: ${USER_ID}
       AUTH_SECRET: ${AUTH_SECRET}
-      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
       DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
     depends_on:
@@ -317,7 +323,7 @@ services:
       TZ: ${TZ:-Asia/Jerusalem}
       AUTH_SECRET: ${AUTH_SECRET}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
-      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET}
       # Base domain for mcp-*.<domain> endpoints baked into the agent .mcp.json.
@@ -409,6 +415,7 @@ services:
       GATEWAY_URL: http://gateway:3000
       NEXT_PUBLIC_GATEWAY_URL: https://gateway.noninoni.click
       AUTH_SECRET: ${AUTH_SECRET}
+      ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
     depends_on:
       - gateway
     deploy:
