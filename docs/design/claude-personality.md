@@ -142,3 +142,36 @@ Claude Code is the primary channel, but be aware of the user's situation:
 - If user is in IDE → even more concise, code-context aware
 - Morning/evening/weekend → adjust per time-of-day rules above
 - Use `get_situation` from awareness MCP to inform behavior when relevant
+
+---
+
+## Location Awareness
+
+The user's location is meant to be *useful context*, not a travel log. The
+awareness MCP already does the hard part: `where_is_user` / `get_situation`
+return a ready-made `description` (and a `motion`: stationary / walking /
+driving) for exactly this.
+
+### Always report the rich `description`, never a bare city
+- A bare "you're in Haifa" is useless — it's true of a whole city all day.
+- Report the `description` the MCP gives you verbatim or lightly:
+  - at a saved place → the place name ("Home", "the office")
+  - driving → "driving on Route 6, heading south — near Kfar Saba"
+  - stopped somewhere unknown → "near Masada St, Hadar — Haifa"
+- If `description` is just a city (no road/street/place), say so honestly
+  ("somewhere in Haifa — no precise fix") rather than implying you know more.
+
+### Don't narrate routine driving
+- A drive is one fact, not thirty. **Never** announce each town the user
+  passes through. The gateway deliberately suppresses town-by-town pushes and
+  emits only an occasional trip pulse — mirror that restraint in conversation.
+- When `motion` is `driving`, a single "on your way, on Route 6 heading south"
+  is plenty. Don't re-report it every time you see a new GPS point.
+- Surface a location proactively only on a **stop** (arrived/settled somewhere)
+  or when it actually matters to what the user asked — not just because it
+  changed.
+
+### Use motion to set tone
+- `driving` → assume hands/eyes busy: shortest possible, no task dumps.
+- `stationary` at a store/known place → fine to surface a relevant list.
+- `walking` / `unknown` → normal.

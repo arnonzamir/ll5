@@ -16,10 +16,12 @@ import {
   haversineMeters,
   DEFAULT_PLACE_RADIUS_M,
   TRANSITION_DEDUP_MS,
+  TRIP_PULSE_MS,
   WIFI_CONNECTED_ANCHOR_MS,
   BSSID_MIN_OBSERVATIONS,
   type WifiSignal,
   type PriorLabel,
+  type Motion,
 } from '@ll5/shared';
 
 /**
@@ -246,7 +248,16 @@ interface LocationState {
   last_seen?: string;
   last_push_label?: string;
   last_push_at?: number;
+  /** Last classified motion — lets us detect a driving→stopped "stop". */
+  last_motion?: Motion;
+  /** When we last emitted a trip pulse (epoch ms) — caps drive-time chatter. */
+  last_pulse_at?: number;
   updated_at?: string;
+}
+
+/** Sentence-case a description ("driving on…" → "Driving on…") for a push body. */
+function capitalize(s: string): string {
+  return s.length ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
 interface CurrentLabel {
@@ -324,9 +335,11 @@ async function runTransition(
     const state = await getLocationState(es, userId);
 
     // Resolve the current label through the SHARED resolver — wifi-anchored +
-    // departure hysteresis. The push is "now", so GPS age is 0 (fresh); we pass
-    // its accuracy so a low-accuracy edge fix can't release a held place, and the
-    // prior committed label so we don't flap off a place on a single weak fix.
+    // departure hysteresis, and now the USEFUL description ("driving on Route 6,
+    // heading south — near Hadera" / "near Masada St, Haifa") + motion. The push
+    // is "now", so GPS age is 0 (fresh); we pass accuracy (a low-accuracy edge fix
+    // can't release a held place), the road/neighbourhood/bearing/speed that make
+    // the description useful, and the prior committed label (anti-flap).
     const prior: PriorLabel | null = state
       ? { label: state.label, kind: state.kind, placeId: state.place_id }
       : null;
@@ -340,6 +353,10 @@ async function runTransition(
           ? { placeId: placeMatch.place_id, placeName: placeMatch.place_name }
           : null,
         city: geocode?.city ?? null,
+        road: geocode?.road ?? null,
+        neighborhood: geocode?.neighborhood ?? null,
+        bearingDeg: item.bearing_deg ?? null,
+        speedMps: item.speed_mps ?? null,
       },
       wifi: wifiSignal,
       prior,
@@ -354,36 +371,71 @@ async function runTransition(
       place_id: resolved.placeId ?? undefined,
       city: geocode?.city,
     };
-
-    // Same place as last confirmed: just refresh coordinates/last_seen.
-    if (state && state.label === cur.label) {
-      await setLocationState(es, userId, {
-        ...state, label: cur.label, kind: cur.kind, place_id: cur.place_id, city: cur.city,
-        lat: item.lat, lon: item.lon, last_seen: item.timestamp,
-      });
-      return;
-    }
+    const { description, motion } = resolved;
 
     const now = Date.now();
     const prevLabel = state?.label;
+    const isPlace = cur.kind === 'place';
+    const labelChanged = !state || state.label !== cur.label;
+    const stoppedNow = state?.last_motion === 'driving' && motion !== 'driving';
 
-    // Anti-flap: if we already pushed this exact label very recently (A→B→A),
-    // update state silently without re-pushing.
-    if (state?.last_push_label === cur.label && state.last_push_at && now - state.last_push_at < TRANSITION_DEDUP_MS) {
+    // ---- Notification policy: "stops + pulse, prefer more on less" -----------
+    //  - place arrival (label changed to a known place) → push (a "stop").
+    //  - driving → SUPPRESS per-town city spam; emit one rich "trip pulse" at
+    //    most every TRIP_PULSE_MS so a long drive reads as periodic useful
+    //    updates, not a town-by-town firehose.
+    //  - stationary / walking → push when the label changes OR you just stopped
+    //    (arriving / settling somewhere new), using the rich description.
+    let pushBody: string | null = null;
+    let isPulse = false;
+    let summary: string;
+
+    if (isPlace && labelChanged) {
+      pushBody = phraseArrival(cur);
+      summary = `Arrived at ${cur.label}`;
+    } else if (motion === 'driving') {
+      summary = capitalize(description);
+      if (now - (state?.last_pulse_at ?? 0) >= TRIP_PULSE_MS) {
+        pushBody = capitalize(description);
+        isPulse = true;
+      }
+    } else if (!isPlace && (labelChanged || stoppedNow)) {
+      pushBody = capitalize(description);
+      summary = capitalize(description);
+    } else {
+      summary = capitalize(description);
+    }
+
+    // Anti-flap: never re-push the exact same STOP label within the dedup window
+    // (A→B→A bounce). Pulses are already timer-gated, so they're exempt.
+    if (
+      pushBody && !isPulse &&
+      state?.last_push_label === cur.label && state.last_push_at &&
+      now - state.last_push_at < TRANSITION_DEDUP_MS
+    ) {
       logger.debug('[location][transition] deduped recent label, no re-push', {
-        label: cur.label,
-        sinceLastPushMs: now - state.last_push_at,
+        label: cur.label, sinceLastPushMs: now - state.last_push_at,
       });
-      await setLocationState(es, userId, {
-        ...state, label: cur.label, kind: cur.kind, place_id: cur.place_id, city: cur.city,
-        lat: item.lat, lon: item.lon, last_seen: item.timestamp,
-      });
+      pushBody = null;
+    }
+
+    // State advances every point so motion/label/coords stay current even when we
+    // stay silent; last_push_* / last_pulse_at only move when we actually surface.
+    const nextState: Omit<LocationState, 'user_id' | 'updated_at'> = {
+      label: cur.label, kind: cur.kind, place_id: cur.place_id, city: cur.city,
+      lat: item.lat, lon: item.lon, last_seen: item.timestamp,
+      last_motion: motion,
+      last_push_label: pushBody ? cur.label : state?.last_push_label,
+      last_push_at: pushBody ? now : state?.last_push_at,
+      last_pulse_at: isPulse ? now : state?.last_pulse_at,
+    };
+
+    if (!pushBody) {
+      await setLocationState(es, userId, nextState);
       return;
     }
 
-    const summary = cur.kind === 'place' ? `Arrived at ${cur.label}` : `Now in ${cur.label}`;
-
-    // 1) Awareness record
+    // 1) Awareness record (carries the rich description + motion for history).
     await writeNotableEvent(es, userId, {
       event_type: 'location_change',
       timestamp: item.timestamp,
@@ -392,37 +444,38 @@ async function runTransition(
       payload: {
         kind: cur.kind,
         place_id: cur.place_id,
-        place_name: cur.kind === 'place' ? cur.label : undefined,
+        place_name: isPlace ? cur.label : undefined,
         city: cur.city,
+        motion,
+        description,
+        pulse: isPulse,
         previous: prevLabel,
         location: { lat: item.lat, lon: item.lon },
       },
     });
 
     // 2) Agent context (no FCM — the gateway sends the user push directly below).
-    // A4: tag signal quality so the agent knows confidence. A known-place match
-    // (within 100m of a saved place) is high confidence; a geocoded city label
-    // is coarse (anywhere in town), so flag it as lower confidence.
-    const ctx = prevLabel ? ` (was ${prevLabel})` : '';
-    const quality = cur.kind === 'place' ? ' [place match]' : ' [city-level]';
-    await insertSystemMessage(pool, userId, `[Location] ${phraseArrival(cur)}${ctx}.${quality}`);
+    // The agent always gets the USEFUL description, not a bare city. Quality tag:
+    // a known-place match is high confidence; a geocoded city label is coarse.
+    const agentText = isPlace ? phraseArrival(cur) : description;
+    const ctx = prevLabel && labelChanged ? ` (was ${prevLabel})` : '';
+    const quality = isPlace ? ' [place match]' : ' [city-level]';
+    await insertSystemMessage(pool, userId, `[Location] ${agentText}${ctx}.${quality}`);
 
     // 3) Direct push to the user
     await sendFCMNotification(pool, userId, {
       title: 'LL5',
-      body: phraseArrival(cur),
+      body: pushBody,
       type: 'location',
       notification_level: 'notify',
     });
 
     // 4) Commit new state
-    await setLocationState(es, userId, {
-      label: cur.label, kind: cur.kind, place_id: cur.place_id, city: cur.city,
-      lat: item.lat, lon: item.lon, last_seen: item.timestamp,
-      last_push_label: cur.label, last_push_at: now,
-    });
+    await setLocationState(es, userId, nextState);
 
-    logger.info('[location][transition] place/region transition pushed', { from: prevLabel ?? '(none)', to: cur.label, kind: cur.kind });
+    logger.info('[location][transition] location update pushed', {
+      from: prevLabel ?? '(none)', to: cur.label, kind: cur.kind, motion, pulse: isPulse,
+    });
 }
 
 // Accuracy / plausibility / drift thresholds now live in @ll5/shared
@@ -563,6 +616,7 @@ export async function processLocation(
   if (geocodeResult) {
     doc.address = geocodeResult.address;
     if (geocodeResult.city) doc.city = geocodeResult.city;
+    if (geocodeResult.road) doc.road = geocodeResult.road;
     if (geocodeResult.neighborhood) doc.neighborhood = geocodeResult.neighborhood;
   }
 

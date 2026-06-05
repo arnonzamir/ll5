@@ -76,6 +76,9 @@ export function registerSituationTools(
             freshness: gpsTimestamp ? computeFreshness(gpsTimestamp) : null,
             place_name: fused.place,
             place_type: null,
+            // The USEFUL one-liner to report instead of a bare city/place name.
+            description: fused.description,
+            motion: fused.motion,
             address: gps?.address ?? null,
             confidence: fused.confidence,
             source: fused.source,

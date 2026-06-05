@@ -2,6 +2,9 @@ import { logger } from './logger.js';
 
 export interface GeocodingResult {
   address: string;
+  /** Street / road name (e.g. "Route 6", "Masada St") — drives the useful
+   *  "driving on X" / "near Street" descriptions. */
+  road?: string;
   neighborhood?: string;
   city?: string;
   country?: string;
@@ -74,6 +77,7 @@ async function reverseGeocodeNominatim(lat: number, lon: number): Promise<Geocod
 
   return {
     address: data.display_name ?? '',
+    road: addr?.road ?? undefined,
     neighborhood: addr?.neighbourhood ?? addr?.suburb ?? undefined,
     city,
     country: addr?.country ?? undefined,
@@ -124,6 +128,7 @@ async function reverseGeocodeGoogle(lat: number, lon: number, apiKey: string): P
 
   return {
     address: result.formatted_address ?? '',
+    road: findComponent('route'),
     neighborhood: findComponent('neighborhood') ?? findComponent('sublocality'),
     city: findComponent('locality'),
     country: findComponent('country'),

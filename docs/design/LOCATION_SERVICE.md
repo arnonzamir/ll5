@@ -30,11 +30,48 @@ interface CurrentLocation {
   confidence: 'high' | 'medium' | 'low' | 'unknown';
   source: 'gps' | 'wifi' | 'gps+wifi' | 'stale_gps' | 'none';
   reasoning: string;             // short one-line explanation
+  description: string;           // the USEFUL one-liner to report (see below)
+  motion: 'stationary' | 'walking' | 'driving' | 'unknown';
 
   gps?: { lat; lon; accuracy_m; age_s; freshness; matched_place? };
   wifi?: { bssid; ssid; connected; age_s; place_from_bssid? };
 }
 ```
+
+## Useful descriptions (the "you're in Haifa is useless" fix)
+
+A bare city label is true of a whole city all day — useless as an update. The
+shared resolver (`@ll5/shared` `describeLocation`) builds a `description` from
+the non-place GPS context so the agent and the user push always have something
+worth saying. It is computed identically on the gateway write path and the
+awareness read path (same module), and `motion` is classified from device speed
+(`STATIONARY_SPEED_MPS=1`, `DRIVING_SPEED_MPS=6` m/s):
+
+| Situation | `description` |
+|---|---|
+| At a saved place | the place name ("Home") |
+| Driving | "driving on Route 6, heading south — near Kfar Saba" (road + bearing→cardinal + nearby city) |
+| Stopped, unknown spot | "near Masada St, Haifa" (street/neighbourhood + city) |
+| Only a city is known | "near Haifa" |
+| No fix | coordinates |
+
+The road/neighbourhood come from reverse geocoding (Nominatim `road` /
+Google `route`, stored on the location doc); bearing/speed come from the device.
+
+## Notification cadence — stops + trip pulse
+
+The gateway transition path (`runTransition`) no longer pushes on every label
+change (which firehosed town-by-town on a highway). Policy ("stops + pulse,
+prefer more on less"):
+
+- **Place arrival** (label changed to a saved place) → push (a "stop").
+- **Driving** → suppress per-town city spam; emit ONE rich trip pulse at most
+  every `TRIP_PULSE_MS` (12 min) — "Driving on Route 6, heading south — near
+  Hadera".
+- **Stationary / walking** → push when the label changes OR you just stopped
+  (driving→stationary = settling somewhere), using the rich description.
+- Anti-flap (`TRANSITION_DEDUP_MS`, 5 min) still suppresses A→B→A bounces; pulses
+  are timer-gated so they're exempt. State carries `last_motion` + `last_pulse_at`.
 
 ## Fusion rules
 

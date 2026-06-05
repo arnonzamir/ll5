@@ -8,6 +8,25 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Useful location updates — rich descriptions + stops/pulse cadence (2026-06-05)
+"You're in Haifa" was useless (true all day). Now the shared resolver builds a
+`description` + `motion` (stationary/walking/driving) consumed identically by the
+gateway write path and awareness read path: at a place → the place name; driving →
+"driving on Route 6, heading south — near Kfar Saba" (road + bearing→cardinal +
+nearby city); stopped at an unknown spot → "near Masada St, Haifa". **Tools:**
+new `@ll5/shared/location/describe.ts` (`cardinal`, `motionState`,
+`describeLocation`); reverse-geocode now parses `road` (Nominatim `road` / Google
+`route`) and stores road/bearing on the location doc; `where_is_user` /
+`get_current_location` / `get_situation` surface `description`+`motion`. **Cadence
+(user choice "stops + pulse, prefer more on less"):** `runTransition` pushes on
+place arrivals + stops (driving→stationary), suppresses town-by-town city spam
+while driving, and emits one rich trip pulse at most every `TRIP_PULSE_MS` (12 min);
+state carries `last_motion`/`last_pulse_at`. **Prompts:** new "Location Awareness"
+section in claude-personality.md (always report `description`, never a bare city,
+never narrate routine driving) + tightened `where_is_user` tool description.
+Tests: shared +6, gateway transition +3 (suppress/pulse/stop). See
+[LOCATION_SERVICE.md](design/LOCATION_SERVICE.md).
+
 ### Elasticsearch authentication enabled (2026-06-05)
 ES ran unauthed (`xpack.security.enabled=false`) on the shared internal Docker net —
 a latent risk, and an acute one once the agent got a browser (a prompt-injected page

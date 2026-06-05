@@ -4,6 +4,8 @@ export type Freshness = 'fresh' | 'stale' | 'very_stale';
 export type Confidence = 'high' | 'medium' | 'low' | 'unknown';
 export type LocationSource = 'gps' | 'wifi' | 'gps+wifi' | 'stale_gps' | 'hold' | 'none';
 export type LabelKind = 'place' | 'city' | null;
+/** Inferred from device speed. 'unknown' when no speed is available. */
+export type Motion = 'stationary' | 'walking' | 'driving' | 'unknown';
 
 /** A known place a GPS fix matched (within its radius). */
 export interface KnownPlaceMatch {
@@ -22,6 +24,15 @@ export interface GpsSignal {
   /** Reverse-geocoded city, used for the city-level fallback label. */
   city?: string | null;
   address?: string | null;
+  // --- enrichment for a USEFUL description (vs a bare city) ---
+  /** Reverse-geocoded street/road (zoom-18). */
+  road?: string | null;
+  /** Reverse-geocoded neighbourhood/suburb. */
+  neighborhood?: string | null;
+  /** Device heading in degrees (0=N, 90=E). For "heading <cardinal>". */
+  bearingDeg?: number | null;
+  /** Device speed in m/s. Drives the motion classification. */
+  speedMps?: number | null;
 }
 
 /** A BSSID->place binding resolved by the caller from the networks index. */
@@ -76,6 +87,13 @@ export interface ResolvedLocation {
    *  city-level; null when in transit / unknown. */
   label: string | null;
   labelKind: LabelKind;
+
+  /** USEFUL human description — the thing to actually show the user:
+   *  a place name ("Home"), an in-transit line ("on Route 6, heading south —
+   *  near Kfar Saba"), or a stationary landmark ("near Masada St, Haifa"). */
+  description: string;
+  /** Motion inferred from device speed. */
+  motion: Motion;
 
   recentlyLeft?: RecentlyLeft;
 }

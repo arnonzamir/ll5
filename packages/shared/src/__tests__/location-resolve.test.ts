@@ -165,3 +165,60 @@ describe('haversineMeters', () => {
     expect(haversineMeters({ lat: 0, lon: 0 }, { lat: 1, lon: 0 })).toBeLessThan(112_000);
   });
 });
+
+import { cardinal, motionState, describeLocation } from '../location/index.js';
+
+describe('cardinal direction', () => {
+  it('maps degrees to 8-point cardinals', () => {
+    expect(cardinal(0)).toBe('north');
+    expect(cardinal(90)).toBe('east');
+    expect(cardinal(180)).toBe('south');
+    expect(cardinal(270)).toBe('west');
+    expect(cardinal(45)).toBe('northeast');
+    expect(cardinal(350)).toBe('north');
+    expect(cardinal(-90)).toBe('west');
+  });
+});
+
+describe('motionState', () => {
+  it('classifies from speed', () => {
+    expect(motionState(undefined)).toBe('unknown');
+    expect(motionState(0)).toBe('stationary');
+    expect(motionState(3)).toBe('walking');
+    expect(motionState(25)).toBe('driving');
+  });
+});
+
+describe('describeLocation — useful descriptions', () => {
+  const g = (over: Partial<GpsSignal>): GpsSignal => ({ lat: 32.1, lon: 34.8, ageMs: 1000, ...over });
+
+  it('known place is its own description', () => {
+    expect(describeLocation(g({ speedMps: 25 }), 'Home').description).toBe('Home');
+  });
+  it('driving → on road, heading cardinal, near city', () => {
+    const r = describeLocation(g({ speedMps: 25, road: 'Route 6', bearingDeg: 180, city: 'Kfar Saba' }), null);
+    expect(r.motion).toBe('driving');
+    expect(r.description).toBe('driving on Route 6, heading south — near Kfar Saba');
+  });
+  it('driving without a road still gives direction + city', () => {
+    expect(describeLocation(g({ speedMps: 25, bearingDeg: 0, city: 'Hadera' }), null).description)
+      .toBe('driving heading north — near Hadera');
+  });
+  it('stationary unknown spot → near street, city', () => {
+    const r = describeLocation(g({ speedMps: 0, road: 'Masada St', neighborhood: 'Hadar', city: 'Haifa' }), null);
+    expect(r.motion).toBe('stationary');
+    expect(r.description).toBe('near Masada St, Haifa');
+  });
+  it('falls back to neighborhood then city', () => {
+    expect(describeLocation(g({ speedMps: 0, neighborhood: 'Hadar', city: 'Haifa' }), null).description)
+      .toBe('near Hadar, Haifa');
+    expect(describeLocation(g({ speedMps: 0, city: 'Haifa' }), null).description).toBe('near Haifa');
+  });
+
+  it('resolveLocation attaches description + motion (driving, no place)', () => {
+    const r = resolveLocation({ gps: { lat: 32, lon: 34, ageMs: 1000, matchedPlace: null, city: 'Hadera', road: 'Route 2', bearingDeg: 200, speedMps: 30 } });
+    expect(r.motion).toBe('driving');
+    expect(r.description).toContain('on Route 2');
+    expect(r.description).toContain('heading');
+  });
+});

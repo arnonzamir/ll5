@@ -10,6 +10,7 @@ import {
   type WifiSignal,
   type Confidence,
   type LocationSource,
+  type Motion,
 } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
@@ -43,6 +44,14 @@ export interface CurrentLocation {
   confidence: Confidence;
   source: LocationSource;
   reasoning: string;
+  /**
+   * The USEFUL human description — what to actually say instead of a bare city.
+   * A known place is its own description; otherwise "driving on Route 6, heading
+   * south — near Hadera" or "near Masada St, Haifa".
+   */
+  description: string;
+  /** Motion inferred from device speed: stationary / walking / driving / unknown. */
+  motion: Motion;
   gps?: GpsBlock;
   wifi?: WifiBlock;
   /**
@@ -113,6 +122,12 @@ export class LocationService {
           matchedPlace: latestGps.matchedPlace
             ? { placeId: latestGps.matchedPlaceId ?? '', placeName: latestGps.matchedPlace }
             : null,
+          // The context that turns a bare city into a useful description.
+          city: latestGps.city ?? null,
+          road: latestGps.road ?? null,
+          neighborhood: latestGps.neighborhood ?? null,
+          bearingDeg: latestGps.bearing ?? null,
+          speedMps: latestGps.speed ?? null,
         }
       : undefined;
 
@@ -168,6 +183,8 @@ export class LocationService {
       confidence: resolved.confidence,
       source: resolved.source,
       reasoning: resolved.reasoning,
+      description: resolved.description,
+      motion: resolved.motion,
       gps: gpsBlock,
       wifi: wifiBlock,
       recently_left: resolved.recentlyLeft

@@ -12,7 +12,11 @@ interface LocationDoc {
   location: { lat: number; lon: number };
   accuracy?: number;
   speed?: number;
+  bearing?: number;
   address?: string;
+  road?: string;
+  city?: string;
+  neighborhood?: string;
   matched_place_id?: string;
   matched_place?: string;
   device_timezone?: string;
@@ -140,7 +144,11 @@ export class ElasticsearchLocationRepository
       location: { lat: doc.location.lat, lon: doc.location.lon },
       accuracy: doc.accuracy,
       speed: doc.speed,
+      bearing: doc.bearing,
       address: doc.address,
+      road: doc.road,
+      city: doc.city,
+      neighborhood: doc.neighborhood,
       matchedPlaceId: doc.matched_place_id,
       matchedPlace: doc.matched_place,
       deviceTimezone: doc.device_timezone,

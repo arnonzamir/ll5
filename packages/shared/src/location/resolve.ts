@@ -5,6 +5,7 @@ import {
   WIFI_CONNECTED_ANCHOR_MS,
   DEPARTURE_ACCURACY_M,
 } from './constants.js';
+import { describeLocation } from './describe.js';
 import type {
   ResolveInput,
   ResolvedLocation,
@@ -12,6 +13,9 @@ import type {
   BssidPlace,
   KnownPlaceMatch,
 } from './types.js';
+
+/** The resolved answer before the human description/motion are attached. */
+type Core = Omit<ResolvedLocation, 'description' | 'motion'>;
 
 function freshnessOf(ageMs: number): Freshness {
   if (ageMs < GPS_FRESH_MS) return 'fresh';
@@ -93,9 +97,16 @@ export function resolveLocation(input: ResolveInput): ResolvedLocation {
     result.recentlyLeft = recentlyLeft;
     result.reasoning += `; recently left ${recentlyLeft.placeName} (wifi disconnect ${recentlyLeft.ageS}s ago)`;
   }
-  return result;
 
-  function decide(): ResolvedLocation {
+  // Attach the USEFUL human description + motion. A known place is its own best
+  // description; otherwise build "driving on X heading Y near Z" / "near Street, City".
+  const { description, motion } = describeLocation(
+    gps,
+    result.labelKind === 'place' ? result.label : null,
+  );
+  return { ...result, description, motion };
+
+  function decide(): Core {
     // 1. Fresh GPS + matched place + wifi agrees
     if (gpsFresh && gpsPlace && wifiPlace && wifiPlace.placeName === gpsPlace.placeName) {
       return place(gpsPlace.placeName, wifiPlace.placeId, 'high', 'gps+wifi',
@@ -139,13 +150,13 @@ export function resolveLocation(input: ResolveInput): ResolvedLocation {
   function place(
     name: string, id: string, confidence: ResolvedLocation['confidence'],
     source: ResolvedLocation['source'], reasoning: string,
-  ): ResolvedLocation {
+  ): Core {
     return { place: name, placeId: id, confidence, source, reasoning, label: name, labelKind: 'place' };
   }
 
   function cityOrNull(
     source: ResolvedLocation['source'], confidence: ResolvedLocation['confidence'], reasoning: string,
-  ): ResolvedLocation {
+  ): Core {
     return {
       place: null, placeId: null, confidence, source, reasoning,
       label: city ?? null, labelKind: city ? 'city' : null,

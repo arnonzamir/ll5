@@ -104,6 +104,8 @@ export function registerLocationTools(
               fused: {
                 place: fused.place,
                 place_id: fused.place_id,
+                description: fused.description,
+                motion: fused.motion,
                 confidence: fused.confidence,
                 source: fused.source,
                 reasoning: fused.reasoning,
@@ -119,7 +121,7 @@ export function registerLocationTools(
 
   server.tool(
     'where_is_user',
-    'Fused answer to "where is the user right now" from GPS + wifi signals. Returns place + confidence + reasoning. Preferred over get_current_location for decision-making.',
+    'Fused answer to "where is the user right now" from GPS + wifi signals. Returns a ready-to-report `description` (e.g. "driving on Route 6, heading south — near Kfar Saba" or "near Masada St, Haifa"), a `motion` (stationary/walking/driving), plus place + confidence + reasoning. ALWAYS report the `description`, never a bare city like "in Haifa". When `motion` is "driving", do not narrate town-by-town — one update is enough. Preferred over get_current_location for decision-making.',
     {},
     async () => {
       const userId = getUserId();

@@ -18,6 +18,9 @@ vi.mock('../utils/fcm-sender.js', () => ({ sendFCMNotification }));
 vi.mock('../processors/notable.js', () => ({ writeNotableEvent }));
 
 import { processLocation } from '../processors/location.js';
+import { reverseGeocode } from '../utils/geocoding.js';
+
+const mockGeocode = vi.mocked(reverseGeocode);
 
 const USER = 'user-flap';
 const HOME_STATE = { user_id: USER, label: 'Home', kind: 'place', place_id: 'home', lat: 32.0, lon: 34.0 };
@@ -78,5 +81,55 @@ describe('place transition — wifi anchor + hysteresis (no home flapping)', () 
     await processLocation(es, USER, loc({ accuracy_m: 20, lat: 32.05, lon: 34.05 }), undefined, pool, null);
     expect(sendFCMNotification).toHaveBeenCalledTimes(1);
     expect(insertSystemMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stops + pulse policy: a long drive must NOT firehose town-by-town; it emits
+// one rich "trip pulse" at most every TRIP_PULSE_MS, plus a push when you stop.
+// ---------------------------------------------------------------------------
+const DRIVE_STATE = (over: Record<string, unknown> = {}) => ({
+  user_id: USER, label: 'Hadera', kind: 'city', city: 'Hadera',
+  lat: 32.4, lon: 34.9, last_motion: 'driving', ...over,
+});
+
+/** ES whose location_state is a driving city-state; no place match, no wifi anchor. */
+function makeDriveEs(stateOver: Record<string, unknown> = {}): Client {
+  return {
+    search: vi.fn(async () => ({ hits: { hits: [] } })),
+    get: vi.fn(async (req: { index: string }) => {
+      if (req.index === 'll5_awareness_location_state') return { _source: DRIVE_STATE(stateOver) };
+      throw { meta: { statusCode: 404 } };
+    }),
+    index: vi.fn(async () => ({ result: 'created' })),
+  } as unknown as Client;
+}
+
+describe('drive cadence — stops + trip pulse, not town-by-town', () => {
+  it('SUPPRESSES a town change while driving within the pulse window', async () => {
+    // Pulsed 1 min ago; now a fresh driving fix in a different town → stay silent.
+    mockGeocode.mockResolvedValueOnce({ address: 'hwy', city: 'Kfar Saba', road: 'Route 6' });
+    const es = makeDriveEs({ last_pulse_at: Date.now() - 60_000 });
+    await processLocation(es, USER, loc({ accuracy_m: 20, lat: 32.2, lon: 34.9, speed_mps: 25, bearing_deg: 180 }), undefined, pool, null);
+    expect(sendFCMNotification).not.toHaveBeenCalled();
+  });
+
+  it('EMITS one rich trip pulse once the pulse window has elapsed', async () => {
+    mockGeocode.mockResolvedValueOnce({ address: 'hwy', city: 'Kfar Saba', road: 'Route 6' });
+    const es = makeDriveEs({ last_pulse_at: Date.now() - 15 * 60_000 });
+    await processLocation(es, USER, loc({ accuracy_m: 20, lat: 32.2, lon: 34.9, speed_mps: 25, bearing_deg: 180 }), undefined, pool, null);
+    expect(sendFCMNotification).toHaveBeenCalledTimes(1);
+    const body = sendFCMNotification.mock.calls[0][2].body as string;
+    expect(body).toContain('Route 6');
+    expect(body.toLowerCase()).toContain('heading south');
+  });
+
+  it('PUSHES when you stop (driving → stationary), even within the pulse window', async () => {
+    mockGeocode.mockResolvedValueOnce({ address: 'side st', city: 'Kfar Saba', road: 'Weizmann St' });
+    const es = makeDriveEs({ last_pulse_at: Date.now() - 60_000 });
+    await processLocation(es, USER, loc({ accuracy_m: 20, lat: 32.2, lon: 34.9, speed_mps: 0 }), undefined, pool, null);
+    expect(sendFCMNotification).toHaveBeenCalledTimes(1);
+    const body = sendFCMNotification.mock.calls[0][2].body as string;
+    expect(body).toContain('Weizmann St');
   });
 });

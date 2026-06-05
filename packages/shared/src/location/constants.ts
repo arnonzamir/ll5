@@ -71,6 +71,16 @@ export const MAX_GAP_MS = 30 * 60 * 1000;
  */
 export const DEPARTURE_ACCURACY_M = 50;
 
-// --- Place-transition anti-flap (write-time) ------------------------------
+// --- Motion classification (from device speed m/s) ------------------------
+/** At/below this speed (m/s) the user is treated as stationary (~3.6 km/h). */
+export const STATIONARY_SPEED_MPS = 1.0;
+/** At/above this speed (m/s) the user is treated as driving (~22 km/h). Between
+ *  STATIONARY and this is "walking". */
+export const DRIVING_SPEED_MPS = 6.0;
+
+// --- Place-transition anti-flap + trip cadence (write-time) ----------------
 /** Don't re-push the same label within this window (handles A->B->A bounce). */
 export const TRANSITION_DEDUP_MS = 5 * 60 * 1000;
+/** While driving, don't push every town change — emit one "trip pulse" at most
+ *  this often (a useful "on Route 6 heading south, near Hadera" update). */
+export const TRIP_PULSE_MS = 12 * 60 * 1000;
