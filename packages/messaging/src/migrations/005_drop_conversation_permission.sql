@@ -1,0 +1,12 @@
+-- Retire messaging_conversations.permission.
+--
+-- Authority (read / reply) lives solely in contact_settings.permission — the unified
+-- per-contact/per-chat settings table written by the dashboard Authority control,
+-- set_contact_settings, and update_conversation_permissions, and read by the permission
+-- checker. Gateway migration 017 already backfilled group permissions out of this column,
+-- and list_conversations / the conversation repo now resolve authority from contact_settings
+-- via a join, so this column is fully orphaned (it had been frozen at its 'ignore' default,
+-- never written, ever since the unification).
+--
+-- Idempotent: DROP COLUMN IF EXISTS is safe to re-run on every boot.
+ALTER TABLE messaging_conversations DROP COLUMN IF EXISTS permission;

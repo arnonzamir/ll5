@@ -6,44 +6,71 @@ import type {
   ConversationListResult,
 } from '../interfaces/conversation.repository.js';
 
+// The conversation row no longer stores `permission` (dropped in migration 005).
+// Authority (read / reply) is resolved from contact_settings — the single source
+// of truth written by the dashboard Authority control, set_contact_settings, and
+// update_conversation_permissions, and read by the permission checker. A 1:1 chat
+// keys on its linked KB person_id; a group (or unlinked chat) keys on the JID.
+// No row multiplication: messaging_contacts and contact_settings are both unique
+// on their join keys, and the OR matches exactly one branch per conversation.
+const PERMISSION_JOIN = `
+  LEFT JOIN messaging_contacts mct
+    ON mct.user_id = c.user_id AND mct.platform = c.platform AND mct.platform_id = c.conversation_id
+  LEFT JOIN contact_settings cs
+    ON cs.user_id = c.user_id::uuid
+    AND (
+      (c.is_group = true  AND cs.target_type = 'group'  AND cs.target_id = c.conversation_id)
+      OR
+      (c.is_group = false AND cs.target_type = 'person' AND cs.target_id = mct.person_id)
+    )`;
+
+// COALESCE default mirrors the permission checker: no contact_settings row → 'input'
+// (read OK, send blocked).
+const SELECT_COLS = `
+  c.id, c.user_id, c.account_id, c.platform, c.conversation_id, c.name,
+  c.is_group, c.is_archived, c.unread_count, c.last_message_at, c.created_at, c.updated_at,
+  COALESCE(cs.permission, 'input') AS permission`;
+
 export class PostgresConversationRepository
   extends BasePostgresRepository
   implements ConversationRepository
 {
   async list(userId: string, params?: ConversationListParams): Promise<ConversationListResult> {
-    const conditions: string[] = ['user_id = $1'];
+    const conditions: string[] = ['c.user_id = $1'];
     const values: unknown[] = [userId];
     let paramIndex = 2;
 
     if (params?.platform) {
-      conditions.push(`platform = $${paramIndex++}`);
+      conditions.push(`c.platform = $${paramIndex++}`);
       values.push(params.platform);
     }
-    if (params?.permission) {
-      conditions.push(`permission = $${paramIndex++}`);
-      values.push(params.permission);
-    }
     if (params?.account_id) {
-      conditions.push(`account_id = $${paramIndex++}`);
+      conditions.push(`c.account_id = $${paramIndex++}`);
       values.push(params.account_id);
     }
     if (params?.is_group !== undefined) {
-      conditions.push(`is_group = $${paramIndex++}`);
+      conditions.push(`c.is_group = $${paramIndex++}`);
       values.push(params.is_group);
     }
     if (params?.query) {
       conditions.push(
-        `(name ILIKE $${paramIndex} OR conversation_id ILIKE $${paramIndex})`,
+        `(c.name ILIKE $${paramIndex} OR c.conversation_id ILIKE $${paramIndex})`,
       );
       values.push(`%${params.query}%`);
       paramIndex++;
+    }
+    if (params?.permission) {
+      // Authority lives in contact_settings (see PERMISSION_JOIN), not on the
+      // conversation row — filter the joined value, with the same default.
+      conditions.push(`COALESCE(cs.permission, 'input') = $${paramIndex++}`);
+      values.push(params.permission);
     }
 
     const whereClause = conditions.join(' AND ');
 
     // Get total count
     const countResult = await this.query<{ count: string }>(
-      `SELECT COUNT(*) as count FROM messaging_conversations WHERE ${whereClause}`,
+      `SELECT COUNT(*) as count FROM messaging_conversations c ${PERMISSION_JOIN} WHERE ${whereClause}`,
       [...values],
     );
     const total = parseInt(countResult[0]?.count ?? '0', 10);
@@ -52,9 +79,11 @@ export class PostgresConversationRepository
     const offset = params?.offset ?? 0;
 
     const sql = `
-      SELECT * FROM messaging_conversations
+      SELECT ${SELECT_COLS}
+      FROM messaging_conversations c
+      ${PERMISSION_JOIN}
       WHERE ${whereClause}
-      ORDER BY last_message_at DESC NULLS LAST, created_at DESC
+      ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
     values.push(limit, offset);
@@ -69,8 +98,10 @@ export class PostgresConversationRepository
     conversationId: string,
   ): Promise<ConversationRecord | null> {
     return this.queryOne<ConversationRecord>(
-      `SELECT * FROM messaging_conversations
-       WHERE user_id = $1 AND platform = $2 AND conversation_id = $3`,
+      `SELECT ${SELECT_COLS}
+       FROM messaging_conversations c
+       ${PERMISSION_JOIN}
+       WHERE c.user_id = $1 AND c.platform = $2 AND c.conversation_id = $3`,
       [userId, platform, conversationId],
     );
   }
@@ -87,7 +118,8 @@ export class PostgresConversationRepository
       unread_count?: number;
     },
   ): Promise<{ created: boolean }> {
-    // Use INSERT ... ON CONFLICT to upsert. Preserve existing permission.
+    // Use INSERT ... ON CONFLICT to upsert conversation metadata only. Authority
+    // lives in contact_settings, so sync never touches it.
     const result = await this.query<{ xmax: string }>(
       `INSERT INTO messaging_conversations
          (user_id, account_id, platform, conversation_id, name, is_group, is_archived, unread_count)
@@ -117,29 +149,6 @@ export class PostgresConversationRepository
     const row = result[0];
     const created = row ? row.xmax === '0' : false;
     return { created };
-  }
-
-  async updatePermission(
-    userId: string,
-    platform: string,
-    conversationId: string,
-    permission: 'agent' | 'input' | 'ignore',
-  ): Promise<{ previous_permission: string }> {
-    const existing = await this.get(userId, platform, conversationId);
-    if (!existing) {
-      throw new Error('CONVERSATION_NOT_FOUND');
-    }
-
-    const previousPermission = existing.permission;
-
-    await this.query(
-      `UPDATE messaging_conversations
-       SET permission = $1, updated_at = now()
-       WHERE user_id = $2 AND platform = $3 AND conversation_id = $4`,
-      [permission, userId, platform, conversationId],
-    );
-
-    return { previous_permission: previousPermission };
   }
 
   async touchLastMessage(

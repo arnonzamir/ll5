@@ -8,6 +8,10 @@ export interface ConversationRecord {
   is_group: boolean;
   is_archived: boolean;
   unread_count: number;
+  /**
+   * Agent authority, resolved from contact_settings (NOT stored on the row).
+   * 'input' when the conversation has no contact_settings entry.
+   */
   permission: 'agent' | 'input' | 'ignore';
   last_message_at: Date | null;
   created_at: Date;
@@ -36,7 +40,7 @@ export interface ConversationRepository {
   /** Get a specific conversation by platform and conversation_id. */
   get(userId: string, platform: string, conversationId: string): Promise<ConversationRecord | null>;
 
-  /** Upsert a conversation (used during sync). Preserves existing permission if record exists. */
+  /** Upsert a conversation (used during sync). Touches metadata only; authority lives in contact_settings. */
   upsert(
     userId: string,
     conversation: {
@@ -49,14 +53,6 @@ export interface ConversationRepository {
       unread_count?: number;
     },
   ): Promise<{ created: boolean }>;
-
-  /** Update permission for a conversation. Returns previous permission. */
-  updatePermission(
-    userId: string,
-    platform: string,
-    conversationId: string,
-    permission: 'agent' | 'input' | 'ignore',
-  ): Promise<{ previous_permission: string }>;
 
   /** Update last_message_at timestamp. */
   touchLastMessage(

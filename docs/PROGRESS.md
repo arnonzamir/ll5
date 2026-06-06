@@ -8,6 +8,23 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Conversation authority unified on contact_settings; dead column retired (2026-06-06)
+`list_conversations` reported `messaging_conversations.permission` — a column frozen at
+its `'ignore'` default and never written since the contact_settings unification (gateway
+migration 017), so `permission: 'agent'` always returned **0** even when chats were flipped
+to agent in the dashboard. Authority truth lives in `contact_settings.permission` (written
+by the dashboard Authority control + `set_contact_settings`, read by the permission checker).
+Fixes: (1) the conversation repo's `list`/`get` now resolve permission from `contact_settings`
+via a join (1:1 → linked KB person_id, group/unlinked → JID; `COALESCE(…, 'input')` default,
+matching the checker) so the reported and filtered value reflect reality; (2) the
+`update_conversation_permissions` tool now writes `contact_settings.permission` (Authority)
+instead of `contact_settings.routing` — it had silently been a routing setter while its only
+caller, the dashboard `/settings/messaging` page, sent `[ignore|input|agent]` permission
+values, so that page's permission buttons never took effect; (3) removed the dead
+`ConversationRepository.updatePermission` (zero callers); (4) **migration 005** drops
+`messaging_conversations.permission` (017 already backfilled group permissions out of it).
+Tests: +2 (update-permissions write path), messaging suite 70 pass.
+
 ### Useful location updates — rich descriptions + stops/pulse cadence (2026-06-05)
 "You're in Haifa" was useless (true all day). Now the shared resolver builds a
 `description` + `motion` (stationary/walking/driving) consumed identically by the

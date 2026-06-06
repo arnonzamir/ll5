@@ -143,7 +143,6 @@ function makeConversationRepo(overrides: Partial<ConversationRepository> = {}): 
     list: unimpl('list'),
     get: unimpl('get'),
     upsert: unimpl('upsert'),
-    updatePermission: unimpl('updatePermission'),
     touchLastMessage: unimpl('touchLastMessage'),
     ...overrides,
   } as ConversationRepository;

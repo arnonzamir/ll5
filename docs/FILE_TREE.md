@@ -174,9 +174,9 @@ ll5/
 ├── packages/messaging/                # @ll5/messaging — PG-backed MCP (live: mcp-messaging.noninoni.click)
 │   └── src/
 │       ├── clients/                   # Evolution API (WhatsApp), Telegram Bot API
-│       ├── repositories/postgres/     # Accounts, conversations, contacts (with person linking)
-│       ├── tools/                     # 19 tools (send, read, sync, contacts, link, auto-match, backfill-contact-names, restart-whatsapp-account, provision-whatsapp-account, get-pairing-qr, disconnect-whatsapp-account [last 3 added May 18 for dashboard /settings/messaging Add/Re-pair/Disconnect buttons])
-│       ├── migrations/               # 001 tables, 002 contacts, 003 archived conversations
+│       ├── repositories/postgres/     # Accounts, conversations, contacts (with person linking). conversation repo resolves `permission` from contact_settings via join (1:1→person_id, group→JID; default 'input') — the row no longer stores it.
+│       ├── tools/                     # 19 tools (send, read, sync, contacts, link, auto-match, backfill-contact-names, restart-whatsapp-account, provision-whatsapp-account, get-pairing-qr, disconnect-whatsapp-account [last 3 added May 18 for dashboard /settings/messaging Add/Re-pair/Disconnect buttons]). update-permissions.ts → update_conversation_permissions now sets contact_settings.permission (Authority), not routing.
+│       ├── migrations/               # 001 tables, 002 contacts, 003 archived conversations, 004 unread_count, 005 drop_conversation_permission (authority lives in contact_settings; column orphaned since gateway 017). Run every boot, idempotent (no ledger).
 │       └── server.ts
 │
 ├── packages/dashboard/                # @ll5/dashboard — Next.js 15 web UI
@@ -198,7 +198,7 @@ ll5/
 ├── packages/shared/src/__tests__/      # 41 tests: auth token generation, validation, expiry (auth.test.ts: 21); validateLl5Token discriminated-union helper covering malformed/wrong_prefix/bad_signature/expired + role coercion + grace period (validateLl5Token.test.ts: 20, added Phase 2)
 ├── packages/gateway/src/__tests__/     # 174 tests: whatsapp webhook, whatsapp webhook route (auth + no-fallback), uploads-route (ownership), notification rules, chat, chat-conversations, admin API, phone contacts, getOrCreateActiveConversation retry loop
 ├── packages/personal-knowledge/src/__tests__/ # 77 tests: person repo (rewrote May 18 to import real ElasticsearchPersonRepository — was last theater test), people tools (real handlers via captureTools), observation repo, narrative repo
-├── packages/{gtd,awareness,health,messaging,google}/src/__tests__/ # Real tool-handler tests via captureTools helper. Phase 0 (May 18) + carryforward (May 18). 32 gtd, 162 awareness (tools, tools-extra [+ LocationService recently_left/A7 + get_current_location fused.gps/A5 + query_visits/suggest_frequent_places Stage 4], stay-point-service [Stage 4 clustering], geo-search, cross-tenant-hardening, review-batch; get_situation now drives location through the GPS+wifi fusion service), 44 health (2 files: tools, registry), 59 messaging (4 files: encryption, tools, account-management-tools [provision/get_pairing_qr/disconnect, added May 18], contact-settings-tools [get/set_contact_settings, added May 22]), 27 google.
+├── packages/{gtd,awareness,health,messaging,google}/src/__tests__/ # Real tool-handler tests via captureTools helper. Phase 0 (May 18) + carryforward (May 18). 32 gtd, 162 awareness (tools, tools-extra [+ LocationService recently_left/A7 + get_current_location fused.gps/A5 + query_visits/suggest_frequent_places Stage 4], stay-point-service [Stage 4 clustering], geo-search, cross-tenant-hardening, review-batch; get_situation now drives location through the GPS+wifi fusion service), 44 health (2 files: tools, registry), 70 messaging (encryption, tools, account-management-tools [provision/get_pairing_qr/disconnect, added May 18], contact-settings-tools [get/set_contact_settings, added May 22], update-permissions-tool [agent-authority write → contact_settings.permission, added Jun 6]), 27 google.
 │   Each package has its own __tests__/_helpers.ts with the captureTools/parseToolResponse pattern.
 │   Standard documented in docs/testing.md.
 │
