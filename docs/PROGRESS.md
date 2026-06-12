@@ -8,6 +8,17 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Proactivity eval pipeline — forward scheduler name onto the trigger envelope (2026-06-13)
+Supports the proactivity golden-dataset effort (instrumentation lives in **ll5-run**:
+a Stop-hook eval recorder + a local `record_moment` tool + an `export-moments` CLI +
+the vendored `ll5_label.py`). The one ll5-side change: **migration 032** extends the
+`notify_chat_message()` NOTIFY projection (the `meta_proj` added in 024 for `kind`) to
+also carry `metadata.scheduler`, so the agent's `<channel ...>` trigger envelope now
+includes `scheduler="heartbeat"|"calendar_review"|...`. The eval recorder maps that to a
+ground-truth `trigger_class`/`source` instead of guessing from the message text. Additive
+and tiny (scheduler names are short, well under the 8KB NOTIFY limit); mirrors 024 exactly
+otherwise. No gateway TS change — `insertSystemMessage` already stamps `metadata.scheduler`.
+
 ### Full rebuild + redeploy of all services; manual-deploy footgun fixed (2026-06-12)
 The location-snapshot push (`d2cfb34`) changed `packages/shared/`, which should rebuild
 every dependent — but CI diffs the **tip commit only**, and the tip (`7053a92`) touched just
