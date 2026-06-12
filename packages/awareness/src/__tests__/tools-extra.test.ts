@@ -316,83 +316,9 @@ describe('get_entity_statuses tool handler', () => {
 // LOCATION TOOLS
 // ===========================================================================
 
-describe('get_current_location tool handler', () => {
+describe('where_is_user tool handler', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns isError when LocationService reports source=none', async () => {
-    const locationRepo = makeLocationRepo();
-    const svc = makeLocationService({
-      place: null, place_id: null, confidence: 'unknown', source: 'none', reasoning: 'no signal',
-    });
-    const tools = captureTools((s) => registerLocationTools(s, locationRepo, getUserId, svc));
-
-    const response = await tools.get('get_current_location')!({});
-    expect(response.isError).toBe(true);
-    expect(parseToolResponse<{ error: string }>(response).error).toMatch(/No location data available/);
-  });
-
-  it('builds the legacy location block from the fused position, and spreads the full snapshot', async () => {
-    const svc = makeLocationService({
-      place: 'Home', place_id: 'p-1', confidence: 'high', source: 'gps',
-      reasoning: 'GPS fix (60s old) at Home',
-      description: 'Home', motion: 'stationary', speed_mps: 0, speed_kmh: 0,
-      trail: [],
-      position: {
-        lat: 32.0853, lon: 34.7818, accuracy_m: 10, precision: 'high',
-        timestamp: '2026-06-12T10:00:00.000Z', age_s: 60, freshness: 'recent',
-        road: null, neighborhood: null, city: 'Tel Aviv', address: 'Tel Aviv',
-      },
-    });
-    const tools = captureTools((s) => registerLocationTools(s, makeLocationRepo(), getUserId, svc));
-
-    const response = await tools.get('get_current_location')!({});
-    expect(svc.getCurrentLocation).toHaveBeenCalledWith(USER_ID);
-
-    const parsed = parseToolResponse<{ location: Record<string, unknown>; place: string; confidence: string; position: Record<string, unknown> }>(response);
-    // Legacy flat block (dashboard consumer) derived from the position.
-    expect(parsed.location.lat).toBe(32.0853);
-    expect(parsed.location.lon).toBe(34.7818);
-    expect(parsed.location.accuracy).toBe(10);
-    expect(parsed.location.timestamp).toBe('2026-06-12T10:00:00.000Z');
-    expect(parsed.location.freshness).toBe('recent');
-    expect(parsed.location.place_name).toBe('Home');
-    expect(parsed.location.address).toBe('Tel Aviv');
-    // The full snapshot is spread alongside it.
-    expect(parsed.place).toBe('Home');
-    expect(parsed.confidence).toBe('high');
-    expect(parsed.position.precision).toBe('high');
-  });
-
-  it('omits the position and nulls the legacy block when wifi-only (no GPS fix)', async () => {
-    const svc = makeLocationService({
-      place: 'Office', place_id: 'p-2', confidence: 'medium', source: 'wifi',
-      reasoning: 'wifi only', description: 'Office', motion: 'unknown',
-      speed_mps: null, speed_kmh: null, trail: [],
-      wifi: { bssid: 'aa:bb:cc:dd:ee:ff', ssid: 'OfficeWifi', connected: true, age_s: 30 },
-    });
-    const tools = captureTools((s) => registerLocationTools(s, makeLocationRepo(), getUserId, svc));
-
-    const response = await tools.get('get_current_location')!({});
-    const parsed = parseToolResponse<{ location: unknown; position?: unknown }>(response);
-    expect(parsed.location).toBeNull();
-    expect(parsed.position).toBeUndefined();
-  });
-
-  it('returns location:null when source != none but gps is missing (wifi-only)', async () => {
-    const svc = makeLocationService({
-      place: 'Office', place_id: 'p-2', confidence: 'medium', source: 'wifi',
-      reasoning: 'wifi only',
-      wifi: { bssid: 'aa:bb:cc:dd:ee:ff', ssid: 'OfficeWifi', connected: true, age_s: 30 },
-    });
-    const tools = captureTools((s) => registerLocationTools(s, makeLocationRepo(), getUserId, svc));
-
-    const response = await tools.get('get_current_location')!({});
-    const parsed = parseToolResponse<{ location: unknown }>(response);
-    expect(parsed.location).toBeNull();
-  });
-});
-
-describe('where_is_user tool handler', () => {
   it('returns the LocationService result verbatim, scoped by user_id', async () => {
     const fused = {
       place: 'Home', place_id: 'p-1', confidence: 'high' as const, source: 'gps' as const, reasoning: 'r',
@@ -403,6 +329,19 @@ describe('where_is_user tool handler', () => {
     const response = await tools.get('where_is_user')!({});
     expect(svc.getCurrentLocation).toHaveBeenCalledWith(USER_ID);
     expect(parseToolResponse(response)).toEqual(fused);
+  });
+
+  it('returns the snapshot verbatim even when source=none (no isError, agent decides)', async () => {
+    const none = {
+      place: null, place_id: null, confidence: 'unknown' as const, source: 'none' as const,
+      reasoning: 'no signal',
+    };
+    const svc = makeLocationService(none);
+    const tools = captureTools((s) => registerLocationTools(s, makeLocationRepo(), getUserId, svc));
+
+    const response = await tools.get('where_is_user')!({});
+    expect(response.isError).toBeUndefined();
+    expect(parseToolResponse(response)).toEqual(none);
   });
 });
 

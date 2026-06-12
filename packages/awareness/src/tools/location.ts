@@ -78,50 +78,6 @@ export function registerLocationTools(
   );
 
   server.tool(
-    'get_current_location',
-    'DEPRECATED — prefer where_is_user, which returns the same fused snapshot. Kept only for legacy clients: returns the full snapshot plus a flat `location` block (lat/lon/accuracy/timestamp/freshness/place_name/address).',
-    {},
-    async () => {
-      const userId = getUserId();
-      const fused = await locationService.getCurrentLocation(userId);
-
-      if (fused.source === 'none') {
-        return {
-          content: [
-            { type: 'text' as const, text: JSON.stringify({ error: 'No location data available' }) },
-          ],
-          isError: true,
-        };
-      }
-
-      // Legacy flat block for old consumers (e.g. the dashboard map), built from
-      // the unified position so it can't disagree with the snapshot.
-      const pos = fused.position;
-      const legacy = pos
-        ? {
-            lat: pos.lat,
-            lon: pos.lon,
-            accuracy: pos.accuracy_m,
-            timestamp: pos.timestamp,
-            freshness: pos.freshness,
-            place_name: fused.place,
-            place_type: null,
-            address: pos.address,
-          }
-        : null;
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify({ location: legacy, ...fused }),
-          },
-        ],
-      };
-    },
-  );
-
-  server.tool(
     'query_location_history',
     'Queries GPS history over a time range, with optional place filter by ID. Returns location points sorted by timestamp descending.',
     {

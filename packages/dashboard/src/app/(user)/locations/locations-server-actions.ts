@@ -60,16 +60,15 @@ export interface KnownNetwork {
   last_seen: string;
 }
 
-/** Shape returned by the awareness MCP get_current_location tool */
-interface CurrentLocationResponse {
-  location: {
+/** Subset of the awareness MCP where_is_user snapshot the map needs. */
+interface WhereIsUserResponse {
+  place?: string | null;
+  source?: string;
+  position?: {
     lat: number;
     lon: number;
-    accuracy?: number;
+    accuracy_m?: number | null;
     timestamp?: string;
-    freshness?: string;
-    place_name?: string | null;
-    place_type?: string | null;
     address?: string | null;
   };
 }
@@ -102,17 +101,18 @@ export async function fetchLocations(params: {
 
 export async function fetchCurrentLocation(): Promise<LocationPoint | null> {
   try {
-    const data = await mcpCallJsonSafe<CurrentLocationResponse>("awareness", "get_current_location");
-    if (!data?.location) return null;
+    const data = await mcpCallJsonSafe<WhereIsUserResponse>("awareness", "where_is_user");
+    const pos = data?.position;
+    // No GPS fix (wifi-only / no signal) → nothing to pin on the map.
+    if (!pos) return null;
 
-    const loc = data.location;
     return {
       id: "current",
-      location: { lat: loc.lat, lon: loc.lon },
-      address: loc.address ?? undefined,
-      matched_place: loc.place_name ?? undefined,
-      accuracy: loc.accuracy,
-      timestamp: loc.timestamp ?? new Date().toISOString(),
+      location: { lat: pos.lat, lon: pos.lon },
+      address: pos.address ?? undefined,
+      matched_place: data?.place ?? undefined,
+      accuracy: pos.accuracy_m ?? undefined,
+      timestamp: pos.timestamp ?? new Date().toISOString(),
     };
   } catch (err) {
     console.error("[locations] fetchCurrentLocation failed:", err instanceof Error ? err.message : String(err));

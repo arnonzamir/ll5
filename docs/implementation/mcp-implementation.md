@@ -525,7 +525,7 @@ DATABASE_URL=postgresql://user:pass@postgres:5432/ll5
 ## MCP 3: awareness
 
 **Storage:** Elasticsearch
-**Tools:** 7 (get_current_location, query_location_history, query_im_messages, get_entity_statuses, get_calendar_events, get_situation, get_notable_events, acknowledge_events)
+**Tools:** 7 (where_is_user, query_location_history, query_im_messages, get_entity_statuses, get_calendar_events, get_situation, get_notable_events, acknowledge_events)
 **Complexity:** Medium -- mostly read queries, but get_situation is a composite tool and geo queries add complexity
 
 ### Phase 1: Repository Layer

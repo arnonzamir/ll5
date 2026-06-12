@@ -90,7 +90,7 @@ Apply in order; first match wins:
 ## Tool surface
 
 - **`where_is_user`** — THE single location call (2026-06-12). Returns one rich snapshot of deterministic facts: `place`/`confidence`/`source`/`reasoning`, a `position` block (`lat`/`lon`/`accuracy_m`/`precision`/`age_s`/`freshness`/`road`/`neighborhood`/`city`/`address`), `motion`+`speed_kmh`+`heading`, a recent `trail` (last ~12 fixes / 30 min), the `wifi` anchor, and `recently_left`. `description` is a deterministic baseline/floor — the MCP does the deterministic part, the agent does the deduction and phrasing.
-- **`get_current_location`** — deprecated alias of `where_is_user`. Same snapshot plus a flat `location` block (`lat`/`lon`/`accuracy`/`timestamp`/`freshness`/`place_name`/`address`) for legacy clients (dashboard map).
+- **`get_current_location`** — retired 2026-06-12. `where_is_user` is the only current-location call; consumers that need flat lat/lon read the `position` block (the dashboard map was migrated).
 - **`get_situation`** — embeds the same snapshot verbatim as `current_location` (one shape, one vocabulary).
 - **`query_location_history`** — unchanged. Raw historical queries are still raw.
 
@@ -106,4 +106,4 @@ Existing `delete_location_point` is unchanged.
 
 ## Rollout
 
-Atomic with the gateway notable-events shape fix. Old clients keep working because `get_current_location` is additive.
+Atomic with the gateway notable-events shape fix. (Update 2026-06-12: `get_current_location` has since been retired in favour of the single `where_is_user` snapshot; the dashboard map was migrated to read `position`.)

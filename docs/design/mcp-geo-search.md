@@ -7,7 +7,7 @@
 - **Different failure modes.** External APIs have rate limits and downtime. A Nominatim outage shouldn't degrade location history queries.
 - **Different caching.** POI data is semi-static and benefits from aggressive caching. Awareness data is real-time.
 
-The agent orchestrates across MCPs — calls `get_current_location` on awareness, passes lat/lon to geo-search. Standard LL5 pattern.
+The agent orchestrates across MCPs — calls `where_is_user` on awareness, passes the `position` lat/lon to geo-search. Standard LL5 pattern.
 
 ## Tools
 

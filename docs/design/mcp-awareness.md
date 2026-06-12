@@ -66,11 +66,9 @@ one vocabulary, no reconciliation.
 The agent refines `motion` with `speed_kmh`, infers intent from `heading` +
 `trail` + calendar/places, and hedges by `confidence`/`precision`.
 
-### get_current_location (deprecated)
-
-Deprecated alias of `where_is_user`. Returns the same snapshot plus a flat
-`location` block (`lat`/`lon`/`accuracy`/`timestamp`/`freshness`/`place_name`/
-`address`) for legacy clients (the dashboard map). Prefer `where_is_user`.
+> Retired 2026-06-12: the old `get_current_location` tool is gone. `where_is_user`
+> is the only current-location call; consumers that need flat lat/lon read it off
+> the `position` block.
 
 ---
 

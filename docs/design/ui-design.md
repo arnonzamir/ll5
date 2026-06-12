@@ -170,7 +170,7 @@ List + optional map view:
 - Map pin for places with coordinates
 - Current location indicator (from awareness)
 
-Data source: `list_places`, `get_current_location`
+Data source: `list_places`, `where_is_user`
 
 #### Shopping (`/shopping`)
 

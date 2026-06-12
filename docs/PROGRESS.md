@@ -17,16 +17,18 @@ rich snapshot: `place`/`confidence`/`source`, a `position` block (lat/lon, `accu
 + `speed_kmh` + `heading` (bearing/cardinal), a recent `trail` (last ~12 fixes / 30 min for
 trajectory + destination inference), the `wifi` anchor, and `recently_left`. `description`
 stays as a deterministic baseline/floor, not a line to parrot. **`get_situation` embeds the
-exact same object** as `current_location` (no more bespoke flat shape), and **`get_current_location`
-is now a deprecated alias** (same snapshot + a legacy flat `location` block for the dashboard map).
+exact same object** as `current_location` (no more bespoke flat shape), and the old
+**`get_current_location` tool was retired** — `where_is_user` is the only current-location call;
+the dashboard map now reads its `position` block (consumer migrated, admin tool-list + design
+docs updated).
 **Enum unification:** one freshness vocabulary everywhere — `live`/`recent`/`stale`/`unknown`
 (shared `Freshness`); the divergent `fresh`/`stale`/`very_stale` is gone from the agent surface
 (resolver computes its usability booleans straight off age). New shared classifiers
 `freshnessLabel` / `precisionLabel` / `speedKmh` in `describe.ts`. **Prompt:** "Location Awareness"
 rewritten — deduce don't parrot (cycling vs driving from speed; "probably en route to school"
 from heading+trail+calendar), hedge by confidence/precision, one fact per drive. Tests: shared
-+3 (classifiers), awareness +1 (rich snapshot/trail), updated situation + get_current_location
-shape tests; shared 85, awareness 167, gateway 345 green; dashboard typechecks.
++3 (classifiers), awareness rich-snapshot/trail + source=none coverage (removed the legacy
+get_current_location shape tests); shared 85, awareness 164, gateway 345 green; dashboard typechecks.
 
 ### Conversation authority unified on contact_settings; dead column retired (2026-06-06)
 `list_conversations` reported `messaging_conversations.permission` — a column frozen at
