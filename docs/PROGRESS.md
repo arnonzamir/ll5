@@ -8,6 +8,17 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Full rebuild + redeploy of all services; manual-deploy footgun fixed (2026-06-12)
+The location-snapshot push (`d2cfb34`) changed `packages/shared/`, which should rebuild
+every dependent — but CI diffs the **tip commit only**, and the tip (`7053a92`) touched just
+awareness/dashboard, so gateway/personal-knowledge/gtd/google/health stayed on their
+2026-06-05 images (the partial-deploy trap). Forced a full rebuild+redeploy of all 8 via a
+docs-only commit (no `packages/*` in the diff → `detect-changes` uses the full 8-package
+matrix → deploy job pulls all 8 `:latest` + `up -d`). Also fixed a real footgun: the manual
+"How to Deploy" fallback in HANDOFF used `docker compose up -d --remove-orphans`, contradicting
+two other warnings in the same doc that it "destroyed 7 manually-started containers
+(2026-05-18)" — dropped the flag and documented the force-full-rebuild recipe.
+
 ### Location reflected to the agent as one rich snapshot — MCP decides facts, agent deduces (2026-06-12)
 Reworked the agent-facing location surface from "MCP bakes a `description`, agent
 parrots it" to "MCP hands over all the deterministic facts, agent does the deduction

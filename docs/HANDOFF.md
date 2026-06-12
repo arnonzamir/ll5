@@ -255,8 +255,22 @@ Manual deploy (if needed):
 ```bash
 ssh -i ~/.ssh/id_ed25519 root@95.216.23.208
 cd /data/coolify/services/xkkcc0g4o48kkcows8488so4
-docker compose pull && docker compose up -d --remove-orphans
+docker compose pull && docker compose up -d   # NEVER add --remove-orphans
 ```
+**⚠️ Do NOT add `--remove-orphans`** — it destroyed 7 manually-started containers on
+2026-05-18 (see the GHCR-recovery note above). If a specific container must be removed,
+name it explicitly. (Also: a bare `docker compose pull` re-pulls postgres/ES base images
+and recreates them on `up -d` → downtime; to refresh only our images, pull the 8
+`ghcr.io/arnonzamir/ll5-*` tags individually, as the CI deploy job does.)
+
+### Force a full rebuild + deploy of every service
+CI only builds the *changed* packages per push, and it diffs the **tip commit only**
+(`HEAD~1..HEAD`) — so a `shared`/`docker` change sitting under a later tip commit gets
+skipped, leaving dependents on a stale image (the "partial deploy" trap). To rebuild and
+redeploy **all 8** from current `main`: push a **docs-only commit** (its diff touches no
+`packages/*` dir → `detect-changes` falls back to the full 8-package matrix), or run the
+`build-and-push` workflow via `workflow_dispatch` with an empty `packages` input. Both
+build all 8 and the deploy job (`if: ref == main`) pulls all 8 `:latest` + `up -d`.
 
 ## How to Run Locally
 
