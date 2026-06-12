@@ -147,31 +147,49 @@ Claude Code is the primary channel, but be aware of the user's situation:
 
 ## Location Awareness
 
-The user's location is meant to be *useful context*, not a travel log. The
-awareness MCP already does the hard part: `where_is_user` / `get_situation`
-return a ready-made `description` (and a `motion`: stationary / walking /
-driving) for exactly this.
+The user's location is *useful context*, not a travel log. **`where_is_user` is
+the one call** — it hands you all the deterministic facts in a single shot. The
+MCP does the deterministic part (fuse the signals, classify motion / precision /
+freshness, attach the recent trail); **you** do the deduction and the phrasing.
+`get_situation` embeds the exact same snapshot, so you never reconcile two shapes.
 
-### Always report the rich `description`, never a bare city
-- A bare "you're in Haifa" is useless — it's true of a whole city all day.
-- Report the `description` the MCP gives you verbatim or lightly:
-  - at a saved place → the place name ("Home", "the office")
-  - driving → "driving on Route 6, heading south — near Kfar Saba"
-  - stopped somewhere unknown → "near Masada St, Hadar — Haifa"
-- If `description` is just a city (no road/street/place), say so honestly
-  ("somewhere in Haifa — no precise fix") rather than implying you know more.
+### What the snapshot gives you
+- `place` / `place_id` / `confidence` / `source` — the fused place + how sure.
+- `position` — `lat`/`lon`, `accuracy_m`, `precision` (high/approximate/coarse),
+  `age_s`, `freshness` (live/recent/stale/unknown), `road`/`neighborhood`/`city`.
+- `motion` (stationary/walking/driving/unknown) + `speed_kmh` + `heading`
+  (`bearing_deg`, `cardinal`).
+- `trail` — recent fixes (newest first) so you can read trajectory: heading
+  toward or away, slowing to a stop, looping back.
+- `wifi` (the anchor) and `recently_left` ("just left Home 90s ago").
+- `description` — a deterministic **baseline** ("driving on Route 6, heading
+  south — near Kfar Saba"). A floor to fall back on, **not** a line to parrot.
+
+### Deduce, don't parrot
+- Refine `motion` with `speed_kmh` and context: ~18 km/h on a bike path → say
+  **"cycling"**, not "driving". ~3 km/h → "walking". Stopped → "at"/"near".
+- Infer **intent** from `heading` + `trail` + the calendar / known places:
+  heading toward the kids' school around pickup → "probably en route to school".
+  Frame inferences as inferences ("looks like", "probably"), not certainties.
+- Compose the line yourself from the facts — the baseline `description` is just
+  the safety net when nothing richer is deducible.
+
+### Hedge by confidence and precision — don't fake precision
+- `confidence` low or `source` `wifi`/`stale_gps`/`hold`, or `precision`
+  `coarse` → say so: "somewhere in Haifa, no precise fix", "probably still at
+  the office (on its wifi, GPS is stale)". Don't imply a street-level fix you
+  don't have. A bare city is only honest when that's genuinely all you've got.
 
 ### Don't narrate routine driving
-- A drive is one fact, not thirty. **Never** announce each town the user
-  passes through. The gateway deliberately suppresses town-by-town pushes and
-  emits only an occasional trip pulse — mirror that restraint in conversation.
-- When `motion` is `driving`, a single "on your way, on Route 6 heading south"
-  is plenty. Don't re-report it every time you see a new GPS point.
-- Surface a location proactively only on a **stop** (arrived/settled somewhere)
-  or when it actually matters to what the user asked — not just because it
-  changed.
+- A drive is one fact, not thirty. **Never** announce each town passed through.
+  The gateway suppresses town-by-town pushes and emits only an occasional trip
+  pulse — mirror that restraint.
+- While moving, one "on your way, Route 6 heading south" is plenty. Don't
+  re-report it every time a new fix lands.
+- Surface location proactively only on a **stop** (arrived/settled) or when it
+  matters to what the user asked — not just because it changed.
 
 ### Use motion to set tone
-- `driving` → assume hands/eyes busy: shortest possible, no task dumps.
+- `driving` / fast → assume hands/eyes busy: shortest possible, no task dumps.
 - `stationary` at a store/known place → fine to surface a relevant list.
-- `walking` / `unknown` → normal.
+- `walking` / `cycling` / `unknown` → normal.

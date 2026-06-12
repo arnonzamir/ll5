@@ -8,6 +8,26 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Location reflected to the agent as one rich snapshot — MCP decides facts, agent deduces (2026-06-12)
+Reworked the agent-facing location surface from "MCP bakes a `description`, agent
+parrots it" to "MCP hands over all the deterministic facts, agent does the deduction
+and phrasing." **`where_is_user` is now the single point of connection** and returns one
+rich snapshot: `place`/`confidence`/`source`, a `position` block (lat/lon, `accuracy_m`,
+`precision` high/approximate/coarse, `age_s`, `freshness`, road/neighborhood/city), `motion`
++ `speed_kmh` + `heading` (bearing/cardinal), a recent `trail` (last ~12 fixes / 30 min for
+trajectory + destination inference), the `wifi` anchor, and `recently_left`. `description`
+stays as a deterministic baseline/floor, not a line to parrot. **`get_situation` embeds the
+exact same object** as `current_location` (no more bespoke flat shape), and **`get_current_location`
+is now a deprecated alias** (same snapshot + a legacy flat `location` block for the dashboard map).
+**Enum unification:** one freshness vocabulary everywhere — `live`/`recent`/`stale`/`unknown`
+(shared `Freshness`); the divergent `fresh`/`stale`/`very_stale` is gone from the agent surface
+(resolver computes its usability booleans straight off age). New shared classifiers
+`freshnessLabel` / `precisionLabel` / `speedKmh` in `describe.ts`. **Prompt:** "Location Awareness"
+rewritten — deduce don't parrot (cycling vs driving from speed; "probably en route to school"
+from heading+trail+calendar), hedge by confidence/precision, one fact per drive. Tests: shared
++3 (classifiers), awareness +1 (rich snapshot/trail), updated situation + get_current_location
+shape tests; shared 85, awareness 167, gateway 345 green; dashboard typechecks.
+
 ### Conversation authority unified on contact_settings; dead column retired (2026-06-06)
 `list_conversations` reported `messaging_conversations.permission` — a column frozen at
 its `'ignore'` default and never written since the contact_settings unification (gateway

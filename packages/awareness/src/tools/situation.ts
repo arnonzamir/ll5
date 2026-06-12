@@ -4,7 +4,6 @@ import type { CalendarEventRepository } from '../repositories/interfaces/calenda
 import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
 import type { MessageRepository } from '../repositories/interfaces/message.repository.js';
 import type { LocationService } from '../services/location-service.js';
-import { computeFreshness } from '../types/location.js';
 import { logger } from '../utils/logger.js';
 import {
   getTimePeriod,
@@ -56,36 +55,14 @@ export function registerSituationTools(
       const dayType = getDayType(dayOfWeek);
       const suggestedEnergy = getSuggestedEnergy(timePeriod);
 
-      // Fetch current location via the fusion service (GPS + wifi BSSID) so the
-      // snapshot agrees with where_is_user / get_current_location instead of the
-      // raw last GPS point. Keeps the legacy flat fields for backward compat and
-      // surfaces the fused confidence/source/reasoning + wifi-derived place.
+      // Current location via the fusion service (GPS + wifi BSSID). Embed the
+      // SAME rich snapshot where_is_user returns — one shape, one vocabulary — so
+      // the agent never has to reconcile two different location formats.
       let currentLocation = null;
       try {
         const fused = await locationService.getCurrentLocation(userId);
         if (fused.source !== 'none') {
-          const gps = fused.gps;
-          const gpsTimestamp = gps
-            ? new Date(Date.now() - gps.age_s * 1000).toISOString()
-            : null;
-          currentLocation = {
-            lat: gps?.lat ?? null,
-            lon: gps?.lon ?? null,
-            accuracy: gps?.accuracy_m ?? null,
-            timestamp: gpsTimestamp,
-            freshness: gpsTimestamp ? computeFreshness(gpsTimestamp) : null,
-            place_name: fused.place,
-            place_type: null,
-            // The USEFUL one-liner to report instead of a bare city/place name.
-            description: fused.description,
-            motion: fused.motion,
-            address: gps?.address ?? null,
-            confidence: fused.confidence,
-            source: fused.source,
-            reasoning: fused.reasoning,
-            wifi_place: fused.wifi?.place_from_bssid?.place_name ?? null,
-            recently_left: fused.recently_left ?? null,
-          };
+          currentLocation = fused;
           if (fused.source === 'wifi' || fused.source === 'gps+wifi') {
             logger.debug('[situation] Location resolved with wifi assist', {
               source: fused.source,

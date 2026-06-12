@@ -63,7 +63,8 @@ function makeLocationRepo(overrides: Partial<LocationRepository> = {}): Location
   });
   return {
     getLatest: unimpl('getLatest'),
-    query: unimpl('query'),
+    // Default to an empty trail; history-specific tests override.
+    query: vi.fn(async () => []),
     delete: unimpl('delete'),
     create: unimpl('create'),
     ...overrides,
@@ -361,9 +362,11 @@ describe('get_situation tool handler', () => {
     const svc = makeLocationService({
       place: 'Home', place_id: 'p-1', confidence: 'high', source: 'gps',
       reasoning: 'GPS fix (120s old) at Home',
-      gps: {
-        lat: 32.0853, lon: 34.7818, accuracy_m: 10, age_s: 120,
-        freshness: 'fresh', matched_place: 'Home', address: 'Tel Aviv',
+      description: 'Home', motion: 'stationary', speed_mps: 0, speed_kmh: 0, trail: [],
+      position: {
+        lat: 32.0853, lon: 34.7818, accuracy_m: 10, precision: 'high',
+        timestamp: locationTs, age_s: 120, freshness: 'live',
+        road: null, neighborhood: null, city: 'Tel Aviv', address: 'Tel Aviv',
       },
     });
 
@@ -373,12 +376,13 @@ describe('get_situation tool handler', () => {
     const parsed = parseToolResponse<{ situation: Record<string, unknown> }>(response);
     const sit = parsed.situation;
     expect(sit.timezone).toBe('UTC');
+    // current_location is now the SAME rich snapshot where_is_user returns.
     const loc = sit.current_location as Record<string, unknown>;
-    expect(loc.lat).toBe(32.0853);
-    expect(loc.lon).toBe(34.7818);
-    expect(loc.place_name).toBe('Home');
-    expect(loc.freshness).toBe('live');
-    // New fused fields surfaced into the snapshot.
+    const pos = loc.position as Record<string, unknown>;
+    expect(pos.lat).toBe(32.0853);
+    expect(pos.lon).toBe(34.7818);
+    expect(loc.place).toBe('Home');
+    expect(pos.freshness).toBe('live');
     expect(loc.confidence).toBe('high');
     expect(loc.source).toBe('gps');
     expect(loc.reasoning).toBe('GPS fix (120s old) at Home');
@@ -400,9 +404,11 @@ describe('get_situation tool handler', () => {
     const svc = makeLocationService({
       place: 'Office', place_id: 'p-2', confidence: 'medium', source: 'wifi',
       reasoning: 'GPS stale (1200s), wifi BSSID maps to Office',
-      gps: {
-        lat: 32.1, lon: 34.8, accuracy_m: 20, age_s: 1200,
-        freshness: 'stale', matched_place: null, address: null,
+      description: 'Office', motion: 'unknown', speed_mps: null, speed_kmh: null, trail: [],
+      position: {
+        lat: 32.1, lon: 34.8, accuracy_m: 20, precision: 'high',
+        timestamp: '2026-06-12T09:40:00.000Z', age_s: 1200, freshness: 'stale',
+        road: null, neighborhood: null, city: null, address: null,
       },
       wifi: {
         bssid: 'aa:bb:cc:dd:ee:ff', ssid: 'OfficeWifi', connected: true, age_s: 30,
@@ -416,8 +422,8 @@ describe('get_situation tool handler', () => {
     const loc = parseToolResponse<{ situation: { current_location: Record<string, unknown> } }>(response)
       .situation.current_location;
     // Place comes from the wifi BSSID resolution, not raw GPS (which had none).
-    expect(loc.place_name).toBe('Office');
-    expect(loc.wifi_place).toBe('Office');
+    expect(loc.place).toBe('Office');
+    expect((loc.wifi as { place_from_bssid?: { place_name?: string } }).place_from_bssid?.place_name).toBe('Office');
     expect(loc.confidence).toBe('medium');
     expect(loc.source).toBe('wifi');
     expect(loc.reasoning).toMatch(/wifi BSSID maps to Office/);

@@ -2,7 +2,11 @@
 export type { Location, LocationQuery } from '@ll5/shared';
 export type { GeoPoint } from '@ll5/shared';
 
-export type LocationFreshness = 'live' | 'recent' | 'stale' | 'unknown';
+// One freshness vocabulary for the whole system. The location snapshot computes
+// it from GPS-fix age (shared `freshnessLabel`); device heartbeats use their own
+// thresholds below — same four words, different age cutoffs per domain.
+import type { Freshness } from '@ll5/shared';
+export type LocationFreshness = Freshness;
 
 export interface LocationWithFreshness {
   lat: number;
@@ -15,6 +19,8 @@ export interface LocationWithFreshness {
   address: string | null;
 }
 
+/** Device-heartbeat freshness (tracked devices): live < 5m, recent < 30m,
+ *  stale < 2h, else unknown. Distinct from GPS-fix freshness on purpose. */
 export function computeFreshness(timestamp: string): LocationFreshness {
   const ageMs = Date.now() - new Date(timestamp).getTime();
   const minutes = ageMs / 60_000;

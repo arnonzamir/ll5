@@ -89,9 +89,12 @@ Apply in order; first match wins:
 
 ## Tool surface
 
-- **`get_current_location`** — kept, rewritten internally to call `LocationService`. Response preserves existing fields (`lat`, `lon`, `freshness`, `place_name`, `address`) for backward compatibility, plus adds `confidence`, `source`, `reasoning`, and an optional `wifi` block.
-- **`where_is_user`** — new, agent-friendly. Returns only the fused result (no raw GPS fields at the top level).
-- **`query_location_history`** — unchanged for now. Raw historical queries are still raw.
+- **`where_is_user`** — THE single location call (2026-06-12). Returns one rich snapshot of deterministic facts: `place`/`confidence`/`source`/`reasoning`, a `position` block (`lat`/`lon`/`accuracy_m`/`precision`/`age_s`/`freshness`/`road`/`neighborhood`/`city`/`address`), `motion`+`speed_kmh`+`heading`, a recent `trail` (last ~12 fixes / 30 min), the `wifi` anchor, and `recently_left`. `description` is a deterministic baseline/floor — the MCP does the deterministic part, the agent does the deduction and phrasing.
+- **`get_current_location`** — deprecated alias of `where_is_user`. Same snapshot plus a flat `location` block (`lat`/`lon`/`accuracy`/`timestamp`/`freshness`/`place_name`/`address`) for legacy clients (dashboard map).
+- **`get_situation`** — embeds the same snapshot verbatim as `current_location` (one shape, one vocabulary).
+- **`query_location_history`** — unchanged. Raw historical queries are still raw.
+
+Freshness is unified to `live`/`recent`/`stale`/`unknown` across the whole agent surface (shared `Freshness`); the resolver computes its usability tiers off raw age, not an enum.
 
 Existing `delete_location_point` is unchanged.
 

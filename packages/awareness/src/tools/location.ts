@@ -2,7 +2,6 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
 import type { LocationRepository } from '../repositories/interfaces/location.repository.js';
-import { computeFreshness } from '../types/location.js';
 import type { LocationService } from '../services/location-service.js';
 import {
   detectStayPoints,
@@ -64,8 +63,23 @@ export function registerLocationTools(
   esClient?: Client,
 ): void {
   server.tool(
+    'where_is_user',
+    'THE one call for "where is the user right now". Fuses GPS + wifi and hands you ALL the deterministic facts in one shot — `place`/`confidence`/`source`, `position` (lat/lon, `accuracy_m`, `precision`, `age_s`, `freshness`, road/neighborhood/city), `motion` + `speed_kmh` + `heading` (bearing/cardinal), a recent `trail` of past fixes, the `wifi` anchor, and a `recently_left` hint. YOU do the deduction and the phrasing: refine motion with speed (e.g. ~18 km/h on a bike path → "cycling"), infer intent from heading + trail + the calendar/known places ("probably en route to school"), and hedge by `confidence`/`precision` (low/coarse → "somewhere in Haifa, no precise fix"). `description` is a deterministic baseline to fall back on, not a line to parrot. Never report a bare city when richer facts exist; treat a whole drive as one fact, not town-by-town.',
+    {},
+    async () => {
+      const userId = getUserId();
+      const fused = await locationService.getCurrentLocation(userId);
+      return {
+        content: [
+          { type: 'text' as const, text: JSON.stringify(fused) },
+        ],
+      };
+    },
+  );
+
+  server.tool(
     'get_current_location',
-    'Fused current-location answer (GPS + wifi BSSID). Returns the inferred place with confidence and provenance. Also includes raw GPS fields for backward compatibility.',
+    'DEPRECATED — prefer where_is_user, which returns the same fused snapshot. Kept only for legacy clients: returns the full snapshot plus a flat `location` block (lat/lon/accuracy/timestamp/freshness/place_name/address).',
     {},
     async () => {
       const userId = getUserId();
@@ -80,18 +94,19 @@ export function registerLocationTools(
         };
       }
 
-      // Preserve legacy shape: lat/lon/accuracy/timestamp/place_name/address/freshness
-      const gps = fused.gps;
-      const legacy = gps
+      // Legacy flat block for old consumers (e.g. the dashboard map), built from
+      // the unified position so it can't disagree with the snapshot.
+      const pos = fused.position;
+      const legacy = pos
         ? {
-            lat: gps.lat,
-            lon: gps.lon,
-            accuracy: gps.accuracy_m ?? null,
-            timestamp: new Date(Date.now() - gps.age_s * 1000).toISOString(),
-            freshness: computeFreshness(new Date(Date.now() - gps.age_s * 1000).toISOString()),
+            lat: pos.lat,
+            lon: pos.lon,
+            accuracy: pos.accuracy_m,
+            timestamp: pos.timestamp,
+            freshness: pos.freshness,
             place_name: fused.place,
             place_type: null,
-            address: gps.address ?? null,
+            address: pos.address,
           }
         : null;
 
@@ -99,36 +114,8 @@ export function registerLocationTools(
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({
-              location: legacy,
-              fused: {
-                place: fused.place,
-                place_id: fused.place_id,
-                description: fused.description,
-                motion: fused.motion,
-                confidence: fused.confidence,
-                source: fused.source,
-                reasoning: fused.reasoning,
-                gps: fused.gps ?? null,
-                wifi: fused.wifi ?? null,
-              },
-            }),
+            text: JSON.stringify({ location: legacy, ...fused }),
           },
-        ],
-      };
-    },
-  );
-
-  server.tool(
-    'where_is_user',
-    'Fused answer to "where is the user right now" from GPS + wifi signals. Returns a ready-to-report `description` (e.g. "driving on Route 6, heading south — near Kfar Saba" or "near Masada St, Haifa"), a `motion` (stationary/walking/driving), plus place + confidence + reasoning. ALWAYS report the `description`, never a bare city like "in Haifa". When `motion` is "driving", do not narrate town-by-town — one update is enough. Preferred over get_current_location for decision-making.',
-    {},
-    async () => {
-      const userId = getUserId();
-      const fused = await locationService.getCurrentLocation(userId);
-      return {
-        content: [
-          { type: 'text' as const, text: JSON.stringify(fused) },
         ],
       };
     },

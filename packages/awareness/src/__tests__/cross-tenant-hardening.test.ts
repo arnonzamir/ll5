@@ -101,6 +101,7 @@ describe('LocationService.lookupBssidPlace — user_id recheck on network doc', 
     const now = new Date().toISOString();
     const locationRepo = {
       getLatest: vi.fn(async () => null),
+      query: vi.fn(async () => []),
     } as never;
     const wifiRepo = {
       getLatest: vi.fn(async () => ({

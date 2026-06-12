@@ -1,5 +1,5 @@
-import { STATIONARY_SPEED_MPS, DRIVING_SPEED_MPS } from './constants.js';
-import type { GpsSignal, Motion } from './types.js';
+import { STATIONARY_SPEED_MPS, DRIVING_SPEED_MPS, GPS_FRESH_MS, GPS_STALE_USABLE_MS, WIFI_CONNECTED_ANCHOR_MS } from './constants.js';
+import type { GpsSignal, Motion, Freshness, Precision } from './types.js';
 
 const CARDINALS = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'] as const;
 
@@ -7,6 +7,32 @@ const CARDINALS = ['north', 'northeast', 'east', 'southeast', 'south', 'southwes
 export function cardinal(bearingDeg: number): string {
   const idx = Math.round(((bearingDeg % 360) + 360) % 360 / 45) % 8;
   return CARDINALS[idx];
+}
+
+/** Device speed (m/s) → km/h, rounded. null in → null out. */
+export function speedKmh(speedMps?: number | null): number | null {
+  if (speedMps == null) return null;
+  return Math.round(speedMps * 3.6);
+}
+
+/** Age of a GPS fix (ms) → a human freshness word, using GPS-fix thresholds
+ *  (live < 5m, recent < 15m, stale < 2h, else unknown). Same vocabulary the
+ *  rest of the system uses; the device-heartbeat path uses its own thresholds. */
+export function freshnessLabel(ageMs: number): Freshness {
+  if (ageMs < GPS_FRESH_MS) return 'live';
+  if (ageMs < GPS_STALE_USABLE_MS) return 'recent';
+  if (ageMs < WIFI_CONNECTED_ANCHOR_MS) return 'stale';
+  return 'unknown';
+}
+
+/** GPS accuracy radius (m) → a precision bucket the agent can hedge on.
+ *  high ≤ 30m (clean outdoor fix), approximate ≤ 100m (place-radius scale),
+ *  coarse otherwise (cell/wifi estimate), unknown when no accuracy reported. */
+export function precisionLabel(accuracyM?: number | null): Precision {
+  if (accuracyM == null) return 'unknown';
+  if (accuracyM <= 30) return 'high';
+  if (accuracyM <= 100) return 'approximate';
+  return 'coarse';
 }
 
 /** Classify motion from device speed (m/s). 'unknown' when speed is absent. */

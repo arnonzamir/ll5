@@ -166,7 +166,8 @@ describe('haversineMeters', () => {
   });
 });
 
-import { cardinal, motionState, describeLocation } from '../location/index.js';
+import { cardinal, motionState, describeLocation, freshnessLabel, precisionLabel, speedKmh } from '../location/index.js';
+import { GPS_FRESH_MS, GPS_STALE_USABLE_MS, WIFI_CONNECTED_ANCHOR_MS } from '../location/index.js';
 
 describe('cardinal direction', () => {
   it('maps degrees to 8-point cardinals', () => {
@@ -220,5 +221,40 @@ describe('describeLocation — useful descriptions', () => {
     expect(r.motion).toBe('driving');
     expect(r.description).toContain('on Route 2');
     expect(r.description).toContain('heading');
+  });
+});
+
+describe('freshnessLabel — GPS-fix age buckets', () => {
+  it('maps age to live/recent/stale/unknown', () => {
+    expect(freshnessLabel(0)).toBe('live');
+    expect(freshnessLabel(GPS_FRESH_MS - 1)).toBe('live');
+    expect(freshnessLabel(GPS_FRESH_MS)).toBe('recent');
+    expect(freshnessLabel(GPS_STALE_USABLE_MS - 1)).toBe('recent');
+    expect(freshnessLabel(GPS_STALE_USABLE_MS)).toBe('stale');
+    expect(freshnessLabel(WIFI_CONNECTED_ANCHOR_MS - 1)).toBe('stale');
+    expect(freshnessLabel(WIFI_CONNECTED_ANCHOR_MS)).toBe('unknown');
+  });
+});
+
+describe('precisionLabel — accuracy buckets', () => {
+  it('buckets accuracy radius (m) into high/approximate/coarse/unknown', () => {
+    expect(precisionLabel(null)).toBe('unknown');
+    expect(precisionLabel(undefined)).toBe('unknown');
+    expect(precisionLabel(10)).toBe('high');
+    expect(precisionLabel(30)).toBe('high');
+    expect(precisionLabel(31)).toBe('approximate');
+    expect(precisionLabel(100)).toBe('approximate');
+    expect(precisionLabel(101)).toBe('coarse');
+    expect(precisionLabel(1500)).toBe('coarse');
+  });
+});
+
+describe('speedKmh', () => {
+  it('converts m/s to rounded km/h, passing null through', () => {
+    expect(speedKmh(null)).toBeNull();
+    expect(speedKmh(undefined)).toBeNull();
+    expect(speedKmh(0)).toBe(0);
+    expect(speedKmh(10)).toBe(36);
+    expect(speedKmh(5)).toBe(18); // ~cycling
   });
 });

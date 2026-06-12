@@ -74,7 +74,8 @@ function makeLocationRepo(over: Partial<LocationRepository> = {}): LocationRepos
   });
   return {
     getLatest: unimpl('getLatest'),
-    query: unimpl('query'),
+    // Default to an empty trail; history-specific tests override.
+    query: vi.fn(async () => []),
     delete: unimpl('delete'),
     create: unimpl('create'),
     ...over,
@@ -330,14 +331,16 @@ describe('get_current_location tool handler', () => {
     expect(parseToolResponse<{ error: string }>(response).error).toMatch(/No location data available/);
   });
 
-  it('shapes legacy location block from fused.gps when available', async () => {
+  it('builds the legacy location block from the fused position, and spreads the full snapshot', async () => {
     const svc = makeLocationService({
       place: 'Home', place_id: 'p-1', confidence: 'high', source: 'gps',
       reasoning: 'GPS fix (60s old) at Home',
-      gps: {
-        lat: 32.0853, lon: 34.7818,
-        accuracy_m: 10, age_s: 60, freshness: 'fresh',
-        matched_place: 'Home', address: 'Tel Aviv',
+      description: 'Home', motion: 'stationary', speed_mps: 0, speed_kmh: 0,
+      trail: [],
+      position: {
+        lat: 32.0853, lon: 34.7818, accuracy_m: 10, precision: 'high',
+        timestamp: '2026-06-12T10:00:00.000Z', age_s: 60, freshness: 'recent',
+        road: null, neighborhood: null, city: 'Tel Aviv', address: 'Tel Aviv',
       },
     });
     const tools = captureTools((s) => registerLocationTools(s, makeLocationRepo(), getUserId, svc));
@@ -345,32 +348,34 @@ describe('get_current_location tool handler', () => {
     const response = await tools.get('get_current_location')!({});
     expect(svc.getCurrentLocation).toHaveBeenCalledWith(USER_ID);
 
-    const parsed = parseToolResponse<{ location: Record<string, unknown>; fused: Record<string, unknown> }>(response);
+    const parsed = parseToolResponse<{ location: Record<string, unknown>; place: string; confidence: string; position: Record<string, unknown> }>(response);
+    // Legacy flat block (dashboard consumer) derived from the position.
     expect(parsed.location.lat).toBe(32.0853);
     expect(parsed.location.lon).toBe(34.7818);
     expect(parsed.location.accuracy).toBe(10);
+    expect(parsed.location.timestamp).toBe('2026-06-12T10:00:00.000Z');
+    expect(parsed.location.freshness).toBe('recent');
     expect(parsed.location.place_name).toBe('Home');
     expect(parsed.location.address).toBe('Tel Aviv');
-    expect(parsed.fused.confidence).toBe('high');
-    expect(parsed.fused.source).toBe('gps');
-    // A5: fused now exposes the gps block (parity with where_is_user).
-    expect(parsed.fused.gps).toEqual({
-      lat: 32.0853, lon: 34.7818, accuracy_m: 10, age_s: 60,
-      freshness: 'fresh', matched_place: 'Home', address: 'Tel Aviv',
-    });
+    // The full snapshot is spread alongside it.
+    expect(parsed.place).toBe('Home');
+    expect(parsed.confidence).toBe('high');
+    expect(parsed.position.precision).toBe('high');
   });
 
-  it('A5: fused.gps is null when source != none but no gps block (wifi-only)', async () => {
+  it('omits the position and nulls the legacy block when wifi-only (no GPS fix)', async () => {
     const svc = makeLocationService({
       place: 'Office', place_id: 'p-2', confidence: 'medium', source: 'wifi',
-      reasoning: 'wifi only',
+      reasoning: 'wifi only', description: 'Office', motion: 'unknown',
+      speed_mps: null, speed_kmh: null, trail: [],
       wifi: { bssid: 'aa:bb:cc:dd:ee:ff', ssid: 'OfficeWifi', connected: true, age_s: 30 },
     });
     const tools = captureTools((s) => registerLocationTools(s, makeLocationRepo(), getUserId, svc));
 
     const response = await tools.get('get_current_location')!({});
-    const parsed = parseToolResponse<{ fused: Record<string, unknown> }>(response);
-    expect(parsed.fused.gps).toBeNull();
+    const parsed = parseToolResponse<{ location: unknown; position?: unknown }>(response);
+    expect(parsed.location).toBeNull();
+    expect(parsed.position).toBeUndefined();
   });
 
   it('returns location:null when source != none but gps is missing (wifi-only)', async () => {
@@ -1349,5 +1354,47 @@ describe('LocationService.getCurrentLocation — recently_left hint (A7)', () =>
 
     const result = await svc.getCurrentLocation(USER_ID);
     expect(result.recently_left).toBeUndefined();
+  });
+});
+
+describe('LocationService.getCurrentLocation — rich snapshot (position, trail, heading, speed)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('builds position/precision/freshness, heading, speed_kmh and the recent trail', async () => {
+    const gpsTs = new Date(Date.now() - 60_000).toISOString(); // 1 min → freshness 'live'
+    const trailDocs = [
+      { id: 't1', userId: USER_ID, location: { lat: 32.10, lon: 34.80 }, speed: 8, timestamp: gpsTs, matchedPlace: null },
+      { id: 't2', userId: USER_ID, location: { lat: 32.09, lon: 34.81 }, speed: 7, timestamp: new Date(Date.now() - 300_000).toISOString(), matchedPlace: 'Home' },
+    ];
+    const locationRepo = makeLocationRepo({
+      getLatest: vi.fn(async () => ({
+        id: 't1', userId: USER_ID,
+        location: { lat: 32.10, lon: 34.80 },
+        accuracy: 18, speed: 8, bearing: 180,
+        road: 'Route 6', neighborhood: null, city: 'Kfar Saba',
+        timestamp: gpsTs, matchedPlace: null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)),
+      query: vi.fn(async () => trailDocs as never),
+    });
+    const wifiRepo = makeWifiRepo({ getLatest: vi.fn(async () => null) });
+    const es = makeMockEsClient({ get: vi.fn().mockResolvedValue({ _source: undefined }) });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const svc = new LocationServiceImpl(locationRepo, wifiRepo, es as any);
+
+    const result = await svc.getCurrentLocation(USER_ID);
+
+    expect(result.position).toBeDefined();
+    expect(result.position!.precision).toBe('high'); // 18m ≤ 30m
+    expect(result.position!.freshness).toBe('live');
+    expect(result.position!.city).toBe('Kfar Saba');
+    expect(result.position!.road).toBe('Route 6');
+    expect(result.heading).toEqual({ bearing_deg: 180, cardinal: 'south' });
+    expect(result.speed_mps).toBe(8);
+    expect(result.speed_kmh).toBe(29); // 8 m/s → 28.8 → 29
+    expect(result.motion).toBe('driving');
+    expect(result.trail).toHaveLength(2);
+    expect(result.trail[0]).toMatchObject({ lat: 32.10, lon: 34.80, speed_mps: 8, place: null });
+    expect(result.trail[1]).toMatchObject({ place: 'Home', speed_mps: 7 });
   });
 });

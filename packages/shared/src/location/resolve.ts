@@ -9,19 +9,12 @@ import { describeLocation } from './describe.js';
 import type {
   ResolveInput,
   ResolvedLocation,
-  Freshness,
   BssidPlace,
   KnownPlaceMatch,
 } from './types.js';
 
 /** The resolved answer before the human description/motion are attached. */
 type Core = Omit<ResolvedLocation, 'description' | 'motion'>;
-
-function freshnessOf(ageMs: number): Freshness {
-  if (ageMs < GPS_FRESH_MS) return 'fresh';
-  if (ageMs < GPS_STALE_USABLE_MS) return 'stale';
-  return 'very_stale';
-}
 
 /**
  * THE canonical "where is the user" decision. Pure over the signals the caller
@@ -43,9 +36,10 @@ export function resolveLocation(input: ResolveInput): ResolvedLocation {
   const wifi = input.wifi ?? null;
   const prior = input.prior ?? null;
 
-  const freshness: Freshness | null = gps ? freshnessOf(gps.ageMs) : null;
-  const gpsFresh = freshness === 'fresh';
-  const gpsUsable = !!gps && freshness !== 'very_stale';
+  // GPS-fix usability tiers, straight off the age (no enum needed): "fresh" =
+  // trusted without wifi; "usable" = stale but still good enough to place you.
+  const gpsFresh = !!gps && gps.ageMs < GPS_FRESH_MS;
+  const gpsUsable = !!gps && gps.ageMs < GPS_STALE_USABLE_MS;
   const gpsPlace: KnownPlaceMatch | null = gps?.matchedPlace ?? null;
   const ageS = gps ? Math.floor(gps.ageMs / 1000) : null;
 

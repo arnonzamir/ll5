@@ -32,28 +32,45 @@ All indices are prefixed with `ll5_awareness_` and use `userId` as a required fi
 
 ## Tools
 
-### get_current_location
+### where_is_user
 
-Returns the most recent GPS fix for the user, enriched with reverse-geocoded place name and a freshness indicator.
+**The single call for "where is the user right now."** Fuses the latest GPS +
+wifi via the shared `resolveLocation` (the same brain the gateway write path
+uses) and returns one rich snapshot of deterministic facts. The MCP does the
+deterministic part; the agent does the deduction and phrasing (see the "Location
+Awareness" section of `claude-personality.md`).
 
-**Parameters:**
+`get_situation` embeds this exact same object as `current_location` — one shape,
+one vocabulary, no reconciliation.
 
-| Name | Type | Required | Description |
-|---|---|---|---|
-| `userId` | `string` | yes | User identifier |
+**Parameters:** none (scoped to the session user).
 
 **Returns:**
 
 | Field | Type | Description |
 |---|---|---|
-| `lat` | `number` | Latitude |
-| `lon` | `number` | Longitude |
-| `accuracy` | `number` | GPS accuracy in meters |
-| `timestamp` | `string (ISO 8601)` | Time of GPS fix |
-| `freshness` | `string` | `"live"` (< 5 min), `"recent"` (< 30 min), `"stale"` (< 2 hr), `"unknown"` (> 2 hr) |
-| `place_name` | `string \| null` | Matched place name (e.g., "Home", "Office", "Dizengoff Center") |
-| `place_type` | `string \| null` | Place category (e.g., "home", "work", "restaurant", "gym") |
-| `address` | `string \| null` | Reverse-geocoded street address |
+| `place` | `string \| null` | Fused place name (known place > city), or null |
+| `place_id` | `string \| null` | Matched place UUID |
+| `confidence` | `string` | `high` / `medium` / `low` / `unknown` |
+| `source` | `string` | `gps` / `wifi` / `gps+wifi` / `stale_gps` / `hold` / `none` |
+| `reasoning` | `string` | Why this conclusion (diagnostic) |
+| `description` | `string` | Deterministic baseline phrasing — a floor, not to parrot |
+| `motion` | `string` | `stationary` / `walking` / `driving` / `unknown` (coarse, from speed) |
+| `speed_mps` / `speed_kmh` | `number \| null` | Device speed (refine motion, e.g. cycling) |
+| `heading` | `{ bearing_deg, cardinal } \| undefined` | Direction of travel |
+| `position` | `object \| undefined` | `lat`, `lon`, `accuracy_m`, `precision` (high/approximate/coarse), `timestamp`, `age_s`, `freshness` (live/recent/stale/unknown), `road`, `neighborhood`, `city`, `address` |
+| `trail` | `array` | Recent fixes (newest first): `lat`, `lon`, `timestamp`, `age_s`, `speed_mps`, `place` — for trajectory / destination inference |
+| `wifi` | `object \| undefined` | The wifi anchor: `connected`, `ssid`, `bssid`, `age_s`, `place_from_bssid` |
+| `recently_left` | `object \| undefined` | "Just left X" hint: `place_name`, `place_id`, `age_s` |
+
+The agent refines `motion` with `speed_kmh`, infers intent from `heading` +
+`trail` + calendar/places, and hedges by `confidence`/`precision`.
+
+### get_current_location (deprecated)
+
+Deprecated alias of `where_is_user`. Returns the same snapshot plus a flat
+`location` block (`lat`/`lon`/`accuracy`/`timestamp`/`freshness`/`place_name`/
+`address`) for legacy clients (the dashboard map). Prefer `where_is_user`.
 
 ---
 
@@ -204,7 +221,7 @@ Returns a composite snapshot of the user's current situation. This is the primar
 | `timezone` | `string` | User's timezone (e.g., "Asia/Jerusalem") |
 | `time_period` | `string` | `"morning"` (6-12), `"afternoon"` (12-17), `"evening"` (17-21), `"night"` (21-6) |
 | `day_type` | `string` | `"weekday"` or `"weekend"` |
-| `current_location` | `object \| null` | Same shape as `get_current_location` return value |
+| `current_location` | `object \| null` | The full `where_is_user` snapshot (position, trail, motion, heading, wifi, …), or null when no signal |
 | `next_event` | `object \| null` | Next upcoming calendar event with `title`, `start`, `location` |
 | `time_until_next_event` | `string \| null` | Human-readable duration (e.g., "in 45 minutes") |
 | `suggested_energy` | `string` | `"low"`, `"medium"`, `"high"` -- heuristic based on time of day and schedule density |

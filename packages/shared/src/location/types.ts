@@ -1,6 +1,11 @@
 /** Inputs and outputs for the canonical location resolver. All pure data — no I/O. */
 
-export type Freshness = 'fresh' | 'stale' | 'very_stale';
+/** How recent a reading is, in human terms. One vocabulary across the whole
+ *  system (GPS snapshot, device heartbeats) so nothing exposes two enums for
+ *  "how fresh". The age thresholds differ per domain; the words don't. */
+export type Freshness = 'live' | 'recent' | 'stale' | 'unknown';
+/** How precise a GPS fix is, bucketed from its accuracy radius. */
+export type Precision = 'high' | 'approximate' | 'coarse' | 'unknown';
 export type Confidence = 'high' | 'medium' | 'low' | 'unknown';
 export type LocationSource = 'gps' | 'wifi' | 'gps+wifi' | 'stale_gps' | 'hold' | 'none';
 export type LabelKind = 'place' | 'city' | null;

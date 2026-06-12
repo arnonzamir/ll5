@@ -64,7 +64,8 @@ const MCP_TOOLS: McpServerDef[] = [
     name: "awareness",
     label: "Awareness",
     tools: [
-      { name: "get_current_location", description: "Latest GPS fix with place matching" },
+      { name: "where_is_user", description: "Fused location snapshot: position, precision, motion, heading, trail, wifi" },
+      { name: "get_current_location", description: "Deprecated alias of where_is_user (adds a flat location block)" },
       { name: "query_location_history", description: "GPS history over a time range" },
       { name: "query_im_messages", description: "Search IM notifications by sender, app, or keyword" },
       { name: "get_entity_statuses", description: "Current statuses of tracked entities" },

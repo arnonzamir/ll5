@@ -3,25 +3,57 @@ import type { LocationRepository } from '../repositories/interfaces/location.rep
 import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
 import {
   resolveLocation,
+  freshnessLabel,
+  precisionLabel,
+  speedKmh,
+  cardinal,
   GPS_FRESH_MS,
-  GPS_STALE_USABLE_MS,
   WIFI_CONNECTED_ANCHOR_MS,
   type GpsSignal,
   type WifiSignal,
   type Confidence,
   type LocationSource,
   type Motion,
+  type Freshness,
+  type Precision,
 } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
-export interface GpsBlock {
+/** Window + cap for the recent-trail the snapshot carries, so the agent can read
+ *  trajectory (heading toward / away) and infer a destination. */
+const TRAIL_WINDOW_MS = 30 * 60 * 1000;
+const TRAIL_MAX_POINTS = 12;
+
+/** Where the user is right now, with precision + recency, as one block. */
+export interface PositionBlock {
   lat: number;
   lon: number;
-  accuracy_m?: number;
+  accuracy_m: number | null;
+  /** Bucketed from accuracy: high / approximate / coarse / unknown. */
+  precision: Precision;
+  timestamp: string;
   age_s: number;
-  freshness: 'fresh' | 'stale' | 'very_stale';
-  matched_place?: string | null;
-  address?: string | null;
+  /** live / recent / stale / unknown — same vocabulary everywhere. */
+  freshness: Freshness;
+  road: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  address: string | null;
+}
+
+/** One past fix in the recent trail. Newest first. */
+export interface TrailPoint {
+  lat: number;
+  lon: number;
+  timestamp: string;
+  age_s: number;
+  speed_mps: number | null;
+  place: string | null;
+}
+
+export interface Heading {
+  bearing_deg: number;
+  cardinal: string;
 }
 
 export interface WifiBlock {
@@ -38,21 +70,31 @@ export interface RecentlyLeft {
   age_s: number;
 }
 
+/**
+ * The single rich "where is the user" snapshot the agent gets in ONE call. The
+ * MCP does the deterministic part — fuse the signals, classify motion/precision/
+ * freshness, attach the recent trail — and hands ALL of it over. The agent does
+ * the deduction (is this cycling or driving? heading to school?) and the phrasing.
+ * `description` is a deterministic baseline/floor, not a line to parrot verbatim.
+ */
 export interface CurrentLocation {
   place: string | null;
   place_id: string | null;
   confidence: Confidence;
   source: LocationSource;
   reasoning: string;
-  /**
-   * The USEFUL human description — what to actually say instead of a bare city.
-   * A known place is its own description; otherwise "driving on Route 6, heading
-   * south — near Hadera" or "near Masada St, Haifa".
-   */
+  /** Deterministic baseline phrasing ("driving on Route 6, heading south — near
+   *  Hadera"). A floor to fall back on — the agent is free to compose better. */
   description: string;
-  /** Motion inferred from device speed: stationary / walking / driving / unknown. */
+  /** Coarse motion bucket from device speed: stationary / walking / driving /
+   *  unknown. Use with `speed_kmh` to refine (e.g. ~18 km/h on a bike path → cycling). */
   motion: Motion;
-  gps?: GpsBlock;
+  speed_mps: number | null;
+  speed_kmh: number | null;
+  heading?: Heading;
+  position?: PositionBlock;
+  /** Recent fixes (newest first), for trajectory / destination inference. */
+  trail: TrailPoint[];
   wifi?: WifiBlock;
   /**
    * Additive context only: set when GPS is not fresh and the most recent wifi
@@ -89,29 +131,51 @@ export class LocationService {
   ) {}
 
   async getCurrentLocation(userId: string): Promise<CurrentLocation> {
-    const [latestGps, latestWifi] = await Promise.all([
+    const now = Date.now();
+    const [latestGps, latestWifi, recent] = await Promise.all([
       this.locationRepo.getLatest(userId),
       this.wifiRepo.getLatest(userId),
+      this.locationRepo.query(userId, {
+        startTime: new Date(now - TRAIL_WINDOW_MS).toISOString(),
+        endTime: new Date(now).toISOString(),
+        limit: TRAIL_MAX_POINTS,
+      }),
     ]);
 
-    const now = Date.now();
-
-    // --- GPS: response block + shared signal ---
+    // --- GPS: position block + shared signal ---
     const gpsAgeMs = latestGps ? now - new Date(latestGps.timestamp).getTime() : 0;
     const gpsFresh = !!latestGps && gpsAgeMs < GPS_FRESH_MS;
 
-    const gpsBlock: GpsBlock | undefined = latestGps
+    const positionBlock: PositionBlock | undefined = latestGps
       ? {
           lat: latestGps.location.lat,
           lon: latestGps.location.lon,
-          accuracy_m: latestGps.accuracy,
+          accuracy_m: latestGps.accuracy ?? null,
+          precision: precisionLabel(latestGps.accuracy),
+          timestamp: latestGps.timestamp,
           age_s: Math.floor(gpsAgeMs / 1000),
-          freshness:
-            gpsAgeMs < GPS_FRESH_MS ? 'fresh' : gpsAgeMs < GPS_STALE_USABLE_MS ? 'stale' : 'very_stale',
-          matched_place: latestGps.matchedPlace ?? null,
+          freshness: freshnessLabel(gpsAgeMs),
+          road: latestGps.road ?? null,
+          neighborhood: latestGps.neighborhood ?? null,
+          city: latestGps.city ?? null,
           address: latestGps.address ?? null,
         }
       : undefined;
+
+    // --- Recent trail (newest first) for trajectory / destination inference ---
+    const trail: TrailPoint[] = recent.map((loc) => ({
+      lat: loc.location.lat,
+      lon: loc.location.lon,
+      timestamp: loc.timestamp,
+      age_s: Math.floor((now - new Date(loc.timestamp).getTime()) / 1000),
+      speed_mps: loc.speed ?? null,
+      place: loc.matchedPlace ?? null,
+    }));
+
+    const heading: Heading | undefined =
+      latestGps?.bearing != null
+        ? { bearing_deg: latestGps.bearing, cardinal: cardinal(latestGps.bearing) }
+        : undefined;
 
     const gpsSignal: GpsSignal | undefined = latestGps
       ? {
@@ -185,7 +249,11 @@ export class LocationService {
       reasoning: resolved.reasoning,
       description: resolved.description,
       motion: resolved.motion,
-      gps: gpsBlock,
+      speed_mps: latestGps?.speed ?? null,
+      speed_kmh: speedKmh(latestGps?.speed),
+      heading,
+      position: positionBlock,
+      trail,
       wifi: wifiBlock,
       recently_left: resolved.recentlyLeft
         ? {
