@@ -28,3 +28,6 @@ export * from './audit.js';
 
 // App log
 export * from './app-log.js';
+
+// Per-request correlation context
+export * from './request-context.js';

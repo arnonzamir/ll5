@@ -16,10 +16,16 @@ add `request_id`/`session_id`/`trace_id` correlation across all actions (shared
 AsyncLocalStorage request-context; agent→MCP propagation via the headers-helper), and
 replace the SessionEnd-only session dump with **per-turn accumulation** (crash-safe —
 the agent restarts constantly). Owner choices: keep everything, PII acceptable
-(single-user server), correlation everywhere. Staged rollout; **stage 1 (per-turn
+(single-user server), correlation everywhere. Staged rollout. **Stage 1 (per-turn
 session accumulation) shipped in ll5-run** (Stop-hook `session-save.sh` +
-`lib/session_payload.py`); stages 2-5 (request-context, audit ledger, propagation, UI)
-are the ll5-side follow-ups.
+`lib/session_payload.py`). **Stage 2 (correlation context) shipped in ll5**: new
+`@ll5/shared/request-context.ts` (one AsyncLocalStorage carrying `{userId, requestId,
+sessionId?, traceId?}`); `logApp`/`logAudit` auto-stamp `request_id` (+session/trace);
+all 6 MCPs migrated off their local `userStore` to the shared context (and read optional
+`X-LL5-Session-Id`/`X-LL5-Trace-Id` headers — forward-compat for stage 4); gateway gains a
+request-id middleware + `request_id`/`session_id`/`trace_id`/`kind` on the `ll5_app_log`
+and `ll5_audit_log` mappings. Stages 3-5 (audit-as-tool-ledger, agent-side propagation, UI)
+remain.
 
 ### Proactivity eval pipeline — forward scheduler name onto the trigger envelope (2026-06-13)
 Supports the proactivity golden-dataset effort (instrumentation lives in **ll5-run**:

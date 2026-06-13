@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
+import { runWithRequestContext, getContextUserId } from '@ll5/shared';
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
@@ -26,12 +26,11 @@ interface AuthenticatedRequest extends Request {
   userId: string;
 }
 
-// Per-request userId storage using AsyncLocalStorage for proper request isolation.
-const userStore = new AsyncLocalStorage<string>();
+// Per-request correlation context (userId + request_id) lives in @ll5/shared (DECISION-012).
 
 function getUserId(): string {
-  const uid = userStore.getStore();
-  if (!uid) throw new Error('No user context — request not wrapped in userStore.run()');
+  const uid = getContextUserId();
+  if (!uid) throw new Error('No user context — request not wrapped in runWithRequestContext()');
   return uid;
 }
 
@@ -439,7 +438,7 @@ export async function startServer(): Promise<void> {
   // MCP endpoint (stateless — new server+transport per request)
   app.all('/mcp', authMiddleware, async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
-    await userStore.run(userId, async () => {
+    await runWithRequestContext({ userId, sessionId: (req.headers['x-ll5-session-id'] as string) || undefined, traceId: (req.headers['x-ll5-trace-id'] as string) || undefined }, async () => {
       try {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,

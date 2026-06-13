@@ -82,8 +82,9 @@ ll5/
 │       ├── storage/                  # ES + PG client factories
 │       ├── auth/                     # Token generate/validate, Express middleware. `token.ts` exports `generateToken`, `validateToken` (Bearer-header form, throws on expiry), and `validateLl5Token` (raw-token form returning `ValidationResult` discriminated union — single source of truth for the four gateway call sites after Phase 2)
 │       ├── mcp/                      # MCP server helpers
-│       ├── audit.ts                  # ES audit writer (100% mutation coverage across all MCPs)
-│       ├── app-log.ts               # ES app logger (all tool calls, errors, webhooks)
+│       ├── audit.ts                  # ES audit writer (100% mutation coverage across all MCPs); auto-stamps request_id/session_id/trace_id + kind='mutation' from request-context (DECISION-012)
+│       ├── app-log.ts               # ES app logger (all tool calls, errors, webhooks); auto-stamps correlation ids from request-context
+│       ├── request-context.ts       # DECISION-012 stage 2: one AsyncLocalStorage carrying {userId, requestId, sessionId?, traceId?}; runWithRequestContext + getRequestId/getContextUserId. Replaced each MCP's local userStore; logApp/logAudit read it
 │       └── utils/                    # env, logger, errors
 │
 ├── packages/personal-knowledge/       # @ll5/personal-knowledge — ES-backed MCP

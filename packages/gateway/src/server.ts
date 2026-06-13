@@ -15,6 +15,8 @@ import {
   KNOWLEDGE_NETWORKS_INDEX,
   AWARENESS_INDEX_SETTINGS,
   validateLl5Token,
+  runWithRequestContext,
+  getRequestId,
   type IndexDefinition,
 } from '@ll5/shared';
 import { createAdminRouter } from './admin.js';
@@ -76,6 +78,9 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         success: { type: 'boolean' },
         error_message: { type: 'text' },
         metadata: { type: 'object', enabled: false },
+        request_id: { type: 'keyword' },
+        session_id: { type: 'keyword' },
+        trace_id: { type: 'keyword' },
       },
     },
   },
@@ -83,6 +88,8 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
     index: 'll5_audit_log',
     mappings: {
       properties: {
+        // kind: 'mutation' (semantic rows) | 'tool_call' (DECISION-012 ledger, stage 3)
+        kind: { type: 'keyword' },
         user_id: { type: 'keyword' },
         timestamp: { type: 'date' },
         source: { type: 'keyword' },
@@ -91,6 +98,9 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         entity_id: { type: 'keyword' },
         summary: { type: 'text', analyzer: 'multilingual' },
         metadata: { type: 'object', enabled: false },
+        request_id: { type: 'keyword' },
+        session_id: { type: 'keyword' },
+        trace_id: { type: 'keyword' },
       },
     },
   },
@@ -206,6 +216,25 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Parse JSON bodies
   app.use(express.json({ limit: '1mb' }));
+
+  // Per-request correlation context (DECISION-012): every request gets a
+  // request_id that logApp/logAudit auto-stamp. session_id/trace_id ride in from
+  // optional X-LL5-* headers (agent propagation, stage 4). userId is resolved
+  // later by per-route auth; the request_id is the gateway-side span id.
+  app.use((req: Request, res: Response, next: express.NextFunction) => {
+    runWithRequestContext(
+      {
+        userId: '',
+        sessionId: (req.headers['x-ll5-session-id'] as string) || undefined,
+        traceId: (req.headers['x-ll5-trace-id'] as string) || undefined,
+      },
+      () => {
+        const rid = getRequestId();
+        if (rid) res.setHeader('X-Request-Id', rid);
+        next();
+      },
+    );
+  });
 
   // Create ES client
   const esClient = new Client({

@@ -3,6 +3,7 @@
  * Replaces console.log/warn/error across all services.
  * Fire-and-forget — never throws, never blocks.
  */
+import { getRequestContext } from './request-context.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -17,6 +18,10 @@ export interface AppLogEntry {
   success?: boolean;
   error_message?: string;
   metadata?: Record<string, unknown>;
+  /** Correlation ids (DECISION-012) — auto-filled from the request context. */
+  request_id?: string;
+  session_id?: string;
+  trace_id?: string;
 }
 
 const INDEX = 'll5_app_log';
@@ -39,8 +44,13 @@ export function initAppLog(config: {
 
 /** Write a structured log entry to ES. Also writes to stdout for Docker log capture. */
 export function logApp(entry: Omit<AppLogEntry, 'service'>): void {
+  const ctx = getRequestContext();
   const fullEntry: AppLogEntry & { timestamp: string } = {
     ...entry,
+    // Auto-fill correlation ids from the request context (explicit values win).
+    request_id: entry.request_id ?? ctx?.requestId,
+    session_id: entry.session_id ?? ctx?.sessionId,
+    trace_id: entry.trace_id ?? ctx?.traceId,
     service: serviceName,
     timestamp: new Date().toISOString(),
   };
