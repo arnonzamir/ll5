@@ -8,6 +8,19 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Observability initiative — DECISION-012 (correlation ids + tool ledger + session accumulation) (2026-06-13)
+Design recorded in `docs/decisions/DECISION-012`: make the audit layer the durable,
+complete, correlated record of every tool call (extend `ll5_audit_log` with a `kind`
+discriminator + full `args`/`result` stored as non-indexed JSON via `withToolLogging`),
+add `request_id`/`session_id`/`trace_id` correlation across all actions (shared
+AsyncLocalStorage request-context; agent→MCP propagation via the headers-helper), and
+replace the SessionEnd-only session dump with **per-turn accumulation** (crash-safe —
+the agent restarts constantly). Owner choices: keep everything, PII acceptable
+(single-user server), correlation everywhere. Staged rollout; **stage 1 (per-turn
+session accumulation) shipped in ll5-run** (Stop-hook `session-save.sh` +
+`lib/session_payload.py`); stages 2-5 (request-context, audit ledger, propagation, UI)
+are the ll5-side follow-ups.
+
 ### Proactivity eval pipeline — forward scheduler name onto the trigger envelope (2026-06-13)
 Supports the proactivity golden-dataset effort (instrumentation lives in **ll5-run**:
 a Stop-hook eval recorder + a local `record_moment` tool + an `export-moments` CLI +
