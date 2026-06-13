@@ -23,6 +23,8 @@ export async function fetchDataSources(): Promise<DataSources> {
       health: ds.health ?? DEFAULTS.health,
       whatsapp: ds.whatsapp ?? DEFAULTS.whatsapp,
       findhub: ds.findhub ?? DEFAULTS.findhub,
+      device_activity: ds.device_activity ?? DEFAULTS.device_activity,
+      bluetooth: ds.bluetooth ?? DEFAULTS.bluetooth,
     };
   } catch {
     return DEFAULTS;

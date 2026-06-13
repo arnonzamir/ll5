@@ -5,3 +5,5 @@ export type { CalendarEventRepository, CalendarEventQueryParams } from './calend
 export type { NotableEventRepository, NotableEventQueryParams } from './notable-event.repository.js';
 export type { PhoneStatusRepository } from './phone-status.repository.js';
 export type { WifiRepository } from './wifi.repository.js';
+export type { DeviceActivityRepository } from './device-activity.repository.js';
+export type { BluetoothRepository } from './bluetooth.repository.js';

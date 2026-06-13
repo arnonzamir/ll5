@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, MapPin, MessageSquare, Calendar, Heart, Phone, Tag } from "lucide-react";
+import { RefreshCw, MapPin, MessageSquare, Calendar, Heart, Phone, Tag, Activity, Bluetooth } from "lucide-react";
 import {
   fetchDataSources,
   updateDataSources,
@@ -22,6 +22,8 @@ const SOURCE_META: Array<{
   { key: "health", label: "Health Data", description: "Garmin and other health sources sync sleep, HR, activities", icon: Heart },
   { key: "whatsapp", label: "WhatsApp Messages", description: "Evolution API webhook processes WhatsApp messages", icon: Phone },
   { key: "findhub", label: "Find Hub Trackers", description: "Google Find Hub locations for Bluetooth trackers and devices (keys, bag, car, tablets)", icon: Tag },
+  { key: "device_activity", label: "Phone Activity & App Usage", description: "Screen wake/idle and a compact app-usage rollup so the agent can tell when you're up and active (requires Usage Access on the phone)", icon: Activity },
+  { key: "bluetooth", label: "Bluetooth Connections", description: "Connect/disconnect events (car, headphones, watch) for context like driving or commuting", icon: Bluetooth },
 ];
 
 export function DataSourcesView() {

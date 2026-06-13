@@ -215,6 +215,57 @@ export const AWARENESS_INDICES: IndexDefinition[] = [
       },
     },
   },
+  {
+    // Battery-light rollup of phone activity for one sync window, derived on
+    // the device from a single UsageStatsManager.queryEvents() poll inside the
+    // existing periodic push (no always-on receiver). One doc per window.
+    // Source = the Android `device_activity` push item. The agent reads the
+    // latest doc(s) via get_situation and DEDUCES wake/active/idle — we only
+    // state facts (first interaction, screen-on time, top apps), never "awake".
+    index: 'll5_awareness_device_activity',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        window_start: { type: 'date' },
+        window_end: { type: 'date' },
+        // Screen / interactivity summary for the window.
+        screen_on_ms: { type: 'long' },
+        unlock_count: { type: 'integer' },
+        first_interaction: { type: 'date' }, // earliest screen-interactive/unlock in window
+        last_interaction: { type: 'date' },
+        interactive_now: { type: 'boolean' }, // screen interactive at window_end
+        // Compact app-usage rollup: top foreground apps this window.
+        top_apps: {
+          type: 'nested',
+          properties: {
+            package: { type: 'keyword' },
+            app_name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+            category: { type: 'keyword' }, // social | maps | productivity | ... | undefined
+            foreground_ms: { type: 'long' },
+            opens: { type: 'integer' },
+          },
+        },
+        timestamp: { type: 'date' }, // = window_end, for uniform recency sorting
+      },
+    },
+  },
+  {
+    // Bluetooth connect/disconnect events from a cheap event-driven receiver
+    // (ACL connected/disconnected). Source = the Android `bluetooth` push item.
+    // device_class lets the agent infer context (car → driving, headset →
+    // commute/workout, wearable → on-body) without us asserting the activity.
+    index: 'll5_awareness_bluetooth',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        device_name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+        device_address: { type: 'keyword' },
+        device_class: { type: 'keyword' }, // car | headset | wearable | phone | computer | other
+        connected: { type: 'boolean' },
+        timestamp: { type: 'date' },
+      },
+    },
+  },
 ];
 
 /**

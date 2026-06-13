@@ -122,6 +122,42 @@ const PushTrackedDeviceSchema = z.object({
   semantic_name: z.string().nullable().optional(),
 });
 
+// Device activity — battery-light rollup of phone interactivity + app usage for
+// one sync window, derived on-device from a single UsageStatsManager poll. One
+// item per window. We state facts (first interaction, screen-on time, top apps);
+// the agent deduces wake/active/idle.
+const PushTopAppSchema = z.object({
+  package: z.string(),
+  app_name: z.string().optional(),
+  category: z.string().optional(),
+  foreground_ms: z.number().nonnegative().optional(),
+  opens: z.number().int().nonnegative().optional(),
+});
+const PushDeviceActivityItemSchema = z.object({
+  type: z.literal('device_activity'),
+  timestamp: z.string().datetime({ offset: true }), // = window_end
+  window_start: z.string().datetime({ offset: true }),
+  window_end: z.string().datetime({ offset: true }),
+  screen_on_ms: z.number().nonnegative().optional(),
+  unlock_count: z.number().int().nonnegative().optional(),
+  first_interaction: z.string().datetime({ offset: true }).nullable().optional(),
+  last_interaction: z.string().datetime({ offset: true }).nullable().optional(),
+  interactive_now: z.boolean().optional(),
+  top_apps: z.array(PushTopAppSchema).optional(),
+});
+
+// Bluetooth connect/disconnect event (cheap event-driven receiver).
+const PushBluetoothItemSchema = z.object({
+  type: z.literal('bluetooth'),
+  timestamp: z.string().datetime({ offset: true }),
+  connected: z.boolean(),
+  device_name: z.string().nullable().optional(),
+  device_address: z.string().nullable().optional(),
+  device_class: z
+    .enum(['car', 'headset', 'wearable', 'phone', 'computer', 'other'])
+    .optional(),
+});
+
 const PushItemSchema = z.discriminatedUnion('type', [
   PushLocationItemSchema,
   PushMessageItemSchema,
@@ -132,6 +168,8 @@ const PushItemSchema = z.discriminatedUnion('type', [
   PushWifiItemSchema,
   PushCameraPhotoSchema,
   PushTrackedDeviceSchema,
+  PushDeviceActivityItemSchema,
+  PushBluetoothItemSchema,
 ]);
 
 export const WebhookPayloadSchema = z.object({
@@ -150,6 +188,8 @@ export type PushPhoneStatusItem = z.infer<typeof PushPhoneStatusItemSchema>;
 export type PushWifiItem = z.infer<typeof PushWifiItemSchema>;
 export type PushCameraPhotoItem = z.infer<typeof PushCameraPhotoSchema>;
 export type PushTrackedDeviceItem = z.infer<typeof PushTrackedDeviceSchema>;
+export type PushDeviceActivityItem = z.infer<typeof PushDeviceActivityItemSchema>;
+export type PushBluetoothItem = z.infer<typeof PushBluetoothItemSchema>;
 export type PushItem = z.infer<typeof PushItemSchema>;
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 

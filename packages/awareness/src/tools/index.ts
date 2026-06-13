@@ -8,6 +8,8 @@ import type { NotableEventRepository } from '../repositories/interfaces/notable-
 import type { PhoneStatusRepository } from '../repositories/interfaces/phone-status.repository.js';
 import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
 import type { TrackedDeviceRepository } from '../repositories/interfaces/tracked-device.repository.js';
+import type { DeviceActivityRepository } from '../repositories/interfaces/device-activity.repository.js';
+import type { BluetoothRepository } from '../repositories/interfaces/bluetooth.repository.js';
 import { LocationService } from '../services/location-service.js';
 import { registerLocationTools } from './location.js';
 import { registerMessageTools } from './messages.js';
@@ -30,6 +32,8 @@ export interface Repositories {
   phoneStatus: PhoneStatusRepository;
   wifi: WifiRepository;
   trackedDevice: TrackedDeviceRepository;
+  deviceActivity: DeviceActivityRepository;
+  bluetooth: BluetoothRepository;
 }
 
 export function registerAllTools(
@@ -57,6 +61,8 @@ export function registerAllTools(
       calendar: repos.calendar,
       notableEvent: repos.notableEvent,
       message: repos.message,
+      deviceActivity: repos.deviceActivity,
+      bluetooth: repos.bluetooth,
     },
     getUserId,
     timezone,

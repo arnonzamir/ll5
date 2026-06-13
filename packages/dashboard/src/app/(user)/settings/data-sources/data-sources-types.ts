@@ -15,6 +15,8 @@ export interface DataSources {
   health: DataSourceConfig;
   whatsapp: DataSourceConfig;
   findhub: DataSourceConfig;
+  device_activity: DataSourceConfig;
+  bluetooth: DataSourceConfig;
 }
 
 export const DEFAULTS: DataSources = {
@@ -24,6 +26,12 @@ export const DEFAULTS: DataSources = {
   health: { enabled: true },
   whatsapp: { enabled: true },
   findhub: { enabled: true },
+  // Phone-collected, but the real opt-in is on the device: an OFF-by-default
+  // app toggle + the OS special permissions (Usage Access / Bluetooth). This
+  // gateway gate stays on (consistent with gps/calendar) so enabling on the
+  // phone is sufficient and nothing is silently dropped server-side.
+  device_activity: { enabled: true },
+  bluetooth: { enabled: true },
 };
 
 // Sources collected on the phone (toggling these queues an Android device

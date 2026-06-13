@@ -3,6 +3,8 @@ import type { LocationRepository } from '../repositories/interfaces/location.rep
 import type { CalendarEventRepository } from '../repositories/interfaces/calendar-event.repository.js';
 import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
 import type { MessageRepository } from '../repositories/interfaces/message.repository.js';
+import type { DeviceActivityRepository } from '../repositories/interfaces/device-activity.repository.js';
+import type { BluetoothRepository } from '../repositories/interfaces/bluetooth.repository.js';
 import type { LocationService } from '../services/location-service.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -19,6 +21,8 @@ export function registerSituationTools(
     calendar: CalendarEventRepository;
     notableEvent: NotableEventRepository;
     message: MessageRepository;
+    deviceActivity: DeviceActivityRepository;
+    bluetooth: BluetoothRepository;
   },
   getUserId: () => string,
   timezone: string,
@@ -115,6 +119,47 @@ export function registerSituationTools(
         logger.warn('[situation] Active conversations count failed', { error: err instanceof Error ? err.message : String(err) });
       }
 
+      // Phone-activity rollup (latest window) — the agent DEDUCES awake/active/
+      // idle from first_interaction / interactive_now / top apps; we only state
+      // the facts. Null when the source is disabled or no window yet.
+      let deviceActivity = null;
+      try {
+        const latest = await repos.deviceActivity.getLatest(userId);
+        if (latest) {
+          deviceActivity = {
+            window_start: latest.windowStart,
+            window_end: latest.windowEnd,
+            screen_on_ms: latest.screenOnMs ?? null,
+            unlock_count: latest.unlockCount ?? null,
+            first_interaction: latest.firstInteraction ?? null,
+            last_interaction: latest.lastInteraction ?? null,
+            interactive_now: latest.interactiveNow ?? null,
+            top_apps: (latest.topApps ?? []).map((a) => ({
+              app: a.appName ?? a.package,
+              category: a.category ?? null,
+              foreground_ms: a.foregroundMs ?? null,
+              opens: a.opens ?? null,
+            })),
+          };
+        }
+      } catch (err) {
+        logger.warn('[situation] Device activity fetch failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+
+      // Currently-connected Bluetooth devices — class lets the agent infer
+      // context (car → driving, headset → commute/workout, wearable → on-body).
+      let bluetoothConnected: unknown[] = [];
+      try {
+        const connected = await repos.bluetooth.getConnected(userId);
+        bluetoothConnected = connected.map((c) => ({
+          name: c.deviceName ?? null,
+          class: c.deviceClass ?? null,
+          since: c.since,
+        }));
+      } catch (err) {
+        logger.warn('[situation] Bluetooth fetch failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+
       const situation = {
         current_time: now.toISOString(),
         timezone,
@@ -126,6 +171,8 @@ export function registerSituationTools(
         suggested_energy: suggestedEnergy,
         notable_recent_events: notableRecentEvents,
         active_conversations: activeConversations,
+        device_activity: deviceActivity,
+        bluetooth_connected: bluetoothConnected,
       };
 
       return {

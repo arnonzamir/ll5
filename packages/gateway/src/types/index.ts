@@ -8,6 +8,8 @@ export {
   type PushWifiItem,
   type PushCameraPhotoItem,
   type PushTrackedDeviceItem,
+  type PushDeviceActivityItem,
+  type PushBluetoothItem,
   type PushItem,
   type WebhookPayload,
   type ItemResult,

@@ -8,6 +8,20 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: phone-activity awareness — screen/wake, Bluetooth, app-usage (2026-06-13, branch `feat/phone-activity-awareness`)
+New situational signals so the agent can tell when the user is up/active, what they're connected to,
+and which apps they're using — **battery-first**. Two new push item types riding the existing batched
+push: `device_activity` (a per-sync-window rollup the Android app derives from a single
+`UsageStatsManager.queryEvents()` poll — screen on/off + unlock + top-app usage, **no always-on
+receiver**) and `bluetooth` (cheap event-driven connect/disconnect with a `device_class` car/headset/
+wearable). Design: **MCP states facts, agent deduces** (no on-device "wake event"). Data plane DONE
+(this branch): `@ll5/shared` indices `ll5_awareness_device_activity` + `ll5_awareness_bluetooth`
+(auto-created by `ensureIndices`); gateway `PushDeviceActivityItem`/`PushBluetoothItem` schemas +
+`processors/device-activity.ts` + `processors/bluetooth.ts` + `processItem` switch + `sourceMap`
+(`device_activity`/`bluetooth`); awareness MCP repositories + surfaced in `get_situation`
+(`device_activity` block + `bluetooth_connected[]`); dashboard Data Sources toggles. 3 new gateway
+processor tests pass. **Android side (ll5-android) + live ingest verification still TODO.**
+
 ### FIX: app_log + audit ES writes silently dead for 8 days (since ES auth) (2026-06-13)
 Found while verifying the DECISION-012 tool-ledger: `ll5_app_log` and `ll5_audit_log` had
 accepted **zero writes since 2026-06-05T07:36** — exactly when ES auth was enabled

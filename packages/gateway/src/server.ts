@@ -34,6 +34,8 @@ import { processPhoneStatus } from './processors/phone-status.js';
 import { processWifi } from './processors/wifi.js';
 import { processCameraPhoto } from './processors/camera-photo.js';
 import { processTrackedDevice } from './processors/findhub.js';
+import { processDeviceActivity } from './processors/device-activity.js';
+import { processBluetooth } from './processors/bluetooth.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
@@ -173,6 +175,8 @@ async function processItem(
       wifi: 'wifi',
       camera_photo: 'camera_photos',
       tracked_device: 'findhub',
+      device_activity: 'device_activity',
+      bluetooth: 'bluetooth',
     };
     const sourceKey = sourceMap[item.type];
     if (sourceKey && pgPool && !await isSourceEnabled(pgPool, userId, sourceKey)) {
@@ -217,6 +221,12 @@ async function processItem(
         break;
       case 'tracked_device':
         await processTrackedDevice(es, userId, item, config.geocodingApiKey);
+        break;
+      case 'device_activity':
+        await processDeviceActivity(es, userId, item);
+        break;
+      case 'bluetooth':
+        await processBluetooth(es, userId, item);
         break;
     }
     return { index: itemIndex, type: item.type, status: 'ok' };

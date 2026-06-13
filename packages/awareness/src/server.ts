@@ -18,6 +18,8 @@ import { ElasticsearchNotableEventRepository } from './repositories/elasticsearc
 import { ElasticsearchPhoneStatusRepository } from './repositories/elasticsearch/phone-status.repository.js';
 import { ElasticsearchWifiRepository } from './repositories/elasticsearch/wifi.repository.js';
 import { ElasticsearchTrackedDeviceRepository } from './repositories/elasticsearch/tracked-device.repository.js';
+import { ElasticsearchDeviceActivityRepository } from './repositories/elasticsearch/device-activity.repository.js';
+import { ElasticsearchBluetoothRepository } from './repositories/elasticsearch/bluetooth.repository.js';
 import { registerAllTools } from './tools/index.js';
 
 // Per-request correlation context (userId + request_id) lives in @ll5/shared (DECISION-012).
@@ -90,6 +92,8 @@ export async function startServer(): Promise<void> {
     phoneStatus: new ElasticsearchPhoneStatusRepository(esClient),
     wifi: new ElasticsearchWifiRepository(esClient),
     trackedDevice: new ElasticsearchTrackedDeviceRepository(esClient),
+    deviceActivity: new ElasticsearchDeviceActivityRepository(esClient),
+    bluetooth: new ElasticsearchBluetoothRepository(esClient),
   };
 
   logger.info('[startServer][init] Repositories initialized');
