@@ -31,3 +31,6 @@ export * from './app-log.js';
 
 // Per-request correlation context
 export * from './request-context.js';
+
+// ES fetch auth helper
+export * from './es-auth.js';

@@ -8,6 +8,21 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FIX: app_log + audit ES writes silently dead for 8 days (since ES auth) (2026-06-13)
+Found while verifying the DECISION-012 tool-ledger: `ll5_app_log` and `ll5_audit_log` had
+accepted **zero writes since 2026-06-05T07:36** — exactly when ES auth was enabled
+(DECISION-011). The raw-`fetch` writers (`app-log.ts`, `audit.ts`) passed credentials
+**inline in the URL** (`http://elastic:pw@es:9200`), which Node's `fetch`/undici **ignores**,
+so every write 401'd and was swallowed by the fire-and-forget `.catch()`. (The
+`@elastic/elasticsearch` client callers were fine — they parse URL creds; only the raw-fetch
+ones broke. DECISION-011 fixed the dashboard's `lib/es.ts` but not these.) Fix: new
+`@ll5/shared/es-auth.ts` `esFetchTarget()` derives base URL + a `Basic` auth header; both
+writers use it. Added `warnEsWriteFailure()` (throttled stderr) so a fully-broken write path
+can't hide silently again (it's how this stayed invisible for 8 days — the no-silent-errors
+rule, ironically). Also: `logToolCall` now stores `args`/`result` as **JSON strings** (objects
+would dynamic-map per-tool and explode/conflict the index mapping), and `ensureIndices` now
+**additively PUTs mappings on existing indices** so new keyword fields don't get dynamic-mapped.
+
 ### Observability initiative — DECISION-012 (correlation ids + tool ledger + session accumulation) (2026-06-13)
 Design recorded in `docs/decisions/DECISION-012`: make the audit layer the durable,
 complete, correlated record of every tool call (extend `ll5_audit_log` with a `kind`

@@ -85,6 +85,7 @@ ll5/
 │       ├── audit.ts                  # ES audit writer: logAudit (kind='mutation' semantic rows) + logToolCall (kind='tool_call' COMPLETE ledger row: full args/result non-indexed + correlation ids, DECISION-012 stage 3); auto-stamps request_id/session_id/trace_id from request-context
 │       ├── app-log.ts               # ES app logger (all tool calls, errors, webhooks); auto-stamps correlation ids from request-context
 │       ├── request-context.ts       # DECISION-012 stage 2: one AsyncLocalStorage carrying {userId, requestId, sessionId?, traceId?}; runWithRequestContext + getRequestId/getContextUserId. Replaced each MCP's local userStore; logApp/logAudit read it. (Cassette query: gateway GET /audit/tool-calls returns kind:'tool_call' ledger rows by session/trace/tool/time — DECISION-012 stage 5)
+│       ├── es-auth.ts               # esFetchTarget (derive base URL + Basic auth header from inline-cred ES URL — Node fetch ignores URL userinfo, which silently killed app_log/audit writes for 8 days after ES auth) + warnEsWriteFailure (throttled stderr on dead write path)
 │       └── utils/                    # env, logger, errors
 │
 ├── packages/personal-knowledge/       # @ll5/personal-knowledge — ES-backed MCP

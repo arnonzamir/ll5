@@ -101,11 +101,11 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         request_id: { type: 'keyword' },
         session_id: { type: 'keyword' },
         trace_id: { type: 'keyword' },
-        // tool_call ledger fields. args/result kept non-indexed so the full I/O is
-        // stored without exploding the mapping.
+        // tool_call ledger fields. args/result are JSON STRINGS, stored (in _source)
+        // but not indexed — keeps the full I/O without exploding the mapping.
         tool_name: { type: 'keyword' },
-        args: { type: 'object', enabled: false },
-        result: { type: 'object', enabled: false },
+        args: { type: 'text', index: false },
+        result: { type: 'text', index: false },
         duration_ms: { type: 'integer' },
         success: { type: 'boolean' },
         error_message: { type: 'text' },
@@ -127,7 +127,22 @@ async function ensureIndices(client: Client): Promise<void> {
       });
       logger.info(`[ensureIndices][create] Index created: ${def.index}`);
     } else {
-      logger.debug(`[ensureIndices][create] Index already exists: ${def.index}`);
+      // Index exists — additively apply the mapping so NEW fields (e.g. the
+      // DECISION-012 correlation + tool-ledger fields) get their intended
+      // keyword/text types instead of being dynamic-mapped. PUT _mapping only ADDS
+      // fields; it errors on changing an existing field's type, which we never do
+      // (caught + warned, never fatal).
+      const props = (def.mappings as { properties?: Record<string, unknown> } | undefined)?.properties;
+      if (props) {
+        try {
+          await client.indices.putMapping({ index: def.index, properties: props as never });
+          logger.debug(`[ensureIndices][mapping] Mapping ensured for: ${def.index}`);
+        } catch (err) {
+          logger.warn(`[ensureIndices][mapping] Mapping update skipped for ${def.index}`, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     }
   }
 }

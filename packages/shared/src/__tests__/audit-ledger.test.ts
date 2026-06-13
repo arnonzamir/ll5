@@ -28,8 +28,9 @@ describe('audit tool-ledger (DECISION-012 stage 3)', () => {
     const d = bodies[0];
     expect(d.kind).toBe('tool_call');
     expect(d.tool_name).toBe('get_situation');
-    expect(d.args).toEqual({ window: '2h' });
-    expect(d.result).toEqual({ content: [{ type: 'text', text: 'ok' }] });
+    // args/result are stored as JSON strings (parse to recover).
+    expect(JSON.parse(d.args)).toEqual({ window: '2h' });
+    expect(JSON.parse(d.result)).toEqual({ content: [{ type: 'text', text: 'ok' }] });
     expect(d.success).toBe(true);
     expect(d.duration_ms).toBe(42);
     // correlation pulled from the request context

@@ -4,6 +4,7 @@
  * Each MCP imports this and calls logAudit() after mutations.
  */
 import { getRequestContext } from './request-context.js';
+import { esFetchTarget, warnEsWriteFailure } from './es-auth.js';
 
 export interface AuditEntry {
   user_id: string;
@@ -22,16 +23,20 @@ export interface AuditEntry {
 
 const INDEX = 'll5_audit_log';
 
-let esUrl: string | null = null;
+let esBase: string | null = null;
+let esHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
 
 /** Initialize the audit logger with an ES URL. Call once at startup. */
 export function initAudit(elasticsearchUrl: string): void {
-  esUrl = elasticsearchUrl.replace(/\/$/, '');
+  // Derive base + Basic-auth header (Node fetch ignores inline URL creds — es-auth.ts).
+  const t = esFetchTarget(elasticsearchUrl);
+  esBase = t.base;
+  esHeaders = t.headers;
 }
 
 /** Write an audit entry. Fire-and-forget — never throws. */
 export function logAudit(entry: AuditEntry): void {
-  if (!esUrl) return;
+  if (!esBase) return;
 
   const ctx = getRequestContext();
   const doc = {
@@ -44,18 +49,26 @@ export function logAudit(entry: AuditEntry): void {
     timestamp: new Date().toISOString(),
   };
 
-  void fetch(`${esUrl}/${INDEX}/_doc`, {
+  void fetch(`${esBase}/${INDEX}/_doc`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: esHeaders,
     body: JSON.stringify(doc),
-  }).catch(() => {
-    // Silent — audit is best-effort
+  }).catch((e) => {
+    warnEsWriteFailure(INDEX, e);
   });
 }
 
+/** JSON.stringify that never throws (circular/odd values → a small placeholder). */
+function safeJson(v: unknown): string {
+  try {
+    return JSON.stringify(v) ?? 'null';
+  } catch {
+    return JSON.stringify({ _unserializable: String(v).slice(0, 200) });
+  }
+}
+
 /** A complete tool-call ledger row (DECISION-012 stage 3): the full input + output
- *  of one MCP tool call. `args`/`result` are stored non-indexed (mapping
- *  `enabled:false`) so keeping everything doesn't explode the index mapping. */
+ *  of one MCP tool call. `args`/`result` are stored as JSON strings (see below). */
 export interface ToolCallAuditEntry {
   user_id?: string;
   tool_name: string;
@@ -69,15 +82,18 @@ export interface ToolCallAuditEntry {
 /** Write a `kind:'tool_call'` row with the full I/O to the same audit index.
  *  Fire-and-forget; correlation ids + user fall back to the request context. */
 export function logToolCall(entry: ToolCallAuditEntry): void {
-  if (!esUrl) return;
+  if (!esBase) return;
 
   const ctx = getRequestContext();
   const doc = {
     kind: 'tool_call' as const,
     user_id: entry.user_id ?? ctx?.userId,
     tool_name: entry.tool_name,
-    args: entry.args ?? null,
-    result: entry.result ?? null,
+    // Stored as JSON STRINGS, not objects: an object would dynamic-map per-tool and
+    // explode / type-conflict the index mapping. A string never conflicts and still
+    // keeps everything; the cassette reader JSON.parses it back.
+    args: entry.args === undefined ? null : safeJson(entry.args),
+    result: entry.result === undefined ? null : safeJson(entry.result),
     duration_ms: entry.duration_ms,
     success: entry.success,
     error_message: entry.error_message,
@@ -87,11 +103,11 @@ export function logToolCall(entry: ToolCallAuditEntry): void {
     timestamp: new Date().toISOString(),
   };
 
-  void fetch(`${esUrl}/${INDEX}/_doc`, {
+  void fetch(`${esBase}/${INDEX}/_doc`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: esHeaders,
     body: JSON.stringify(doc),
-  }).catch(() => {
-    // Silent — the ledger is best-effort; a write failure must not affect the call.
+  }).catch((e) => {
+    warnEsWriteFailure(INDEX, e);
   });
 }

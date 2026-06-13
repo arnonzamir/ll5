@@ -4,6 +4,7 @@
  * Fire-and-forget — never throws, never blocks.
  */
 import { getRequestContext } from './request-context.js';
+import { esFetchTarget, warnEsWriteFailure } from './es-auth.js';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -27,7 +28,8 @@ export interface AppLogEntry {
 const INDEX = 'll5_app_log';
 const LOG_LEVELS: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
-let esUrl: string | null = null;
+let esBase: string | null = null;
+let esHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
 let serviceName: string = 'unknown';
 let minLevel: LogLevel = 'info';
 
@@ -37,7 +39,10 @@ export function initAppLog(config: {
   service: string;
   level?: LogLevel;
 }): void {
-  esUrl = config.elasticsearchUrl.replace(/\/$/, '');
+  // Derive base + Basic-auth header (Node fetch ignores inline URL creds — see es-auth.ts).
+  const t = esFetchTarget(config.elasticsearchUrl);
+  esBase = t.base;
+  esHeaders = t.headers;
   serviceName = config.service;
   minLevel = config.level ?? 'info';
 }
@@ -65,15 +70,16 @@ export function logApp(entry: Omit<AppLogEntry, 'service'>): void {
   }
 
   // Write to ES if configured
-  if (!esUrl) return;
+  if (!esBase) return;
   if (LOG_LEVELS[entry.level] < LOG_LEVELS[minLevel]) return;
 
-  void fetch(`${esUrl}/${INDEX}/_doc`, {
+  void fetch(`${esBase}/${INDEX}/_doc`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: esHeaders,
     body: JSON.stringify(fullEntry),
-  }).catch(() => {
-    // Silent — logging should never break the app
+  }).catch((e) => {
+    warnEsWriteFailure(INDEX, e);
+    // Swallowed — logging should never break the app
   });
 }
 
