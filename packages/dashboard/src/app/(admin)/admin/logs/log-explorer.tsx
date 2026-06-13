@@ -233,16 +233,16 @@ function FacetSection({
               <Checkbox
                 checked={selected.includes(b.key)}
                 onCheckedChange={() => onToggle(field, b.key)}
-                className="h-3.5 w-3.5"
+                className="h-3.5 w-3.5 shrink-0"
               />
-              <span className="text-xs text-gray-700 truncate flex-1">{b.key}</span>
+              <span className="text-xs text-gray-700 truncate flex-1 min-w-0">{b.key}</span>
               <button
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOnly(field, b.key); }}
                 className="text-[10px] text-blue-500 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
               >
                 only
               </button>
-              <span className="text-[10px] text-gray-400 tabular-nums">{b.count.toLocaleString()}</span>
+              <span className="shrink-0 text-[10px] text-gray-400 tabular-nums">{b.count.toLocaleString()}</span>
             </label>
           ))}
           {hasMore && (
@@ -263,6 +263,24 @@ function FacetSection({
 /*  DetailPanel                                                        */
 /* ------------------------------------------------------------------ */
 
+/** If `value` is an object/array, or a string that parses to one, return the parsed
+ *  value for pretty-printing; otherwise null (render as plain text). */
+function asJson(value: unknown): unknown {
+  if (value && typeof value === "object") return value;
+  if (typeof value === "string") {
+    const s = value.trim();
+    if ((s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"))) {
+      try {
+        const parsed = JSON.parse(s);
+        if (parsed && typeof parsed === "object") return parsed;
+      } catch {
+        /* not JSON */
+      }
+    }
+  }
+  return null;
+}
+
 function DetailPanel({
   doc,
   index,
@@ -275,8 +293,36 @@ function DetailPanel({
   const isAudit = index === "ll5_audit_log";
   const entries = Object.entries(doc).filter(([k]) => k !== "_id");
 
+  // Resizable width (drag the left edge). Persisted in localStorage.
+  const [width, setWidth] = useState<number>(384);
+  useEffect(() => {
+    const saved = Number(localStorage.getItem("logDetailWidth"));
+    if (saved >= 320 && saved <= 1100) setWidth(saved);
+  }, []);
+  const dragging = useRef(false);
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragging.current) return;
+      const w = Math.min(Math.max(window.innerWidth - e.clientX, 320), Math.min(1100, window.innerWidth - 80));
+      setWidth(w);
+    }
+    function onUp() {
+      if (dragging.current) {
+        dragging.current = false;
+        document.body.style.userSelect = "";
+        localStorage.setItem("logDetailWidth", String(width));
+      }
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [width]);
+
   // Sort: common fields first, metadata last
-  const priority = ["timestamp", "service", "source", "level", "action", "tool_name", "entity_type", "entity_id", "message", "summary", "user_id", "username", "duration_ms", "success"];
+  const priority = ["timestamp", "service", "source", "level", "kind", "action", "tool_name", "entity_type", "entity_id", "message", "summary", "user_id", "username", "duration_ms", "success", "args", "result"];
   entries.sort((a, b) => {
     const ai = priority.indexOf(a[0]);
     const bi = priority.indexOf(b[0]);
@@ -297,7 +343,20 @@ function DetailPanel({
       />
 
       {/* Panel */}
-      <div className="fixed top-0 right-0 h-full w-96 bg-white border-l border-gray-200 shadow-xl z-50 overflow-y-auto animate-in slide-in-from-right duration-200">
+      <div
+        className="fixed top-0 right-0 h-full bg-white border-l border-gray-200 shadow-xl z-50 overflow-y-auto"
+        style={{ width }}
+      >
+        {/* Resize handle (left edge) */}
+        <div
+          onMouseDown={() => {
+            dragging.current = true;
+            document.body.style.userSelect = "none";
+          }}
+          className="absolute left-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-blue-200 active:bg-blue-300 z-10"
+          title="Drag to resize"
+        />
+
         <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-700">Log Detail</h3>
           <button
@@ -324,20 +383,23 @@ function DetailPanel({
             // Skip null/undefined
             if (value === null || value === undefined) return null;
 
-            const isMetadata = key === "metadata";
             const isError = key === "error_message";
             const isId = key === "entity_id" || key === "user_id";
             const isTimestamp = key === "timestamp";
+            const json = asJson(value); // metadata, args, result, or any JSON string
 
             return (
               <div key={key}>
-                <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">
-                  {key.replace(/_/g, " ")}
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <div className="text-[10px] text-gray-400 uppercase tracking-wider">
+                    {key.replace(/_/g, " ")}
+                  </div>
+                  {(json != null || typeof value === "string") && <CopyButton text={json != null ? JSON.stringify(json, null, 2) : String(value)} />}
                 </div>
 
-                {isMetadata && typeof value === "object" ? (
-                  <pre className="text-xs font-mono text-gray-600 bg-gray-50 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-64">
-                    {JSON.stringify(value, null, 2)}
+                {json != null ? (
+                  <pre className="text-[11px] font-mono text-gray-100 bg-gray-900 rounded p-2 overflow-auto whitespace-pre-wrap max-h-[28rem]">
+                    {JSON.stringify(json, null, 2)}
                   </pre>
                 ) : isError ? (
                   <p className="text-xs font-mono text-red-600 whitespace-pre-wrap">{String(value)}</p>
@@ -383,7 +445,7 @@ export function LogExplorer({
   facetFields,
 }: LogExplorerProps) {
   // State
-  const [timeRange, setTimeRange] = useState<string>("1h");
+  const [timeRange, setTimeRange] = useState<string>("1d");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Record<string, string[]>>({});
@@ -396,6 +458,7 @@ export function LogExplorer({
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailDoc, setDetailDoc] = useState<Record<string, unknown> | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; row: Record<string, unknown> } | null>(null);
 
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -736,6 +799,10 @@ export function LogExplorer({
                 <div
                   key={hit._id}
                   onClick={() => openDetail(hit._id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setCtxMenu({ x: e.clientX, y: e.clientY, row: { ...hit._source, _id: hit._id } });
+                  }}
                   className={cn(
                     "flex items-center px-3 py-1.5 border-b border-gray-50 cursor-pointer transition-colors text-xs",
                     selectedId === hit._id
@@ -782,6 +849,54 @@ export function LogExplorer({
           </div>
         </div>
       </div>
+
+      {/* Right-click context menu */}
+      {ctxMenu && (
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }} />
+          <div
+            className="fixed z-[61] min-w-[200px] rounded-md border border-gray-200 bg-white py-1 shadow-lg text-xs"
+            style={{ left: Math.min(ctxMenu.x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 220), top: ctxMenu.y }}
+          >
+            {/* Filter by facetable fields present in the row */}
+            {facetFields
+              .filter((f) => ctxMenu.row[f] != null && String(ctxMenu.row[f]) !== "")
+              .map((f) => (
+                <button
+                  key={"flt-" + f}
+                  className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
+                  onClick={() => { onlyFacet(f, String(ctxMenu.row[f])); setCtxMenu(null); }}
+                >
+                  Filter by {f}: <span className="font-mono text-gray-600">{String(ctxMenu.row[f])}</span>
+                </button>
+              ))}
+
+            {/* Trace by correlation id (links to the audit trace view) */}
+            {(["request_id", "session_id", "trace_id"] as const)
+              .filter((f) => ctxMenu.row[f] != null && String(ctxMenu.row[f]) !== "")
+              .map((f, i, arr) => (
+                <div key={"trc-" + f}>
+                  {i === 0 && <div className="my-1 border-t border-gray-100" />}
+                  <a
+                    href={`/admin/audit?field=${f}&trace=${encodeURIComponent(String(ctxMenu.row[f]))}`}
+                    className="block w-full px-3 py-1.5 text-left text-blue-600 hover:bg-blue-50"
+                    onClick={() => setCtxMenu(null)}
+                  >
+                    Trace {f} →
+                  </a>
+                  {i === arr.length - 1 && <div className="my-1 border-t border-gray-100" />}
+                </div>
+              ))}
+
+            <button
+              className="block w-full px-3 py-1.5 text-left hover:bg-gray-50"
+              onClick={() => { navigator.clipboard.writeText(String(ctxMenu.row._id ?? "")); setCtxMenu(null); }}
+            >
+              Copy row id
+            </button>
+          </div>
+        </>
+      )}
 
       {/* C3. Detail panel */}
       {selectedId && detailDoc && (
