@@ -47,9 +47,12 @@ cassette reads. **Stage 4 (propagation) shipped (ll5-run):** the MCP headers-hel
 (the ll5-channel MCP writes the trigger id per delivery), so tool-call ledger rows carry
 session_id/trace_id. **Stage 5 (cassette) shipped:** gateway `GET /audit/tool-calls`
 (filter kind:'tool_call' by session/trace/tool/time, user-scoped) is the cassette query;
-the eval moment now records `session_id`+`trace_id` to join to its ledger rows. The
-"trace-a-concern" dashboard UI (stage 5c) is deferred — all data is queryable via the
-endpoint; the UI is convenience polish.
+the eval moment now records `session_id`+`trace_id` to join to its ledger rows. **Stage 5c
+(trace UI) shipped:** the admin **Audit** page now has a "Trace a concern end to end" section
+— paste/click any `request_id`/`session_id`/`trace_id` to see every correlated step (app_log
+lines + tool-call ledger with expandable args/result), across services, in time order; ids
+clickable to pivot, deep-linkable `?trace=&field=` (`audit/trace-view.tsx` +
+`trace-server-actions.ts` join `ll5_app_log`+`ll5_audit_log`). **DECISION-012 complete (stages 1-5).**
 
 ### Proactivity eval pipeline — forward scheduler name onto the trigger envelope (2026-06-13)
 Supports the proactivity golden-dataset effort (instrumentation lives in **ll5-run**:

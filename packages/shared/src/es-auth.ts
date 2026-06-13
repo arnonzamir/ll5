@@ -9,7 +9,8 @@
  * client callers were fine; only the raw-fetch ones broke).
  *
  * This derives the base URL (creds stripped) + an explicit Basic auth header so the
- * raw-fetch writers authenticate correctly.
+ * raw-fetch writers authenticate correctly. (The dashboard's lib/es.ts does the same
+ * for its ES reads — incl. the admin Audit trace UI that follows a correlation id.)
  */
 let lastEsWarn = 0;
 
