@@ -44,6 +44,8 @@ export async function fetchLogs(params: LogQuery): Promise<LogResult> {
     "4h": "now-4h",
     "1d": "now-1d",
     "7d": "now-7d",
+    "14d": "now-14d",
+    "30d": "now-30d",
   };
   const gte = timeRangeMap[params.timeRange] ?? "now-1h";
 

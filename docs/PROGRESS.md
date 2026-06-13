@@ -52,7 +52,7 @@ the eval moment now records `session_id`+`trace_id` to join to its ledger rows. 
 — paste/click any `request_id`/`session_id`/`trace_id` to see every correlated step (app_log
 lines + tool-call ledger with expandable args/result), across services, in time order; ids
 clickable to pivot, deep-linkable `?trace=&field=` (`audit/trace-view.tsx` +
-`trace-server-actions.ts` join `ll5_app_log`+`ll5_audit_log`). **DECISION-012 complete (stages 1-5).** Log/Audit explorer polish: row right-click context menu (filter-by-facet + trace by request/session/trace id), detail panel renders JSON fields (incl. tool args/result) + drag-resizable, default range 1d, facet-count layout fix.
+`trace-server-actions.ts` join `ll5_app_log`+`ll5_audit_log`). **DECISION-012 complete (stages 1-5).** Log/Audit explorer polish: row right-click context menu (filter-by-facet + trace by request/session/trace id), detail panel renders JSON fields (incl. tool args/result) + drag-resizable, default range 1d, time ranges incl. 14d/30d, facet-count layout fix.
 
 ### Proactivity eval pipeline — forward scheduler name onto the trigger envelope (2026-06-13)
 Supports the proactivity golden-dataset effort (instrumentation lives in **ll5-run**:

@@ -9,10 +9,34 @@ const FIELDS: { value: TraceField; label: string }[] = [
   { value: "trace_id", label: "trace_id" },
 ];
 
+// Recursively unwrap stringified JSON at any depth — MCP tool results nest their
+// payload as a JSON STRING inside content[].text, so a single parse leaves an
+// escaped mess.
+function deepUnwrap(value: unknown): unknown {
+  if (typeof value === "string") {
+    const s = value.trim();
+    if ((s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"))) {
+      try {
+        return deepUnwrap(JSON.parse(s));
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(deepUnwrap);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = deepUnwrap(v);
+    return out;
+  }
+  return value;
+}
+
 function pretty(json?: string): string {
   if (!json) return "";
   try {
-    return JSON.stringify(JSON.parse(json), null, 2);
+    return JSON.stringify(deepUnwrap(JSON.parse(json)), null, 2);
   } catch {
     return json;
   }

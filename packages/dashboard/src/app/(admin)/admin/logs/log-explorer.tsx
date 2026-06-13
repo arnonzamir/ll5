@@ -47,7 +47,7 @@ export interface LogExplorerProps {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const TIME_RANGES = ["15m", "1h", "4h", "1d", "7d"] as const;
+const TIME_RANGES = ["15m", "1h", "4h", "1d", "7d", "14d", "30d"] as const;
 
 const LEVEL_COLORS: Record<string, string> = {
   debug: "bg-gray-100 text-gray-600 border-gray-200",
@@ -263,16 +263,40 @@ function FacetSection({
 /*  DetailPanel                                                        */
 /* ------------------------------------------------------------------ */
 
-/** If `value` is an object/array, or a string that parses to one, return the parsed
- *  value for pretty-printing; otherwise null (render as plain text). */
+/** Recursively unwrap stringified JSON at any depth. MCP tool results wrap their
+ *  payload as a JSON STRING inside `content[].text`, so a single parse leaves an
+ *  escaped \n\" mess; this turns it into real nested JSON. */
+function deepUnwrap(value: unknown): unknown {
+  if (typeof value === "string") {
+    const s = value.trim();
+    if ((s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"))) {
+      try {
+        return deepUnwrap(JSON.parse(s));
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(deepUnwrap);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = deepUnwrap(v);
+    return out;
+  }
+  return value;
+}
+
+/** If `value` is JSON (object/array, or a string that parses to one), return it
+ *  fully unwrapped for pretty-printing; otherwise null (render as plain text). */
 function asJson(value: unknown): unknown {
-  if (value && typeof value === "object") return value;
+  if (value && typeof value === "object") return deepUnwrap(value);
   if (typeof value === "string") {
     const s = value.trim();
     if ((s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"))) {
       try {
         const parsed = JSON.parse(s);
-        if (parsed && typeof parsed === "object") return parsed;
+        if (parsed && typeof parsed === "object") return deepUnwrap(parsed);
       } catch {
         /* not JSON */
       }
