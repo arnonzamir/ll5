@@ -1010,6 +1010,41 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Tool-call ledger (DECISION-012) — the eval-replay cassette source. ---
+  // Returns kind:'tool_call' audit rows (full args/result) for the caller, filtered
+  // by session/trace/tool/time. The eval cassette = query this by a moment's
+  // session_id + time window (or trace_id).
+  app.get('/audit/tool-calls', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { session_id, trace_id, tool_name, from, to, limit: limitStr } = req.query as Record<string, string>;
+    const limit = Math.min(parseInt(limitStr || '200', 10), 1000);
+    const filter: Array<Record<string, unknown>> = [
+      { term: { user_id: userId } },
+      { term: { kind: 'tool_call' } },
+    ];
+    if (session_id) filter.push({ term: { session_id } });
+    if (trace_id) filter.push({ term: { trace_id } });
+    if (tool_name) filter.push({ term: { tool_name } });
+    if (from || to) {
+      filter.push({ range: { timestamp: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } });
+    }
+    try {
+      const result = await esClient.search({
+        index: 'll5_audit_log',
+        query: { bool: { filter } },
+        sort: [{ timestamp: { order: 'asc' } }],
+        size: limit,
+      });
+      const calls = (result.hits.hits as Array<{ _source?: Record<string, unknown> }>).map((h) => h._source);
+      const total = typeof result.hits.total === 'object' ? result.hits.total.value : result.hits.total;
+      res.json({ calls, total });
+    } catch (err) {
+      // Index might not exist yet, or no rows — return empty, never 500.
+      logger.debug('[server][toolCalls] query failed (treating as empty)', { error: err instanceof Error ? err.message : String(err) });
+      res.json({ calls: [], total: 0 });
+    }
+  });
+
   // --- Export / Backup ---
   app.get('/export', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;

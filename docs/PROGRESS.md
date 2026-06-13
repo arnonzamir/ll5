@@ -27,8 +27,14 @@ request-id middleware + `request_id`/`session_id`/`trace_id`/`kind` on the `ll5_
 and `ll5_audit_log` mappings. **Stage 3 (audit tool-ledger) shipped**: `withToolLogging`
 now also writes a `kind:'tool_call'` row to `ll5_audit_log` with the FULL `args`+`result`
 (non-indexed) + correlation ids on every MCP tool call — the durable record the eval-replay
-cassette reads. Stages 4-5 (agent-side session/trace propagation, trace UI + cassette-as-query)
-remain.
+cassette reads. **Stage 4 (propagation) shipped (ll5-run):** the MCP headers-helper
+`get-mcp-auth.sh` emits `X-LL5-Session-Id` (SessionStart writes it) + `X-LL5-Trace-Id`
+(the ll5-channel MCP writes the trigger id per delivery), so tool-call ledger rows carry
+session_id/trace_id. **Stage 5 (cassette) shipped:** gateway `GET /audit/tool-calls`
+(filter kind:'tool_call' by session/trace/tool/time, user-scoped) is the cassette query;
+the eval moment now records `session_id`+`trace_id` to join to its ledger rows. The
+"trace-a-concern" dashboard UI (stage 5c) is deferred — all data is queryable via the
+endpoint; the UI is convenience polish.
 
 ### Proactivity eval pipeline — forward scheduler name onto the trigger envelope (2026-06-13)
 Supports the proactivity golden-dataset effort (instrumentation lives in **ll5-run**:
