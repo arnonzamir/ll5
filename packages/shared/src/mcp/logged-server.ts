@@ -1,8 +1,13 @@
 /**
- * Wraps McpServer.tool() to log every tool call with duration and success/error.
+ * Wraps McpServer.tool() to log every tool call:
+ *  - app_log: a lightweight row (name/duration/success) for the log explorer.
+ *  - audit ledger (DECISION-012 stage 3): a `kind:'tool_call'` row with the FULL
+ *    input + output + correlation ids — the durable record the eval-replay cassette
+ *    reads. Both are fire-and-forget and never affect the call.
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logApp } from '../app-log.js';
+import { logToolCall } from '../audit.js';
 
 type ToolHandler = (...args: unknown[]) => Promise<unknown>;
 
@@ -29,6 +34,10 @@ export function withToolLogging(
       const start = Date.now();
       const userId = getUserId();
 
+      // The MCP SDK invokes the handler as (args, extra) — handlerArgs[0] is the
+      // tool input the agent supplied.
+      const toolArgs = handlerArgs[0];
+
       try {
         const result = await handler(...handlerArgs);
         const duration = Date.now() - start;
@@ -39,6 +48,15 @@ export function withToolLogging(
           message: `${name} completed in ${duration}ms`,
           tool_name: name,
           user_id: userId,
+          duration_ms: duration,
+          success: true,
+        });
+        // Complete ledger row: full input + output (DECISION-012 stage 3).
+        logToolCall({
+          tool_name: name,
+          user_id: userId,
+          args: toolArgs,
+          result,
           duration_ms: duration,
           success: true,
         });
@@ -54,6 +72,14 @@ export function withToolLogging(
           message: `${name} failed: ${errorMessage}`,
           tool_name: name,
           user_id: userId,
+          duration_ms: duration,
+          success: false,
+          error_message: errorMessage,
+        });
+        logToolCall({
+          tool_name: name,
+          user_id: userId,
+          args: toolArgs,
           duration_ms: duration,
           success: false,
           error_message: errorMessage,

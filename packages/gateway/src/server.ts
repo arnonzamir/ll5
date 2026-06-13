@@ -101,6 +101,14 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         request_id: { type: 'keyword' },
         session_id: { type: 'keyword' },
         trace_id: { type: 'keyword' },
+        // tool_call ledger fields. args/result kept non-indexed so the full I/O is
+        // stored without exploding the mapping.
+        tool_name: { type: 'keyword' },
+        args: { type: 'object', enabled: false },
+        result: { type: 'object', enabled: false },
+        duration_ms: { type: 'integer' },
+        success: { type: 'boolean' },
+        error_message: { type: 'text' },
       },
     },
   },

@@ -24,7 +24,10 @@ sessionId?, traceId?}`); `logApp`/`logAudit` auto-stamp `request_id` (+session/t
 all 6 MCPs migrated off their local `userStore` to the shared context (and read optional
 `X-LL5-Session-Id`/`X-LL5-Trace-Id` headers — forward-compat for stage 4); gateway gains a
 request-id middleware + `request_id`/`session_id`/`trace_id`/`kind` on the `ll5_app_log`
-and `ll5_audit_log` mappings. Stages 3-5 (audit-as-tool-ledger, agent-side propagation, UI)
+and `ll5_audit_log` mappings. **Stage 3 (audit tool-ledger) shipped**: `withToolLogging`
+now also writes a `kind:'tool_call'` row to `ll5_audit_log` with the FULL `args`+`result`
+(non-indexed) + correlation ids on every MCP tool call — the durable record the eval-replay
+cassette reads. Stages 4-5 (agent-side session/trace propagation, trace UI + cassette-as-query)
 remain.
 
 ### Proactivity eval pipeline — forward scheduler name onto the trigger envelope (2026-06-13)
