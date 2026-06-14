@@ -8,6 +8,18 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: proactive points-of-change triggers — heartbeat transition cues (2026-06-14)
+Diagnosis: the agent stopped calling `get_situation` (~May 23) — the schedulers pre-bake time/
+location/schedule into system messages, so the agent reads the injected lines and never pulls the
+composite (where the new device_activity/bluetooth signals live). Fix is two-sided. **Agent side
+(ll5-run):** persona reframed so `get_situation` is the proactive ANCHOR (call first on every wake +
+at points of change), `where_is_user` is reserved for reactive location-only lookups; situation-check
+skill gains the new fields + 4 situations (morning-wake, driving, late-night, focus/idle) + new-day
+user-model refresh. **Gateway side (this repo):** `scheduler/heartbeat.ts` now fires **edge-triggered
+transition cues** — on a time-period flip (morning→afternoon→evening→night) and a new local day —
+bypassing the silence gate (each edge fires once, self-gated to active hours), prompting a fresh
+situation-check (+ `read_user_model()` on a new day). Events tagged `transition` / `new_day`.
+
 ### FEATURE: phone-activity awareness — screen/wake, Bluetooth, app-usage (2026-06-13, branch `feat/phone-activity-awareness`)
 New situational signals so the agent can tell when the user is up/active, what they're connected to,
 and which apps they're using — **battery-first**. Two new push item types riding the existing batched

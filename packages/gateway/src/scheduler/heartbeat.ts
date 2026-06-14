@@ -22,12 +22,82 @@ interface HeartbeatConfig {
  */
 export class HeartbeatScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
+  // Edge-trigger state: the time-period and local date seen on the last tick,
+  // so we can fire a transition cue exactly once when either flips. Null until
+  // the first tick establishes a baseline (no spurious fire on startup).
+  private lastPeriod: string | null = null;
+  private lastDate: string | null = null;
 
   constructor(
     private pool: Pool,
     private es: Client,
     private config: HeartbeatConfig,
   ) {}
+
+  private timePeriod(hour: number): string {
+    if (hour >= 6 && hour < 12) return 'morning';
+    if (hour >= 12 && hour < 17) return 'afternoon';
+    if (hour >= 17 && hour < 21) return 'evening';
+    return 'night';
+  }
+
+  private localDate(): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: this.config.timezone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+  }
+
+  /**
+   * Points of change. Fires a transition system message — bypassing the silence
+   * gate — when the time period flips (afternoon→evening …) or a new local day
+   * starts, so the agent runs a fresh situation-check at the edges where the
+   * user's situation actually shifts (not just after N minutes of silence). Each
+   * edge fires at most once. Gated to active hours so a midnight rollover doesn't
+   * ping; the new-day cue lands on the first active-hours tick of the day.
+   */
+  private async checkTransitions(hour: number): Promise<void> {
+    const period = this.timePeriod(hour);
+    const date = this.localDate();
+    const inActiveHours = hour >= this.config.startHour && hour < this.config.endHour;
+
+    // Establish baseline silently on the very first tick.
+    if (this.lastPeriod === null || this.lastDate === null) {
+      this.lastPeriod = period;
+      this.lastDate = date;
+      return;
+    }
+
+    const prevPeriod = this.lastPeriod;
+    const newDay = date !== this.lastDate;
+    const periodFlip = period !== this.lastPeriod;
+    this.lastDate = date;
+    this.lastPeriod = period;
+
+    if (!inActiveHours || (!newDay && !periodFlip)) return;
+
+    const banner = timeBanner(new Date(), this.config.timezone);
+    const parts: string[] = [];
+    if (newDay) {
+      parts.push(`[New Day] ${banner}`);
+      parts.push(
+        'A new day started. Run the situation-check skill, and refresh your situational model for the day: call read_user_model() and recall the open narratives so you start on current context, not yesterday\'s.',
+      );
+    } else {
+      parts.push(`[Transition] Time period is now ${period} (was ${prevPeriod}). ${banner}`);
+      parts.push(
+        'The user\'s situation likely shifted. Run the situation-check skill — pull get_situation (it carries time/location/activity/Bluetooth) and decide whether anything is worth surfacing now.',
+      );
+    }
+
+    try {
+      const evt = createSchedulerEvent(newDay ? 'new_day' : 'transition');
+      await insertSystemMessage(this.pool, this.config.userId, parts.join('\n'), undefined, evt);
+      logger.info('[HeartbeatScheduler][checkTransitions] Transition cue sent', { kind: newDay ? 'new_day' : 'transition', period });
+    } catch (err) {
+      logger.warn('[HeartbeatScheduler][checkTransitions] Failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   start(): void {
     logger.info('[HeartbeatScheduler][start] Heartbeat started', {
@@ -60,6 +130,11 @@ export class HeartbeatScheduler {
 
   private async tick(): Promise<void> {
     const hour = this.getCurrentHour();
+
+    // Edge-triggered transition cues run every tick (they self-gate to active
+    // hours) and are independent of the silence-gated time check below.
+    await this.checkTransitions(hour);
+
     if (hour < this.config.startHour || hour >= this.config.endHour) return;
 
     try {
