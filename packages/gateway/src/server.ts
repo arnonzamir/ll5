@@ -223,7 +223,7 @@ async function processItem(
         await processTrackedDevice(es, userId, item, config.geocodingApiKey);
         break;
       case 'device_activity':
-        await processDeviceActivity(es, userId, item);
+        await processDeviceActivity(es, userId, item, pgPool);
         break;
       case 'bluetooth':
         await processBluetooth(es, userId, item);

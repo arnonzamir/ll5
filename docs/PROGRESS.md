@@ -24,6 +24,14 @@ overnight new-day / pre-active-hours morning flip was consumed silently and neve
 observed). Moved the gate to the top of `checkTransitions` — an overnight transition now fires on the
 **first active tick** of the new day. (Verified separately: the persona reframe works — the agent
 called `get_situation` at 06:04 local and its result carried `device_activity` + `bluetooth_connected`.)
+**Real-time night activity (2026-06-15):** the 15-min poll is Doze-deferred overnight, so a
+middle-of-the-night phone-touch didn't reach the agent until morning. Android now has a real-time
+`ScreenActivityReceiver` (ACTION_USER_PRESENT/SCREEN_ON) that captures + **pushes immediately** (unlock
+forces the device out of Doze, so the network is up). Gateway `processDeviceActivity` adds
+`maybeWakeOnNightActivity`: a deep-night (00:00–06:00 local) unlock after a ≥45-min idle gap inserts a
+`[Night Activity]` system message (event `night_activity`, 30-min dedup) so the agent KNOWS now rather
+than at morning — it reads it gently (most night wakes are nothing). Depends on the process staying
+alive overnight (foreground location service + MIUI Autostart/no-restrictions).
 
 ### FEATURE: phone-activity awareness — screen/wake, Bluetooth, app-usage (2026-06-13, branch `feat/phone-activity-awareness`)
 New situational signals so the agent can tell when the user is up/active, what they're connected to,
