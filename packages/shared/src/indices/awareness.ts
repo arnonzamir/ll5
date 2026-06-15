@@ -43,6 +43,10 @@ export const AWARENESS_INDICES: IndexDefinition[] = [
         bearing: { type: 'float' },
         altitude: { type: 'float' },
         low_accuracy: { type: 'boolean' },
+        // GPS-jamming/spoof guard: true when the fix contradicts the wifi anchor
+        // or teleports while stationary. Such fixes are NOT the user's location.
+        suspect: { type: 'boolean' },
+        suspect_reason: { type: 'keyword' },
         address: { type: 'text' },
         matched_place_id: { type: 'keyword' },
         matched_place: { type: 'keyword' },

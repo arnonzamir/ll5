@@ -8,6 +8,25 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: GPS-jamming filter + Places map UI (2026-06-15)
+External regional GPS jamming snaps the chip to a far airport (e.g. Queen Alia/Amman) with a confident
+accuracy, producing a stray "user is in Jordan" fix. Two-layer defence, no on-device change (the
+jamming is external — mock-provider capture is irrelevant). **Write-time flag (gateway
+`processors/location.ts`):** a fix that hops >20 km from the previous one is flagged `suspect` when
+either (a) the wifi anchor is a confident known place that disagrees with the GPS place
+(`wifi_anchor_disagreement`), or (b) the device reports stationary (<5 km/h) while teleporting
+(`teleport_while_stationary`). Suspect fixes are still indexed (flagged, for the review map) but the
+place-transition notifier is suppressed for them. New ES fields `suspect`/`suspect_reason` added to
+`ll5_awareness_locations` (`@ll5/shared`). **Read-time exclusion (awareness
+`location.repository.ts`):** a static `NOT_SUSPECT` filter on `getLatest` + `query`, so `where_is_user`
+/ trail / visit reads never see a jammed fix. **Agent (ll5-run persona):** a note that jamming is
+filtered for it — trust the wifi anchor / last good fix, never tell the user they're somewhere they
+obviously aren't. **Dashboard Places UI (`locations/`):** the location map now overlays deduced known
+places (`list_places`) as violet radius circles + name labels, plus a right-side "Places" list-panel
+(name, radius, address, category, current motion stationary/moving, and a "here now" badge for the
+place the user is currently inside). New `fetchKnownPlaces` server action; `where_is_user.motion`
+surfaced on the current-location snapshot.
+
 ### FEATURE: proactive points-of-change triggers — heartbeat transition cues (2026-06-14)
 Diagnosis: the agent stopped calling `get_situation` (~May 23) — the schedulers pre-bake time/
 location/schedule into system messages, so the agent reads the injected lines and never pulls the

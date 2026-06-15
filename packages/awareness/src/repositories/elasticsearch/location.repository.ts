@@ -31,9 +31,16 @@ export class ElasticsearchLocationRepository
     super(client, INDEX);
   }
 
+  // Suspect (GPS-jammed/spoofed) fixes are not the user's location — exclude
+  // them from every where_is_user / trail / visit read. They're kept in the
+  // index (flagged) only for the map/review UI.
+  private static readonly NOT_SUSPECT: EsQueryContainer = {
+    bool: { must_not: [{ term: { suspect: true } }] },
+  };
+
   async getLatest(userId: string): Promise<Location | null> {
     const { hits } = await this.searchDocs<LocationDoc>(userId, {
-      filters: [],
+      filters: [ElasticsearchLocationRepository.NOT_SUSPECT],
       size: 1,
       sort: [{ timestamp: { order: 'desc' } }],
     });
@@ -43,7 +50,7 @@ export class ElasticsearchLocationRepository
   }
 
   async query(userId: string, query: LocationQuery): Promise<Location[]> {
-    const filters: EsQueryContainer[] = [];
+    const filters: EsQueryContainer[] = [ElasticsearchLocationRepository.NOT_SUSPECT];
 
     if (query.startTime || query.endTime) {
       const range: Record<string, string> = {};

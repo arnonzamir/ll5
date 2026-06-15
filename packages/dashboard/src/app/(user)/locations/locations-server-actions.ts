@@ -10,6 +10,8 @@ export interface LocationPoint {
   matched_place_id?: string;
   accuracy?: number;
   speed?: number;
+  /** Only set on the current-location snapshot: "stationary" | "moving" | ... */
+  motion?: string | null;
   timestamp: string;
 }
 
@@ -60,10 +62,22 @@ export interface KnownNetwork {
   last_seen: string;
 }
 
+/** A known/deduced place the system has on file (where the user has been). */
+export interface KnownPlace {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  radius_m: number;
+  address?: string;
+  category?: string;
+}
+
 /** Subset of the awareness MCP where_is_user snapshot the map needs. */
 interface WhereIsUserResponse {
   place?: string | null;
   source?: string;
+  motion?: string | null;
   position?: {
     lat: number;
     lon: number;
@@ -112,6 +126,7 @@ export async function fetchCurrentLocation(): Promise<LocationPoint | null> {
       address: pos.address ?? undefined,
       matched_place: data?.place ?? undefined,
       accuracy: pos.accuracy_m ?? undefined,
+      motion: data?.motion ?? undefined,
       timestamp: pos.timestamp ?? new Date().toISOString(),
     };
   } catch (err) {
@@ -140,6 +155,33 @@ export async function fetchCurrentPhoneStatus(): Promise<CurrentPhoneStatus | nu
   } catch (err) {
     console.error("[locations] fetchCurrentPhoneStatus failed:", err instanceof Error ? err.message : String(err));
     return null;
+  }
+}
+
+/** Deduced/known places (ll5_knowledge_places) the user has been — name + radius. */
+export async function fetchKnownPlaces(limit: number = 200): Promise<KnownPlace[]> {
+  try {
+    const raw = await mcpCallList<Record<string, unknown>>("knowledge", "list_places", { limit });
+    return raw
+      .map((p) => {
+        // list_places serializes Place: { id, name, type, address?, geo:{lat,lon}, radiusM? }
+        const geo = p.geo as { lat?: number; lon?: number } | undefined;
+        const lat = Number(geo?.lat ?? p.lat);
+        const lon = Number(geo?.lon ?? p.lon);
+        return {
+          id: String(p.id ?? `${lat}-${lon}`),
+          name: String(p.name ?? "Unnamed place"),
+          lat,
+          lon,
+          radius_m: Number(p.radiusM ?? p.radius_m ?? 100),
+          address: (p.address as string | undefined) ?? undefined,
+          category: (p.type as string | undefined) ?? undefined,
+        };
+      })
+      .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  } catch (err) {
+    console.error("[locations] fetchKnownPlaces failed:", err instanceof Error ? err.message : String(err));
+    return [];
   }
 }
 

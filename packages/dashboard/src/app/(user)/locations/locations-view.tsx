@@ -19,6 +19,9 @@ import {
   BatteryCharging,
   Smartphone,
   Tag,
+  Home,
+  Navigation2,
+  Crosshair,
 } from "lucide-react";
 import {
   fetchLocations,
@@ -26,10 +29,12 @@ import {
   fetchCurrentWifi,
   fetchCurrentPhoneStatus,
   fetchKnownNetworks,
+  fetchKnownPlaces,
   type LocationPoint,
   type CurrentWifi,
   type CurrentPhoneStatus,
   type KnownNetwork,
+  type KnownPlace,
 } from "./locations-server-actions";
 
 // ---------------------------------------------------------------------------
@@ -205,7 +210,10 @@ export function LocationsView() {
   const [currentWifi, setCurrentWifi] = useState<CurrentWifi | null>(null);
   const [currentPhoneStatus, setCurrentPhoneStatus] = useState<CurrentPhoneStatus | null>(null);
   const [knownNetworks, setKnownNetworks] = useState<KnownNetwork[]>([]);
+  const [knownPlaces, setKnownPlaces] = useState<KnownPlace[]>([]);
   const [devicePanelOpen, setDevicePanelOpen] = useState(false);
+  const [placesPanelOpen, setPlacesPanelOpen] = useState(false);
+  const [focusedPlaceId, setFocusedPlaceId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [rangePreset, setRangePreset] = useState<RangePreset>("today");
   const [customFrom, setCustomFrom] = useState(isoDate(new Date()));
@@ -220,6 +228,7 @@ export function LocationsView() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef<L.LayerGroup | null>(null);
   const trailRef = useRef<L.LayerGroup | null>(null);
+  const placesRef = useRef<L.LayerGroup | null>(null);
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
 
   // Load data
@@ -236,19 +245,22 @@ export function LocationsView() {
           }
         : getDateRange(rangePreset);
 
-    const [locData, curLoc, curWifi, curPhone, networks] = await Promise.all([
-      fetchLocations({ ...range, limit: 500 }),
-      fetchCurrentLocation(),
-      fetchCurrentWifi(),
-      fetchCurrentPhoneStatus(),
-      fetchKnownNetworks(100),
-    ]);
+    const [locData, curLoc, curWifi, curPhone, networks, places] =
+      await Promise.all([
+        fetchLocations({ ...range, limit: 500 }),
+        fetchCurrentLocation(),
+        fetchCurrentWifi(),
+        fetchCurrentPhoneStatus(),
+        fetchKnownNetworks(100),
+        fetchKnownPlaces(200),
+      ]);
 
     setPoints(locData);
     setCurrentLoc(curLoc);
     setCurrentWifi(curWifi);
     setCurrentPhoneStatus(curPhone);
     setKnownNetworks(networks);
+    setKnownPlaces(places);
     setLoading(false);
   }, [rangePreset, customFrom, customTo]);
 
@@ -324,6 +336,8 @@ export function LocationsView() {
       }).addTo(map);
 
       mapRef.current = map;
+      // Places sit UNDER the GPS markers/trail so points stay clickable.
+      placesRef.current = L.layerGroup().addTo(map);
       markersRef.current = L.layerGroup().addTo(map);
       trailRef.current = L.layerGroup().addTo(map);
       setMapReady(true);
@@ -488,6 +502,81 @@ export function LocationsView() {
     }
   }, [visibleClusters, currentLoc, mapReady]);
 
+  // The known place the user is currently inside, if any (by id, else by name).
+  const currentPlaceId = useMemo(() => {
+    if (!currentLoc) return null;
+    const byId = knownPlaces.find((p) => p.id === currentLoc.matched_place_id);
+    if (byId) return byId.id;
+    const byName = knownPlaces.find(
+      (p) => currentLoc.matched_place && p.name === currentLoc.matched_place
+    );
+    return byName?.id ?? null;
+  }, [knownPlaces, currentLoc]);
+
+  // Render deduced known places as radius circles + labels (own layer group)
+  useEffect(() => {
+    if (!mapReady) return;
+    const L = leafletRef.current;
+    const placesGroup = placesRef.current;
+    if (!L || !placesGroup) return;
+
+    placesGroup.clearLayers();
+
+    for (const place of knownPlaces) {
+      const here = place.id === currentPlaceId;
+      const color = here ? "#22c55e" : "#8b5cf6";
+      const pos: L.LatLngExpression = [place.lat, place.lon];
+
+      const circle = L.circle(pos, {
+        radius: place.radius_m,
+        color,
+        weight: here ? 2 : 1,
+        opacity: 0.7,
+        fillColor: color,
+        fillOpacity: here ? 0.18 : 0.1,
+      });
+      circle.bindPopup(
+        `<div style="min-width:160px">
+          <div style="font-weight:600;color:${color}">${place.name}${here ? " · here now" : ""}</div>
+          ${place.address ? `<div style="font-size:12px;color:#666;max-width:240px;word-wrap:break-word">${place.address}</div>` : ""}
+          <div style="font-size:11px;color:#999;margin-top:4px">Radius: ${Math.round(place.radius_m)}m${place.category ? ` · ${place.category}` : ""}</div>
+        </div>`
+      );
+      placesGroup.addLayer(circle);
+
+      // Small center label pin so empty-radius places are still discoverable.
+      const labelIcon = L.divIcon({
+        html: `<div style="
+          display:inline-block;white-space:nowrap;
+          background:${color};color:white;
+          font-size:10px;font-weight:600;
+          padding:1px 6px;border-radius:8px;
+          border:1px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.3);
+          transform:translate(-50%,-50%);
+        ">${place.name}</div>`,
+        className: "",
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+      });
+      placesGroup.addLayer(L.marker(pos, { icon: labelIcon, interactive: false }));
+    }
+  }, [knownPlaces, currentPlaceId, mapReady]);
+
+  // Pan/zoom to a place when picked from the Places list panel.
+  const focusPlace = useCallback(
+    (place: KnownPlace) => {
+      setFocusedPlaceId(place.id);
+      const L = leafletRef.current;
+      const map = mapRef.current;
+      if (!L || !map) return;
+      const bounds = L.latLng(place.lat, place.lon).toBounds(
+        Math.max(place.radius_m * 4, 300)
+      );
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+    },
+    []
+  );
+
   // When a cluster is selected, zoom in and show individual points
   useEffect(() => {
     if (!mapReady || !selectedCluster) return;
@@ -639,10 +728,24 @@ export function LocationsView() {
             {clusters.length} stops
           </span>
           <Button
+            variant={placesPanelOpen ? "default" : "outline"}
+            size="sm"
+            onClick={() => setPlacesPanelOpen((v) => !v)}
+            className="ml-2"
+            title="Show deduced known places (where the system marked the user has been)"
+          >
+            <Home className="h-3 w-3 mr-1" />
+            Places
+            {knownPlaces.length > 0 && (
+              <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-primary/10 text-[10px] leading-none">
+                {knownPlaces.length}
+              </span>
+            )}
+          </Button>
+          <Button
             variant={devicePanelOpen ? "default" : "outline"}
             size="sm"
             onClick={() => setDevicePanelOpen((v) => !v)}
-            className="ml-2"
             title="Show phone status, current WiFi, and known networks"
           >
             <Smartphone className="h-3 w-3 mr-1" />
@@ -757,6 +860,106 @@ export function LocationsView() {
                   selectedCluster.last_seen
                 )}
               </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Places panel — deduced known places (where the user has been) */}
+      {placesPanelOpen && (
+        <div
+          className={`absolute top-16 z-20 w-96 max-h-[calc(100vh-9rem)] overflow-y-auto ${
+            devicePanelOpen ? "right-[25.5rem]" : "right-4"
+          }`}
+        >
+          <Card>
+            <CardHeader className="pb-2 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Home className="h-4 w-4 text-violet-500" />
+                Known places ({knownPlaces.length})
+              </CardTitle>
+              <button
+                onClick={() => setPlacesPanelOpen(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </CardHeader>
+            <CardContent className="text-xs space-y-2">
+              {/* Current motion / where-now header */}
+              <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+                {currentLoc?.motion === "moving" ? (
+                  <Navigation2 className="h-4 w-4 text-blue-600" />
+                ) : (
+                  <Crosshair className="h-4 w-4 text-emerald-600" />
+                )}
+                <span className="font-medium capitalize">
+                  {currentLoc?.motion ?? "unknown"}
+                </span>
+                <span className="text-gray-500 truncate">
+                  {currentPlaceId
+                    ? `at ${knownPlaces.find((p) => p.id === currentPlaceId)?.name}`
+                    : currentLoc?.matched_place
+                      ? `near ${currentLoc.matched_place}`
+                      : "no place match"}
+                </span>
+              </div>
+
+              {knownPlaces.length === 0 && (
+                <p className="text-gray-400">
+                  No deduced places yet. As the system recognizes recurring
+                  stops it will mark them here with a name, radius, and address.
+                </p>
+              )}
+
+              {[...knownPlaces]
+                .sort((a, b) => {
+                  // "here now" first, then by name.
+                  if (a.id === currentPlaceId) return -1;
+                  if (b.id === currentPlaceId) return 1;
+                  return a.name.localeCompare(b.name);
+                })
+                .map((place) => {
+                  const here = place.id === currentPlaceId;
+                  const focused = place.id === focusedPlaceId;
+                  return (
+                    <button
+                      key={place.id}
+                      onClick={() => focusPlace(place)}
+                      className={`w-full text-left border-b border-gray-100 pb-2 last:border-0 last:pb-0 rounded px-1 -mx-1 ${
+                        focused ? "bg-violet-50" : "hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate flex items-center gap-1.5">
+                            <MapPin
+                              className={`h-3 w-3 shrink-0 ${here ? "text-emerald-600" : "text-violet-500"}`}
+                            />
+                            {place.name}
+                          </div>
+                          {place.address && (
+                            <div className="text-gray-500 text-[11px] mt-0.5 truncate">
+                              {place.address}
+                            </div>
+                          )}
+                        </div>
+                        {here && (
+                          <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-emerald-50 text-emerald-700">
+                            here now
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-[10px] text-gray-400 mt-1">
+                        <span>radius {Math.round(place.radius_m)}m</span>
+                        {place.category && <span>{place.category}</span>}
+                        {here && currentLoc?.motion && (
+                          <span className="capitalize">{currentLoc.motion}</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
             </CardContent>
           </Card>
         </div>

@@ -50,6 +50,9 @@ interface PlaceHit {
 // upsert tool caps radius_m at 2000m). We then post-filter by each place's own
 // radius (default DEFAULT_PLACE_RADIUS_M).
 const PLACE_CANDIDATE_CAP_M = 2000;
+// A hop larger than this from the previous fix, while the device reports it
+// isn't moving, is treated as a GPS-jamming spoof (suspect), not real travel.
+const SUSPECT_JUMP_KM = 20;
 
 export interface PlaceMatchResult {
   place_id: string;
@@ -530,8 +533,8 @@ export async function processLocation(
   // ---- Drift / teleport filtering (G1/G2/G6) via the shared helper ----------
   // Compare against the in-batch predecessor when provided; otherwise the ES
   // latest. A dropped GLITCH returns null (not stored).
+  let prev: { lat: number; lon: number; timestampMs: number; atKnownPlace: boolean } | null = null;
   try {
-    let prev: { lat: number; lon: number; timestampMs: number; atKnownPlace: boolean } | null = null;
     if (prevPoint) {
       prev = {
         lat: prevPoint.lat,
@@ -576,10 +579,52 @@ export async function processLocation(
     getWifiSignal(es, userId),
   ]);
 
+  // ---- GPS-jamming / spoof guard (G10) --------------------------------------
+  // Regional GPS jamming snaps the chip to a far airport (e.g. Amman/Beirut)
+  // with a confident-looking accuracy, while you're actually home. Speed-based
+  // drift misses it across an overnight gap (the implied speed looks plausible).
+  // Two tells: (a) you're on a place-bound wifi but GPS isn't at that place;
+  // (b) a large jump from the previous fix while the device reports it's not
+  // moving (you can't be 20km away from where you just were, at rest). Flag —
+  // don't drop — so the data survives for the map/review, but where_is_user and
+  // the agent treat a `suspect` fix as NOT the user's location.
+  let suspect = false;
+  let suspectReason: string | undefined;
+  const hopKm = prev
+    ? haversineMeters({ lat: prev.lat, lon: prev.lon }, { lat: item.lat, lon: item.lon }) / 1000
+    : 0;
+  // Both rules require a LARGE hop (jitter-safe — normal GPS noise is metres).
+  if (hopKm > SUSPECT_JUMP_KM) {
+    const wifiAnchored = !!(wifiSignal?.connected && wifiSignal.bssidPlace?.confident);
+    const gpsNotAtWifiPlace =
+      !placeMatch ||
+      (wifiSignal?.bssidPlace != null && placeMatch.place_id !== wifiSignal.bssidPlace.placeId);
+    const reportedStationary = deviceSpeedKmh != null && deviceSpeedKmh < 5;
+    if (wifiAnchored && gpsNotAtWifiPlace) {
+      // Strongest tell: you're on a known place's wifi but GPS jumped far away.
+      suspect = true;
+      suspectReason = 'wifi_anchor_disagreement';
+    } else if (reportedStationary) {
+      // You can't be 20km from where you just were while not moving.
+      suspect = true;
+      suspectReason = 'teleport_while_stationary';
+    }
+  }
+  if (suspect) {
+    logger.info('[location][processLocation] GPS fix flagged suspect (likely jamming)', {
+      reason: suspectReason,
+      lat: item.lat,
+      lon: item.lon,
+      hop_km: Math.round(hopKm),
+      wifi_place: wifiSignal?.bssidPlace?.placeName,
+    });
+  }
+
   // Detect a place/region transition and notify (awaited — serializes the
   // per-user state read/write against this push). Now WiFi-aware + hysteresis
   // via the shared resolver, so home GPS-jitter no longer flaps to city-level.
-  if (pgPool) {
+  // A suspect (jammed) fix must NOT drive a transition — skip the notifier.
+  if (pgPool && !suspect) {
     await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, placeMatch, wifiSignal);
   }
 
@@ -623,6 +668,11 @@ export async function processLocation(
   if (placeMatch) {
     doc.matched_place_id = placeMatch.place_id;
     doc.matched_place = placeMatch.place_name;
+  }
+
+  if (suspect) {
+    doc.suspect = true;
+    if (suspectReason) doc.suspect_reason = suspectReason;
   }
 
   // Write location document
