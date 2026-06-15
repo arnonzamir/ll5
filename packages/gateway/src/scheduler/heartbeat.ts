@@ -57,11 +57,18 @@ export class HeartbeatScheduler {
    * ping; the new-day cue lands on the first active-hours tick of the day.
    */
   private async checkTransitions(hour: number): Promise<void> {
+    // Only ever evaluate (and consume) transitions DURING active hours. If we
+    // updated last* outside active hours, an overnight new-day / pre-active
+    // morning flip would be silently swallowed and never re-fire. Gating at the
+    // top means an overnight transition is detected on the FIRST active tick of
+    // the new day and fires then (which is exactly when we want it).
+    const inActiveHours = hour >= this.config.startHour && hour < this.config.endHour;
+    if (!inActiveHours) return;
+
     const period = this.timePeriod(hour);
     const date = this.localDate();
-    const inActiveHours = hour >= this.config.startHour && hour < this.config.endHour;
 
-    // Establish baseline silently on the very first tick.
+    // Establish baseline silently on the very first active tick.
     if (this.lastPeriod === null || this.lastDate === null) {
       this.lastPeriod = period;
       this.lastDate = date;
@@ -74,7 +81,7 @@ export class HeartbeatScheduler {
     this.lastDate = date;
     this.lastPeriod = period;
 
-    if (!inActiveHours || (!newDay && !periodFlip)) return;
+    if (!newDay && !periodFlip) return;
 
     const banner = timeBanner(new Date(), this.config.timezone);
     const parts: string[] = [];

@@ -19,6 +19,11 @@ user-model refresh. **Gateway side (this repo):** `scheduler/heartbeat.ts` now f
 transition cues** — on a time-period flip (morning→afternoon→evening→night) and a new local day —
 bypassing the silence gate (each edge fires once, self-gated to active hours), prompting a fresh
 situation-check (+ `read_user_model()` on a new day). Events tagged `transition` / `new_day`.
+**FIX (2026-06-15):** the active-hours gate ran *after* updating last-seen period/date, so an
+overnight new-day / pre-active-hours morning flip was consumed silently and never fired (0 cues
+observed). Moved the gate to the top of `checkTransitions` — an overnight transition now fires on the
+**first active tick** of the new day. (Verified separately: the persona reframe works — the agent
+called `get_situation` at 06:04 local and its result carried `device_activity` + `bluetooth_connected`.)
 
 ### FEATURE: phone-activity awareness — screen/wake, Bluetooth, app-usage (2026-06-13, branch `feat/phone-activity-awareness`)
 New situational signals so the agent can tell when the user is up/active, what they're connected to,

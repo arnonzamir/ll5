@@ -26,7 +26,7 @@ Gateway (Express)
   ├── GET /admin/health — aggregate health (all MCPs + DBs + per-user agent-output / WhatsApp / phone liveness, cached from monitors)
   ├── /media, /media/:id/links — media file listing + linked entities (ES ll5_media, ll5_media_links)
   ├── /commands/* — device command queue (queue, pending, confirm)
-  ├── Schedulers (13) — heartbeat (5min; 2026-06-14 also emits edge-triggered `transition`/`new_day` cues on time-period flip + new local day → fresh situation-check), calendar sync (30min), calendar review (periodic),
+  ├── Schedulers (13) — heartbeat (5min; 2026-06-14 also emits edge-triggered `transition`/`new_day` cues on time-period flip + new local day (fires on first active tick) → fresh situation-check), calendar sync (30min), calendar review (periodic),
       daily briefing (morning), tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00),
       message batch (30min), journal consolidation (2am), journal health/agent nudge (15min),
       health polling (20min, detects sleep/activity/HR/stress/energy/weight, 7-day baseline),
