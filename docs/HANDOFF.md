@@ -30,8 +30,11 @@ Gateway (Express)
       daily briefing (morning), tickler alerts (1h), GTD health (4h), weekly review (Fri 14:00),
       message batch (30min), journal consolidation (2am), journal health/agent nudge (15min),
       health polling (20min, detects sleep/activity/HR/stress/energy/weight, 7-day baseline),
-      mcp-health-monitor (2min ping all 7 services + tool error-rate scan, critical FCM on 2-in-a-row failure),
-      agent-output-monitor (15min during active hours: alerts when triggers landed but agent has been silent >0.5h on BOTH chat outbound AND journal activity)
+      mcp-health-monitor (2min ping all 7 services + tool error-rate scan),
+      agent-output-monitor (15min during active hours: alerts when triggers landed but agent has been silent >0.5h on BOTH chat outbound AND journal activity),
+      whatsapp-flow-monitor (10min, alert if no inbound WhatsApp for 2h in active hours), phone-liveness-monitor (15min, GPS/status stale 3h),
+      metrics-monitor (5min: slack/gmail/sms freshness [baseline-gated] + Elasticsearch cluster health)
+  ├── ALERT SPINE (2026-06-16): all monitors funnel through `utils/alerting.ts` raiseAlert/clearAlert → durable `system_alerts` table (migration 033). On firing: an `[ALERT]` system message to the AGENT (always, repeating ~20min, escalating) + severity-based FCM (critical=DND-override re-push ~30min, warning=once); on recovery `[ALERT RESOLVED]`. `GET /alerts` (user-scoped) feeds the web + Android banners. Replaced the old per-monitor FCM-only + 2-alert cap. Thresholds overridable via `user_settings.scheduler` (e.g. `whatsapp_flow_stale_hours`, `metrics_monitor_minutes`, `metrics_baseline_days`).
   ├── System message dedup — checks PG for recent duplicate before inserting
   └── Immediate + ignored messages mark ES doc as processed (prevents double-report/leak in batch review)
 

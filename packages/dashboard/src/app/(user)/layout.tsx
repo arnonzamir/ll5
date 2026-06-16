@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { Nav } from "@/components/nav";
+import { AlertsBanner } from "@/components/alerts-banner";
 import { getToken, decodeTokenPayload } from "@/lib/auth";
 import { mcpCallJsonSafe } from "@/lib/api";
 import { env } from "@/lib/env";
@@ -71,6 +72,7 @@ export default async function UserLayout({
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <Nav username={displayName} isAdmin={isAdmin} />
+      <AlertsBanner />
       {isImmersive ? (
         <main className="flex-1 min-h-0 overflow-hidden">{children}</main>
       ) : (

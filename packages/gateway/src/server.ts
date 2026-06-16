@@ -43,6 +43,7 @@ import { isSourceEnabled } from './utils/data-source-config.js';
 import { createWhatsappWebhookRouter } from './whatsapp-webhook-route.js';
 import { createUploadsRouter, resolveUploadsDir, createPublicUploadsRouter, resolvePublicUploadsDir } from './uploads-route.js';
 import type { EnvConfig } from './utils/env.js';
+import { getFiringAlerts } from './utils/alerting.js';
 import { logger } from './utils/logger.js';
 import { recordWebhookFailure } from './utils/webhook-stats.js';
 
@@ -1004,6 +1005,18 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     } catch (err) {
       // Index might not exist yet
       res.json({ sessions: [], total: 0 });
+    }
+  });
+
+  // Active system-health alerts for the user (drives the web + Android banners).
+  app.get('/alerts', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const alerts = await getFiringAlerts(pgPool, userId);
+      res.json({ alerts });
+    } catch (err) {
+      logger.error('[GET /alerts] failed', { error: err instanceof Error ? err.message : String(err) });
+      res.json({ alerts: [] });
     }
   });
 

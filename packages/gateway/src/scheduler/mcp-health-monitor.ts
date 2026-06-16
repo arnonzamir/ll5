@@ -4,7 +4,7 @@ import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { generateToken } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
-import { sendFCMNotification } from '../utils/fcm-sender.js';
+import { raiseAlert, clearAlert } from '../utils/alerting.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 export interface ServiceHealth {
@@ -80,8 +80,6 @@ export function getHealthSnapshot(): ServiceHealth[] {
  * Keyed by user_id so alerts respect notification-level routing, but the
  * checks themselves are user-independent.
  */
-const MAX_ALERTS_PER_EPISODE = 2;
-
 /** Services we should NOT probe via MCP tools/list — the gateway is a plain
  *  HTTP service and exposes /health but no /mcp endpoint. Anything not in
  *  this set is assumed to be a real MCP server. */
@@ -89,7 +87,6 @@ const NON_MCP_SERVICES = new Set(['gateway']);
 
 export class MCPHealthMonitorScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
-  private alertCounts: Map<string, number> = new Map(); // per-service alert counter, resets on recovery
 
   constructor(
     private pool: Pool,
@@ -289,54 +286,32 @@ export class MCPHealthMonitorScheduler {
   }
 
   private async alertStateChange(next: ServiceHealth, prev: ServiceHealth | undefined): Promise<void> {
-    const wasHealthy = prev?.healthy ?? true;
     const isHealthy = next.healthy;
+    const key = `service.${next.name}`;
 
-    // Only alert on crossings, and only after failureThreshold consecutive failures.
-    // Cap at MAX_ALERTS_PER_EPISODE per service, reset on recovery.
+    // raiseAlert/clearAlert own the cadence + agent + app surfaces; we just
+    // express the condition. Raise every tick while down (idempotent upsert)
+    // once we've crossed failureThreshold consecutive failures; clear when healthy.
     if (!isHealthy && next.consecutive_failures >= this.config.failureThreshold) {
-      const count = this.alertCounts.get(next.name) ?? 0;
-      if (count < MAX_ALERTS_PER_EPISODE) {
-        this.alertCounts.set(next.name, count + 1);
-        logger.error('[MCPHealthMonitor][alert] Service down', {
-          service: next.name,
-          url: next.url,
-          error: next.error,
-          tool_count: next.tool_count,
-          tools_probe_error: next.tools_probe_error,
-          consecutive_failures: next.consecutive_failures,
-          alert_number: count + 1,
-        });
-        await sendFCMNotification(this.pool, this.config.userId, {
-          title: 'LL5 service down',
-          body: `${next.name}: ${next.error ?? 'unhealthy'} (${next.consecutive_failures}× in a row, alert ${count + 1}/${MAX_ALERTS_PER_EPISODE})`,
-          type: 'mcp_health',
-          notification_level: 'critical',
-          data: {
-            service: next.name,
-            error: next.error ?? '',
-            tool_count: String(next.tool_count ?? ''),
-            tools_probe_error: next.tools_probe_error ?? '',
-          },
-        });
-      }
-    } else if (isHealthy && !wasHealthy) {
-      this.alertCounts.delete(next.name);
-      const downtimeSec = prev?.last_healthy_at
-        ? Math.round((Date.now() - new Date(prev.last_healthy_at).getTime()) / 1000)
-        : null;
-      logger.info('[MCPHealthMonitor][alert] Service recovered', {
+      logger.error('[MCPHealthMonitor][alert] Service down', {
         service: next.name,
-        downtime_seconds: downtimeSec,
+        url: next.url,
+        error: next.error,
         tool_count: next.tool_count,
+        tools_probe_error: next.tools_probe_error,
+        consecutive_failures: next.consecutive_failures,
       });
-      await sendFCMNotification(this.pool, this.config.userId, {
-        title: 'LL5 service recovered',
-        body: `${next.name} is back${downtimeSec ? ` (${downtimeSec}s down)` : ''}`,
-        type: 'mcp_health',
-        notification_level: 'notify',
-        data: { service: next.name },
+      await raiseAlert(this.pool, {
+        userId: this.config.userId,
+        key,
+        severity: 'critical',
+        summary: `Service down: ${next.name}`,
+        value: `${next.error ?? 'unhealthy'} (${next.consecutive_failures}× in a row)`,
+        expected: 'healthy',
+        suggestion: `Check the ${next.name} container/health; a single ES restart can cascade to the ES-backed MCPs.`,
       });
+    } else if (isHealthy) {
+      await clearAlert(this.pool, this.config.userId, key);
     }
   }
 
@@ -355,33 +330,27 @@ export class MCPHealthMonitorScheduler {
     // 2. Tool-call error rate sweep from ll5_app_log
     const errorRates = await this.computeErrorRates();
     for (const sample of errorRates) {
-      if (sample.total_calls < this.config.errorRateMinSamples) continue;
-      if (sample.error_rate < this.config.errorRateThreshold) continue;
-
-      const errKey = `errors_${sample.service}`;
-      const count = this.alertCounts.get(errKey) ?? 0;
-      if (count >= MAX_ALERTS_PER_EPISODE) continue;
-      this.alertCounts.set(errKey, count + 1);
-
-      logger.error('[MCPHealthMonitor][toolErrors] Elevated tool error rate', {
-        service: sample.service,
-        errors: sample.errors,
-        total: sample.total_calls,
-        error_rate: sample.error_rate.toFixed(2),
-        alert_number: count + 1,
-      });
-
-      await sendFCMNotification(this.pool, this.config.userId, {
-        title: 'LL5 tool errors spiking',
-        body: `${sample.service}: ${sample.errors}/${sample.total_calls} failed in 15 min (${Math.round(sample.error_rate * 100)}%, alert ${count + 1}/${MAX_ALERTS_PER_EPISODE})`,
-        type: 'mcp_tool_errors',
-        notification_level: 'alert',
-        data: {
+      if (sample.total_calls < this.config.errorRateMinSamples) continue; // too few to judge
+      const errKey = `mcp.errors.${sample.service}`;
+      if (sample.error_rate >= this.config.errorRateThreshold) {
+        logger.error('[MCPHealthMonitor][toolErrors] Elevated tool error rate', {
           service: sample.service,
-          errors: String(sample.errors),
-          total: String(sample.total_calls),
-        },
-      });
+          errors: sample.errors,
+          total: sample.total_calls,
+          error_rate: sample.error_rate.toFixed(2),
+        });
+        await raiseAlert(this.pool, {
+          userId: this.config.userId,
+          key: errKey,
+          severity: 'warning',
+          summary: `Tool errors spiking: ${sample.service}`,
+          value: `${sample.errors}/${sample.total_calls} failed (${Math.round(sample.error_rate * 100)}%) in 15min`,
+          expected: `< ${Math.round(this.config.errorRateThreshold * 100)}%`,
+          suggestion: `Check ${sample.service} logs; transient backend/ES errors inflate this.`,
+        });
+      } else {
+        await clearAlert(this.pool, this.config.userId, errKey);
+      }
     }
 
     const unhealthy = results.filter((r) => !r.healthy).map((r) => `${r.name}(${r.error ?? 'unknown'})`);

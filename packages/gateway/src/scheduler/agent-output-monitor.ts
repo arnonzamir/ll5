@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import type { Client } from '@elastic/elasticsearch';
 import { logger } from '../utils/logger.js';
-import { sendFCMNotification } from '../utils/fcm-sender.js';
+import { raiseAlert, clearAlert } from '../utils/alerting.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface AgentOutputConfig {
@@ -87,10 +87,6 @@ export function getAllAgentOutputSnapshots(): AgentOutputSnapshot[] {
  */
 export class AgentOutputMonitor {
   private timer: ReturnType<typeof setInterval> | null = null;
-  private lastAlertAt: number = 0;
-  private alertCount: number = 0;
-  private readonly ALERT_COOLDOWN_MS = 30 * 60 * 1000;
-  private readonly MAX_ALERTS_PER_EPISODE = 2;
 
   constructor(
     private pool: Pool,
@@ -219,46 +215,30 @@ export class AgentOutputMonitor {
 
       const snapshotCtx = { ...snapshot } as Record<string, unknown>;
       if (!stale) {
-        if (this.alertCount > 0) {
-          logger.info('[AgentOutputMonitor][tick] Agent producing output again, resetting alert counter', { alertCount: this.alertCount });
-          this.alertCount = 0;
-        }
+        await clearAlert(this.pool, this.config.userId, 'agent.output');
         logger.debug('[AgentOutputMonitor][tick] Agent output healthy', snapshotCtx);
         return;
       }
 
-      // Only alert during active hours
+      // Only raise during active hours (agent quiet overnight is expected).
       const hour = this.getCurrentHour();
       if (hour < this.config.startHour || hour >= this.config.endHour) {
-        logger.info('[AgentOutputMonitor][tick] Agent silent outside active hours — not alerting', snapshotCtx);
+        logger.info('[AgentOutputMonitor][tick] Agent silent outside active hours — not raising', snapshotCtx);
         return;
       }
-
-      if (this.alertCount >= this.MAX_ALERTS_PER_EPISODE) {
-        logger.debug('[AgentOutputMonitor][tick] Agent silent but max alerts reached', { alertCount: this.alertCount });
-        return;
-      }
-      if (Date.now() - this.lastAlertAt < this.ALERT_COOLDOWN_MS) {
-        logger.debug('[AgentOutputMonitor][tick] Agent silent but within cooldown', snapshotCtx);
-        return;
-      }
-      this.lastAlertAt = Date.now();
-      this.alertCount += 1;
-
-      logger.error('[AgentOutputMonitor][alert] Agent has produced no output during active hours', snapshotCtx);
 
       const hoursFragment = hoursSinceLastOutbound !== null
         ? `${Math.round(hoursSinceLastOutbound * 10) / 10}h`
         : 'ever';
-      await sendFCMNotification(this.pool, this.config.userId, {
-        title: 'LL5 agent silent',
-        body: `${systemInbound} scheduler triggers in the last ${this.config.lookbackHours}h but no agent reply OR journal activity in ${hoursFragment}. The agent appears genuinely unresponsive — check it.`,
-        type: 'agent_silent',
-        notification_level: 'critical',
-        data: {
-          system_inbound: String(systemInbound),
-          hours_since_last_outbound: String(hoursSinceLastOutbound ?? 'null'),
-        },
+      logger.error('[AgentOutputMonitor][alert] Agent has produced no output during active hours', snapshotCtx);
+      await raiseAlert(this.pool, {
+        userId: this.config.userId,
+        key: 'agent.output',
+        severity: 'critical',
+        summary: 'Agent unresponsive (no reply or journal activity)',
+        value: `${systemInbound} triggers in ${this.config.lookbackHours}h, silent ${hoursFragment}`,
+        expected: `output within ${this.config.silenceHours}h`,
+        suggestion: 'The agent process may be stuck — check the ll5-agent container / MCP connections.',
       });
     }); } catch {
       // withSchedulerHealth already recorded the failure + logged at error;

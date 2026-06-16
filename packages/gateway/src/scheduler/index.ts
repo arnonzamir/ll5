@@ -21,6 +21,7 @@ import { AgentOutputMonitor } from './agent-output-monitor.js';
 import { CharacterRefreshScheduler } from './character-refresh.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
+import { MetricsMonitor } from './metrics-monitor.js';
 import { ChatSearchIndexer } from './chat-search-indexer.js';
 import { logger } from '../utils/logger.js';
 
@@ -218,12 +219,26 @@ async function startSchedulersForUser(
   // WhatsApp flow — catches Evolution's ghost-connected failure where state
   // reports open but the webhook has been silent for hours.
   const whatsappFlowMonitor = new WhatsAppFlowMonitor(pgPool, es, {
-    intervalMinutes: s('whatsapp_flow_minutes', 15),
-    stalenessHours: s('whatsapp_flow_stale_hours', 6),
+    intervalMinutes: s('whatsapp_flow_minutes', 10),
+    // 2h (was 6h): WhatsApp is high-volume during active hours, so a 2h gap is
+    // already a strong outage signal — catch it fast. Alerts now reach the
+    // agent + repeat + show in the apps via the alert spine.
+    stalenessHours: s('whatsapp_flow_stale_hours', 2),
     startHour, endHour, timezone, userId,
   });
   whatsappFlowMonitor.start();
   schedulers.push(whatsappFlowMonitor);
+
+  // Metrics watchdog — declarative companion: the remaining input channels
+  // (slack/gmail/sms freshness, baseline-gated) + Elasticsearch cluster health,
+  // all funneled through the alert spine (agent + repeat + app banner).
+  const metricsMonitor = new MetricsMonitor(pgPool, es, {
+    intervalMinutes: s('metrics_monitor_minutes', 5),
+    baselineDays: s('metrics_baseline_days', 7),
+    startHour, endHour, timezone, userId,
+  });
+  metricsMonitor.start();
+  schedulers.push(metricsMonitor);
 
   // Phone liveness — Android notification/location service dying is invisible
   // from the server side until the heartbeat message happens to notice.

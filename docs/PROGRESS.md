@@ -8,6 +8,24 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: server-side metrics watchdog + agent/app alert spine (2026-06-16)
+A WhatsApp ingestion stall (Jun 15 14:06, Evolution desync) went undetected ~18h: the existing
+monitor fleet (whatsapp-flow/phone-liveness/mcp-health/agent-output) only FCM-pushed the phone, capped
+at 2 alerts/episode, kept state in-memory, and never told the agent. Fixed structurally with an **alert
+spine**: migration `033_system_alerts` (durable firing/resolved state per `(user, alert_key)`);
+`utils/alerting.ts` `raiseAlert`/`clearAlert` — on firing they notify the AGENT via an `[ALERT]`
+`insertSystemMessage` **always + repeating** (~20min cadence, escalating with firing-duration) and push
+the PHONE **severity-based** (critical → FCM `critical`/DND-override, re-push ~30min; warning → once),
+and on recovery emit `[ALERT RESOLVED]`. New `GET /alerts` (user-scoped) feeds the apps. All four
+existing monitors were rerouted through the spine (drop the 2-cap; WhatsApp staleness 6h→2h, interval
+15→10min). New `scheduler/metrics-monitor.ts` (~5min) adds the gap checks: slack/gmail/sms freshness
+(baseline-gated so unused channels never alert) + Elasticsearch cluster health. **Web:** `AlertsBanner`
+under the nav (polls `/api/alerts`, red/amber, firing-duration, dismiss). **Android:** app-wide
+`AlertsBanner` above the NavHost (AlertsApi/Repository/ViewModel, ~45s poll). **ll5-run persona:** an
+`[ALERT]` note (surface to user + run the fix tool, e.g. `restart_whatsapp_account`). Gateway 354 tests
+pass (+6 `alerting.test.ts` cadence; agent-output test updated to assert the spine); dashboard + Android
+typecheck/compile clean. Would have caught the Jun 15 stall within ~5min, repeating, reaching the agent.
+
 ### FEATURE: GPS-jamming filter + Places map UI (2026-06-15)
 External regional GPS jamming snaps the chip to a far airport (e.g. Queen Alia/Amman) with a confident
 accuracy, producing a stray "user is in Jordan" fix. Two-layer defence, no on-device change (the

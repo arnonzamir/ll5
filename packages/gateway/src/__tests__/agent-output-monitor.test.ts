@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Pool } from 'pg';
 import type { Client } from '@elastic/elasticsearch';
 
-// Mock the FCM sender so we can assert whether an alert was pushed.
-const sendFCM = vi.fn(async () => {});
-vi.mock('../utils/fcm-sender.js', () => ({
-  sendFCMNotification: (...args: unknown[]) => sendFCM(...args),
+// Mock the alert spine so we can assert whether an alert was raised/cleared.
+const raiseAlert = vi.fn(async () => {});
+const clearAlert = vi.fn(async () => {});
+vi.mock('../utils/alerting.js', () => ({
+  raiseAlert: (...args: unknown[]) => raiseAlert(...args),
+  clearAlert: (...args: unknown[]) => clearAlert(...args),
 }));
 // withSchedulerHealth just wraps the tick body; run it directly in tests.
 vi.mock('../utils/scheduler-health.js', () => ({
@@ -65,7 +67,7 @@ async function runTick(monitor: AgentOutputMonitor) {
 }
 
 describe('AgentOutputMonitor — journal-aware liveness window', () => {
-  beforeEach(() => sendFCM.mockClear());
+  beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
 
   it('does NOT alert when the agent journaled within the ~hourly cadence (45m ago), despite a 0.5h chat-silence threshold', async () => {
     // No chat outbound for 45m (> silenceHours 0.5h) and 8 triggers landed —
@@ -76,7 +78,7 @@ describe('AgentOutputMonitor — journal-aware liveness window', () => {
       makeConfig(),
     );
     await runTick(monitor);
-    expect(sendFCM).not.toHaveBeenCalled();
+    expect(raiseAlert).not.toHaveBeenCalled();
   });
 
   it('STILL alerts when the agent is genuinely dead (no journal for 3h) while triggers pile up — failsafe preserved', async () => {
@@ -86,8 +88,8 @@ describe('AgentOutputMonitor — journal-aware liveness window', () => {
       makeConfig(),
     );
     await runTick(monitor);
-    expect(sendFCM).toHaveBeenCalledTimes(1);
-    expect(sendFCM.mock.calls[0][2]).toMatchObject({ type: 'agent_silent' });
+    expect(raiseAlert).toHaveBeenCalledTimes(1);
+    expect(raiseAlert.mock.calls[0][1]).toMatchObject({ key: 'agent.output', severity: 'critical' });
   });
 
   it('does NOT alert when too few scheduler triggers landed (silence is organic)', async () => {
@@ -97,6 +99,6 @@ describe('AgentOutputMonitor — journal-aware liveness window', () => {
       makeConfig(),
     );
     await runTick(monitor);
-    expect(sendFCM).not.toHaveBeenCalled();
+    expect(raiseAlert).not.toHaveBeenCalled();
   });
 });

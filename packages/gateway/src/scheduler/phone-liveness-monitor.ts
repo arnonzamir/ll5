@@ -1,7 +1,7 @@
 import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
-import { sendFCMNotification } from '../utils/fcm-sender.js';
+import { raiseAlert, clearAlert } from '../utils/alerting.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface PhoneLivenessConfig {
@@ -48,10 +48,6 @@ export function getAllPhoneLivenessSnapshots(): PhoneLivenessSnapshot[] {
  */
 export class PhoneLivenessMonitor {
   private timer: ReturnType<typeof setInterval> | null = null;
-  private lastAlertAt: number = 0;
-  private alertCount: number = 0;
-  private readonly ALERT_COOLDOWN_MS = 30 * 60 * 1000;
-  private readonly MAX_ALERTS_PER_EPISODE = 2;
 
   constructor(
     private pool: Pool,
@@ -132,46 +128,30 @@ export class PhoneLivenessMonitor {
       CACHED_SNAPSHOT.set(this.config.userId, snapshot);
 
       if (!stale) {
-        if (this.alertCount > 0) {
-          logger.info('[PhoneLivenessMonitor][tick] Phone recovered, resetting alert counter', { alertCount: this.alertCount });
-          this.alertCount = 0;
-        }
+        await clearAlert(this.pool, this.config.userId, 'channel.phone');
         logger.debug('[PhoneLivenessMonitor][tick] Phone alive', snapshot as unknown as Record<string, unknown>);
         return;
       }
 
+      // Only raise during active hours; an existing alert persists overnight.
       const hour = this.getCurrentHour();
       if (hour < this.config.startHour || hour >= this.config.endHour) {
-        logger.info('[PhoneLivenessMonitor][tick] Phone stale outside active hours — not alerting', snapshot as unknown as Record<string, unknown>);
+        logger.info('[PhoneLivenessMonitor][tick] Phone stale outside active hours — not raising', snapshot as unknown as Record<string, unknown>);
         return;
       }
-
-      if (this.alertCount >= this.MAX_ALERTS_PER_EPISODE) {
-        logger.debug('[PhoneLivenessMonitor][tick] Stale but max alerts reached', { alertCount: this.alertCount });
-        return;
-      }
-      if (Date.now() - this.lastAlertAt < this.ALERT_COOLDOWN_MS) {
-        logger.debug('[PhoneLivenessMonitor][tick] Stale but within cooldown', snapshot as unknown as Record<string, unknown>);
-        return;
-      }
-      this.lastAlertAt = Date.now();
-      this.alertCount += 1;
-
-      logger.error('[PhoneLivenessMonitor][alert] Phone pipeline stalled', snapshot as unknown as Record<string, unknown>);
 
       const bodyAge = ageHours === null
         ? 'no phone data on record'
         : `last signal ${Math.round(ageHours)}h ago`;
-
-      await sendFCMNotification(this.pool, this.config.userId, {
-        title: 'LL5 phone pipeline stalled',
-        body: `No GPS or phone_status in ${Math.round(this.config.stalenessHours)}h+ (${bodyAge}). Open LL5 on the phone to restart the service.`,
-        type: 'phone_liveness_stall',
-        notification_level: 'critical',
-        data: {
-          last_signal_at: signalTs ?? '',
-          age_hours: ageHours === null ? '' : String(Math.round(ageHours)),
-        },
+      logger.error('[PhoneLivenessMonitor][alert] Phone pipeline stalled', snapshot as unknown as Record<string, unknown>);
+      await raiseAlert(this.pool, {
+        userId: this.config.userId,
+        key: 'channel.phone',
+        severity: 'critical',
+        summary: 'Phone pipeline stalled (no GPS or status)',
+        value: bodyAge,
+        expected: `< ${Math.round(this.config.stalenessHours)}h`,
+        suggestion: 'Open LL5 on the phone to restart the location/notification service.',
       });
     }); } catch {
       // withSchedulerHealth already recorded the failure + logged at error.
