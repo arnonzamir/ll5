@@ -70,7 +70,7 @@ export class CalendarSyncScheduler {
           summary: 'Google disconnected (Calendar + Gmail)',
           value: 'OAuth refresh failed',
           expected: 'connected',
-          suggestion: 'Reconnect Google in the dashboard (Settings → Calendar) — the refresh token is invalid/revoked. Calendar + Gmail are dark until then.',
+          suggestion: 'Refresh token invalid/revoked — Calendar + Gmail are dark. Call `get_auth_url` (google MCP) and push the one-tap reconnect link to the user so they can re-auth from the app (web or phone); they can also use dashboard Settings → Calendar.',
         });
       } else {
         // Transient (network / google MCP down / ES) — don't alert; the

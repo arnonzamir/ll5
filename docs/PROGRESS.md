@@ -19,7 +19,10 @@ cycle, so a successful fetch `clearAlert('service.google-auth')` and an **auth**
 `isGoogleAuthError()` (matches `invalid_grant` / "account not connected" / "refresh Google access token";
 deliberately NOT a bare 401/403 = gateway↔MCP key). Transient/ES errors stay non-alerting (mcp-health
 owns service-down). Reaches the agent + repeat + web/Android banner + critical push, same spine as
-WhatsApp. +5 tests (`calendar-sync-auth.test.ts`); gateway 359 pass.
+WhatsApp. +5 tests (`calendar-sync-auth.test.ts`); gateway 359 pass. The alert's instruction tells the
+agent to call `get_auth_url` (google MCP) and **push a one-tap reconnect link** so the user can re-auth
+from the app (web or phone) — the dashboard Settings → Calendar reconnect still works too; Android has
+no native Google-OAuth UI, so the pushed link is the phone path.
 
 ### FEATURE: server-side metrics watchdog + agent/app alert spine (2026-06-16)
 A WhatsApp ingestion stall (Jun 15 14:06, Evolution desync) went undetected ~18h: the existing
