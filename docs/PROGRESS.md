@@ -8,6 +8,19 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: watchdog now detects Google OAuth disconnect (2026-06-17)
+The watchdog had a blind spot: nothing verified Google stayed *connected*. `google` MCP `/health` is
+just `SELECT 1` (PG up), `mcp-health-monitor`'s `/health`+`tools/list` pass regardless of OAuth, and
+`calendar-sync` swallowed a dead-token failure as a non-blocking `warn` — so a revoked/expired refresh
+token (`invalid_grant`, the known #1 Google error) left every signal green while Calendar+Gmail silently
+failed. Fix: `scheduler/calendar-sync.ts` now doubles as the OAuth liveness probe — it calls Google every
+cycle, so a successful fetch `clearAlert('service.google-auth')` and an **auth** failure
+`raiseAlert('service.google-auth', critical, 'Reconnect Google…')`. Auth errors are classified via
+`isGoogleAuthError()` (matches `invalid_grant` / "account not connected" / "refresh Google access token";
+deliberately NOT a bare 401/403 = gateway↔MCP key). Transient/ES errors stay non-alerting (mcp-health
+owns service-down). Reaches the agent + repeat + web/Android banner + critical push, same spine as
+WhatsApp. +5 tests (`calendar-sync-auth.test.ts`); gateway 359 pass.
+
 ### FEATURE: server-side metrics watchdog + agent/app alert spine (2026-06-16)
 A WhatsApp ingestion stall (Jun 15 14:06, Evolution desync) went undetected ~18h: the existing
 monitor fleet (whatsapp-flow/phone-liveness/mcp-health/agent-output) only FCM-pushed the phone, capped

@@ -258,7 +258,7 @@ async function startSchedulersForUser(
     return schedulers;
   }
 
-  const syncScheduler = new CalendarSyncScheduler(es, googleClient, userId);
+  const syncScheduler = new CalendarSyncScheduler(es, googleClient, userId, pgPool);
   syncScheduler.start();
   schedulers.push(syncScheduler);
 

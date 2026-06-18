@@ -1,11 +1,28 @@
 import type { Client } from '@elastic/elasticsearch';
+import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
+import { raiseAlert, clearAlert } from '../utils/alerting.js';
+
+/**
+ * True when a calendar-fetch error is a Google OAUTH failure (refresh token
+ * revoked/expired, or no token stored) rather than a transient blip. The google
+ * MCP surfaces these as a 500 whose body carries the message from
+ * google-client.ts: "Google account not connected…" or "Failed to refresh
+ * Google access token: …invalid_grant…". We deliberately do NOT match a bare
+ * 401/403 (that would be the gateway↔MCP API-key auth, a different problem).
+ */
+export function isGoogleAuthError(message: string): boolean {
+  return /invalid_grant|account not connected|refresh google access token|get_auth_url|token (has been )?(expired|revoked)|invalid_rapt|unauthorized_client/i.test(message);
+}
 
 /**
  * Syncs Google Calendar events into the awareness ES index.
  * Uses deterministic document IDs to prevent duplicates.
- * Runs periodically (every 30 minutes).
+ * Runs periodically (every 30 minutes). Also doubles as the Google-OAUTH
+ * liveness check: a successful fetch clears `service.google-auth`; an auth
+ * failure raises it (the old health checks only proved the service was up,
+ * never that the token was still valid).
  */
 export class CalendarSyncScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -14,6 +31,7 @@ export class CalendarSyncScheduler {
     private es: Client,
     private googleClient: GoogleCalendarClient,
     private userId: string,
+    private pool: Pool,
     private intervalMs: number = 30 * 60 * 1000, // 30 minutes
   ) {}
 
@@ -32,14 +50,40 @@ export class CalendarSyncScheduler {
   }
 
   async sync(): Promise<void> {
+    // Fetch events for the next 7 days
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const to = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    // --- Phase 1: fetch from Google (this is the OAuth liveness probe) ---
+    let events;
     try {
-      // Fetch events for the next 7 days
-      const now = new Date();
-      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-      const to = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      events = await this.googleClient.getEvents(from, to);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (isGoogleAuthError(message)) {
+        logger.error('[CalendarSyncScheduler][sync] Google OAuth disconnected', { error: message });
+        await raiseAlert(this.pool, {
+          userId: this.userId,
+          key: 'service.google-auth',
+          severity: 'critical',
+          summary: 'Google disconnected (Calendar + Gmail)',
+          value: 'OAuth refresh failed',
+          expected: 'connected',
+          suggestion: 'Reconnect Google in the dashboard (Settings → Calendar) — the refresh token is invalid/revoked. Calendar + Gmail are dark until then.',
+        });
+      } else {
+        // Transient (network / google MCP down / ES) — don't alert; the
+        // mcp-health-monitor owns service-down, this owns OAuth specifically.
+        logger.warn('[CalendarSyncScheduler][sync] Calendar fetch failed (non-blocking)', { error: message });
+      }
+      return;
+    }
+    // Fetch succeeded → the token is valid; resolve any standing auth alert.
+    await clearAlert(this.pool, this.userId, 'service.google-auth');
 
-      const events = await this.googleClient.getEvents(from, to);
-
+    // --- Phase 2: write to ES (an ES error here is NOT an auth problem) ---
+    try {
       if (events.length === 0) {
         logger.debug('[CalendarSyncScheduler][sync] No events found');
         return;
@@ -105,7 +149,7 @@ export class CalendarSyncScheduler {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.warn('[CalendarSyncScheduler][sync] Calendar sync failed (non-blocking)', { error: message });
+      logger.warn('[CalendarSyncScheduler][sync] ES upsert failed (non-blocking)', { error: message });
     }
   }
 }

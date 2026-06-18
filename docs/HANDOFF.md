@@ -33,7 +33,8 @@ Gateway (Express)
       mcp-health-monitor (2min ping all 7 services + tool error-rate scan),
       agent-output-monitor (15min during active hours: alerts when triggers landed but agent has been silent >0.5h on BOTH chat outbound AND journal activity),
       whatsapp-flow-monitor (10min, alert if no inbound WhatsApp for 2h in active hours), phone-liveness-monitor (15min, GPS/status stale 3h),
-      metrics-monitor (5min: slack/gmail/sms freshness [baseline-gated] + Elasticsearch cluster health)
+      metrics-monitor (5min: slack/gmail/sms freshness [baseline-gated] + Elasticsearch cluster health),
+      calendar-sync (30min: ALSO the Google-OAuth liveness probe — successful fetch clears `service.google-auth`, an auth failure [invalid_grant / not-connected, via isGoogleAuthError] raises it critical. google /health is only `SELECT 1`, so this is the ONLY check that a dead Google token is detected)
   ├── ALERT SPINE (2026-06-16): all monitors funnel through `utils/alerting.ts` raiseAlert/clearAlert → durable `system_alerts` table (migration 033). On firing: an `[ALERT]` system message to the AGENT (always, repeating ~20min, escalating) + severity-based FCM (critical=DND-override re-push ~30min, warning=once); on recovery `[ALERT RESOLVED]`. `GET /alerts` (user-scoped) feeds the web + Android banners. Replaced the old per-monitor FCM-only + 2-alert cap. Thresholds overridable via `user_settings.scheduler` (e.g. `whatsapp_flow_stale_hours`, `metrics_monitor_minutes`, `metrics_baseline_days`).
   ├── System message dedup — checks PG for recent duplicate before inserting
   └── Immediate + ignored messages mark ES doc as processed (prevents double-report/leak in batch review)
