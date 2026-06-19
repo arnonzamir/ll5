@@ -13,6 +13,9 @@ vi.mock('@ll5/shared', () => ({
   logAudit: vi.fn(),
   generateToken: vi.fn().mockReturnValue('mock-gw-token'),
   sessionTimezone: vi.fn().mockReturnValue('Asia/Jerusalem'),
+  pickEffectiveTimezone: vi.fn().mockReturnValue('Asia/Jerusalem'),
+  HOME_TIMEZONE_FALLBACK: 'Asia/Jerusalem',
+  DEFAULT_WORKING_ZONES: ['America/Los_Angeles', 'Europe/Berlin', 'Asia/Jerusalem'],
 }));
 
 // ---------------------------------------------------------------------------
@@ -158,7 +161,7 @@ function makeCalendarConfigRepo(overrides: Partial<CalendarConfigRepository> = {
 
 function makeUserSettingsRepo(overrides: Partial<UserSettingsRepository> = {}): UserSettingsRepository {
   return {
-    get: vi.fn().mockResolvedValue({ user_id: USER_ID, timezone: 'Asia/Jerusalem' }),
+    get: vi.fn().mockResolvedValue({ user_id: USER_ID, timezone: 'Asia/Jerusalem', current_timezone: null, current_timezone_at: null, working_zones: ['America/Los_Angeles', 'Europe/Berlin', 'Asia/Jerusalem'] }),
     setTimezone: vi.fn(),
     ...overrides,
   };
@@ -510,7 +513,7 @@ describe('create_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     const response = await tools.get('create_tickler')!({
@@ -537,7 +540,7 @@ describe('create_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     await tools.get('create_tickler')!({
@@ -561,7 +564,7 @@ describe('create_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     const response = await tools.get('create_tickler')!({
@@ -582,7 +585,7 @@ describe('create_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     await tools.get('create_tickler')!({
@@ -606,7 +609,7 @@ describe('create_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     await tools.get('create_tickler')!({
@@ -630,7 +633,7 @@ describe('create_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     await tools.get('create_tickler')!({
@@ -671,7 +674,7 @@ describe('complete_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     const response = await tools.get('complete_tickler')!({
@@ -697,7 +700,7 @@ describe('complete_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     const response = await tools.get('complete_tickler')!({
@@ -719,7 +722,7 @@ describe('complete_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     await tools.get('complete_tickler')!({
@@ -737,7 +740,7 @@ describe('complete_tickler tool handler', () => {
 
     const { registerTicklerTools } = await import('../tools/tickler.js');
     const tools = captureTools((s) =>
-      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, esRepo, GOOGLE_CONFIG, getUserId),
+      registerTicklerTools(s, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId),
     );
 
     const response = await tools.get('complete_tickler')!({

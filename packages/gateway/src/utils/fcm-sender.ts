@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { Pool } from 'pg';
+import { pickEffectiveTimezone } from '@ll5/shared';
 import { logger } from './logger.js';
 
 export type NotificationLevel = 'silent' | 'notify' | 'alert' | 'critical';
@@ -128,7 +129,14 @@ async function resolveLevel(
     const allSettings = result.rows[0].settings ?? {};
     const notif = allSettings.notification ?? {};
     const maxLevel = (notif.max_level as NotificationLevel) ?? 'critical';
-    const tz = allSettings.timezone ?? 'Asia/Jerusalem';
+    // Quiet hours follow the user wherever they are: a fresh GPS-derived current
+    // zone if recent, else home (settings.timezone), else the global fallback —
+    // not a hardcoded 'Asia/Jerusalem' that leaks the home zone abroad.
+    const tz = pickEffectiveTimezone({
+      currentTz: allSettings.current_timezone,
+      currentTzAt: allSettings.current_timezone_at,
+      homeTz: allSettings.timezone,
+    });
 
     // Check if currently in quiet hours
     let effectiveMax = maxLevel;

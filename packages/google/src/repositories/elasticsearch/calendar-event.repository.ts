@@ -9,6 +9,8 @@ export interface CalendarEventDoc {
   description?: string | null;
   start_time: string;
   end_time: string;
+  /** IANA timezone the event's wall-clock times are anchored to, if known. */
+  timezone?: string | null;
   location?: string | null;
   calendar_name?: string | null;
   calendar_id?: string | null;
@@ -145,6 +147,7 @@ export class ESCalendarEventRepository {
       title: string;
       start: string;
       end: string;
+      timezone?: string | null;
       all_day: boolean;
       location?: string | null;
       description?: string | null;
@@ -165,6 +168,7 @@ export class ESCalendarEventRepository {
       description: event.description,
       start_time: event.start,
       end_time: event.end,
+      timezone: event.timezone ?? null,
       location: event.location,
       calendar_name: event.calendar_name,
       calendar_id: event.calendar_id,

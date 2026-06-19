@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
+import { getEffectiveTimezone } from '../utils/timezone.js';
 
 interface TicklerAlertConfig {
   intervalMinutes: number;
@@ -19,12 +20,17 @@ export class TicklerAlertScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private alertedIds: Set<string> = new Set();
   private lastAlertDate: string | null = null;
+  // Effective timezone resolved fresh at the top of each tick (current GPS zone
+  // if recent, else home). Seeded with the static config tz until the first tick.
+  private tz: string;
 
   constructor(
     private pool: Pool,
     private googleClient: GoogleCalendarClient,
     private config: TicklerAlertConfig,
-  ) {}
+  ) {
+    this.tz = config.timezone;
+  }
 
   start(): void {
     logger.info('[TicklerAlertScheduler][start] Tickler alert scheduler started', {
@@ -46,7 +52,7 @@ export class TicklerAlertScheduler {
 
   private getCurrentHour(): number {
     const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
       hour: 'numeric',
       hour12: false,
     });
@@ -55,7 +61,7 @@ export class TicklerAlertScheduler {
 
   private getCurrentDate(): string {
     const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -69,6 +75,10 @@ export class TicklerAlertScheduler {
   }
 
   private async tick(): Promise<void> {
+    // Resolve the effective tz once per tick so active-hours gating, the daily
+    // alerted-IDs reset, and time rendering follow the user's current zone.
+    this.tz = await getEffectiveTimezone(this.pool, this.config.userId);
+
     if (!this.isWithinActiveHours()) return;
 
     try {
@@ -125,7 +135,7 @@ export class TicklerAlertScheduler {
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
     });
   }
 }

@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
 import { raiseAlert, clearAlert } from '../utils/alerting.js';
+import { getEffectiveTimezone, startOfDayInTz } from '../utils/timezone.js';
 
 /**
  * True when a calendar-fetch error is a Google OAUTH failure (refresh token
@@ -50,9 +51,12 @@ export class CalendarSyncScheduler {
   }
 
   async sync(): Promise<void> {
-    // Fetch events for the next 7 days
+    // Fetch events for the next 7 days. The window starts at the user's local
+    // midnight in their EFFECTIVE timezone (current GPS zone if recent, else
+    // home), not the server-process local day.
     const now = new Date();
-    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const tz = await getEffectiveTimezone(this.pool, this.userId);
+    const from = startOfDayInTz(now, tz).toISOString();
     const to = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
     // --- Phase 1: fetch from Google (this is the OAuth liveness probe) ---

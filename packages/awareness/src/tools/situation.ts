@@ -13,6 +13,56 @@ import {
   getSuggestedEnergy,
   formatTimeUntil,
 } from '../types/situation.js';
+import {
+  generateToken,
+  pickEffectiveTimezone,
+  isTraveling,
+  DEFAULT_WORKING_ZONES,
+  HOME_TIMEZONE_FALLBACK,
+} from '@ll5/shared';
+
+/**
+ * The slice of `user_settings.settings` (JSONB) this tool reads. Awareness is
+ * ES-only and owns no Postgres access, so it reads the user's settings through
+ * the gateway's authenticated `GET /user-settings` endpoint (the same JSONB the
+ * dashboard reads). Timezone is system-wide, stored under these keys.
+ */
+interface TimezoneSettings {
+  timezone?: string;
+  current_timezone?: string;
+  current_timezone_at?: string;
+  working_zones?: string[];
+}
+
+/**
+ * Fetch the user's settings JSONB from the gateway. Returns `{}` on any failure
+ * (no gateway URL/secret, network error, non-2xx) so get_situation degrades to
+ * the configured fallback timezone rather than failing.
+ */
+async function fetchUserSettings(
+  gatewayUrl: string | undefined,
+  authSecret: string | undefined,
+  userId: string,
+): Promise<TimezoneSettings> {
+  if (!gatewayUrl || !authSecret) return {};
+  try {
+    const token = generateToken(userId, authSecret, 1);
+    const res = await fetch(`${gatewayUrl.replace(/\/$/, '')}/user-settings`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      logger.warn('[situation] user-settings fetch non-2xx', { status: res.status });
+      return {};
+    }
+    return (await res.json()) as TimezoneSettings;
+  } catch (err) {
+    logger.warn('[situation] user-settings fetch failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return {};
+  }
+}
 
 export function registerSituationTools(
   server: McpServer,
@@ -27,6 +77,8 @@ export function registerSituationTools(
   getUserId: () => string,
   timezone: string,
   locationService: LocationService,
+  gatewayUrl?: string,
+  authSecret?: string,
 ): void {
   server.tool(
     'get_situation',
@@ -36,9 +88,23 @@ export function registerSituationTools(
       const userId = getUserId();
       const now = new Date();
 
-      // Compute time-based fields using the configured timezone
+      // Resolve the user's EFFECTIVE (travel-aware) timezone up front — every
+      // time-based field below (time_period, day_type) is computed in it, so a
+      // user in SF gets SF's morning rather than Israel's afternoon. Falls back
+      // to the configured tz / shared default when settings are unavailable.
+      const settings = await fetchUserSettings(gatewayUrl, authSecret, userId);
+      const homeTz = settings.timezone || timezone || HOME_TIMEZONE_FALLBACK;
+      const tzInput = {
+        currentTz: settings.current_timezone,
+        currentTzAt: settings.current_timezone_at,
+        homeTz,
+        now,
+      };
+      const effectiveTz = pickEffectiveTimezone(tzInput);
+
+      // Compute time-based fields using the effective timezone
       const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone,
+        timeZone: effectiveTz,
         hour: 'numeric',
         hour12: false,
       });
@@ -46,7 +112,7 @@ export function registerSituationTools(
       const hour = parseInt(hourStr, 10);
 
       const dayFormatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone,
+        timeZone: effectiveTz,
         weekday: 'short',
       });
       const dayOfWeekStr = dayFormatter.format(now);
@@ -160,9 +226,20 @@ export function registerSituationTools(
         logger.warn('[situation] Bluetooth fetch failed', { error: err instanceof Error ? err.message : String(err) });
       }
 
+      // Timezone awareness block — home vs. effective (travel-aware) zone,
+      // reusing the settings/effectiveTz resolved at the top of the handler.
+      const timezoneBlock = {
+        current: effectiveTz,
+        home: homeTz,
+        working_zones: settings.working_zones || DEFAULT_WORKING_ZONES,
+        traveling: isTraveling(tzInput),
+        current_since: settings.current_timezone_at ?? null,
+      };
+
       const situation = {
         current_time: now.toISOString(),
-        timezone,
+        timezone: effectiveTz,
+        timezone_info: timezoneBlock,
         time_period: timePeriod,
         day_type: dayType,
         current_location: currentLocation,

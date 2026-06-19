@@ -41,8 +41,8 @@ export function registerAllTools(
   repos: Repositories,
   getUserId: () => string,
   timezone: string,
-  _gatewayUrl?: string,
-  _authSecret?: string,
+  gatewayUrl?: string,
+  authSecret?: string,
   esClient?: Client,
 ): void {
   if (!esClient) {
@@ -67,6 +67,8 @@ export function registerAllTools(
     getUserId,
     timezone,
     locationService,
+    gatewayUrl,
+    authSecret,
   );
   if (esClient) {
     registerJournalTools(server, esClient, getUserId);

@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 import { timeBanner, formatTime } from '@ll5/shared';
 import { buildLocationLine } from './location-state.js';
+import { getEffectiveTimezone } from '../utils/timezone.js';
 
 interface HeartbeatConfig {
   silenceMinutes: number;
@@ -27,12 +28,17 @@ export class HeartbeatScheduler {
   // the first tick establishes a baseline (no spurious fire on startup).
   private lastPeriod: string | null = null;
   private lastDate: string | null = null;
+  // Effective timezone resolved fresh at the top of each tick (current GPS zone
+  // if recent, else home). Seeded with the static config tz until the first tick.
+  private tz: string;
 
   constructor(
     private pool: Pool,
     private es: Client,
     private config: HeartbeatConfig,
-  ) {}
+  ) {
+    this.tz = config.timezone;
+  }
 
   private timePeriod(hour: number): string {
     if (hour >= 6 && hour < 12) return 'morning';
@@ -43,7 +49,7 @@ export class HeartbeatScheduler {
 
   private localDate(): string {
     return new Intl.DateTimeFormat('en-CA', {
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
       year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(new Date());
   }
@@ -83,7 +89,7 @@ export class HeartbeatScheduler {
 
     if (!newDay && !periodFlip) return;
 
-    const banner = timeBanner(new Date(), this.config.timezone);
+    const banner = timeBanner(new Date(), this.tz);
     const parts: string[] = [];
     if (newDay) {
       parts.push(`[New Day] ${banner}`);
@@ -127,7 +133,7 @@ export class HeartbeatScheduler {
   private getCurrentHour(): number {
     return parseInt(
       new Intl.DateTimeFormat('en-US', {
-        timeZone: this.config.timezone,
+        timeZone: this.tz,
         hour: 'numeric',
         hour12: false,
       }).format(new Date()),
@@ -136,6 +142,11 @@ export class HeartbeatScheduler {
   }
 
   private async tick(): Promise<void> {
+    // Resolve the effective tz once per tick so active-hours gating, the
+    // new-day/period edge triggers, and time rendering follow the user's
+    // current zone.
+    this.tz = await getEffectiveTimezone(this.pool, this.config.userId);
+
     const hour = this.getCurrentHour();
 
     // Edge-triggered transition cues run every tick (they self-gate to active
@@ -163,16 +174,16 @@ export class HeartbeatScheduler {
 
       // Build data-rich message
       const now = new Date();
-      const banner = timeBanner(now, this.config.timezone);
+      const banner = timeBanner(now, this.tz);
 
       const parts: string[] = [
         `[Time Check] ${banner}`,
-        `Anchoring rule: every "local" you see is in ${this.config.timezone}; every "utc" is UTC. "today/yesterday/tomorrow" resolve in local. If a tool returned only ISO UTC, convert before talking to the user.`,
+        `Anchoring rule: every "local" you see is in ${this.tz}; every "utc" is UTC. "today/yesterday/tomorrow" resolve in local. If a tool returned only ISO UTC, convert before talking to the user.`,
       ];
 
       // A2: include the user's current semantic place when known + recent.
       try {
-        const locationLine = await buildLocationLine(this.es, this.config.userId, this.config.timezone);
+        const locationLine = await buildLocationLine(this.es, this.config.userId, this.tz);
         if (locationLine) parts.push(locationLine);
       } catch (err) {
         logger.debug('[HeartbeatScheduler][tick] location line skipped', { error: err instanceof Error ? err.message : String(err) });
@@ -208,7 +219,7 @@ export class HeartbeatScheduler {
           const startTime = new Date(s.start_time as string);
           const isPast = startTime < now;
           const diffMin = Math.round((startTime.getTime() - now.getTime()) / 60000);
-          const t = formatTime(startTime, this.config.timezone);
+          const t = formatTime(startTime, this.tz);
           // Local "HH:MM Weekday" only — full date is implied by the banner above
           // and the "in N min / N min ago" relative anchor below removes ambiguity.
           const [, timePart, weekday] = t.local.split(' ');

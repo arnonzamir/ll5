@@ -25,5 +25,5 @@ export function registerAllTools(
   registerAuthTools(server, deps.tokenRepo, deps.calendarConfigRepo, deps.googleConfig, getUserId);
   registerCalendarTools(server, deps.tokenRepo, deps.calendarConfigRepo, deps.userSettingsRepo, deps.esCalendarRepo, deps.googleConfig, getUserId);
   registerGmailTools(server, deps.tokenRepo, deps.googleConfig, getUserId);
-  registerTicklerTools(server, deps.tokenRepo, deps.calendarConfigRepo, deps.esCalendarRepo, deps.googleConfig, getUserId);
+  registerTicklerTools(server, deps.tokenRepo, deps.calendarConfigRepo, deps.userSettingsRepo, deps.esCalendarRepo, deps.googleConfig, getUserId);
 }

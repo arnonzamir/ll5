@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { GoogleCalendarClient } from './google-calendar-client.js';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
+import { getEffectiveTimezone, startOfDayInTz, endOfDayInTz } from '../utils/timezone.js';
 
 interface ReviewConfig {
   startHour: number;
@@ -18,12 +19,17 @@ interface ReviewConfig {
 export class CalendarReviewScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastReviewTime: Date | null = null;
+  // Effective timezone resolved fresh at the top of each tick (current GPS zone
+  // if recent, else home). Seeded with the static config tz until the first tick.
+  private tz: string;
 
   constructor(
     private pool: Pool,
     private googleClient: GoogleCalendarClient,
     private config: ReviewConfig,
-  ) {}
+  ) {
+    this.tz = config.timezone;
+  }
 
   start(): void {
     logger.info('[CalendarReviewScheduler][start] Calendar review scheduler started', {
@@ -48,7 +54,7 @@ export class CalendarReviewScheduler {
 
   private getCurrentHour(): number {
     const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
       hour: 'numeric',
       hour12: false,
     });
@@ -57,7 +63,7 @@ export class CalendarReviewScheduler {
 
   private getCurrentMinute(): number {
     const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
       minute: 'numeric',
     });
     return parseInt(formatter.format(new Date()), 10);
@@ -84,6 +90,10 @@ export class CalendarReviewScheduler {
   }
 
   private async tick(): Promise<void> {
+    // Resolve the effective tz once per tick so active-hours gating, day
+    // boundaries, and time rendering all follow the user's current zone.
+    this.tz = await getEffectiveTimezone(this.pool, this.config.userId);
+
     if (!this.shouldRunReview()) return;
 
     try {
@@ -108,7 +118,7 @@ export class CalendarReviewScheduler {
     logger.info('[CalendarReviewScheduler][runMorningReview] Running morning calendar review');
 
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfDay = startOfDayInTz(now, this.tz);
     const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
     const endOfTomorrow = new Date(endOfDay.getTime() + 24 * 60 * 60 * 1000);
 
@@ -121,7 +131,7 @@ export class CalendarReviewScheduler {
       weekday: 'long',
       month: 'long',
       day: 'numeric',
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
     });
 
     const lines: string[] = [`[Morning Calendar Review] Today is ${dayName}.`];
@@ -163,12 +173,13 @@ export class CalendarReviewScheduler {
 
     const now = new Date();
     const fourHoursLater = new Date(now.getTime() + 4 * 60 * 60 * 1000);
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const startOfDay = startOfDayInTz(now, this.tz);
+    const endOfDay = endOfDayInTz(now, this.tz);
 
     const [upcomingEvents, ticklers] = await Promise.all([
       this.googleClient.getEvents(now.toISOString(), fourHoursLater.toISOString()),
       this.googleClient.getTicklers(
-        new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString(),
+        startOfDay.toISOString(),
         endOfDay.toISOString(),
       ),
     ]);
@@ -212,7 +223,7 @@ export class CalendarReviewScheduler {
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
     });
   }
 
@@ -221,7 +232,7 @@ export class CalendarReviewScheduler {
     return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
     });
   }
 

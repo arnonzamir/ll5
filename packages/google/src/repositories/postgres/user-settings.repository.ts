@@ -1,7 +1,8 @@
 import { BasePostgresRepository } from './base.repository.js';
+import { HOME_TIMEZONE_FALLBACK, DEFAULT_WORKING_ZONES } from '@ll5/shared';
 import type { UserSettings, UserSettingsRepository } from '../interfaces/user-settings.repository.js';
 
-const DEFAULT_TIMEZONE = 'Asia/Jerusalem';
+const DEFAULT_TIMEZONE = HOME_TIMEZONE_FALLBACK;
 
 export class PostgresUserSettingsRepository extends BasePostgresRepository implements UserSettingsRepository {
 
@@ -12,7 +13,17 @@ export class PostgresUserSettingsRepository extends BasePostgresRepository imple
       [userId],
     );
     if (row?.settings?.timezone) {
-      return { user_id: userId, timezone: row.settings.timezone as string };
+      const s = row.settings;
+      const workingZones = Array.isArray(s.working_zones) && s.working_zones.length > 0
+        ? (s.working_zones as string[])
+        : [...DEFAULT_WORKING_ZONES];
+      return {
+        user_id: userId,
+        timezone: s.timezone as string,
+        current_timezone: (s.current_timezone as string | undefined) ?? null,
+        current_timezone_at: (s.current_timezone_at as string | undefined) ?? null,
+        working_zones: workingZones,
+      };
     }
 
     // Legacy fallback
@@ -20,7 +31,13 @@ export class PostgresUserSettingsRepository extends BasePostgresRepository imple
       `SELECT timezone FROM google_user_settings WHERE user_id = $1`,
       [userId],
     );
-    return { user_id: userId, timezone: legacy?.timezone ?? DEFAULT_TIMEZONE };
+    return {
+      user_id: userId,
+      timezone: legacy?.timezone ?? DEFAULT_TIMEZONE,
+      current_timezone: null,
+      current_timezone_at: null,
+      working_zones: [...DEFAULT_WORKING_ZONES],
+    };
   }
 
   async setTimezone(userId: string, timezone: string): Promise<void> {

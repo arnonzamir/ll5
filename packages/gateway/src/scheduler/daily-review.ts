@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 import { timeBanner } from '@ll5/shared';
 import { buildLocationLine } from './location-state.js';
+import { getEffectiveTimezone, startOfDayInTz } from '../utils/timezone.js';
 
 interface DailyReviewConfig {
   reviewHour: number;
@@ -19,6 +20,9 @@ interface DailyReviewConfig {
 export class DailyReviewScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastReviewDate: string | null = null;
+  // Effective timezone resolved fresh at the top of each tick (current GPS zone
+  // if recent, else home). Seeded with the static config tz until the first tick.
+  private tz: string;
 
   constructor(
     private pool: Pool,
@@ -27,7 +31,9 @@ export class DailyReviewScheduler {
     // Optional: enables the A3 current-place line. Omitted in unit tests that
     // don't exercise location.
     private es?: Client,
-  ) {}
+  ) {
+    this.tz = config.timezone;
+  }
 
   start(): void {
     logger.info('[DailyReviewScheduler][start] Daily review scheduler started', {
@@ -47,7 +53,7 @@ export class DailyReviewScheduler {
 
   private getCurrentHour(): number {
     const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
       hour: 'numeric',
       hour12: false,
     });
@@ -56,7 +62,7 @@ export class DailyReviewScheduler {
 
   private getCurrentDate(): string {
     const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -66,6 +72,11 @@ export class DailyReviewScheduler {
 
   private async tick(): Promise<void> {
     try {
+      // Resolve the effective tz once per tick so the fire-hour, the
+      // once-per-day gate, the day window, and time rendering follow the
+      // user's current zone.
+      this.tz = await getEffectiveTimezone(this.pool, this.config.userId);
+
       const currentHour = this.getCurrentHour();
       const currentDate = this.getCurrentDate();
 
@@ -75,7 +86,7 @@ export class DailyReviewScheduler {
       this.lastReviewDate = currentDate;
 
       const now = new Date();
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfDay = startOfDayInTz(now, this.tz);
       const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
       const endOfTomorrow = new Date(endOfDay.getTime() + 24 * 60 * 60 * 1000);
 
@@ -85,14 +96,14 @@ export class DailyReviewScheduler {
       ]);
 
       const lines: string[] = [
-        `[Morning Briefing] ${timeBanner(now, this.config.timezone)}`,
+        `[Morning Briefing] ${timeBanner(now, this.tz)}`,
         'Good morning. Today\'s frame:',
       ];
 
       // A3: brief current-place line (shared helper with the heartbeat).
       if (this.es) {
         try {
-          const locationLine = await buildLocationLine(this.es, this.config.userId, this.config.timezone);
+          const locationLine = await buildLocationLine(this.es, this.config.userId, this.tz);
           if (locationLine) lines.push(locationLine);
         } catch (err) {
           logger.debug('[DailyReviewScheduler][tick] location line skipped', { error: err instanceof Error ? err.message : String(err) });
@@ -150,7 +161,7 @@ export class DailyReviewScheduler {
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
     });
   }
 
@@ -159,7 +170,7 @@ export class DailyReviewScheduler {
     return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
     });
   }
 }

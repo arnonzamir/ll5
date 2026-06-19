@@ -14,6 +14,7 @@ import {
   gateAccuracy,
   detectDriftGlitch,
   haversineMeters,
+  timezoneFromLocation,
   DEFAULT_PLACE_RADIUS_M,
   TRANSITION_DEDUP_MS,
   TRIP_PULSE_MS,
@@ -486,6 +487,51 @@ async function runTransition(
 // applied via the shared gateAccuracy() + detectDriftGlitch() helpers below.
 
 /**
+ * Derive the IANA timezone of a FRESH, NON-SUSPECT GPS fix and cache it on the
+ * user as `current_timezone` (+ `current_timezone_at`). This is the *producer*
+ * of the effective-timezone signal that the schedulers and FCM quiet-hours
+ * consume. Only persists when the derived zone actually CHANGES from the stored
+ * one (avoids a JSONB write on every push). Best-effort — a failure here never
+ * blocks location processing.
+ */
+async function updateCurrentTimezoneFromLocation(
+  pool: Pool,
+  userId: string,
+  lat: number,
+  lon: number,
+): Promise<void> {
+  const zone = timezoneFromLocation(lat, lon);
+  if (!zone) return;
+  try {
+    const result = await pool.query<{ current_tz: string | null }>(
+      "SELECT settings->>'current_timezone' AS current_tz FROM user_settings WHERE user_id = $1",
+      [userId],
+    );
+    const stored = result.rows[0]?.current_tz ?? null;
+    if (stored === zone) return; // unchanged — no write
+
+    const nowIso = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO user_settings (user_id, settings, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (user_id) DO UPDATE SET
+         settings = user_settings.settings || $2::jsonb,
+         updated_at = now()`,
+      [userId, JSON.stringify({ current_timezone: zone, current_timezone_at: nowIso })],
+    );
+    logger.info('[location][timezone] current_timezone updated from GPS', {
+      userId,
+      from: stored ?? '(none)',
+      to: zone,
+    });
+  } catch (err) {
+    logger.warn('[location][timezone] failed to update current_timezone (non-blocking)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Process a location push item:
  * 1. Plausibility / drift filtering (drops glitches, flags low-accuracy)
  * 2. Reverse geocode lat/lon to address
@@ -624,7 +670,11 @@ export async function processLocation(
   // per-user state read/write against this push). Now WiFi-aware + hysteresis
   // via the shared resolver, so home GPS-jitter no longer flaps to city-level.
   // A suspect (jammed) fix must NOT drive a transition — skip the notifier.
+  // Same gate guards the timezone producer: only a fresh, non-suspect, non-stale
+  // (glitches/garbage already dropped above) fix derives a current zone, so we
+  // never snap the user's effective tz to a jammed airport.
   if (pgPool && !suspect) {
+    await updateCurrentTimezoneFromLocation(pgPool, userId, item.lat, item.lon);
     await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, placeMatch, wifiSignal);
   }
 

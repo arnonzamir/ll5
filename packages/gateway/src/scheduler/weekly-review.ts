@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
+import { getEffectiveTimezone } from '../utils/timezone.js';
 
 interface WeeklyReviewConfig {
   reviewDay: number; // 0=Sunday, 5=Friday, etc.
@@ -16,11 +17,16 @@ interface WeeklyReviewConfig {
 export class WeeklyReviewReminder {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastReviewWeek: number | null = null;
+  // Effective timezone resolved fresh at the top of each tick (current GPS zone
+  // if recent, else home). Seeded with the static config tz until the first tick.
+  private tz: string;
 
   constructor(
     private pool: Pool,
     private config: WeeklyReviewConfig,
-  ) {}
+  ) {
+    this.tz = config.timezone;
+  }
 
   start(): void {
     logger.info('[WeeklyReviewReminder][start] Weekly review reminder started', {
@@ -41,7 +47,7 @@ export class WeeklyReviewReminder {
 
   private getCurrentHour(): number {
     const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
       hour: 'numeric',
       hour12: false,
     });
@@ -50,7 +56,7 @@ export class WeeklyReviewReminder {
 
   private getCurrentDayOfWeek(): number {
     const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: this.config.timezone,
+      timeZone: this.tz,
       weekday: 'short',
     });
     const dayStr = formatter.format(new Date());
@@ -71,6 +77,10 @@ export class WeeklyReviewReminder {
 
   private async tick(): Promise<void> {
     try {
+      // Resolve the effective tz once per tick so the review day-of-week and
+      // hour follow the user's current zone.
+      this.tz = await getEffectiveTimezone(this.pool, this.config.userId);
+
       const currentDay = this.getCurrentDayOfWeek();
       const currentHour = this.getCurrentHour();
       const currentWeek = this.getISOWeekNumber();

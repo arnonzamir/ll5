@@ -3,9 +3,10 @@ import { google } from 'googleapis';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-token.repository.js';
 import type { CalendarConfigRepository } from '../repositories/interfaces/calendar-config.repository.js';
+import type { UserSettingsRepository } from '../repositories/interfaces/user-settings.repository.js';
 import type { ESCalendarEventRepository } from '../repositories/elasticsearch/calendar-event.repository.js';
 import { getAuthenticatedClient, type GoogleClientConfig } from '../utils/google-client.js';
-import { logAudit, sessionTimezone } from '@ll5/shared';
+import { logAudit, pickEffectiveTimezone } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
 const TICKLER_CALENDAR_NAME = 'LL5 System';
@@ -19,6 +20,26 @@ const RECURRENCE_MAP: Record<string, string> = {
   monthly: 'RRULE:FREQ=MONTHLY',
   yearly: 'RRULE:FREQ=YEARLY',
 };
+
+/**
+ * Add minutes to a naive (date, HH:MM) wall-clock pair, returning the new
+ * date/time in wall-clock terms. Pure arithmetic — no UTC/instant conversion,
+ * so the result stays in the caller's intended timezone regardless of the
+ * container's TZ. Handles day rollover.
+ */
+function addMinutesWallClock(date: string, time: string, minutes: number): { date: string; time: string } {
+  const [y, m, d] = date.split('-').map(Number);
+  const [hh, mm] = time.split(':').map(Number);
+  // Use a UTC anchor purely as a calendar calculator; we only read UTC parts back,
+  // so the absolute instant is irrelevant — this never touches local TZ.
+  const anchor = new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
+  anchor.setUTCMinutes(anchor.getUTCMinutes() + minutes);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    date: `${anchor.getUTCFullYear()}-${pad(anchor.getUTCMonth() + 1)}-${pad(anchor.getUTCDate())}`,
+    time: `${pad(anchor.getUTCHours())}:${pad(anchor.getUTCMinutes())}`,
+  };
+}
 
 /** Resolve a recurrence input (friendly name or raw RRULE) to an RRULE string array for Google Calendar. */
 function resolveRecurrence(input: string | undefined): string[] | undefined {
@@ -80,6 +101,7 @@ export function registerTicklerTools(
   server: McpServer,
   tokenRepo: OAuthTokenRepository,
   calendarConfigRepo: CalendarConfigRepository,
+  userSettingsRepo: UserSettingsRepository,
   esRepo: ESCalendarEventRepository | null,
   config: GoogleClientConfig,
   getUserId: () => string,
@@ -104,7 +126,16 @@ export function registerTicklerTools(
       const calendarId = await findTicklerCalendar(config, tokenRepo, calendarConfigRepo, userId);
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
       const calendarApi = google.calendar({ version: 'v3', auth });
-      const tz = sessionTimezone();
+
+      // Use the user's EFFECTIVE timezone (fresh GPS-derived current zone, else
+      // home, else fallback) so wall-clock times are anchored where the user
+      // actually is — not the container's TZ (which is UTC without a TZ env).
+      const settings = await userSettingsRepo.get(userId);
+      const tz = pickEffectiveTimezone({
+        currentTz: settings.current_timezone,
+        currentTzAt: settings.current_timezone_at,
+        homeTz: settings.timezone,
+      });
 
       const fullTitle = category ? `[${category}] ${title}` : title;
       const effectiveTime = (!due_time || due_time === 'all_day') ? null : due_time;
@@ -125,11 +156,14 @@ export function registerTicklerTools(
         eventBody.start = { date: due_date };
         eventBody.end = { date: endDateStr };
       } else {
+        // Both start and end are naive wall-time strings tagged with the same
+        // IANA timeZone. Compute the +30min end in wall-clock terms (no UTC Z
+        // instant) so start/end stay consistent across timezones.
         const startDateTime = `${due_date}T${resolvedTime}:00`;
-        const endDate = new Date(startDateTime);
-        endDate.setMinutes(endDate.getMinutes() + 30); // 30-min default duration
+        const { date: endDateStr, time: endTime } = addMinutesWallClock(due_date, resolvedTime as string, 30);
+        const endDateTime = `${endDateStr}T${endTime}:00`;
         eventBody.start = { dateTime: startDateTime, timeZone: tz };
-        eventBody.end = { dateTime: endDate.toISOString(), timeZone: tz };
+        eventBody.end = { dateTime: endDateTime, timeZone: tz };
       }
 
       // Add a popup reminder
@@ -163,6 +197,7 @@ export function registerTicklerTools(
           title: fullTitle,
           start: response.data.start?.dateTime ?? response.data.start?.date ?? due_date,
           end: response.data.end?.dateTime ?? response.data.end?.date ?? due_date,
+          timezone: response.data.start?.timeZone ?? response.data.end?.timeZone ?? (isAllDay ? null : tz),
           all_day: isAllDay,
           description,
           html_link: response.data.htmlLink ?? undefined,

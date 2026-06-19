@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: system-wide timezone correctness + location-driven multi-zone awareness (2026-06-19)
+Invariant enforced: every stored *instant* is UTC ISO; conversion happens only at the edges using the user's **effective** timezone — their GPS-derived *current* zone when fresh, else *home* (`settings.timezone`). New `@ll5/shared` `utils/timezone.ts` (`timezoneFromLocation` via **geo-tz**, pure `pickEffectiveTimezone`/`isTraveling`, `DEFAULT_WORKING_ZONES` = LA/Berlin/Jerusalem). Producer: gateway `processors/location.ts` derives `current_timezone`/`current_timezone_at` into `user_settings.settings` on a fresh, non-suspect fix. Consumers: `get_situation` now reports a `timezone_info` block (current/home/working_zones/traveling) and computes `time_period` in the effective zone; gateway schedulers resolve effective tz per tick (active-hours follow travel); FCM quiet-hours + day-boundary windows use it; `ll5-channel` message clock + `get_current_time` use it (was hardcoded `Asia/Jerusalem`). **Tickler bug root-caused + fixed**: `create_tickler` used `sessionTimezone()` (→ UTC in the google container, no `TZ` env) instead of the user's stored zone like `create_event` — banking 16:00 as UTC, firing 3h off; now uses the effective zone, `TZ` set on the google service as defense. Per-event Google `timeZone` retained (`calendar_events.timezone` keyword field). Storage audit confirmed all PG timestamps are `timestamptz` and instants are UTC — no migration needed (all-day calendar/`gtd_horizons` DATE naivety noted, fixed forward).
+
 ### FEATURE: watchdog now detects Google OAuth disconnect (2026-06-17)
 The watchdog had a blind spot: nothing verified Google stayed *connected*. `google` MCP `/health` is
 just `SELECT 1` (PG up), `mcp-health-monitor`'s `/health`+`tools/list` pass regardless of OAuth, and
