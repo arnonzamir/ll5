@@ -359,7 +359,9 @@ async function runTransition(
         road: geocode?.road ?? null,
         neighborhood: geocode?.neighborhood ?? null,
         bearingDeg: item.bearing_deg ?? null,
-        speedMps: item.speed_mps ?? null,
+        // The Android app currently sends `speed` (m/s); the canonical field is
+        // `speed_mps`. Accept either so motion classification works either way.
+        speedMps: item.speed_mps ?? item.speed ?? null,
       },
       wifi: wifiSignal,
       prior,
@@ -576,7 +578,9 @@ export async function processLocation(
   }
 
   // Device-reported speed (G3): convert m/s → km/h for the drift check.
-  const deviceSpeedKmh = item.speed_mps != null ? item.speed_mps * 3.6 : null;
+  // Accept the app's `speed` field as well as the canonical `speed_mps`.
+  const deviceSpeedMps = item.speed_mps ?? item.speed;
+  const deviceSpeedKmh = deviceSpeedMps != null ? deviceSpeedMps * 3.6 : null;
 
   // ---- Drift / teleport filtering (G1/G2/G6) via the shared helper ----------
   // Compare against the in-batch predecessor when provided; otherwise the ES

@@ -13,6 +13,9 @@ const PushLocationItemSchema = z.object({
   // them lets the deviation logic trust real fast travel instead of guessing
   // from successive GPS fixes alone.
   speed_mps: z.number().nonnegative().optional(),
+  // Alias: the Android app currently sends `speed` (m/s) instead of `speed_mps`.
+  // Accept both so motion classification works without waiting on an app update.
+  speed: z.number().nonnegative().optional(),
   bearing_deg: z.number().min(0).max(360).optional(),
   altitude_m: z.number().optional(),
 });

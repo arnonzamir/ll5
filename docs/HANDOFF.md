@@ -461,3 +461,5 @@ _health: reconnect_health_source tool — agent re-establishes a source session 
 _dashboard chat renders agent messages as GFM Markdown (react-markdown + remark-gfm + remark-breaks) — tables, bold, lists, code, links; user messages stay plain. See components/chat/markdown.tsx._
 
 _gateway accepts camera_photo push items (phone camera reel): processors/camera-photo.ts indexes into ll5_media (source:camera, taken_at + lat/lon) and surfaces a [Photo] system message for proactive-smart agent reaction. Gated by data_sources.camera_photos._
+
+- 2026-06-19: gateway accepts `speed` as alias for `speed_mps` (Android app sends `speed`); without it motion was always `unknown`. Android DTO follow-up: rename to `speed_mps` + add `bearing_deg`.
