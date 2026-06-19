@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Copy,
+  FileText,
   MessageSquareReply,
   Sparkles,
   type LucideIcon,
@@ -15,7 +16,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "@/lib/chat/constants";
-import type { Message, Reaction } from "@/lib/chat/types";
+import type { Attachment, Message, Reaction } from "@/lib/chat/types";
 import { uploadsUrl } from "@/lib/chat/format";
 import { Markdown } from "./markdown";
 
@@ -65,6 +66,24 @@ export function ReactionStrip({
         );
       })}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// File chip — non-image attachment, opens in a new tab.
+// ---------------------------------------------------------------------------
+
+function FileChip({ att }: { att: Attachment }) {
+  return (
+    <a
+      href={uploadsUrl(att.url)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mb-1.5 inline-flex max-w-full items-center gap-2 rounded-lg border border-ink-300/60 bg-surface-sunken px-3 py-2 text-ink-700 hover:bg-surface-page transition"
+    >
+      <FileText className="w-4 h-4 shrink-0 text-ink-400" />
+      <span className="text-[13px] truncate">{att.filename || "Download file"}</span>
+    </a>
   );
 }
 
@@ -208,6 +227,7 @@ export function MessageBubble({
 }: BubbleProps) {
   const isUser = m.role === "user";
   const images = m.metadata?.attachments?.filter((a) => a.type === "image") ?? [];
+  const files = m.metadata?.attachments?.filter((a) => a.type !== "image") ?? [];
   const isSummary = m.metadata?.kind === "conversation_summary";
 
   // ----- unboxed (coach) assistant rendering ---------------------------
@@ -232,6 +252,9 @@ export function MessageBubble({
                 onClick={() => window.open(uploadsUrl(att.url), "_blank")}
                 loading="lazy"
               />
+            ))}
+            {files.map((att, i) => (
+              <FileChip key={i} att={att} />
             ))}
             {isSummary && (
               <div className="text-[10px] uppercase tracking-wide text-coach-700 mb-1 font-mono">
@@ -296,6 +319,9 @@ export function MessageBubble({
               onClick={() => window.open(uploadsUrl(att.url), "_blank")}
               loading="lazy"
             />
+          ))}
+          {files.map((att, i) => (
+            <FileChip key={i} att={att} />
           ))}
           {isUser ? m.content : <Markdown content={m.content ?? ""} />}
         </div>

@@ -467,14 +467,21 @@ export async function sendChatMessage(args: {
   text: string;
   convId: string | null;
   replyToId?: string | null;
-  imageUrl?: string;
-  imageFilename?: string;
+  fileUrl?: string;
+  filename?: string;
+  mime?: string;
 }): Promise<{ ok: true; id: string; convId: string } | { ok: false; error: string }> {
   const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const now = new Date().toISOString();
 
-  const attachments = args.imageUrl
-    ? [{ type: "image", url: args.imageUrl, filename: args.imageFilename }]
+  // Derive attachment type from the MIME: image mimes → "image", else "file".
+  const attachments = args.fileUrl
+    ? [{
+        type: (args.mime ?? "").startsWith("image/") ? "image" : "file",
+        url: args.fileUrl,
+        filename: args.filename,
+        mime: args.mime,
+      }]
     : undefined;
 
   const echoed: Message = {

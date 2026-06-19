@@ -6,6 +6,7 @@ export interface Attachment {
   type: string;
   url: string;
   filename?: string;
+  mime?: string;
 }
 
 export interface Message {

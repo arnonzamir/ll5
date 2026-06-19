@@ -1,17 +1,46 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Send, X } from "lucide-react";
+import { FileText, ImagePlus, Send, X } from "lucide-react";
 import type { Message } from "@/lib/chat/types";
 import { uploadsUrl } from "@/lib/chat/format";
 
 interface Props {
-  onSend: (args: { text: string; imageUrl?: string; imageFilename?: string }) => Promise<void>;
+  onSend: (args: { text: string; fileUrl?: string; filename?: string; mime?: string }) => Promise<void>;
   sending: boolean;
   replyTo: Message | null;
   onCancelReply: () => void;
   onOpenPalette: () => void;
   onOpenNewConversation: () => void;
+}
+
+/** File input accept list: images plus the document types the gateway allows. */
+const ACCEPT_ATTACHMENTS =
+  "image/*,.pdf,.txt,.csv,.md,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rtf,.odt,.ods";
+
+/** A pending composer attachment. `preview` (object URL) is set for images only. */
+interface PendingAttachment {
+  file: File;
+  mime: string;
+  name: string;
+  preview?: string;
+}
+
+function makePending(file: File): PendingAttachment {
+  const mime = file.type || "";
+  const isImage = mime.startsWith("image/");
+  return {
+    file,
+    mime,
+    name: file.name,
+    preview: isImage ? URL.createObjectURL(file) : undefined,
+  };
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 const PLACEHOLDERS = [
@@ -37,7 +66,7 @@ export function Composer({
   onOpenNewConversation,
 }: Props) {
   const [text, setText] = useState("");
-  const [pendingImage, setPendingImage] = useState<{ file: File; preview: string } | null>(null);
+  const [pending, setPending] = useState<PendingAttachment | null>(null);
   const [uploading, setUploading] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -60,16 +89,16 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
   }, [text]);
 
-  // Paste-to-attach image.
+  // Paste-to-attach — prefer images, but accept any pasted file.
   useEffect(() => {
     const el = ta.current;
     if (!el) return;
     const onPaste = (e: ClipboardEvent) => {
       const files = Array.from(e.clipboardData?.files ?? []);
-      const image = files.find((f) => f.type.startsWith("image/"));
-      if (image) {
+      const file = files.find((f) => f.type.startsWith("image/")) ?? files[0];
+      if (file) {
         e.preventDefault();
-        setPendingImage({ file: image, preview: URL.createObjectURL(image) });
+        setPending(makePending(file));
       }
     };
     el.addEventListener("paste", onPaste);
@@ -78,31 +107,33 @@ export function Composer({
 
   async function handleSend() {
     const trimmed = text.trim();
-    if (!trimmed && !pendingImage) return;
+    if (!trimmed && !pending) return;
 
-    let imageUrl: string | undefined;
-    let imageFilename: string | undefined;
+    let fileUrl: string | undefined;
+    let filename: string | undefined;
+    let mime: string | undefined;
 
-    if (pendingImage) {
+    if (pending) {
       setUploading(true);
       try {
         const fd = new FormData();
-        fd.append("file", pendingImage.file);
+        fd.append("file", pending.file);
         const up = await fetch("/api/chat/upload", { method: "POST", body: fd });
         if (up.ok) {
           const d = (await up.json()) as { url: string; filename: string };
-          imageUrl = d.url;
-          imageFilename = d.filename;
+          fileUrl = d.url;
+          filename = d.filename;
+          mime = pending.mime;
         }
       } finally {
         setUploading(false);
-        URL.revokeObjectURL(pendingImage.preview);
-        setPendingImage(null);
+        if (pending.preview) URL.revokeObjectURL(pending.preview);
+        setPending(null);
       }
     }
 
     setText("");
-    await onSend({ text: trimmed, imageUrl, imageFilename });
+    await onSend({ text: trimmed, fileUrl, filename, mime });
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -160,21 +191,32 @@ export function Composer({
         </div>
       )}
 
-      {pendingImage && (
+      {pending && (
         <div className="mb-2 inline-flex h-14 items-center gap-2 rounded-lg bg-surface-sunken pr-2 pl-1">
-          <img
-            src={pendingImage.preview}
-            alt="Pending"
-            className="h-12 w-12 rounded object-cover"
-          />
-          <span className="text-xs text-ink-500 font-mono max-w-[140px] truncate">
-            {pendingImage.file.name}
-          </span>
+          {pending.preview ? (
+            <img
+              src={pending.preview}
+              alt="Pending"
+              className="h-12 w-12 rounded object-cover"
+            />
+          ) : (
+            <div className="flex h-12 w-12 items-center justify-center rounded bg-surface-page text-ink-400">
+              <FileText className="w-6 h-6" />
+            </div>
+          )}
+          <div className="flex flex-col min-w-0">
+            <span className="text-xs text-ink-700 font-mono max-w-[160px] truncate">
+              {pending.name}
+            </span>
+            <span className="text-[10px] text-ink-400 font-mono">
+              {formatBytes(pending.file.size)}
+            </span>
+          </div>
           <button
             className="p-1 text-ink-500 hover:text-ink-900"
             onClick={() => {
-              URL.revokeObjectURL(pendingImage.preview);
-              setPendingImage(null);
+              if (pending.preview) URL.revokeObjectURL(pending.preview);
+              setPending(null);
             }}
           >
             <X className="w-3.5 h-3.5" />
@@ -210,18 +252,18 @@ export function Composer({
             <input
               ref={fileInput}
               type="file"
-              accept="image/*"
+              accept={ACCEPT_ATTACHMENTS}
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) setPendingImage({ file: f, preview: URL.createObjectURL(f) });
+                if (f) setPending(makePending(f));
                 e.target.value = "";
               }}
             />
             <button
               className="p-1.5 rounded text-ink-400 hover:text-ink-900 hover:bg-surface-sunken"
               onClick={() => fileInput.current?.click()}
-              title="Attach image"
+              title="Attach file"
               type="button"
             >
               <ImagePlus className="w-4 h-4" />
@@ -238,7 +280,7 @@ export function Composer({
               ⌘K palette · ⌘N new · ⌘↵ send
             </span>
             <button
-              disabled={sending || uploading || (!text.trim() && !pendingImage)}
+              disabled={sending || uploading || (!text.trim() && !pending)}
               onClick={() => void handleSend()}
               className={
                 "inline-flex items-center gap-1.5 rounded-full h-8 pl-2.5 pr-3 text-[12px] " +

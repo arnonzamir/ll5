@@ -92,8 +92,8 @@ export function ChatRoot() {
   }, [convId, bootstrappedConvId]);
 
   const handleSend = useCallback(
-    async (args: { text: string; imageUrl?: string; imageFilename?: string }) => {
-      if (!args.text && !args.imageUrl) return;
+    async (args: { text: string; fileUrl?: string; filename?: string; mime?: string }) => {
+      if (!args.text && !args.fileUrl) return;
       setSending(true);
       try {
         const replyId = replyTo?.id ?? null;
@@ -102,8 +102,9 @@ export function ChatRoot() {
           text: args.text,
           convId: useChatStore.getState().convId,
           replyToId: replyId,
-          imageUrl: args.imageUrl,
-          imageFilename: args.imageFilename,
+          fileUrl: args.fileUrl,
+          filename: args.filename,
+          mime: args.mime,
         });
       } finally {
         setSending(false);

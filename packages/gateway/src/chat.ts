@@ -19,6 +19,21 @@ const PUBLIC_UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/public-u
 /** Force a safe, sniffing-proof extension for public files from the (allowlisted) mime. */
 const MIME_EXT: Record<string, string> = {
   'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
+  'application/pdf': 'pdf',
+  'text/plain': 'txt',
+  'text/csv': 'csv',
+  'text/markdown': 'md',
+  'application/json': 'json',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'application/rtf': 'rtf',
+  'application/vnd.oasis.opendocument.text': 'odt',
+  'application/vnd.oasis.opendocument.spreadsheet': 'ods',
+  'application/zip': 'zip',
 };
 
 /** A public upload is requested via `?public=1` (or `=true`) on /chat/upload. */
@@ -64,11 +79,30 @@ const storage = multer.diskStorage({
   },
 });
 
+const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_DOC_MIMES = [
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'text/markdown',
+  'application/json',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+  'application/rtf',
+  'application/vnd.oasis.opendocument.text',
+  'application/vnd.oasis.opendocument.spreadsheet',
+  'application/zip',
+];
+
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 25 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const allowed = [...ALLOWED_IMAGE_MIMES, ...ALLOWED_DOC_MIMES];
     if (allowed.includes(file.mimetype)) {
       cb(null, true);
     } else {
@@ -993,14 +1027,14 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
   });
 
   // ---------------------------------------------------------------------------
-  // POST /chat/upload — upload an image file
+  // POST /chat/upload — upload an image or document file
   // ---------------------------------------------------------------------------
   router.post('/upload', auth, (req: Request, res: Response, next: () => void) => {
     upload.single('file')(req, res, (err: unknown) => {
       if (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
-          res.status(413).json({ error: 'File too large. Maximum size is 10MB.' });
+          res.status(413).json({ error: 'File too large. Maximum size is 25MB.' });
           return;
         }
         res.status(400).json({ error: message });
