@@ -129,6 +129,7 @@ function makeAccountRepo(overrides: Partial<AccountRepository> = {}): AccountRep
     updateStatus: unimpl('updateStatus'),
     touchLastSeen: unimpl('touchLastSeen'),
     getMessageCountToday: unimpl('getMessageCountToday'),
+    countSentToRecipient: unimpl('countSentToRecipient'),
     logSentMessage: unimpl('logSentMessage'),
     createWhatsApp: unimpl('createWhatsApp'),
     ...overrides,
@@ -532,7 +533,8 @@ describe('send_whatsapp tool handler', () => {
   it('sends message when priority is agent; logs send under user_id', async () => {
     const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
     const logSentMessage = vi.fn(async () => undefined);
-    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage });
+    const countSentToRecipient = vi.fn(async () => 3);
+    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage, countSentToRecipient });
     const get = vi.fn(async () => makeConversation());
     const conversationRepo = makeConversationRepo({ get, touchLastMessage: vi.fn(async () => undefined) });
     mockGetConversationPriority.mockResolvedValue('agent');
@@ -556,7 +558,8 @@ describe('send_whatsapp tool handler', () => {
   it('appends @s.whatsapp.net for conversation lookup and forwards user_id to permission check', async () => {
     const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
     const logSentMessage = vi.fn(async () => undefined);
-    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage });
+    const countSentToRecipient = vi.fn(async () => 3);
+    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage, countSentToRecipient });
     const get = vi.fn(async () => null);
     const conversationRepo = makeConversationRepo({ get, touchLastMessage: vi.fn(async () => undefined) });
     mockGetConversationPriority.mockResolvedValue('agent');
@@ -579,7 +582,8 @@ describe('send_whatsapp tool handler', () => {
   it('preserves existing JID suffix in to field', async () => {
     const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
     const logSentMessage = vi.fn(async () => undefined);
-    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage });
+    const countSentToRecipient = vi.fn(async () => 3);
+    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage, countSentToRecipient });
     const get = vi.fn(async () => null);
     const conversationRepo = makeConversationRepo({ get, touchLastMessage: vi.fn(async () => undefined) });
     mockGetConversationPriority.mockResolvedValue('agent');
@@ -601,7 +605,8 @@ describe('send_whatsapp tool handler', () => {
 
   it('returns SEND_FAILED when Evolution API returns failure', async () => {
     const getWhatsApp = vi.fn(async () => makeWhatsAppAccount());
-    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage: vi.fn() });
+    const countSentToRecipient = vi.fn(async () => 3);
+    const accountRepo = makeAccountRepo({ getWhatsApp, logSentMessage: vi.fn(), countSentToRecipient });
     const get = vi.fn(async () => makeConversation());
     const conversationRepo = makeConversationRepo({ get, touchLastMessage: vi.fn(async () => undefined) });
     mockGetConversationPriority.mockResolvedValue('agent');

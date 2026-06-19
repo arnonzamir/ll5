@@ -8,6 +8,8 @@ import { DailyReviewScheduler } from './daily-review.js';
 import { TicklerAlertScheduler } from './tickler-alert.js';
 import { GTDHealthScheduler } from './gtd-health.js';
 import { WeeklyReviewReminder } from './weekly-review.js';
+import { CoachScanScheduler } from './coach-scan.js';
+import { CompositeTriggerScheduler } from './composite-triggers.js';
 import { MessageBatchReviewScheduler } from './message-batch-review.js';
 import { HeartbeatScheduler } from './heartbeat.js';
 import { JournalHealthScheduler } from './journal-health.js';
@@ -108,6 +110,17 @@ async function startSchedulersForUser(
   });
   weeklyReviewScheduler.start();
   schedulers.push(weeklyReviewScheduler);
+
+  // Coach scan — weekly STRATEGIC review (goals/narratives/commitments + the
+  // 2-4-week calendar horizon). Strategic counterpart to the tactical weekly
+  // review above; fires its own [Coach Scan] cue once per week.
+  const coachScanScheduler = new CoachScanScheduler(pgPool, {
+    scanDay: s('coach_scan_day', config.coachScanDay),
+    scanHour: s('coach_scan_hour', config.coachScanHour),
+    timezone, userId,
+  });
+  coachScanScheduler.start();
+  schedulers.push(coachScanScheduler);
 
   const messageBatchScheduler = new MessageBatchReviewScheduler(es, pgPool, {
     intervalMinutes: s('message_batch_minutes', config.messageBatchIntervalMinutes),
@@ -291,6 +304,18 @@ async function startSchedulersForUser(
   });
   responseTimeoutScheduler.start();
   schedulers.push(responseTimeoutScheduler);
+
+  // Composite triggers — event-driven proactivity that can't be fired from a
+  // single webhook: free-block-opened (M5) and important-contact-unanswered
+  // (R1). Ticks conservatively (~3 min) and de-dupes heavily so it surfaces a
+  // situation the moment it crosses threshold, NOT every tick. (The arrival
+  // composite L1 is fired straight from the location processor.)
+  const compositeTriggerScheduler = new CompositeTriggerScheduler(pgPool, es, googleClient, {
+    intervalMinutes: s('composite_trigger_minutes', config.compositeTriggerMinutes),
+    startHour, endHour, timezone, userId,
+  });
+  compositeTriggerScheduler.start();
+  schedulers.push(compositeTriggerScheduler);
 
   return schedulers;
 }

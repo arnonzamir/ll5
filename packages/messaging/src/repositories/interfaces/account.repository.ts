@@ -61,6 +61,17 @@ export interface AccountRepository {
   /** Get message count sent today for an account, scoped to the owning user. */
   getMessageCountToday(userId: string, accountId: string): Promise<number>;
 
+  /**
+   * Count prior outbound messages the agent has sent to a recipient on a
+   * platform, scoped to the owning user. Drives the first-contact send-gate:
+   * 0 means the agent has never messaged this recipient before.
+   */
+  countSentToRecipient(
+    userId: string,
+    platform: string,
+    recipient: string,
+  ): Promise<number>;
+
   /** Log a sent message. */
   logSentMessage(
     userId: string,

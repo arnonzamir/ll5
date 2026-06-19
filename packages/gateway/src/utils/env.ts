@@ -29,6 +29,11 @@ export interface EnvConfig {
   gtdHealthIntervalHours: number;
   weeklyReviewDay: number;
   weeklyReviewHour: number;
+  /** Coach-scan weekly strategic review — day-of-week (0=Sun) + hour. */
+  coachScanDay: number;
+  coachScanHour: number;
+  /** Composite-trigger evaluator tick cadence (minutes). */
+  compositeTriggerMinutes: number;
   messageBatchIntervalMinutes: number;
   journalConsolidationHour: number;
   fcmServerKey?: string;
@@ -148,6 +153,9 @@ export function loadEnv(): EnvConfig {
     gtdHealthIntervalHours: parseInt(process.env.GTD_HEALTH_INTERVAL_HOURS ?? '4', 10),
     weeklyReviewDay: parseInt(process.env.WEEKLY_REVIEW_DAY ?? '5', 10),
     weeklyReviewHour: parseInt(process.env.WEEKLY_REVIEW_HOUR ?? '14', 10),
+    coachScanDay: parseInt(process.env.COACH_SCAN_DAY ?? '0', 10),
+    coachScanHour: parseInt(process.env.COACH_SCAN_HOUR ?? '8', 10),
+    compositeTriggerMinutes: parseInt(process.env.COMPOSITE_TRIGGER_MINUTES ?? '3', 10),
     messageBatchIntervalMinutes: parseInt(process.env.MESSAGE_BATCH_INTERVAL_MINUTES ?? '30', 10),
     journalConsolidationHour: parseInt(process.env.JOURNAL_CONSOLIDATION_HOUR ?? '2', 10),
     fcmServerKey: process.env.FCM_SERVER_KEY,

@@ -8,6 +8,7 @@ import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
 import { writeNotableEvent } from './notable.js';
 import { gatewayKeyMutex } from '../utils/key-mutex.js';
+import { ArrivalCompositeEvaluator } from '../utils/composite-triggers.js';
 import {
   resolveLocation,
   gateAccuracy,
@@ -239,6 +240,16 @@ async function resolveBssidPlace(
 // ---------------------------------------------------------------------------
 const LOCATION_STATE_INDEX = 'll5_awareness_location_state';
 // TRANSITION_DEDUP_MS (anti-flap window) now lives in @ll5/shared.
+
+// Event-driven "Arrived + items here" composite (situation-check L1). Kept as a
+// single process-local instance so its per-place/day dedup persists across the
+// many location pushes that arrive between transitions. Lazily bound to the
+// first pool we see (one pool per process in practice).
+let arrivalEvaluator: ArrivalCompositeEvaluator | null = null;
+function getArrivalEvaluator(pool: Pool): ArrivalCompositeEvaluator {
+  if (!arrivalEvaluator) arrivalEvaluator = new ArrivalCompositeEvaluator(pool);
+  return arrivalEvaluator;
+}
 
 interface LocationState {
   user_id: string;
@@ -477,6 +488,22 @@ async function runTransition(
       pool, userId,
       `[Location] ${eventKind} — ${agentText}. motion=${motion}. ${quality}`,
     );
+
+    // 2b) Event-driven composite (situation-check L1): on a real ARRIVAL at a
+    // known place, immediately check for context-matched items here and fire a
+    // targeted [Situation] message if any — so the user hears about "you're at
+    // X, N items here" the moment they arrive, not at the next heartbeat. Fully
+    // non-blocking / self-deduping; the bare-arrival case (no items) stays
+    // silent so it never doubles up on the [Location] wake above.
+    if (isPlace && labelChanged) {
+      try {
+        await getArrivalEvaluator(pool).onArrival(userId, cur.label);
+      } catch (err) {
+        logger.debug('[location][transition] arrival composite skipped', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     // 3) Commit new state
     await setLocationState(es, userId, nextState);

@@ -125,6 +125,18 @@ export class PostgresAccountRepository extends BasePostgresRepository implements
     );
   }
 
+  async countSentToRecipient(
+    userId: string,
+    platform: string,
+    recipient: string,
+  ): Promise<number> {
+    return this.queryCount(
+      `SELECT COUNT(*) AS count FROM messaging_send_log
+       WHERE user_id = $1 AND platform = $2 AND recipient = $3`,
+      [userId, platform, recipient],
+    );
+  }
+
   async logSentMessage(
     userId: string,
     accountId: string,

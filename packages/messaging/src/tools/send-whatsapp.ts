@@ -16,11 +16,22 @@ export function registerSendWhatsAppTool(
 ): void {
   server.tool(
     'send_whatsapp',
-    'Send a WhatsApp message to a contact or group via Evolution API.',
+    'Send a WhatsApp message to a contact or group via Evolution API. ' +
+      'FIRST-CONTACT GATE: the very first message to a recipient the agent has ' +
+      'never messaged before is blocked unless confirmed:true. On a block, surface ' +
+      'the drafted message to the user, get their explicit approval, then call again ' +
+      'with confirmed:true. Established threads (any prior outbound) send normally.',
     {
       account_id: z.string().describe('WhatsApp account UUID'),
       to: z.string().describe('Recipient phone number (with country code) or group JID'),
       message: z.string().describe('Message text to send'),
+      confirmed: z
+        .boolean()
+        .optional()
+        .describe(
+          'Set true ONLY after the user explicitly approved a first message to a ' +
+            'new contact. Ignored for established threads. Defaults to false.',
+        ),
     },
     async (params) => {
       const userId = getUserId();
@@ -51,6 +62,35 @@ export function registerSendWhatsAppTool(
         };
       }
       const conversation = await conversationRepo.get(userId, 'whatsapp', conversationId);
+
+      // First-contact send-gate: a first message to a recipient the agent has
+      // never messaged before must be explicitly approved by the user. The agent
+      // can only set confirmed:true after surfacing the draft and getting a yes.
+      // TODO(follow-up): make this non-bypassable — gate on a real user-approval
+      // record (user approves in-app) rather than trusting the agent to set
+      // confirmed:true. Today this is pragmatic enforcement at the tool layer.
+      const priorSends = await accountRepo.countSentToRecipient(userId, 'whatsapp', params.to);
+      if (priorSends === 0 && params.confirmed !== true) {
+        logAudit({
+          user_id: userId,
+          source: 'messaging',
+          action: 'send_blocked',
+          entity_type: 'whatsapp_message',
+          entity_id: params.to,
+          summary: `Blocked first-contact WhatsApp message to ${params.to} (needs approval)`,
+          metadata: { account_id: params.account_id, to: params.to, reason: 'first_contact_needs_approval' },
+        });
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              sent: false,
+              blocked: 'first_contact_needs_approval',
+              message: `First message to ${params.to} — get the user's explicit approval, then resend with confirmed:true.`,
+            }, null, 2),
+          }],
+        };
+      }
 
       // Send via Evolution API
       const client = new EvolutionClient(account.api_url, account.instance_name, account.api_key);

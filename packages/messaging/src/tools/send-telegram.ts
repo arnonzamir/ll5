@@ -16,12 +16,23 @@ export function registerSendTelegramTool(
 ): void {
   server.tool(
     'send_telegram',
-    'Send a Telegram message to a chat via Bot API.',
+    'Send a Telegram message to a chat via Bot API. ' +
+      'FIRST-CONTACT GATE: the very first message to a chat the agent has never ' +
+      'messaged before is blocked unless confirmed:true. On a block, surface the ' +
+      'drafted message to the user, get their explicit approval, then call again ' +
+      'with confirmed:true. Established threads (any prior outbound) send normally.',
     {
       account_id: z.string().describe('Telegram account UUID'),
       chat_id: z.string().describe('Telegram chat ID (user, group, or channel)'),
       message: z.string().describe('Message text to send'),
       parse_mode: z.enum(['MarkdownV2', 'HTML', 'plain']).optional().describe('Message formatting (default: plain)'),
+      confirmed: z
+        .boolean()
+        .optional()
+        .describe(
+          'Set true ONLY after the user explicitly approved a first message to a ' +
+            'new chat. Ignored for established threads. Defaults to false.',
+        ),
     },
     async (params) => {
       const userId = getUserId();
@@ -51,6 +62,35 @@ export function registerSendTelegramTool(
         };
       }
       const conversation = await conversationRepo.get(userId, 'telegram', params.chat_id);
+
+      // First-contact send-gate: a first message to a chat the agent has never
+      // messaged before must be explicitly approved by the user. The agent can
+      // only set confirmed:true after surfacing the draft and getting a yes.
+      // TODO(follow-up): make this non-bypassable — gate on a real user-approval
+      // record (user approves in-app) rather than trusting the agent to set
+      // confirmed:true. Today this is pragmatic enforcement at the tool layer.
+      const priorSends = await accountRepo.countSentToRecipient(userId, 'telegram', params.chat_id);
+      if (priorSends === 0 && params.confirmed !== true) {
+        logAudit({
+          user_id: userId,
+          source: 'messaging',
+          action: 'send_blocked',
+          entity_type: 'telegram_message',
+          entity_id: params.chat_id,
+          summary: `Blocked first-contact Telegram message to chat ${params.chat_id} (needs approval)`,
+          metadata: { account_id: params.account_id, chat_id: params.chat_id, reason: 'first_contact_needs_approval' },
+        });
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              sent: false,
+              blocked: 'first_contact_needs_approval',
+              message: `First message to ${params.chat_id} — get the user's explicit approval, then resend with confirmed:true.`,
+            }, null, 2),
+          }],
+        };
+      }
 
       // Send via Telegram Bot API
       const client = new TelegramClient(account.bot_token);

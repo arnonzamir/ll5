@@ -294,3 +294,5 @@ ll5/
 <!-- 2026-06-17: Google-OAuth disconnect detection. scheduler/calendar-sync.ts now doubles as the OAuth liveness probe: getEvents success → clearAlert('service.google-auth'); auth failure → raiseAlert critical (isGoogleAuthError classifier: invalid_grant / "account not connected" / "refresh Google access token"; NOT bare 401/403=MCP key). ES write split into its own phase (ES error ≠ auth). Constructor +pgPool (index.ts passes it). Closes the blind spot where google /health (SELECT 1) + mcp-health /health+tools-list all stay green on a dead token. +__tests__/calendar-sync-auth.test.ts (5). Alert instructs agent to get_auth_url + push one-tap reconnect link (web+phone). -->
 
 _2026-06-19: location speed alias (`speed`↔`speed_mps`) in gateway push-data.ts/location.ts; agent must set push_to_user level on location surfaces._
+
+_2026-06-20: gateway scheduler/coach-scan.ts (weekly cue), scheduler/composite-triggers.ts + utils/composite-triggers.ts (event-driven situations); messaging send-gate on send tools._
