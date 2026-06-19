@@ -43,6 +43,19 @@ describe('resolveLocation — fusion tiers', () => {
     expect(r).toMatchObject({ label: 'Zikhron Yaakov', labelKind: 'city' });
   });
 
+  it('DRIVE-PAST FIX: a place match while DRIVING is a fly-by → city-level, not "at place"', () => {
+    // Fresh GPS within the place radius (matchedPlace=Home) but moving at driving
+    // speed — you're driving past, not visiting. Must NOT label you "at Home".
+    const r = resolveLocation({ gps: gps({ speedMps: 15 }), wifi: null });
+    expect(r.place).toBeNull();
+    expect(r).toMatchObject({ label: 'Zikhron Yaakov', labelKind: 'city' });
+  });
+
+  it('a SLOW fix within the place radius still resolves to the place (a real visit)', () => {
+    const r = resolveLocation({ gps: gps({ speedMps: 0.5 }), wifi: null });
+    expect(r).toMatchObject({ place: 'Home', labelKind: 'place' });
+  });
+
   it('non-confident wifi does NOT anchor', () => {
     const r = resolveLocation({
       gps: gps({ matchedPlace: null }),

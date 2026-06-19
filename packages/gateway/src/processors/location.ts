@@ -6,7 +6,6 @@ import { reverseGeocode } from '../utils/geocoding.js';
 import type { GeocodingResult } from '../utils/geocoding.js';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage } from '../utils/system-message.js';
-import { sendFCMNotification } from '../utils/fcm-sender.js';
 import { writeNotableEvent } from './notable.js';
 import { gatewayKeyMutex } from '../utils/key-mutex.js';
 import {
@@ -458,23 +457,26 @@ async function runTransition(
       },
     });
 
-    // 2) Agent context (no FCM — the gateway sends the user push directly below).
-    // The agent always gets the USEFUL description, not a bare city. Quality tag:
-    // a known-place match is high confidence; a geocoded city label is coarse.
+    // 2) Wake the agent with a CLEARLY-LABELED location event. The agent — not the
+    // gateway — now owns the decision of whether to notify the user and how to word
+    // it (see the agent prompt's Location Intelligence section). We hand it the event
+    // kind (arrived / left / stopped / en route), the rich description, and the motion
+    // so it can recognize arrivals & departures and name the travel mode itself.
+    const wasPlace = state?.kind === 'place';
+    let eventKind: string;
+    if (isPlace && labelChanged) eventKind = `Arrived at ${cur.label}`;
+    else if (wasPlace && labelChanged && !isPlace) eventKind = `Left ${prevLabel}`;
+    else if (stoppedNow) eventKind = 'Stopped';
+    else if (isPulse) eventKind = 'En route';
+    else eventKind = 'Update';
     const agentText = isPlace ? phraseArrival(cur) : description;
-    const ctx = prevLabel && labelChanged ? ` (was ${prevLabel})` : '';
-    const quality = isPlace ? ' [place match]' : ' [city-level]';
-    await insertSystemMessage(pool, userId, `[Location] ${agentText}${ctx}.${quality}`);
+    const quality = isPlace ? '[place match]' : '[city-level]';
+    await insertSystemMessage(
+      pool, userId,
+      `[Location] ${eventKind} — ${agentText}. motion=${motion}. ${quality}`,
+    );
 
-    // 3) Direct push to the user
-    await sendFCMNotification(pool, userId, {
-      title: 'LL5',
-      body: pushBody,
-      type: 'location',
-      notification_level: 'notify',
-    });
-
-    // 4) Commit new state
+    // 3) Commit new state
     await setLocationState(es, userId, nextState);
 
     logger.info('[location][transition] location update pushed', {

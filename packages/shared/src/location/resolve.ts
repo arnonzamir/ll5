@@ -4,6 +4,7 @@ import {
   WIFI_FRESH_MS,
   WIFI_CONNECTED_ANCHOR_MS,
   DEPARTURE_ACCURACY_M,
+  DRIVING_SPEED_MPS,
 } from './constants.js';
 import { describeLocation } from './describe.js';
 import type {
@@ -40,7 +41,12 @@ export function resolveLocation(input: ResolveInput): ResolvedLocation {
   // trusted without wifi; "usable" = stale but still good enough to place you.
   const gpsFresh = !!gps && gps.ageMs < GPS_FRESH_MS;
   const gpsUsable = !!gps && gps.ageMs < GPS_STALE_USABLE_MS;
-  const gpsPlace: KnownPlaceMatch | null = gps?.matchedPlace ?? null;
+  // A known place matched only by GPS proximity (you're within the ~100m place
+  // radius) while DRIVING is a fly-by, not a visit — suppress it so we never label
+  // you "at X" when you're just driving past. A genuine visit re-registers once you
+  // slow/stop, or via a connected-wifi anchor (which a drive-by never trips).
+  const drivingThrough = !!gps && gps.speedMps != null && gps.speedMps >= DRIVING_SPEED_MPS;
+  const gpsPlace: KnownPlaceMatch | null = drivingThrough ? null : (gps?.matchedPlace ?? null);
   const ageS = gps ? Math.floor(gps.ageMs / 1000) : null;
 
   // A CONNECTED wifi event anchors you to its (confident) place until a disconnect

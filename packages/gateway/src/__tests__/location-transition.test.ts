@@ -79,8 +79,11 @@ describe('place transition — wifi anchor + hysteresis (no home flapping)', () 
   it('DOES transition to city on a clean, good-accuracy fix with no wifi anchor (real departure)', async () => {
     const es = makeEs({ wifiConnectedHome: false });
     await processLocation(es, USER, loc({ accuracy_m: 20, lat: 32.05, lon: 34.05 }), undefined, pool, null);
-    expect(sendFCMNotification).toHaveBeenCalledTimes(1);
+    // Gateway no longer pushes the user directly — it wakes the agent with a
+    // labeled event and lets the agent decide whether/how to notify.
     expect(insertSystemMessage).toHaveBeenCalledTimes(1);
+    expect(insertSystemMessage.mock.calls[0][2] as string).toContain('Left Home');
+    expect(sendFCMNotification).not.toHaveBeenCalled();
   });
 });
 
@@ -111,25 +114,30 @@ describe('drive cadence — stops + trip pulse, not town-by-town', () => {
     mockGeocode.mockResolvedValueOnce({ address: 'hwy', city: 'Kfar Saba', road: 'Route 6' });
     const es = makeDriveEs({ last_pulse_at: Date.now() - 60_000 });
     await processLocation(es, USER, loc({ accuracy_m: 20, lat: 32.2, lon: 34.9, speed_mps: 25, bearing_deg: 180 }), undefined, pool, null);
+    expect(insertSystemMessage).not.toHaveBeenCalled();
     expect(sendFCMNotification).not.toHaveBeenCalled();
   });
 
-  it('EMITS one rich trip pulse once the pulse window has elapsed', async () => {
+  it('WAKES the agent with one rich "En route" pulse once the pulse window has elapsed', async () => {
     mockGeocode.mockResolvedValueOnce({ address: 'hwy', city: 'Kfar Saba', road: 'Route 6' });
     const es = makeDriveEs({ last_pulse_at: Date.now() - 15 * 60_000 });
     await processLocation(es, USER, loc({ accuracy_m: 20, lat: 32.2, lon: 34.9, speed_mps: 25, bearing_deg: 180 }), undefined, pool, null);
-    expect(sendFCMNotification).toHaveBeenCalledTimes(1);
-    const body = sendFCMNotification.mock.calls[0][2].body as string;
-    expect(body).toContain('Route 6');
-    expect(body.toLowerCase()).toContain('heading south');
+    expect(insertSystemMessage).toHaveBeenCalledTimes(1);
+    const msg = insertSystemMessage.mock.calls[0][2] as string;
+    expect(msg).toContain('En route');
+    expect(msg).toContain('Route 6');
+    expect(msg.toLowerCase()).toContain('heading south');
+    expect(sendFCMNotification).not.toHaveBeenCalled();
   });
 
-  it('PUSHES when you stop (driving → stationary), even within the pulse window', async () => {
+  it('WAKES the agent with a "Stopped" event when you stop (driving → stationary), even within the pulse window', async () => {
     mockGeocode.mockResolvedValueOnce({ address: 'side st', city: 'Kfar Saba', road: 'Weizmann St' });
     const es = makeDriveEs({ last_pulse_at: Date.now() - 60_000 });
     await processLocation(es, USER, loc({ accuracy_m: 20, lat: 32.2, lon: 34.9, speed_mps: 0 }), undefined, pool, null);
-    expect(sendFCMNotification).toHaveBeenCalledTimes(1);
-    const body = sendFCMNotification.mock.calls[0][2].body as string;
-    expect(body).toContain('Weizmann St');
+    expect(insertSystemMessage).toHaveBeenCalledTimes(1);
+    const msg = insertSystemMessage.mock.calls[0][2] as string;
+    expect(msg).toContain('Stopped');
+    expect(msg).toContain('Weizmann St');
+    expect(sendFCMNotification).not.toHaveBeenCalled();
   });
 });
