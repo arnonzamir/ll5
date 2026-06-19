@@ -92,7 +92,8 @@ export class DailyReviewScheduler {
 
       const [todayEvents, ticklers] = await Promise.all([
         this.googleClient.getEvents(startOfDay.toISOString(), endOfDay.toISOString()),
-        this.googleClient.getTicklers(startOfDay.toISOString(), endOfTomorrow.toISOString()),
+        this.googleClient.getTicklers(startOfDay.toISOString(), endOfTomorrow.toISOString())
+          .then((ts) => ts.filter((t) => (t.kind ?? 'reminder') !== 'instruction')),
       ]);
 
       const lines: string[] = [

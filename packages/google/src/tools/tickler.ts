@@ -120,8 +120,11 @@ export function registerTicklerTools(
       description: z.string().optional().describe('Additional context or notes'),
       category: z.string().optional().describe('Category: health, admin, planning, financial, social, errands'),
       recurrence: z.string().optional().describe('Recurrence pattern. Friendly names: "daily", "weekly", "weekdays", "monthly", "yearly". Or a raw RRULE string like "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR". Omit for one-off ticklers.'),
+      kind: z.enum(['reminder', 'instruction']).optional().describe('"reminder" (default) = a user-facing nudge that surfaces to the user when due (a normal tickler). "instruction" = a private note to your FUTURE SELF that fires as an [Agent Instruction] system message — NO user popup, agent-private. Use it to schedule your own review/planning at a contextual lead time you choose ("consider summer plans — vacations, kids\' activities", "plan Itamar\'s gift, 2 weeks ahead"). An instruction\'s `description` MUST be complete and self-contained: WHAT to do, WHEN and WHY you scheduled it (and on what date), the anchor it relates to, and every bit of context a future session needs to act WITHOUT re-deriving.'),
     },
-    async ({ title, due_date, due_time, description, category, recurrence }) => {
+    async ({ title, due_date, due_time, description, category, recurrence, kind }) => {
+      const ticklerKind = kind ?? 'reminder';
+      const isInstruction = ticklerKind === 'instruction';
       const userId = getUserId();
       const calendarId = await findTicklerCalendar(config, tokenRepo, calendarConfigRepo, userId);
       const auth = await getAuthenticatedClient(config, tokenRepo, userId);
@@ -143,10 +146,18 @@ export function registerTicklerTools(
       const resolvedTime = effectiveTime ?? (isAllDay ? null : '08:00');
 
       const eventBody: Record<string, unknown> = {
-        summary: fullTitle,
+        summary: isInstruction ? `[agent] ${fullTitle}` : fullTitle,
         description: description ?? undefined,
-        colorId: '4', // flamingo in Google Calendar color IDs
+        // flamingo for user reminders, blueberry for agent instructions — so the
+        // two are visually distinguishable on the user's calendar.
+        colorId: isInstruction ? '9' : '4',
       };
+
+      // Mark agent instructions so the sweep + read paths can route them as
+      // agent-private (an [Agent Instruction] system message, no user popup).
+      if (isInstruction) {
+        eventBody.extendedProperties = { private: { ll5_kind: 'instruction' } };
+      }
 
       if (isAllDay) {
         // All-day event: end date is the next day
@@ -166,13 +177,16 @@ export function registerTicklerTools(
         eventBody.end = { dateTime: endDateTime, timeZone: tz };
       }
 
-      // Add a popup reminder
-      eventBody.reminders = {
-        useDefault: false,
-        overrides: [
-          { method: 'popup', minutes: isAllDay ? 480 : 30 }, // 8h before all-day, 30min before timed
-        ],
-      };
+      // User reminders get a popup; agent instructions get NONE (they must not
+      // buzz the user — they fire as an agent-private [Agent Instruction]).
+      eventBody.reminders = isInstruction
+        ? { useDefault: false, overrides: [] }
+        : {
+            useDefault: false,
+            overrides: [
+              { method: 'popup', minutes: isAllDay ? 480 : 30 }, // 8h before all-day, 30min before timed
+            ],
+          };
 
       // Add recurrence rule if specified
       const rrule = resolveRecurrence(recurrence);
@@ -202,6 +216,7 @@ export function registerTicklerTools(
           description,
           html_link: response.data.htmlLink ?? undefined,
           status: 'confirmed',
+          kind: ticklerKind,
         }, true);
       }
 
@@ -211,6 +226,7 @@ export function registerTicklerTools(
           text: JSON.stringify({
             event_id: response.data.id ?? '',
             title: fullTitle,
+            kind: ticklerKind,
             due_date,
             due_time: due_time ?? 'all-day',
             recurring: !!rrule,
@@ -255,6 +271,7 @@ export function registerTicklerTools(
           const ticklers = docs.map((d) => ({
             event_id: d.google_event_id ?? '',
             title: d.title,
+            kind: d.kind ?? 'reminder',
             start: d.start_time,
             end: d.end_time,
             all_day: d.all_day,
@@ -298,6 +315,7 @@ export function registerTicklerTools(
       const ticklers = (response.data.items ?? []).map((event) => ({
         event_id: event.id ?? '',
         title: event.summary ?? '',
+        kind: (event.extendedProperties?.private?.ll5_kind as string | undefined) ?? 'reminder',
         start: event.start?.dateTime ?? event.start?.date ?? '',
         end: event.end?.dateTime ?? event.end?.date ?? '',
         all_day: !event.start?.dateTime,

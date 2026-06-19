@@ -25,7 +25,11 @@ interface TicklerEvent {
   all_day: boolean;
   description: string | null;
   status: string;
+  /** 'reminder' (user-facing) | 'instruction' (agent-private review note). */
+  kind?: string;
 }
+
+export type { TicklerEvent };
 
 /**
  * Simple HTTP client for the Google MCP REST API endpoints.

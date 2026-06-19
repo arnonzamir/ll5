@@ -106,6 +106,7 @@ export const AWARENESS_INDICES: IndexDefinition[] = [
         start_time: { type: 'date' },
         end_time: { type: 'date' },
         timezone: { type: 'keyword' },
+        kind: { type: 'keyword' },
         location: { type: 'text' },
         calendar_name: { type: 'keyword' },
         calendar_id: { type: 'keyword' },

@@ -420,6 +420,7 @@ export async function startServer(): Promise<void> {
       const events = (response.data.items ?? []).map((event) => ({
         event_id: event.id ?? '',
         title: event.summary ?? '',
+        kind: (event.extendedProperties?.private?.ll5_kind as string | undefined) ?? 'reminder',
         start: event.start?.dateTime ?? event.start?.date ?? '',
         end: event.end?.dateTime ?? event.end?.date ?? '',
         all_day: !event.start?.dateTime,

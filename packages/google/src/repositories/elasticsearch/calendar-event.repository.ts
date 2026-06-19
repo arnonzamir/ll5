@@ -23,6 +23,8 @@ export interface CalendarEventDoc {
   recurring?: boolean;
   is_free_busy?: boolean;
   is_tickler?: boolean;
+  /** For ticklers: 'reminder' (user-facing) | 'instruction' (agent-private review note). */
+  kind?: string | null;
   attendees?: string[];
   attendees_detail?: Array<{ email: string; name?: string | null; response_status?: string }>;
   created_at: string;
@@ -156,6 +158,7 @@ export class ESCalendarEventRepository {
       status?: string;
       recurring?: boolean;
       is_free_busy?: boolean;
+      kind?: string | null;
     },
     isTickler: boolean = false,
   ): Promise<void> {
@@ -181,6 +184,7 @@ export class ESCalendarEventRepository {
       recurring: event.recurring ?? false,
       is_free_busy: event.is_free_busy ?? false,
       is_tickler: isTickler,
+      kind: event.kind ?? null,
       attendees: event.attendees?.map((a) => a.name ?? a.email) ?? [],
       attendees_detail: event.attendees,
       created_at: now,

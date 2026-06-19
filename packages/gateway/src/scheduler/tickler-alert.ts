@@ -97,31 +97,56 @@ export class TicklerAlertScheduler {
         twoHoursLater.toISOString(),
       );
 
-      // Filter out already-alerted ticklers
+      // Filter out already-alerted ticklers, then mark all as alerted.
       const newTicklers = ticklers.filter((t) => !this.alertedIds.has(t.event_id));
       if (newTicklers.length === 0) return;
+      for (const t of newTicklers) this.alertedIds.add(t.event_id);
 
-      const lines: string[] = [
-        `[Tickler Alert] ${newTicklers.length} tickler${newTicklers.length > 1 ? 's' : ''} due within the next 2 hours:`,
-      ];
+      // Route by kind: user-facing reminders vs agent-private instructions.
+      const reminders = newTicklers.filter((t) => (t.kind ?? 'reminder') !== 'instruction');
+      const instructions = newTicklers.filter((t) => (t.kind ?? 'reminder') === 'instruction');
 
-      for (const tickler of newTicklers) {
-        const due = tickler.all_day
-          ? 'today'
-          : this.formatTime(tickler.start);
-        lines.push(`- ${tickler.title} (due: ${due})`);
-        this.alertedIds.add(tickler.event_id);
+      if (reminders.length > 0) {
+        const lines: string[] = [
+          `[Tickler Alert] ${reminders.length} tickler${reminders.length > 1 ? 's' : ''} due within the next 2 hours:`,
+        ];
+        for (const tickler of reminders) {
+          const due = tickler.all_day ? 'today' : this.formatTime(tickler.start);
+          lines.push(`- ${tickler.title} (due: ${due})`);
+        }
+        lines.push('');
+        lines.push('Bring the most time-sensitive one to the user now with a concrete next step. Don\'t just acknowledge silently.');
+
+        const evt = createSchedulerEvent('tickler_alert');
+        await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), {
+          title: 'Tickler Alert',
+          type: 'tickler_alert',
+          priority: 'high',
+        }, evt);
+        logger.info('[TicklerAlertScheduler][tick] Tickler alert sent', { count: reminders.length });
       }
-      lines.push('');
-      lines.push('Bring the most time-sensitive one to the user now with a concrete next step. Don\'t just acknowledge silently.');
 
-      const evt = createSchedulerEvent('tickler_alert');
-      await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), {
-        title: 'Tickler Alert',
-        type: 'tickler_alert',
-        priority: 'high',
-      }, evt);
-      logger.info('[TicklerAlertScheduler][tick] Tickler alert sent', { count: newTicklers.length });
+      // Agent-private instructions: a review YOU scheduled for yourself. Fire one
+      // message each (each carries its own complete context), framed as a note to
+      // self — not a user reminder, no phone push.
+      for (const ins of instructions) {
+        const due = ins.all_day ? 'today' : this.formatTime(ins.start);
+        const body = [
+          `[Agent Instruction] A review you scheduled for yourself is due (${due}):`,
+          '',
+          (ins.description?.trim() || ins.title),
+          '',
+          'This is your own note to yourself, not a user reminder. Carry it out now (review / plan / consider, as it says) using the context it carries. Surface something to the user only if your review concludes it deserves their attention; otherwise journal the outcome. A recurring instruction fires again next cycle.',
+        ].join('\n');
+
+        const evt = createSchedulerEvent('agent_instruction');
+        await insertSystemMessage(this.pool, this.config.userId, body, {
+          title: 'Agent Instruction',
+          type: 'agent_instruction',
+          priority: 'normal',
+        }, evt);
+        logger.info('[TicklerAlertScheduler][tick] Agent instruction surfaced', { event_id: ins.event_id });
+      }
     } catch (err) {
       logger.warn('[TicklerAlertScheduler][tick] Tickler alert tick failed', {
         error: err instanceof Error ? err.message : String(err),

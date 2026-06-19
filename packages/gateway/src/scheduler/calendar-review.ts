@@ -124,7 +124,8 @@ export class CalendarReviewScheduler {
 
     const [todayEvents, ticklers] = await Promise.all([
       this.googleClient.getEvents(startOfDay.toISOString(), endOfDay.toISOString()),
-      this.googleClient.getTicklers(startOfDay.toISOString(), endOfTomorrow.toISOString()),
+      this.googleClient.getTicklers(startOfDay.toISOString(), endOfTomorrow.toISOString())
+        .then((ts) => ts.filter((t) => (t.kind ?? 'reminder') !== 'instruction')),
     ]);
 
     const dayName = now.toLocaleDateString('en-US', {
@@ -181,7 +182,7 @@ export class CalendarReviewScheduler {
       this.googleClient.getTicklers(
         startOfDay.toISOString(),
         endOfDay.toISOString(),
-      ),
+      ).then((ts) => ts.filter((t) => (t.kind ?? 'reminder') !== 'instruction')),
     ]);
 
     // Only send a message if there are upcoming events or ticklers
