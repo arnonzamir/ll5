@@ -12,10 +12,17 @@ const PushLocationItemSchema = z.object({
   // Device-reported motion (G3). The phone already collects these; accepting
   // them lets the deviation logic trust real fast travel instead of guessing
   // from successive GPS fixes alone.
-  speed_mps: z.number().nonnegative().optional(),
-  // Alias: the Android app currently sends `speed` (m/s) instead of `speed_mps`.
-  // Accept both so motion classification works without waiting on an app update.
-  speed: z.number().nonnegative().optional(),
+  // nullable: the app sends an explicit null when speed is unknown (never a fake 0).
+  speed_mps: z.number().nonnegative().nullable().optional(),
+  // Alias: older app builds send `speed` (m/s) instead of `speed_mps`. Accept both.
+  speed: z.number().nonnegative().nullable().optional(),
+  // Provenance: where the device's speed came from ('gnss' = GNSS Doppler, trustworthy;
+  // 'derived' = differenced from successive fixes on-device). null/absent = unknown.
+  speed_source: z.enum(['gnss', 'derived']).nullable().optional(),
+  // Formal motion label from the Android Activity Recognition / Transition API, and
+  // its source. Far more reliable than inferring motion from (often-zero) speed.
+  motion: z.enum(['in_vehicle', 'on_bicycle', 'walking', 'running', 'still']).nullable().optional(),
+  motion_source: z.enum(['activity_recognition']).nullable().optional(),
   bearing_deg: z.number().min(0).max(360).optional(),
   altitude_m: z.number().optional(),
 });

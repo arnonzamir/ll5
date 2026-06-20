@@ -308,6 +308,32 @@ async function setLocationState(es: Client, userId: string, state: Omit<Location
   });
 }
 
+/** Map the device's Activity-Recognition label to a human motion word. */
+function mapDeviceMotion(label: string | null | undefined): string | null {
+  switch (label) {
+    case 'in_vehicle': return 'driving';
+    case 'on_bicycle': return 'cycling';
+    case 'walking': return 'walking';
+    case 'running': return 'running';
+    case 'still': return 'stationary';
+    default: return null;
+  }
+}
+
+/**
+ * Speed + motion with PROVENANCE, resolved by the processor and threaded to the
+ * transition so the agent (and the stored doc) can tell where each value came from.
+ */
+interface MotionInfo {
+  /** Effective speed (m/s): device GNSS Doppler or gateway-derived, whichever is known/higher. */
+  mps: number;
+  /** Where `mps` came from: 'gnss' (device Doppler) | 'derived' (differenced fixes) | null. */
+  speedSource: 'gnss' | 'derived' | null;
+  /** Human motion word from the device's Activity Recognition label ('driving'/'cycling'/…), if any. */
+  deviceMotion: string | null;
+  motionSource: 'activity_recognition' | null;
+}
+
 /**
  * Detect a place/region transition and notify the user.
  * Awaited (not fire-and-forget) so the per-user state read/write is serialized
@@ -323,14 +349,14 @@ async function detectPlaceTransitionAndNotify(
   geocode: GeocodingResult | null,
   placeMatch: PlaceMatchResult | null,
   wifiSignal: WifiSignal | undefined,
-  movingMps: number,
+  motionInfo: MotionInfo,
 ): Promise<void> {
   // Serialize the per-user state read-modify-write (G5): concurrent webhooks for
   // the same user must not interleave a read with another's write, or we'd
   // double-fire the transition push / clobber last_push_at.
   try {
     await gatewayKeyMutex.runExclusive(`location-state:${userId}`, async () => {
-      await runTransition(es, pool, userId, item, geocode, placeMatch, wifiSignal, movingMps);
+      await runTransition(es, pool, userId, item, geocode, placeMatch, wifiSignal, motionInfo);
     });
   } catch (err) {
     logger.warn('[location][transition] transition detection failed (non-blocking)', {
@@ -347,7 +373,7 @@ async function runTransition(
   geocode: GeocodingResult | null,
   placeMatch: PlaceMatchResult | null,
   wifiSignal: WifiSignal | undefined,
-  movingMps: number,
+  motionInfo: MotionInfo,
 ): Promise<void> {
     const state = await getLocationState(es, userId);
 
@@ -376,7 +402,7 @@ async function runTransition(
         // Effective speed: the processor already merged device-reported with the
         // DERIVED speed (distance ÷ time from the last fix), so motion reads
         // "driving" even when the phone reports no speed.
-        speedMps: movingMps > 0 ? movingMps : (item.speed_mps ?? item.speed ?? null),
+        speedMps: motionInfo.mps > 0 ? motionInfo.mps : (item.speed_mps ?? item.speed ?? null),
       },
       wifi: wifiSignal,
       prior,
@@ -488,9 +514,16 @@ async function runTransition(
     else eventKind = 'Update';
     const agentText = isPlace ? phraseArrival(cur) : description;
     const quality = isPlace ? '[place match]' : '[city-level]';
+    // Motion + speed WITH PROVENANCE so the agent can trust (and name) the mode:
+    // the device's Activity-Recognition label wins over the speed-inferred one.
+    const finalMotion = motionInfo.deviceMotion ?? motion;
+    const motionSrc = motionInfo.deviceMotion ? 'activity' : 'inferred';
+    const speedStr = motionInfo.mps > 0
+      ? ` speed=${Math.round(motionInfo.mps * 3.6)}km/h[${motionInfo.speedSource ?? 'derived'}]`
+      : '';
     await insertSystemMessage(
       pool, userId,
-      `[Location] ${eventKind} — ${agentText}. motion=${motion}. ${quality}`,
+      `[Location] ${eventKind} — ${agentText}. motion=${finalMotion}[${motionSrc}]${speedStr}. ${quality}`,
     );
 
     // 2b) Event-driven composite (situation-check L1): on a real ARRIVAL at a
@@ -710,29 +743,41 @@ export async function processLocation(
   // Same gate guards the timezone producer: only a fresh, non-suspect, non-stale
   // (glitches/garbage already dropped above) fix derives a current zone, so we
   // never snap the user's effective tz to a jammed airport.
-  // ---- Drive-past place-match suppression (robust) --------------------------
-  // The device's REPORTED speed is unreliable (often 0/missing), so a known place
-  // matched by mere proximity while you're actually moving reads as a false visit
-  // ("Arrived at X" when you only drove past). Use the DERIVED speed from the
-  // previous fix (how far you moved ÷ how long it took) — reliable even with no
-  // reported speed — and suppress the match above a brisk-walk threshold. This
-  // `movingMps` is also the speed we persist + feed the resolver, so motion reads
-  // "driving" even when the phone reports nothing.
-  let movingMps = deviceSpeedMps ?? 0;
+  // ---- Speed + motion provenance + drive-past suppression -------------------
+  // Reported speed (GNSS Doppler) is preferred but often absent, so derive from
+  // the previous fix as a fallback — tracking WHERE the value came from. The
+  // Activity-Recognition `motion` label, when present, is the authoritative
+  // driving/cycling/walking signal (and the strongest drive-past tell). A known
+  // place matched by mere proximity while in transit is a fly-by, not a visit.
+  const reportedMps = item.speed_mps ?? item.speed ?? null;
+  let movingMps = reportedMps ?? 0;
+  let speedSource: 'gnss' | 'derived' | null = reportedMps != null ? (item.speed_source ?? 'gnss') : null;
   if (prev) {
     const dtS = (new Date(item.timestamp).getTime() - prev.timestampMs) / 1000;
-    if (dtS > 0 && dtS < 600) movingMps = Math.max(movingMps, (hopKm * 1000) / dtS);
+    if (dtS > 0 && dtS < 600) {
+      const derivedMps = (hopKm * 1000) / dtS;
+      if (derivedMps > movingMps) { movingMps = derivedMps; speedSource = 'derived'; }
+    }
   }
-  const effectivePlaceMatch = movingMps >= PLACE_FLYBY_SPEED_MPS ? null : placeMatch;
+  const deviceMotion = mapDeviceMotion(item.motion);
+  const motionInfo: MotionInfo = {
+    mps: movingMps,
+    speedSource,
+    deviceMotion,
+    motionSource: item.motion_source ?? null,
+  };
+  const inTransit =
+    deviceMotion === 'driving' || deviceMotion === 'cycling' || movingMps >= PLACE_FLYBY_SPEED_MPS;
+  const effectivePlaceMatch = inTransit ? null : placeMatch;
   if (effectivePlaceMatch === null && placeMatch) {
-    logger.info('[location][processLocation] suppressed drive-past place match (moving)', {
-      place: placeMatch.place_name, speed_kmh: Math.round(movingMps * 3.6),
+    logger.info('[location][processLocation] suppressed drive-past place match (in transit)', {
+      place: placeMatch.place_name, motion: deviceMotion, speed_kmh: Math.round(movingMps * 3.6),
     });
   }
 
   if (pgPool && !suspect) {
     await updateCurrentTimezoneFromLocation(pgPool, userId, item.lat, item.lon);
-    await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, effectivePlaceMatch, wifiSignal, movingMps);
+    await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, effectivePlaceMatch, wifiSignal, motionInfo);
   }
 
   // Build the location document
@@ -750,9 +795,15 @@ export async function processLocation(
     doc.low_accuracy = true;
   }
 
-  // Persist the EFFECTIVE speed (device-reported OR derived from the last fix) so
-  // history + where_is_user have a reliable value even when the phone sends none.
+  // Persist the EFFECTIVE speed + its provenance (device GNSS or gateway-derived),
+  // and the device's Activity-Recognition motion label when present — so history +
+  // where_is_user carry a reliable value AND know its source.
   doc.speed = Math.round(movingMps * 100) / 100;
+  if (speedSource) doc.speed_source = speedSource;
+  if (deviceMotion) {
+    doc.motion = deviceMotion;
+    if (motionInfo.motionSource) doc.motion_source = motionInfo.motionSource;
+  }
   if (item.bearing_deg !== undefined) {
     doc.bearing = item.bearing_deg;
   }

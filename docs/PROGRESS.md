@@ -8,6 +8,12 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: reliable speed (hasSpeed) + formal motion (Activity Recognition) with provenance (2026-06-20)
+The drive-past + mode-naming root cause was the phone sending a fake `0` speed. Now fixed properly with provenance end to end:
+- **Android**: `LocationRepository.resolveSpeed` — GNSS Doppler speed when `hasSpeed()` (rejecting low-confidence via `hasSpeedAccuracy()`), else on-device **derived** speed (`distanceTo` ÷ Δ`elapsedRealtimeNanos`, jitter-gated), else **null** (never a fake 0). Sends `speed_source` ('gnss'|'derived'). The **Activity Transition API** (`ActivityRecognition`, ENTER/EXIT of in_vehicle/on_bicycle/walking/running/still via `ActivityTransitionReceiver` → `CurrentMotionState` singleton) gives a formal `motion` label + `motion_source` ('activity_recognition'). New `ACTIVITY_RECOGNITION` permission; Room v4→5 (speed now nullable + 3 new cols).
+- **Gateway**: `push-data.ts` accepts `speed_source`/`motion`/`motion_source` (nullable). `processors/location.ts` prefers the device's `in_vehicle`/`on_bicycle` label for drive-past suppression (derived speed as backstop), persists provenance (`doc.speed_source`/`motion`/`motion_source`), and surfaces `motion=driving[activity] speed=54km/h[gnss]` (or `[inferred]`/`[derived]`) in the `[Location]` event.
+- **Prompt**: trust `[activity]`, treat `[inferred]` with suspicion.
+
 ### FIX: drive-past place-match — gate on DERIVED speed (reported speed unreliable) (2026-06-20)
 The "you're at X" false matches while driving past **recurred** (Optika Cohen / Ben Keitz's matched at 22–90 km/h derived speed). Root cause: yesterday's drive-past gate keyed off the device's **reported** speed, but the phone sends it as `0`/missing on most fixes (the doc had no `speed` at all — the app sends `speed`, the doc-write checked `speed_mps`). So the gate never engaged. Fix (`processors/location.ts`): compute the **derived** speed = distance from the previous fix ÷ time (reliable even with no reported speed), and suppress a known-place proximity match above `PLACE_FLYBY_SPEED_MPS` (2.5 m/s ≈ 9 km/h, new shared constant). `effectivePlaceMatch` (null when moving) is used in the transition **and** the stored doc + the in-batch predecessor chain; the derived speed is now persisted (`doc.speed`) and fed to the resolver so `motion` reads "driving." The resolve-side reported-speed gate stays as a backstop. New regression test (377 gateway tests).
 
