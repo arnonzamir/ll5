@@ -16,6 +16,7 @@ import {
   haversineMeters,
   timezoneFromLocation,
   DEFAULT_PLACE_RADIUS_M,
+  PLACE_FLYBY_SPEED_MPS,
   TRANSITION_DEDUP_MS,
   TRIP_PULSE_MS,
   WIFI_CONNECTED_ANCHOR_MS,
@@ -322,13 +323,14 @@ async function detectPlaceTransitionAndNotify(
   geocode: GeocodingResult | null,
   placeMatch: PlaceMatchResult | null,
   wifiSignal: WifiSignal | undefined,
+  movingMps: number,
 ): Promise<void> {
   // Serialize the per-user state read-modify-write (G5): concurrent webhooks for
   // the same user must not interleave a read with another's write, or we'd
   // double-fire the transition push / clobber last_push_at.
   try {
     await gatewayKeyMutex.runExclusive(`location-state:${userId}`, async () => {
-      await runTransition(es, pool, userId, item, geocode, placeMatch, wifiSignal);
+      await runTransition(es, pool, userId, item, geocode, placeMatch, wifiSignal, movingMps);
     });
   } catch (err) {
     logger.warn('[location][transition] transition detection failed (non-blocking)', {
@@ -345,6 +347,7 @@ async function runTransition(
   geocode: GeocodingResult | null,
   placeMatch: PlaceMatchResult | null,
   wifiSignal: WifiSignal | undefined,
+  movingMps: number,
 ): Promise<void> {
     const state = await getLocationState(es, userId);
 
@@ -370,9 +373,10 @@ async function runTransition(
         road: geocode?.road ?? null,
         neighborhood: geocode?.neighborhood ?? null,
         bearingDeg: item.bearing_deg ?? null,
-        // The Android app currently sends `speed` (m/s); the canonical field is
-        // `speed_mps`. Accept either so motion classification works either way.
-        speedMps: item.speed_mps ?? item.speed ?? null,
+        // Effective speed: the processor already merged device-reported with the
+        // DERIVED speed (distance ÷ time from the last fix), so motion reads
+        // "driving" even when the phone reports no speed.
+        speedMps: movingMps > 0 ? movingMps : (item.speed_mps ?? item.speed ?? null),
       },
       wifi: wifiSignal,
       prior,
@@ -706,9 +710,29 @@ export async function processLocation(
   // Same gate guards the timezone producer: only a fresh, non-suspect, non-stale
   // (glitches/garbage already dropped above) fix derives a current zone, so we
   // never snap the user's effective tz to a jammed airport.
+  // ---- Drive-past place-match suppression (robust) --------------------------
+  // The device's REPORTED speed is unreliable (often 0/missing), so a known place
+  // matched by mere proximity while you're actually moving reads as a false visit
+  // ("Arrived at X" when you only drove past). Use the DERIVED speed from the
+  // previous fix (how far you moved ÷ how long it took) — reliable even with no
+  // reported speed — and suppress the match above a brisk-walk threshold. This
+  // `movingMps` is also the speed we persist + feed the resolver, so motion reads
+  // "driving" even when the phone reports nothing.
+  let movingMps = deviceSpeedMps ?? 0;
+  if (prev) {
+    const dtS = (new Date(item.timestamp).getTime() - prev.timestampMs) / 1000;
+    if (dtS > 0 && dtS < 600) movingMps = Math.max(movingMps, (hopKm * 1000) / dtS);
+  }
+  const effectivePlaceMatch = movingMps >= PLACE_FLYBY_SPEED_MPS ? null : placeMatch;
+  if (effectivePlaceMatch === null && placeMatch) {
+    logger.info('[location][processLocation] suppressed drive-past place match (moving)', {
+      place: placeMatch.place_name, speed_kmh: Math.round(movingMps * 3.6),
+    });
+  }
+
   if (pgPool && !suspect) {
     await updateCurrentTimezoneFromLocation(pgPool, userId, item.lat, item.lon);
-    await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, placeMatch, wifiSignal);
+    await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, effectivePlaceMatch, wifiSignal, movingMps);
   }
 
   // Build the location document
@@ -726,10 +750,9 @@ export async function processLocation(
     doc.low_accuracy = true;
   }
 
-  // G3: persist device-reported motion when present.
-  if (item.speed_mps !== undefined) {
-    doc.speed = item.speed_mps;
-  }
+  // Persist the EFFECTIVE speed (device-reported OR derived from the last fix) so
+  // history + where_is_user have a reliable value even when the phone sends none.
+  doc.speed = Math.round(movingMps * 100) / 100;
   if (item.bearing_deg !== undefined) {
     doc.bearing = item.bearing_deg;
   }
@@ -748,9 +771,9 @@ export async function processLocation(
     if (geocodeResult.neighborhood) doc.neighborhood = geocodeResult.neighborhood;
   }
 
-  if (placeMatch) {
-    doc.matched_place_id = placeMatch.place_id;
-    doc.matched_place = placeMatch.place_name;
+  if (effectivePlaceMatch) {
+    doc.matched_place_id = effectivePlaceMatch.place_id;
+    doc.matched_place = effectivePlaceMatch.place_name;
   }
 
   if (suspect) {
@@ -770,9 +793,9 @@ export async function processLocation(
     lat: item.lat,
     lon: item.lon,
     address: geocodeResult?.address,
-    matched_place: placeMatch?.place_name,
+    matched_place: effectivePlaceMatch?.place_name,
     low_accuracy: lowAccuracy,
-    speed_mps: item.speed_mps,
+    speed_mps: Math.round(movingMps * 100) / 100,
   });
 
   // Note: arrival notable events are written by detectPlaceTransitionAndNotify
@@ -784,6 +807,6 @@ export async function processLocation(
     lat: item.lat,
     lon: item.lon,
     timestamp: item.timestamp,
-    matched_place: placeMatch?.place_name,
+    matched_place: effectivePlaceMatch?.place_name,
   };
 }

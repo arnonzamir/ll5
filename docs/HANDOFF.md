@@ -465,3 +465,5 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 - 2026-06-19: gateway accepts `speed` as alias for `speed_mps` (Android app sends `speed`); without it motion was always `unknown`. Android DTO follow-up: rename to `speed_mps` + add `bearing_deg`.
 
 - 2026-06-20: Coach Phase 2/3 — gateway `CoachScanScheduler` (weekly `[Coach Scan]`), composite triggers (`utils/composite-triggers.ts` arrival evaluator wired into location processor; `scheduler/composite-triggers.ts` free-block + unanswered-contact, ~3min, emit `[Situation]`); messaging send-gate (first-contact send blocked unless `confirmed:true`, via `countSentToRecipient` on `messaging_send_log`). Coach-scan skill is agent-side (ll5-run). Watch signals: coach_scan, composite.
+
+- 2026-06-20: drive-past place-match now gates on DERIVED speed (dist/time from prev fix) not the unreliable reported speed — `PLACE_FLYBY_SPEED_MPS`=2.5 in shared; processors/location.ts suppresses the match + persists derived `doc.speed`. Reported speed is 0/missing on most phone fixes.

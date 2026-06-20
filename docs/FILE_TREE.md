@@ -296,3 +296,5 @@ ll5/
 _2026-06-19: location speed alias (`speed`↔`speed_mps`) in gateway push-data.ts/location.ts; agent must set push_to_user level on location surfaces._
 
 _2026-06-20: gateway scheduler/coach-scan.ts (weekly cue), scheduler/composite-triggers.ts + utils/composite-triggers.ts (event-driven situations); messaging send-gate on send tools._
+
+_2026-06-20: location.ts drive-past suppression via derived speed (PLACE_FLYBY_SPEED_MPS); fixes recurring false "Arrived at X"._

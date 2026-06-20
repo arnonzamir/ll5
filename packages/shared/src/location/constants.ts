@@ -77,6 +77,12 @@ export const STATIONARY_SPEED_MPS = 1.0;
 /** At/above this speed (m/s) the user is treated as driving (~22 km/h). Between
  *  STATIONARY and this is "walking". */
 export const DRIVING_SPEED_MPS = 6.0;
+/** At/above this speed (m/s, ~9 km/h) a known-place proximity match is treated as a
+ *  DRIVE-PAST (fly-by), not a visit, so we don't label "Arrived at X" when you only
+ *  passed it. Set below DRIVING because the device's reported speed is unreliable —
+ *  the gateway gates on the DERIVED speed (distance between fixes ÷ time), and anything
+ *  faster than a brisk walk near a place means you're in transit, not parked there. */
+export const PLACE_FLYBY_SPEED_MPS = 2.5;
 
 // --- Place-transition anti-flap + trip cadence (write-time) ----------------
 /** Don't re-push the same label within this window (handles A->B->A bounce). */

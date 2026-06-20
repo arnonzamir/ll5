@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FIX: drive-past place-match — gate on DERIVED speed (reported speed unreliable) (2026-06-20)
+The "you're at X" false matches while driving past **recurred** (Optika Cohen / Ben Keitz's matched at 22–90 km/h derived speed). Root cause: yesterday's drive-past gate keyed off the device's **reported** speed, but the phone sends it as `0`/missing on most fixes (the doc had no `speed` at all — the app sends `speed`, the doc-write checked `speed_mps`). So the gate never engaged. Fix (`processors/location.ts`): compute the **derived** speed = distance from the previous fix ÷ time (reliable even with no reported speed), and suppress a known-place proximity match above `PLACE_FLYBY_SPEED_MPS` (2.5 m/s ≈ 9 km/h, new shared constant). `effectivePlaceMatch` (null when moving) is used in the transition **and** the stored doc + the in-batch predecessor chain; the derived speed is now persisted (`doc.speed`) and fed to the resolver so `motion` reads "driving." The resolve-side reported-speed gate stays as a backstop. New regression test (377 gateway tests).
+
 ### FEATURE: Coach Phases 2 & 3 — strategic scan, scheduled cadence, event triggers, send-gate (2026-06-20)
 Built as four independently-validatable components:
 - **2A `coach-scan` skill** (ll5-run `.claude/skills/coach-scan.md`): the weekly strategic layer above situation-check — cross-reads goals/horizons + narratives + open commitments + GTD + calendar 2-4wk out, judges drift/future-reviews/opportunities, **schedules `instruction` ticklers** (the agent calendar) for future reviews, surfaces ≤1 coaching message, journals + `record_moment`. Force-runnable via `/coach-scan` or a `[Coach Scan]` cue; effects observable via `list_ticklers` + journal.

@@ -141,3 +141,44 @@ describe('drive cadence — stops + trip pulse, not town-by-town', () => {
     expect(sendFCMNotification).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Drive-past suppression: a known-place match while genuinely MOVING (derived
+// from the previous fix — the phone's reported speed is unreliable) is a fly-by,
+// not a visit, so we must NOT label "Arrived at X". This is the recurring
+// "you're at Optika/Keitz while I only drove past" bug.
+// ---------------------------------------------------------------------------
+describe('drive-past place suppression (derived speed)', () => {
+  it('SUPPRESSES a known-place match when moving fast, even with a low reported speed', async () => {
+    const prevTs = new Date(Date.now() - 20_000).toISOString(); // 20s ago
+    const es = {
+      search: vi.fn(async (req: { index: string }) => {
+        if (req.index === 'll5_awareness_wifi_connections') return { hits: { hits: [] } };
+        if (req.index === 'll5_knowledge_places') {
+          return { hits: { hits: [{ _id: 'optika', _source: { name: 'Optika Cohen', user_id: USER, geo: { lat: 32.0, lon: 34.0 }, radius_m: 100 } }] } };
+        }
+        if (req.index === 'll5_awareness_locations') {
+          // ~300m away, 20s ago → derived ~54 km/h (driving), even though the
+          // phone reports a near-zero speed.
+          return { hits: { hits: [{ _source: { location: { lat: 32.0027, lon: 34.0 }, timestamp: prevTs, matched_place: null } }] } };
+        }
+        return { hits: { hits: [] } };
+      }),
+      get: vi.fn(async (req: { index: string }) => {
+        if (req.index === 'll5_awareness_location_state') {
+          return { _source: { user_id: USER, label: 'Zikhron Yaakov', kind: 'city', city: 'Zikhron Yaakov', lat: 32.0027, lon: 34.0, last_motion: 'driving' } };
+        }
+        throw { meta: { statusCode: 404 } };
+      }),
+      index: vi.fn(async () => ({ result: 'created' })),
+    } as unknown as Client;
+
+    mockGeocode.mockResolvedValueOnce({ address: 'on the road', city: 'Zikhron Yaakov', road: 'HaDagan' });
+    await processLocation(es, USER, loc({ accuracy_m: 20, lat: 32.0, lon: 34.0, speed_mps: 2 }), undefined, pool, null);
+
+    // Whatever it surfaced, it must NOT be an arrival at the place we drove past.
+    const all = (insertSystemMessage.mock.calls as unknown[][]).map((c) => c[2] as string).join('\n');
+    expect(all).not.toContain('Arrived at Optika Cohen');
+    expect(all).not.toContain('[place match]');
+  });
+});
