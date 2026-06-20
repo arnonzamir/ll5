@@ -61,7 +61,12 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         message_count: { type: 'integer' },
         first_message: { type: 'date' },
         last_message: { type: 'date' },
+        // Structured transcript: store-only (display in the /sessions dashboard), NOT indexed.
         messages: { type: 'object', enabled: false },
+        // Flat, analyzed concatenation of all message texts — the SEARCHABLE projection of
+        // `messages`, so recall_everything (opt-in `sources:["session"]`) can match transcript
+        // content without indexing the bulky structured array. Written in POST /sessions.
+        transcript_text: { type: 'text', analyzer: 'multilingual' },
         indexed_at: { type: 'date' },
       },
     },
@@ -963,6 +968,17 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         res.status(400).json({ error: 'session_id required' });
         return;
       }
+      // Searchable projection: concatenate every message's text so recall_everything's
+      // opt-in session source can match transcript content (the structured `messages`
+      // array is store-only / not indexed). Bounded so a very long session can't bloat
+      // the analyzed field unreasonably.
+      const transcriptText = Array.isArray(messages)
+        ? messages
+            .map((m: { text?: unknown }) => (typeof m?.text === 'string' ? m.text : ''))
+            .filter(Boolean)
+            .join('\n')
+            .slice(0, 200_000)
+        : '';
       await esClient.index({
         index: 'll5_session_history',
         id: session_id,
@@ -973,6 +989,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
           first_message: first_message ?? null,
           last_message: last_message ?? null,
           messages: messages ?? [],
+          transcript_text: transcriptText,
           workspace: workspace ?? 'll5-run',
           indexed_at: new Date().toISOString(),
         },

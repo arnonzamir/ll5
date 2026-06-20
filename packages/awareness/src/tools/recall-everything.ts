@@ -53,7 +53,7 @@ const SEARCH_FIELDS = [
   'context',
   'answer',
   'tags',
-  'messages.text', // raw session transcripts (opt-in source only); ignored by lenient on other indices
+  'transcript_text', // raw session transcripts (opt-in source only); ignored by lenient on other indices
 ];
 
 // Indices swept, mapped to the friendly source label returned to the agent. ll5_agent_lessons

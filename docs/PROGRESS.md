@@ -22,10 +22,12 @@ everything else `user_id`-scoped; retired lessons excluded. When the sweep is **
 `coverage` flag + `suggest_postgres: [gtd, gmail]` so the agent escalates to the Postgres stores it already
 holds (kept agent-driven, not a subagent, until the hint-based ladder proves insufficient). **Raw session
 transcripts (`ll5_session_history`) are an OPT-IN source** — NOT swept by default (un-distilled chatter
-would dilute precision), included only when the caller passes `sources:["session"]` (searches
-`messages.text`); a thin default sweep now also emits `suggest_sessions` pointing the agent at that deeper
-layer. Sessions are saved regularly already (per-turn `session-save.sh` hook → `/sessions` → ES; live data
-confirms current). First part of the general retrieval-surfacing fix; pending parts: nightly pre-staging,
+would dilute precision), included only when the caller passes `sources:["session"]`; a thin default sweep now also emits
+`suggest_sessions` pointing the agent at that deeper layer. **Searchability fix:** session docs map
+`messages` as `enabled:false` (store-only, never indexed) — so the gateway `POST /sessions` handler now also
+writes `transcript_text` (a flat `multilingual`-analyzed concat of all message texts) and recall_everything
+searches THAT; the 153 existing docs were backfilled via `_update_by_query`. Sessions are saved regularly
+already (per-turn `session-save.sh` hook → `/sessions` → ES; live data confirms current). First part of the general retrieval-surfacing fix; pending parts: nightly pre-staging,
 promote-on-repetition. Tests `__tests__/recall-everything.test.ts` (13). Persona wired (look-before-ask,
 call it first — ll5-run). Deployed + verified live (39 tools).
 

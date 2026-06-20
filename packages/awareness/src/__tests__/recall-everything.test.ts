@@ -155,8 +155,8 @@ describe('recall_everything — unified cross-store sweep', () => {
         _index: 'll5_session_history',
         _id: 's1',
         _score: 6,
-        _source: { message_count: 42, last_message: '2026-06-20T18:00:00Z', messages: [{ role: 'human', text: 'about the advisors movie' }] },
-        highlight: { 'messages.text': ['about the <em>advisors movie</em>'] },
+        _source: { message_count: 42, last_message: '2026-06-20T18:00:00Z', transcript_text: 'about the advisors movie' },
+        highlight: { transcript_text: ['about the <em>advisors movie</em>'] },
       },
     ]);
     const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
