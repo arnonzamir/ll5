@@ -8,6 +8,23 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: recall_everything — one unified "what do we know about X" sweep (2026-06-20)
+Root problem (from the wife's-calendar-event miss): **data that existed in a store did not surface when
+needed.** Answering "what do we know about <topic>" required fanning out across `search_knowledge`
+(facts/people/places) + `read_journal` (which only matched `topic`, NOT content) + `recall` + calendar +
+messages — and the agent routinely missed a store, so a correction recorded three times in the journal
+never resurfaced. New awareness tool **`recall_everything`** runs ONE Elasticsearch query across **every
+text-bearing store in the shared cluster** — facts, people, places, profile, data_gaps, observations,
+narratives, journal (topic AND content — the gap closed), lessons (world-scoped), calendar events, IM
+messages, entity statuses, notable events — and returns unified, score-ranked, per-source-capped results
+with highlights. Cross-store READ only (no cross-MCP HTTP); world-scoped lessons admitted via `_index`,
+everything else `user_id`-scoped; retired lessons excluded. When the sweep is **thin/empty** it returns a
+`coverage` flag + `suggest_postgres: [gtd, gmail]` so the agent escalates to the Postgres stores it already
+holds (kept agent-driven, not a subagent, until the hint-based ladder proves insufficient). First part of
+the general retrieval-surfacing fix; pending parts: persona discipline (look-before-asking, use this
+first), nightly pre-staging, promote-on-repetition. Tests `__tests__/recall-everything.test.ts` (10).
+Pending: deploy awareness + wire the persona to call it first.
+
 ### FEATURE: governed agent memory — intercept native Claude Code memory into ES (2026-06-20)
 The agent's native auto-memory was append-only/ungoverned and held two contradictory `create_tickler`
 timezone beliefs at once (→ double-booked ticklers). Now governed (DECISION-013): a `ll5-run`
