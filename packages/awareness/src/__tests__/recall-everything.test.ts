@@ -25,6 +25,7 @@ interface Resp {
   by_source: Record<string, number>;
   results: Array<{ source: string; id: string; score: number; summary: string; highlight: string | null }>;
   suggest_postgres?: string[];
+  suggest_sessions?: boolean;
   note?: string;
 }
 
@@ -117,14 +118,57 @@ describe('recall_everything — unified cross-store sweep', () => {
     expect(call.index).toBe('ll5_agent_journal,ll5_awareness_calendar_events');
   });
 
-  it('rejects an unknown source label with the valid set', async () => {
+  it('rejects an unknown source label with the valid set (incl. session)', async () => {
     const es = esReturning([]);
     const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
     const res = await tools.get('recall_everything')!({ query: 'q', sources: ['bogus'] });
     const out = parseToolResponse<{ error: string; valid_sources: string[] }>(res);
     expect(out.error).toContain('No matching sources');
     expect(out.valid_sources).toContain('journal');
+    expect(out.valid_sources).toContain('session');
     expect(es.search).not.toHaveBeenCalled();
+  });
+
+  it('does NOT sweep session history by default (opt-in only)', async () => {
+    const es = esReturning([]);
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    await tools.get('recall_everything')!({ query: 'q' });
+    const call = (es.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.index).not.toContain('ll5_session_history');
+    // but the user filter is ready to scope dynamic-mapped session docs too
+    const should = call.query.bool.filter[0].bool.should;
+    expect(should).toContainEqual({ term: { 'user_id.keyword': 'user-1' } });
+  });
+
+  it('thin default sweep suggests the session layer as a deeper reach', async () => {
+    const es = esReturning([]);
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    const res = await tools.get('recall_everything')!({ query: 'q' });
+    const out = parseToolResponse<Resp>(res);
+    expect(out.suggest_sessions).toBe(true);
+    expect(out.note).toContain('sources:["session"]');
+  });
+
+  it('opt-in: sources:["session"] adds ll5_session_history and summarizes a transcript hit', async () => {
+    const es = esReturning([
+      {
+        _index: 'll5_session_history',
+        _id: 's1',
+        _score: 6,
+        _source: { message_count: 42, last_message: '2026-06-20T18:00:00Z', messages: [{ role: 'human', text: 'about the advisors movie' }] },
+        highlight: { 'messages.text': ['about the <em>advisors movie</em>'] },
+      },
+    ]);
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    const res = await tools.get('recall_everything')!({ query: 'advisors movie', sources: ['session'] });
+    const out = parseToolResponse<Resp>(res);
+    const call = (es.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.index).toBe('ll5_session_history');
+    expect(out.by_source.session).toBe(1);
+    expect(out.results[0].summary).toContain('42 msgs');
+    expect(out.results[0].highlight).toContain('advisors movie');
+    // session WAS searched → no redundant session suggestion
+    expect(out.suggest_sessions).toBeUndefined();
   });
 
   it('surfaces the highlight snippet that explains the match', async () => {

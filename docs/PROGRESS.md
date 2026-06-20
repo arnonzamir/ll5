@@ -20,10 +20,14 @@ messages, entity statuses, notable events — and returns unified, score-ranked,
 with highlights. Cross-store READ only (no cross-MCP HTTP); world-scoped lessons admitted via `_index`,
 everything else `user_id`-scoped; retired lessons excluded. When the sweep is **thin/empty** it returns a
 `coverage` flag + `suggest_postgres: [gtd, gmail]` so the agent escalates to the Postgres stores it already
-holds (kept agent-driven, not a subagent, until the hint-based ladder proves insufficient). First part of
-the general retrieval-surfacing fix; pending parts: persona discipline (look-before-asking, use this
-first), nightly pre-staging, promote-on-repetition. Tests `__tests__/recall-everything.test.ts` (10).
-Pending: deploy awareness + wire the persona to call it first.
+holds (kept agent-driven, not a subagent, until the hint-based ladder proves insufficient). **Raw session
+transcripts (`ll5_session_history`) are an OPT-IN source** — NOT swept by default (un-distilled chatter
+would dilute precision), included only when the caller passes `sources:["session"]` (searches
+`messages.text`); a thin default sweep now also emits `suggest_sessions` pointing the agent at that deeper
+layer. Sessions are saved regularly already (per-turn `session-save.sh` hook → `/sessions` → ES; live data
+confirms current). First part of the general retrieval-surfacing fix; pending parts: nightly pre-staging,
+promote-on-repetition. Tests `__tests__/recall-everything.test.ts` (13). Persona wired (look-before-ask,
+call it first — ll5-run). Deployed + verified live (39 tools).
 
 ### FEATURE: governed agent memory — intercept native Claude Code memory into ES (2026-06-20)
 The agent's native auto-memory was append-only/ungoverned and held two contradictory `create_tickler`

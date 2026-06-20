@@ -110,7 +110,7 @@ export function SessionsView() {
             <CardContent className="flex flex-col items-center justify-center py-12 text-gray-400">
               <MessageSquare className="h-12 w-12 mb-3" />
               <p className="text-sm">No sessions indexed yet.</p>
-              <p className="text-xs mt-1">Run the backup script to index sessions.</p>
+              <p className="text-xs mt-1">Agent sessions are indexed automatically on every turn (session-save hook).</p>
             </CardContent>
           </Card>
         ) : (

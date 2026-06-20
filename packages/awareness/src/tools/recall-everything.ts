@@ -53,6 +53,7 @@ const SEARCH_FIELDS = [
   'context',
   'answer',
   'tags',
+  'messages.text', // raw session transcripts (opt-in source only); ignored by lenient on other indices
 ];
 
 // Indices swept, mapped to the friendly source label returned to the agent. ll5_agent_lessons
@@ -71,8 +72,16 @@ const INDEX_LABEL: Record<string, string> = {
   ll5_awareness_messages: 'message',
   ll5_awareness_entity_statuses: 'entity_status',
   ll5_awareness_notable_events: 'notable_event',
+  // Raw Claude session transcripts — the un-distilled layer. OPT-IN only (see below).
+  ll5_session_history: 'session',
 };
-const ALL_INDICES = Object.keys(INDEX_LABEL);
+// Sessions are the raw transcript layer; they are NOT swept by default so months-old
+// conversational chatter never dilutes the distilled "what do we know" result. They join
+// the query only when the caller passes sources:["session"] — the deeper-reach rung of the
+// same escalation ladder as the Postgres stores.
+const SESSION_INDEX = 'll5_session_history';
+const DEFAULT_INDICES = Object.keys(INDEX_LABEL).filter((i) => i !== SESSION_INDEX);
+const ALL_LABELED_INDICES = Object.keys(INDEX_LABEL);
 const LESSONS_INDEX = 'll5_agent_lessons';
 
 // Below this total, the ES sweep is "thin" and the agent should also check Postgres stores.
@@ -115,6 +124,8 @@ function summarize(label: string, s: Record<string, unknown>): string {
       return clip(`${s.entity_name ?? ''}: ${s.summary || s.activity || ''}`);
     case 'notable_event':
       return clip(s.summary);
+    case 'session':
+      return clip(`session · ${s.message_count ?? '?'} msgs · last ${s.last_message ?? s.indexed_at ?? '?'}`);
     default:
       return clip(JSON.stringify(s));
   }
@@ -130,6 +141,8 @@ function pickTimestamp(s: Record<string, unknown>): string | null {
     s.observed_at,
     s.updated_at,
     s.last_updated,
+    s.last_message, // session transcripts
+    s.indexed_at, // session transcripts (fallback)
   ];
   for (const c of candidates) if (typeof c === 'string' && c) return c;
   return null;
@@ -155,8 +168,9 @@ export function registerRecallEverythingTool(
       'journal entries (topic AND content), operating lessons, calendar events, IM messages, ' +
       'entity statuses, and notable events. Use this before asking the user or concluding we have ' +
       'no information — it closes the gap where data existed in a store but was never surfaced. ' +
-      'If results come back thin, the response says so and names the Postgres stores (gtd, gmail) ' +
-      'to check next.',
+      'If results come back thin, the response says so and names the deeper layers to check next: ' +
+      'the raw conversation transcripts (pass sources:["session"] — NOT swept by default, since it is ' +
+      'un-distilled chatter) and the Postgres stores (gtd, gmail).',
     {
       query: z.string().describe('Topic / name / phrase to look up (Hebrew or English).'),
       limit: z.number().min(1).max(100).optional().describe('Max results returned. Default 30.'),
@@ -178,11 +192,12 @@ export function registerRecallEverythingTool(
       const limit = params.limit ?? 30;
       const perSourceCap = params.per_source_cap ?? 8;
 
-      // Optional source filter → restrict the index list.
-      let indices = ALL_INDICES;
+      // Default sweep = distilled stores only. A sources filter can opt INTO the raw
+      // session layer (and/or narrow to specific distilled stores).
+      let indices = DEFAULT_INDICES;
       if (params.sources && params.sources.length > 0) {
         const wanted = new Set(params.sources.map((x) => x.toLowerCase()));
-        indices = ALL_INDICES.filter((idx) => wanted.has(INDEX_LABEL[idx]));
+        indices = ALL_LABELED_INDICES.filter((idx) => wanted.has(INDEX_LABEL[idx]));
         if (indices.length === 0) {
           return {
             content: [
@@ -197,6 +212,8 @@ export function registerRecallEverythingTool(
           };
         }
       }
+
+      const sessionSearched = indices.includes(SESSION_INDEX);
 
       // Fetch generously, then group + cap + trim in JS for a balanced, unified ranking.
       const fetchSize = Math.min(100, Math.max(limit, 60));
@@ -226,8 +243,9 @@ export function registerRecallEverythingTool(
                 {
                   bool: {
                     should: [
-                      { term: { user_id: userId } },
-                      { term: { _index: LESSONS_INDEX } },
+                      { term: { user_id: userId } }, // distilled indices map user_id as keyword
+                      { term: { 'user_id.keyword': userId } }, // session_history is dynamic-mapped (text+keyword)
+                      { term: { _index: LESSONS_INDEX } }, // world-scoped lessons (no user_id)
                     ],
                     minimum_should_match: 1,
                   },
@@ -311,9 +329,14 @@ export function registerRecallEverythingTool(
                 ...(thin
                   ? {
                       suggest_postgres: ['gtd', 'gmail'],
+                      ...(sessionSearched ? {} : { suggest_sessions: true }),
                       note:
-                        'ES sweep was sparse. This topic may live in a Postgres store not covered here — ' +
-                        'also check gtd (search_actions / list_projects) and gmail before concluding we have nothing.',
+                        'Distilled sweep was sparse. ' +
+                        (sessionSearched
+                          ? ''
+                          : 'Re-run with sources:["session"] to search the raw conversation transcripts, and ') +
+                        'check the Postgres stores not covered here — gtd (search_actions / list_projects) and gmail — ' +
+                        'before concluding we have nothing.',
                     }
                   : {}),
               }),
