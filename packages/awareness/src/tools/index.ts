@@ -17,6 +17,7 @@ import { registerEntityStatusTools } from './entity-statuses.js';
 import { registerNotableEventTools } from './notable-events.js';
 import { registerSituationTools } from './situation.js';
 import { registerJournalTools } from './journal.js';
+import { registerLessonTools } from './lessons.js';
 import { registerMediaTools } from './media.js';
 import { registerGeoSearchTools } from './geo-search.js';
 import { registerPhoneStatusTools } from './phone-status.js';
@@ -72,6 +73,7 @@ export function registerAllTools(
   );
   if (esClient) {
     registerJournalTools(server, esClient, getUserId);
+    registerLessonTools(server, esClient, getUserId);
     registerMediaTools(server, esClient, getUserId);
   }
   registerGeoSearchTools(server, getUserId);

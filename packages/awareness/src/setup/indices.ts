@@ -38,6 +38,57 @@ const AWARENESS_EXCLUSIVE_INDICES: IndexDefinition[] = [
       },
     },
   },
+  // Governed agent "lessons" — operational/world knowledge the agent learns about
+  // operating itself and the tools (e.g. "create_tickler due_time is local"). GLOBAL
+  // (scope=world, shared across tenants — a living runbook), reconciled on write, and
+  // recalled intentionally via hooks. User-specific knowledge does NOT live here — it
+  // routes to ll5_agent_user_model. Versioned via ll5_agent_lessons_history.
+  {
+    index: 'll5_agent_lessons',
+    mappings: {
+      properties: {
+        scope: { type: 'keyword' }, // 'world' (global operational knowledge)
+        claim: { type: 'text', analyzer: 'multilingual' }, // the belief
+        trigger: { type: 'text', analyzer: 'multilingual' }, // when it's relevant (recall key)
+        durability: { type: 'keyword' }, // 'durable' | 'provisional'
+        status: { type: 'keyword' }, // 'active' | 'retired'
+        falsification_test: { type: 'text', analyzer: 'multilingual' }, // provisional: the check that retires it
+        depends_on: { type: 'keyword' }, // provisional: tool/code path it compensates for
+        expires: { type: 'date' }, // provisional: optional hard expiry
+        supersedes: { type: 'keyword' },
+        superseded_by: { type: 'keyword' },
+        source: { type: 'text', analyzer: 'multilingual' }, // provenance: why/how learned
+        author_user_id: { type: 'keyword' }, // which tenant's agent learned it (provenance only)
+        created_at: { type: 'date' },
+        updated_at: { type: 'date' },
+        retired_at: { type: 'date' },
+      },
+    },
+  },
+  {
+    index: 'll5_agent_lessons_history',
+    mappings: {
+      properties: {
+        scope: { type: 'keyword' },
+        claim: { type: 'text', analyzer: 'multilingual' },
+        trigger: { type: 'text', analyzer: 'multilingual' },
+        durability: { type: 'keyword' },
+        status: { type: 'keyword' },
+        falsification_test: { type: 'text', analyzer: 'multilingual' },
+        depends_on: { type: 'keyword' },
+        expires: { type: 'date' },
+        supersedes: { type: 'keyword' },
+        superseded_by: { type: 'keyword' },
+        source: { type: 'text', analyzer: 'multilingual' },
+        author_user_id: { type: 'keyword' },
+        created_at: { type: 'date' },
+        updated_at: { type: 'date' },
+        retired_at: { type: 'date' },
+        archived_at: { type: 'date' },
+        original_id: { type: 'keyword' },
+      },
+    },
+  },
   {
     index: 'll5_media',
     mappings: {

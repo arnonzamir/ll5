@@ -8,6 +8,20 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: governed agent memory — intercept native Claude Code memory into ES (2026-06-20)
+The agent's native auto-memory was append-only/ungoverned and held two contradictory `create_tickler`
+timezone beliefs at once (→ double-booked ticklers). Now governed (DECISION-013): a `ll5-run`
+`PreToolUse` hook (`memory-intercept.sh`) intercepts every `Write|Edit` to a `*/memory/*` path, routes
+the content to the awareness MCP `ingest_memory`, and **denies the disk write**; recall is replaced by
+governed injection (`SessionStart` runbook block + `UserPromptSubmit` `memory-recall.sh`). New awareness
+store `ll5_agent_lessons` (+ `_history`, versioned/audited like user_model): tools `upsert_lesson`
+(reconcile-on-write — contradictions blocked until resolved), `recall_lessons`, `list_lessons`,
+`retire_lesson`, `ingest_memory` (classifies **world** vs **user**: world→global lessons runbook with
+auto-merge-in-place, user→`user_model.learned_notes`). `durable` vs `provisional` (provisional carry a
+falsification_test, flagged verify-before-trust). Dashboard `/lessons` page renders the runbook. Spike
+validated the hook contract on Claude Code 2.1.178. Pending: migrate existing `feedback_*.md` + clear
+the on-disk memory dir (post-deploy); live end-to-end verification.
+
 ### FEATURE: reliable speed (hasSpeed) + formal motion (Activity Recognition) with provenance (2026-06-20)
 The drive-past + mode-naming root cause was the phone sending a fake `0` speed. Now fixed properly with provenance end to end:
 - **Android**: `LocationRepository.resolveSpeed` — GNSS Doppler speed when `hasSpeed()` (rejecting low-confidence via `hasSpeedAccuracy()`), else on-device **derived** speed (`distanceTo` ÷ Δ`elapsedRealtimeNanos`, jitter-gated), else **null** (never a fake 0). Sends `speed_source` ('gnss'|'derived'). The **Activity Transition API** (`ActivityRecognition`, ENTER/EXIT of in_vehicle/on_bicycle/walking/running/still via `ActivityTransitionReceiver` → `CurrentMotionState` singleton) gives a formal `motion` label + `motion_source` ('activity_recognition'). New `ACTIVITY_RECOGNITION` permission; Room v4→5 (speed now nullable + 3 new cols).

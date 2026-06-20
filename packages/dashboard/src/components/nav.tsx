@@ -35,6 +35,7 @@ import {
   ToggleLeft,
   Sparkles,
   Bot,
+  Lightbulb,
   Tag,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -69,6 +70,7 @@ function buildNavGroups(): NavGroup[] {
     { href: "/media", label: "Media", icon: ImageIcon },
     { href: "/sessions", label: "Sessions", icon: MessageSquare },
     { href: "/journal", label: "Journal", icon: BookOpen },
+    { href: "/lessons", label: "Lessons", icon: Lightbulb },
     { href: "/health", label: "Health", icon: HeartPulse },
   ];
   return [
