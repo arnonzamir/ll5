@@ -17,7 +17,8 @@ governed injection (`SessionStart` runbook block + `UserPromptSubmit` `memory-re
 store `ll5_agent_lessons` (+ `_history`, versioned/audited like user_model): tools `upsert_lesson`
 (reconcile-on-write — contradictions blocked until resolved), `recall_lessons`, `list_lessons`,
 `retire_lesson`, `ingest_memory` (classifies **world** vs **user**: world→global lessons runbook with
-auto-merge-in-place, user→`user_model.learned_notes`). `durable` vs `provisional` (provisional carry a
+auto-merge-in-place, user→`user_model.learned_notes`). Lessons carry claim/trigger/**detail** (the body —
+why/how-to-apply — preserved and searchable). `durable` vs `provisional` (provisional carry a
 falsification_test, flagged verify-before-trust). Dashboard `/lessons` page renders the runbook. Spike
 validated the hook contract on Claude Code 2.1.178. Pending: migrate existing `feedback_*.md` + clear
 the on-disk memory dir (post-deploy); live end-to-end verification.

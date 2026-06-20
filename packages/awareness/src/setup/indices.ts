@@ -50,6 +50,7 @@ const AWARENESS_EXCLUSIVE_INDICES: IndexDefinition[] = [
         scope: { type: 'keyword' }, // 'world' (global operational knowledge)
         claim: { type: 'text', analyzer: 'multilingual' }, // the belief
         trigger: { type: 'text', analyzer: 'multilingual' }, // when it's relevant (recall key)
+        detail: { type: 'text', analyzer: 'multilingual' }, // the body — why / how to apply
         durability: { type: 'keyword' }, // 'durable' | 'provisional'
         status: { type: 'keyword' }, // 'active' | 'retired'
         falsification_test: { type: 'text', analyzer: 'multilingual' }, // provisional: the check that retires it

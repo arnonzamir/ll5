@@ -28,6 +28,7 @@ interface LessonSource {
   scope: string;
   claim: string;
   trigger: string;
+  detail: string | null;
   durability: 'durable' | 'provisional';
   status: 'active' | 'retired';
   falsification_test: string | null;
@@ -74,7 +75,7 @@ async function searchActive(
       bool: {
         filter: [{ term: { scope: WORLD_SCOPE } }, { term: { status: 'active' } }],
         must: query
-          ? [{ multi_match: { query, fields: ['claim^2', 'trigger'], fuzziness: 'AUTO' } }]
+          ? [{ multi_match: { query, fields: ['claim^2', 'trigger^1.5', 'detail'], fuzziness: 'AUTO' } }]
           : [{ match_all: {} }],
       },
     },
@@ -103,6 +104,7 @@ export function registerLessonTools(
     {
       claim: z.string().describe('The lesson/belief, stated plainly and self-contained.'),
       trigger: z.string().describe('When this lesson is relevant — the recall key (e.g. "scheduling ticklers or calendar events").'),
+      detail: z.string().optional().describe('Optional fuller body — the why and how-to-apply.'),
       durability: z
         .enum(['durable', 'provisional'])
         .describe('durable = a standing truth; provisional = a workaround for a current bug/limitation (must carry a falsification_test and depends_on).'),
@@ -166,6 +168,7 @@ export function registerLessonTools(
         scope: WORLD_SCOPE,
         claim: params.claim,
         trigger: params.trigger,
+        detail: params.detail ?? null,
         durability: params.durability,
         status: 'active',
         falsification_test: params.falsification_test ?? null,
@@ -230,6 +233,7 @@ export function registerLessonTools(
           relevance: m.score,
           claim: m.source.claim,
           trigger: m.source.trigger,
+          detail: m.source.detail ?? null,
           durability: m.source.durability,
           verify_before_trust: m.source.durability === 'provisional' ? (m.source.falsification_test ?? null) : null,
         })),
@@ -353,10 +357,12 @@ export function registerLessonTools(
         return text({ ok: true, scope: 'user', action: 'appended', section, note_count: notes.length });
       }
 
-      // world → lessons store
+      // world → lessons store. claim = title; detail = the body (the why/how-to-apply);
+      // trigger = the recall key (native description). The body is preserved + searchable.
       const claim = fm.name || fm.body.split('\n').find((l) => l.trim())?.trim() || fm.description || 'unspecified lesson';
       const trigger = fm.description || fm.name || claim;
-      const near = await searchActive(esClient, `${claim} ${trigger}`, 3);
+      const detail = fm.body || null;
+      const near = await searchActive(esClient, `${claim} ${trigger} ${detail ?? ''}`, 3);
       const strong = near.find((m) => m.score >= AUTO_MERGE_THRESHOLD);
 
       if (strong) {
@@ -365,7 +371,7 @@ export function registerLessonTools(
         await esClient.update({
           index: LESSONS_INDEX,
           id: strong.id,
-          doc: { claim, trigger, source: provenance, updated_at: now, status: 'active' },
+          doc: { claim, trigger, detail, source: provenance, updated_at: now, status: 'active' },
           refresh: 'wait_for',
         });
         logAudit({
@@ -376,7 +382,7 @@ export function registerLessonTools(
       }
 
       const doc: LessonSource = {
-        scope: WORLD_SCOPE, claim, trigger, durability: 'durable', status: 'active',
+        scope: WORLD_SCOPE, claim, trigger, detail, durability: 'durable', status: 'active',
         falsification_test: null, depends_on: null, expires: null, supersedes: null, superseded_by: null,
         source: provenance, author_user_id: userId, created_at: now, updated_at: now, retired_at: null,
       };
