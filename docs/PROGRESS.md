@@ -18,7 +18,10 @@ store `ll5_agent_lessons` (+ `_history`, versioned/audited like user_model): too
 (reconcile-on-write — contradictions blocked until resolved), `recall_lessons`, `list_lessons`,
 `retire_lesson`, `ingest_memory` (classifies **world** vs **user**: world→global lessons runbook with
 auto-merge-in-place, user→`user_model.learned_notes`). Lessons carry claim/trigger/**detail** (the body —
-why/how-to-apply — preserved and searchable). `durable` vs `provisional` (provisional carry a
+why/how-to-apply — preserved and searchable). Merge/conflict decisions use deterministic claim
+token-overlap (overlap coefficient), NOT normalized BM25 (which made the top hit always ~1.0 and
+spuriously merged unrelated lessons — caught during migration); classifier leans world for operating
+guidance, user only when personal markers dominate. `durable` vs `provisional` (provisional carry a
 falsification_test, flagged verify-before-trust). Dashboard `/lessons` page renders the runbook. Spike
 validated the hook contract on Claude Code 2.1.178. Pending: migrate existing `feedback_*.md` + clear
 the on-disk memory dir (post-deploy); live end-to-end verification.

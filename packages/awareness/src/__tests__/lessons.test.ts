@@ -73,18 +73,32 @@ describe('upsert_lesson — reconcile-on-write', () => {
     expect(es.index).toHaveBeenCalled();
   });
 
-  it('force=true inserts despite near matches', async () => {
-    const es = esWithMatches([{ id: 'L-x', score: 10, claim: 'unrelated-but-similar wording' }]);
+  it('force=true inserts despite a real claim-overlap conflict', async () => {
+    // Same significant tokens → genuine conflict; force inserts anyway.
+    const es = esWithMatches([{ id: 'L-x', score: 10, claim: 'create_tickler due_time is UTC' }]);
     const tools = captureTools((s) => registerLessonTools(s, es as never, getUserId));
     const res = await tools.get('upsert_lesson')!({
-      claim: 'a genuinely distinct lesson',
-      trigger: 'something else',
+      claim: 'create_tickler due_time is local',
+      trigger: 'scheduling ticklers',
       durability: 'durable',
       force: true,
     });
     const out = parseToolResponse<{ ok: boolean; forced_over_conflicts: string[] }>(res);
     expect(out.ok).toBe(true);
     expect(out.forced_over_conflicts).toContain('L-x');
+  });
+
+  it('does NOT flag an unrelated lesson as a conflict (no false merge)', async () => {
+    // This is the migration bug: "tickler timezone" vs "agent groups prefix" must not collide.
+    const es = esWithMatches([{ id: 'L-unrel', score: 10, claim: 'agent groups use the ll5 prefix' }]);
+    const tools = captureTools((s) => registerLessonTools(s, es as never, getUserId));
+    const res = await tools.get('upsert_lesson')!({
+      claim: 'create_tickler due_time is the local effective timezone',
+      trigger: 'scheduling ticklers',
+      durability: 'durable',
+    });
+    const out = parseToolResponse<{ ok: boolean; id?: string }>(res);
+    expect(out.ok).toBe(true); // clean insert, no spurious conflict
   });
 
   it('rejects a provisional lesson with no falsification_test', async () => {
@@ -115,15 +129,25 @@ describe('ingest_memory — classify + route', () => {
     expect(es.index).toHaveBeenCalled();
   });
 
-  it('auto-merges a very strong world match in place instead of inserting a duplicate', async () => {
-    const es = esWithMatches([{ id: 'L-tz', score: 10, claim: 'create_tickler due_time is UTC' }]); // normalizes to 1.0 ≥ 0.8
-    es.get = vi.fn().mockResolvedValue({ _id: 'L-tz', _source: { claim: 'create_tickler due_time is UTC', scope: 'world', status: 'active' } });
+  it('auto-merges a genuine restatement in place (high claim overlap)', async () => {
+    // worldMd name is "create_tickler is local"; existing claim shares those tokens → overlap ≥ 0.6.
+    const es = esWithMatches([{ id: 'L-tz', score: 10, claim: 'create_tickler is local timezone' }]);
+    es.get = vi.fn().mockResolvedValue({ _id: 'L-tz', _source: { claim: 'create_tickler is local timezone', scope: 'world', status: 'active' } });
     const tools = captureTools((s) => registerLessonTools(s, es as never, getUserId));
     const res = await tools.get('ingest_memory')!({ raw_content: worldMd });
     const out = parseToolResponse<{ scope: string; action: string; id: string }>(res);
     expect(out.action).toBe('updated_in_place');
     expect(out.id).toBe('L-tz');
     expect(es.update).toHaveBeenCalled(); // updated, not a second insert of a lesson doc
+  });
+
+  it('does NOT merge an unrelated world lesson (the migration corruption bug)', async () => {
+    // "create_tickler is local" must NOT merge into "agent groups use the ll5 prefix".
+    const es = esWithMatches([{ id: 'L-unrel', score: 10, claim: 'agent groups use the ll5 prefix' }]);
+    const tools = captureTools((s) => registerLessonTools(s, es as never, getUserId));
+    const res = await tools.get('ingest_memory')!({ raw_content: worldMd });
+    const out = parseToolResponse<{ scope: string; action: string }>(res);
+    expect(out.action).toBe('created'); // fresh insert, NOT updated_in_place
   });
 
   it('routes a user memory to the user_model learned_notes section (appended)', async () => {

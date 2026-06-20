@@ -16,13 +16,31 @@ const USER_MODEL_INDEX = 'll5_agent_user_model';
 const USER_MODEL_HISTORY_INDEX = 'll5_agent_user_model_history';
 const WORLD_SCOPE = 'world';
 
-// A near-match at/above this BM25 relevance (normalized 0..1) is treated as a potential
-// contradiction/duplicate that the caller must reconcile before a new lesson is inserted.
-const RECONCILE_THRESHOLD = 0.5;
-// On the AUTOMATIC ingest path (the hook), a very strong match is treated as the same
-// lesson evolving → update-in-place (snapshot the old into history) so contradictions can
-// never coexist without the agent having to resolve them by hand.
-const AUTO_MERGE_THRESHOLD = 0.8;
+// Merge/conflict decisions use DETERMINISTIC claim token-overlap (overlap coefficient),
+// NOT the BM25 score — BM25 is normalized against the top hit, so the top match is always
+// ~1.0 and a score threshold would merge any two lessons. Overlap on significant claim
+// tokens only fires for genuine restatements (e.g. two "create_tickler timezone" lessons),
+// never for unrelated topics.
+const MERGE_OVERLAP = 0.6;    // auto-merge in place (ingest) — essentially the same claim
+const CONFLICT_OVERLAP = 0.4; // surface as a potential conflict to reconcile (upsert/review)
+
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'to', 'of', 'for', 'and', 'or', 'in', 'on', 'with', 'by', 'your',
+  'you', 'it', 'that', 'this', 'be', 'as', 'at', 'not', 'no', 'my', 'if', 'when', 'use', 'do', 'its',
+  'was', 'were', 'will', 'should', 'must', 'can', 'has', 'have', 'from', 'into', 'than', 'then',
+]);
+function sigTokens(s: string): Set<string> {
+  return new Set((s.toLowerCase().match(/[a-z0-9_]+/g) ?? []).filter((t) => t.length > 2 && !STOPWORDS.has(t)));
+}
+/** Overlap coefficient on significant tokens: |A∩B| / min(|A|,|B|). 1.0 = one contains the other. */
+function claimOverlap(a: string, b: string): number {
+  const A = sigTokens(a);
+  const B = sigTokens(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  return inter / Math.min(A.size, B.size);
+}
 
 interface LessonSource {
   scope: string;
@@ -126,9 +144,10 @@ export function registerLessonTools(
         });
       }
 
-      // Find near matches to reconcile against.
-      const near = await searchActive(esClient, `${params.claim} ${params.trigger}`, 5);
-      const conflicts = near.filter((m) => m.id !== params.supersede_id && m.score >= RECONCILE_THRESHOLD);
+      // Find near matches via BM25, then decide conflicts by deterministic claim overlap.
+      const near = await searchActive(esClient, `${params.claim} ${params.trigger}`, 8);
+      const conflicts = near
+        .filter((m) => m.id !== params.supersede_id && claimOverlap(params.claim, m.source.claim) >= CONFLICT_OVERLAP);
 
       // Reconcile step: retire the superseded lesson (if any).
       let supersededClaim: string | null = null;
@@ -362,8 +381,12 @@ export function registerLessonTools(
       const claim = fm.name || fm.body.split('\n').find((l) => l.trim())?.trim() || fm.description || 'unspecified lesson';
       const trigger = fm.description || fm.name || claim;
       const detail = fm.body || null;
-      const near = await searchActive(esClient, `${claim} ${trigger} ${detail ?? ''}`, 3);
-      const strong = near.find((m) => m.score >= AUTO_MERGE_THRESHOLD);
+      const near = await searchActive(esClient, `${claim} ${trigger} ${detail ?? ''}`, 8);
+      // Auto-merge only a genuine restatement (high claim overlap), never just the BM25 top hit.
+      const strong = near
+        .map((m) => ({ m, ov: claimOverlap(claim, m.source.claim) }))
+        .filter((x) => x.ov >= MERGE_OVERLAP)
+        .sort((a, b) => b.ov - a.ov)[0]?.m;
 
       if (strong) {
         // Same lesson evolving → update in place; old version preserved in history.
@@ -391,7 +414,9 @@ export function registerLessonTools(
         user_id: userId, source: 'awareness', action: 'create', entity_type: 'lesson',
         entity_id: result._id, summary: `Lesson created: ${claim.slice(0, 60)}`, metadata: { via: 'ingest_memory' },
       });
-      const softConflicts = near.filter((m) => m.score >= RECONCILE_THRESHOLD).map((m) => ({ id: m.id, claim: m.source.claim }));
+      const softConflicts = near
+        .filter((m) => claimOverlap(claim, m.source.claim) >= CONFLICT_OVERLAP)
+        .map((m) => ({ id: m.id, claim: m.source.claim }));
       return text({ ok: true, scope: 'world', action: 'created', id: result._id, claim, review_possible_conflicts: softConflicts });
     },
   );
@@ -419,12 +444,24 @@ function parseFrontmatter(raw: string): { name: string; description: string; typ
 function classifyScope(name: string, description: string, body: string, fmType: string): 'world' | 'user' {
   if (fmType === 'user') return 'user';
   const hay = `${name} ${description} ${body}`.toLowerCase();
-  const worldHints = ['create_tickler', 'tickler', 'mcp', 'elasticsearch', 'timezone', 'utc', 'deploy', 'gateway', 'schema', 'index', 'endpoint', 'hook', 'scheduler', 'cron', 'coolify', 'migration', 'webhook', 'fcm', 'api ', 'tool ', 'bug', 'error', 'auth', 'container'];
-  const userHints = ['arnon', ' he ', ' his ', ' she ', ' her ', 'remind', 'prefers', 'wants', 'dislikes', 'likes ', 'meds', 'ritalin', 'family', 'wife', 'son', 'daughter', 'commute', 'communicat', 'emoji', 'tone', 'birthday'];
-  const w = worldHints.filter((h) => hay.includes(h)).length;
-  const u = userHints.filter((h) => hay.includes(h)).length;
-  if (u > w) return 'user';
-  // Tie or operational-leaning → world (operational mis-file is reviewable + lower-harm).
+  // Personal markers: a fact/preference about the specific user (→ user_model).
+  const personalHints = [
+    'arnon', ' he ', ' his ', ' him ', ' she ', ' her ', 'ritalin', ' meds', 'medication', 'wife',
+    ' son', 'daughter', 'family', 'rotem', 'itamar', 'birthday', 'commute', 'army', 'his ', 'health',
+  ];
+  // Operating markers: a rule/method about how to do the job (→ world runbook). The native
+  // "feedback" type is operating guidance, so it counts toward world.
+  const operatingHints = [
+    'create_tickler', 'tickler', 'mcp', 'elasticsearch', 'timezone', 'utc', 'deploy', 'gateway',
+    'endpoint', 'hook', 'scheduler', 'webhook', 'tool', 'bug', 'error', 'auth', 'container', 'never',
+    "don't", 'always', 'confirm', 'verify', 'do not', 'avoid', 'image', 'screenshot', 'location',
+    'place', 'whatsapp', 'message', 'contact', 'send', 'relay', 'precision', 'tracking',
+  ];
+  const personal = personalHints.filter((h) => hay.includes(h)).length + (fmType === 'feedback' ? 0 : 0);
+  const operating = operatingHints.filter((h) => hay.includes(h)).length + (fmType === 'feedback' ? 1 : 0);
+  // Route to user ONLY when personal markers clearly dominate; otherwise world. Mis-filing a
+  // world lesson into the runbook is reviewable; polluting the user_model is worse.
+  if (personal >= 2 && personal > operating) return 'user';
   return 'world';
 }
 
