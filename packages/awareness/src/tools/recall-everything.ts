@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
+import { logAudit } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
 // recall_everything — the single, global "what do we know about X" entry point.
@@ -321,6 +322,27 @@ export function registerRecallEverythingTool(
           indices: indices.length,
           total,
           coverage,
+        });
+
+        // Coverage telemetry → ll5_audit_log (auto-carries session_id from request context,
+        // so a sweep can be correlated to the conversation it grounded). Lets the usage watch
+        // report not just IF recall is used but WHETHER it returns useful results.
+        logAudit({
+          user_id: userId,
+          source: 'awareness',
+          action: 'recall_sweep',
+          entity_type: 'recall',
+          entity_id: params.query.slice(0, 64),
+          summary: `recall "${params.query}" → ${coverage} (${total} hits / ${Object.keys(bySource).length} sources)`,
+          metadata: {
+            query: params.query,
+            coverage,
+            total,
+            by_source: bySource,
+            sources_searched: indices.map((i) => INDEX_LABEL[i] ?? i),
+            session_searched: sessionSearched,
+            suggest_sessions: thin && !sessionSearched,
+          },
         });
 
         return {

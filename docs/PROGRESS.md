@@ -29,7 +29,9 @@ writes `transcript_text` (a flat `multilingual`-analyzed concat of all message t
 searches THAT; the 155 existing docs were backfilled via `_update_by_query`. (Highlight restricted to the
 searched content fields, not `'*'` — the wildcard re-highlighted `user_id.keyword` via the scoping filter, so
 snippets were showing the bare user UUID instead of the matched text.) All 13 distilled sources +
-session opt-in verified live end-to-end. Sessions are saved regularly
+session opt-in verified live end-to-end. Each sweep also writes a `recall_sweep` `logAudit` entry
+(`ll5_audit_log`, carries coverage/total/by_source/sources + auto session_id) so live usage + recall
+quality can be validated through real operation (alongside the `ll5_app_log` tool_call counts). Sessions are saved regularly
 already (per-turn `session-save.sh` hook → `/sessions` → ES; live data confirms current). First part of the general retrieval-surfacing fix; pending parts: nightly pre-staging,
 promote-on-repetition. Tests `__tests__/recall-everything.test.ts` (13). Persona wired (look-before-ask,
 call it first — ll5-run). Deployed + verified live (39 tools).
