@@ -178,7 +178,10 @@ export function registerRecallEverythingTool(
       'no information — it closes the gap where data existed in a store but was never surfaced. ' +
       'If results come back thin, the response says so and names the deeper layers to check next: ' +
       'the raw conversation transcripts (pass sources:["session"] — NOT swept by default, since it is ' +
-      'un-distilled chatter) and the Postgres stores (gtd, gmail).',
+      'un-distilled chatter) and the Postgres stores (gtd, gmail). ' +
+      'For a STATUS / "did X happen / what is the latest" question, pass mode:"timeline" — it returns EVERY ' +
+      'match most-recent-first with no per-source cap, so a decisive recent update is never out-ranked by ' +
+      'older verbose entries. The default response also flags (more_available) when ranking hid more than it showed.',
     {
       query: z.string().describe('Topic / name / phrase to look up (Hebrew or English).'),
       limit: z.number().min(1).max(100).optional().describe('Max results returned. Default 30.'),
@@ -194,11 +197,22 @@ export function registerRecallEverythingTool(
         .describe(
           'Restrict to these source labels (e.g. ["journal","calendar","fact"]). Default: all sources.',
         ),
+      mode: z
+        .enum(['relevant', 'timeline'])
+        .optional()
+        .describe(
+          "'relevant' (default): top matches by relevance, capped per source — best for \"what do we know about X\". " +
+            "'timeline': EXHAUSTIVE — EVERY match, most-recent-FIRST, NO per-source cap — use for status / \"did X happen / " +
+            'what\'s the latest" questions. In relevant mode a decisive recent update (e.g. "picked up the glasses Friday") ' +
+            'can be out-ranked and capped out by verbose older entries (the original order); timeline mode guarantees you see it.',
+        ),
     },
     async (params) => {
       const userId = getUserId();
-      const limit = params.limit ?? 30;
-      const perSourceCap = params.per_source_cap ?? 8;
+      const mode = params.mode ?? 'relevant';
+      // Timeline (exhaustive) mode: more results, no per-source cap, time-ordered.
+      const limit = params.limit ?? (mode === 'timeline' ? 50 : 30);
+      const perSourceCap = mode === 'timeline' ? Infinity : (params.per_source_cap ?? 8);
 
       // Default sweep = distilled stores only. A sources filter can opt INTO the raw
       // session layer (and/or narrow to specific distilled stores).
@@ -232,6 +246,10 @@ export function registerRecallEverythingTool(
           ignore_unavailable: true,
           allow_no_indices: true,
           size: fetchSize,
+          // True match count per index (not just the fetched page) → the "shown of matched"
+          // cap signal, so the agent knows when relevance ranking hid more than it returned.
+          track_total_hits: true,
+          aggs: { by_index: { terms: { field: '_index', size: 30 } } },
           query: {
             bool: {
               must: [
@@ -309,9 +327,33 @@ export function registerRecallEverythingTool(
           }
         }
 
-        flattened.sort((a, b) => b.score - a.score);
+        // Order: timeline = most-recent-first (the decisive update leads, and recency is
+        // guaranteed in the slice); relevant = best-scoring first.
+        if (mode === 'timeline') {
+          flattened.sort((a, b) => {
+            const ta = a.timestamp ? Date.parse(a.timestamp) : -Infinity;
+            const tb = b.timestamp ? Date.parse(b.timestamp) : -Infinity;
+            return tb - ta;
+          });
+        } else {
+          flattened.sort((a, b) => b.score - a.score);
+        }
         const results = flattened.slice(0, limit);
         const total = results.length;
+
+        // True matched-per-source (from the agg) vs what we actually returned → the cap signal.
+        const matchedBySource: Record<string, number> = {};
+        for (const b of ((res.aggregations?.by_index as { buckets?: Array<{ key: string; doc_count: number }> })?.buckets ?? [])) {
+          const label = INDEX_LABEL[b.key] ?? b.key;
+          matchedBySource[label] = (matchedBySource[label] ?? 0) + b.doc_count;
+        }
+        // Sources where relevance ranking hid more than it surfaced — these are where a
+        // status/"did X happen" answer could be buried. Empty in timeline mode (no cap).
+        const moreAvailable: Record<string, { shown: number; matched: number }> = {};
+        for (const [label, shown] of Object.entries(bySource)) {
+          const matched = matchedBySource[label] ?? shown;
+          if (matched > shown) moreAvailable[label] = { shown, matched };
+        }
 
         const coverage = total === 0 ? 'empty' : total < THIN_THRESHOLD ? 'thin' : 'rich';
         const thin = coverage !== 'rich';
@@ -336,14 +378,20 @@ export function registerRecallEverythingTool(
           summary: `recall "${params.query}" → ${coverage} (${total} hits / ${Object.keys(bySource).length} sources)`,
           metadata: {
             query: params.query,
+            mode,
             coverage,
             total,
             by_source: bySource,
             sources_searched: indices.map((i) => INDEX_LABEL[i] ?? i),
             session_searched: sessionSearched,
             suggest_sessions: thin && !sessionSearched,
+            capped_sources: Object.keys(moreAvailable),
           },
         });
+
+        // In relevant mode, flag when ranking hid more than it showed — the case where a
+        // decisive recent update can be out-ranked. Suppressed in timeline mode (nothing capped).
+        const capped = mode === 'relevant' && Object.keys(moreAvailable).length > 0;
 
         return {
           content: [
@@ -351,10 +399,20 @@ export function registerRecallEverythingTool(
               type: 'text' as const,
               text: JSON.stringify({
                 query: params.query,
+                mode,
                 coverage,
                 total,
                 by_source: bySource,
                 results,
+                ...(capped
+                  ? {
+                      more_available: moreAvailable,
+                      timeline_hint:
+                        'Relevance ranking capped some sources (shown < matched). If this is a status / ' +
+                        '"did X happen / what\'s the latest" question, re-run with mode:"timeline" — the ' +
+                        'decisive recent entry may be beyond the relevance cut.',
+                    }
+                  : {}),
                 ...(thin
                   ? {
                       suggest_postgres: ['gtd', 'gmail'],

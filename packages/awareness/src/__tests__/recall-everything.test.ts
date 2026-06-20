@@ -12,9 +12,12 @@ interface Hit {
   highlight?: Record<string, string[]>;
 }
 
-function esReturning(hits: Hit[]) {
+function esReturning(hits: Hit[], byIndexAgg?: Array<{ key: string; doc_count: number }>) {
   return makeMockEsClient({
-    search: vi.fn().mockResolvedValue({ hits: { hits } }),
+    search: vi.fn().mockResolvedValue({
+      hits: { hits },
+      ...(byIndexAgg ? { aggregations: { by_index: { buckets: byIndexAgg } } } : {}),
+    }),
   });
 }
 
@@ -198,6 +201,43 @@ describe('recall_everything — unified cross-store sweep', () => {
     const res = await tools.get('recall_everything')!({ query: 'text' });
     const out = parseToolResponse<Resp>(res);
     expect(out.results[0].highlight).toBe('long fact <em>text</em>');
+  });
+
+  it('timeline mode: most-recent-first, ignores per-source cap', async () => {
+    // Older, term-dense "origin" entry would out-rank a recent terse "update" by score —
+    // timeline mode must put the recent one first regardless of score.
+    const es = esReturning([
+      { _index: 'll5_agent_journal', _id: 'origin', _score: 20, _source: { topic: 'order', content: 'bought sunglasses and prescription', created_at: '2026-06-07T09:00:00Z' } },
+      { _index: 'll5_agent_journal', _id: 'pickup', _score: 3, _source: { topic: 'misc', content: 'picked up sunglasses', created_at: '2026-06-19T13:00:00Z' } },
+      { _index: 'll5_agent_journal', _id: 'mid', _score: 5, _source: { topic: 'place', content: 'place match optika', created_at: '2026-06-11T07:00:00Z' } },
+    ]);
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    const res = await tools.get('recall_everything')!({ query: 'sunglasses', mode: 'timeline', per_source_cap: 1 });
+    const out = parseToolResponse<Resp & { mode: string }>(res);
+    expect(out.mode).toBe('timeline');
+    // most-recent-first: the Jun 19 pickup leads despite its low score
+    expect(out.results[0].id).toBe('pickup');
+    expect(out.results.map((r) => r.id)).toEqual(['pickup', 'mid', 'origin']);
+    // per_source_cap is ignored in timeline mode — all 3 journal hits returned, not 1
+    expect(out.by_source.journal).toBe(3);
+    // nothing flagged as capped in timeline mode
+    expect((out as { more_available?: unknown }).more_available).toBeUndefined();
+  });
+
+  it('relevant mode: flags the cap signal when ranking hid more than it showed', async () => {
+    const many: Hit[] = Array.from({ length: 8 }, (_, i) => ({
+      _index: 'll5_agent_journal',
+      _id: `j${i}`,
+      _score: 10 - i,
+      _source: { topic: 't', content: `entry ${i}`, created_at: '2026-06-10T00:00:00Z' },
+    }));
+    // agg says 36 journal docs actually matched, but only 8 shown (per_source_cap default)
+    const es = esReturning(many, [{ key: 'll5_agent_journal', doc_count: 36 }]);
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    const res = await tools.get('recall_everything')!({ query: 'glasses' });
+    const out = parseToolResponse<Resp & { more_available?: Record<string, { shown: number; matched: number }>; timeline_hint?: string }>(res);
+    expect(out.more_available?.journal).toEqual({ shown: 8, matched: 36 });
+    expect(out.timeline_hint).toContain('mode:"timeline"');
   });
 
   it('returns a structured error if ES throws', async () => {
