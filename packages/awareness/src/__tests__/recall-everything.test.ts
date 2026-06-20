@@ -171,6 +171,19 @@ describe('recall_everything — unified cross-store sweep', () => {
     expect(out.suggest_sessions).toBeUndefined();
   });
 
+  it('highlights only content fields, never the user-scoping fields (no UUID snippets)', async () => {
+    const es = esReturning([]);
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    await tools.get('recall_everything')!({ query: 'q' });
+    const call = (es.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const hlFields = call.highlight.fields;
+    expect(hlFields['*']).toBeUndefined(); // wildcard would re-highlight user_id.keyword
+    expect(hlFields.transcript_text).toBeDefined();
+    expect(hlFields.content).toBeDefined();
+    expect(hlFields.user_id).toBeUndefined();
+    expect(hlFields['user_id.keyword']).toBeUndefined();
+  });
+
   it('surfaces the highlight snippet that explains the match', async () => {
     const es = esReturning([
       {

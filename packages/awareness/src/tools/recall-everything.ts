@@ -56,6 +56,13 @@ const SEARCH_FIELDS = [
   'transcript_text', // raw session transcripts (opt-in source only); ignored by lenient on other indices
 ];
 
+// Highlight ONLY the content fields we actually search — never the scoping fields. A wildcard
+// (`fields: {'*': {}}`) also highlights `user_id.keyword`, because the user-scoping FILTER term
+// matches it, so the picked snippet becomes the bare user UUID instead of the matched text.
+const HIGHLIGHT_FIELDS: Record<string, Record<string, never>> = Object.fromEntries(
+  SEARCH_FIELDS.map((f) => [f.split('^')[0], {}]),
+);
+
 // Indices swept, mapped to the friendly source label returned to the agent. ll5_agent_lessons
 // is world-scoped (no user_id) — included unconditionally; every other index is user-scoped.
 const INDEX_LABEL: Record<string, string> = {
@@ -257,7 +264,7 @@ export function registerRecallEverythingTool(
             },
           },
           highlight: {
-            fields: { '*': {} },
+            fields: HIGHLIGHT_FIELDS,
             fragment_size: 140,
             number_of_fragments: 1,
           },

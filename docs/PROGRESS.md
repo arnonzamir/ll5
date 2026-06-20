@@ -26,7 +26,10 @@ would dilute precision), included only when the caller passes `sources:["session
 `suggest_sessions` pointing the agent at that deeper layer. **Searchability fix:** session docs map
 `messages` as `enabled:false` (store-only, never indexed) — so the gateway `POST /sessions` handler now also
 writes `transcript_text` (a flat `multilingual`-analyzed concat of all message texts) and recall_everything
-searches THAT; the 153 existing docs were backfilled via `_update_by_query`. Sessions are saved regularly
+searches THAT; the 155 existing docs were backfilled via `_update_by_query`. (Highlight restricted to the
+searched content fields, not `'*'` — the wildcard re-highlighted `user_id.keyword` via the scoping filter, so
+snippets were showing the bare user UUID instead of the matched text.) All 13 distilled sources +
+session opt-in verified live end-to-end. Sessions are saved regularly
 already (per-turn `session-save.sh` hook → `/sessions` → ES; live data confirms current). First part of the general retrieval-surfacing fix; pending parts: nightly pre-staging,
 promote-on-repetition. Tests `__tests__/recall-everything.test.ts` (13). Persona wired (look-before-ask,
 call it first — ll5-run). Deployed + verified live (39 tools).
