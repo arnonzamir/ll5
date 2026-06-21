@@ -93,6 +93,34 @@ describe('processLocation — G9 low-accuracy handling', () => {
   });
 });
 
+describe('processLocation — suspect: impossible implied speed (jamming)', () => {
+  // The 2026-06-21 Amman miss: a ~160km GPS snap 15 min after the previous fix
+  // (gap >= DRIFT_WINDOW_MIN=10, so the glitch filter skips the speed check and does
+  // NOT drop it), while the user is MOVING and NOT wifi-anchored — so the wifi-anchor
+  // and stationary suspect rules both miss it. The implied ~640 km/h is physically
+  // impossible by ground, so it must be FLAGGED suspect (kept, not dropped).
+  const prev: StoredPoint = { lat: 32.0, lon: 34.0, timestamp: '2026-06-21T10:00:00.000Z' };
+  const jammed = loc({ lat: 33.44, lon: 34.0, timestamp: '2026-06-21T10:15:00.000Z', accuracy_m: 30 });
+
+  it('flags a far jamming snap as suspect even when moving and not wifi-anchored', async () => {
+    const { es, indexed } = makeEs();
+    const stored = await processLocation(es, USER, jammed, undefined, undefined, prev);
+    const docs = storedLocDocs(indexed);
+    // kept (not dropped — the glitch window was exceeded) but flagged
+    expect(docs).toHaveLength(1);
+    expect(docs[0].suspect).toBe(true);
+    expect(docs[0].suspect_reason).toBe('impossible_implied_speed');
+    expect(stored).not.toBeNull();
+  });
+
+  it('does NOT flag a normal nearby fix as suspect', async () => {
+    const { es, indexed } = makeEs();
+    const near = loc({ lat: 32.02, lon: 34.0, timestamp: '2026-06-21T10:15:00.000Z', accuracy_m: 30 });
+    await processLocation(es, USER, near, undefined, undefined, prev);
+    expect(storedLocDocs(indexed)[0].suspect).toBeUndefined();
+  });
+});
+
 describe('processLocation — G6 fast travel vs teleport', () => {
   const prev: StoredPoint = { lat: 32.0, lon: 34.0, timestamp: '2026-05-30T10:00:00.000Z' };
   // ~83km away, 2 minutes later → computed ~2500 km/h (implausible by raw speed).

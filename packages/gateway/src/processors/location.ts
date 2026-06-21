@@ -55,6 +55,13 @@ const PLACE_CANDIDATE_CAP_M = 2000;
 // A hop larger than this from the previous fix, while the device reports it
 // isn't moving, is treated as a GPS-jamming spoof (suspect), not real travel.
 const SUSPECT_JUMP_KM = 20;
+// Above this implied GROUND speed a hop is physically impossible — no car, train, or
+// high-speed rail reaches it, but a far-airport GPS-jamming snap does (Binyamina→Amman
+// was ~500 km/h). Flags suspect even when the user is MOVING and NOT wifi-anchored to a
+// confident known place — the exact gap the wifi-anchor and stationary rules leave open
+// (the 2026-06-21 Amman miss). Only meaningful on a SHORT gap; across a long overnight gap
+// the implied speed is low, which is when the wifi-anchor rule is meant to carry the catch.
+const IMPOSSIBLE_HOP_KMH = 400;
 
 export interface PlaceMatchResult {
   place_id: string;
@@ -709,7 +716,11 @@ export async function processLocation(
   const hopKm = prev
     ? haversineMeters({ lat: prev.lat, lon: prev.lon }, { lat: item.lat, lon: item.lon }) / 1000
     : 0;
-  // Both rules require a LARGE hop (jitter-safe — normal GPS noise is metres).
+  // Implied speed of the hop — the physical sanity check. Only valid on a positive,
+  // non-trivial gap (clock-skew / same-instant fixes → 0, rule won't fire).
+  const hopHours = prev ? (new Date(item.timestamp).getTime() - prev.timestampMs) / 3_600_000 : 0;
+  const impliedKmh = hopHours > 0 ? hopKm / hopHours : 0;
+  // Rules require a LARGE hop (jitter-safe — normal GPS noise is metres).
   if (hopKm > SUSPECT_JUMP_KM) {
     const wifiAnchored = !!(wifiSignal?.connected && wifiSignal.bssidPlace?.confident);
     const gpsNotAtWifiPlace =
@@ -724,6 +735,13 @@ export async function processLocation(
       // You can't be 20km from where you just were while not moving.
       suspect = true;
       suspectReason = 'teleport_while_stationary';
+    } else if (impliedKmh > IMPOSSIBLE_HOP_KMH) {
+      // The case the first two rules miss: a far-airport jamming snap while the user is
+      // MOVING (not "stationary") and NOT on a confident known-place wifi — e.g. cycling
+      // when GPS snapped Binyamina→Amman. A >400 km/h ground hop is impossible, so it's
+      // jamming regardless of wifi/reported speed.
+      suspect = true;
+      suspectReason = 'impossible_implied_speed';
     }
   }
   if (suspect) {
@@ -732,6 +750,7 @@ export async function processLocation(
       lat: item.lat,
       lon: item.lon,
       hop_km: Math.round(hopKm),
+      implied_kmh: Math.round(impliedKmh),
       wifi_place: wifiSignal?.bssidPlace?.placeName,
     });
   }

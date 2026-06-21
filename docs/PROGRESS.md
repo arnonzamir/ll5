@@ -8,6 +8,18 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FIX: GPS-jamming suspect filter — catch the impossible hop (2026-06-21)
+The suspect filter missed a real jamming snap (Binyamina→Amman airport, ~160km, current_timezone briefly
+flipped to Asia/Amman). Root cause: its two rules both require the >20km hop PLUS either a confident
+known-place wifi anchor (`wifi_anchor_disagreement`) or a reported-stationary device
+(`teleport_while_stationary`) — so a jamming jump while the user is MOVING (cycling, speed≥5) and NOT
+wifi-anchored slips through both; and `detectDriftGlitch` skips its speed check once the gap ≥
+`DRIFT_WINDOW_MIN` (10min), so a 19-min-gap snap isn't dropped either. Added a third rule
+(`impossible_implied_speed`): a hop whose implied ground speed exceeds `IMPOSSIBLE_HOP_KMH` (400 — below the
+1000 km/h glitch-drop ceiling, above any car/train) is jamming regardless of wifi/reported-speed; only fires
+on a short gap (long overnight gaps → low implied speed → the wifi rule carries it). `processors/location.ts`;
+2 regression tests (379 gateway tests).
+
 ### FEATURE: recall_everything — one unified "what do we know about X" sweep (2026-06-20)
 Root problem (from the wife's-calendar-event miss): **data that existed in a store did not surface when
 needed.** Answering "what do we know about <topic>" required fanning out across `search_knowledge`
