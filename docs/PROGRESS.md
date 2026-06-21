@@ -8,6 +8,28 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: Android geofence + sleep + current-place push types (2026-06-21)
+Gateway ingestion for four new Android push-item types (the app already emits them) plus a registration
+endpoint. **`geofence_transition`** `{place_id, place_name?, transition: enter|dwell|exit, lat?, lon?,
+timestamp}` is the high-value one: a **`dwell` is now the AUTHORITATIVE arrival signal** — the on-device 60s
+loiter already filtered drive-pasts, so `processors/geofence.ts` treats it as a confirmed "Arrived at
+<place>", sets the shared `ll5_awareness_location_state` doc to the place (via the now-exported
+`getLocationState`/`setLocationState` from `processors/location.ts`, under the SAME
+`location-state:<userId>` mutex key) so the GPS `runTransition` path sees the place as current and won't
+double-fire, writes a `location_change` notable event, and wakes the agent with `[Location] Arrived at X —
+…. [geofence]` (the `[geofence]` tag distinguishes it from the GPS path's `[place match]`/`[city-level]`).
+`exit` → clears state to Unknown/city + `Left X` wake (only when state was at this place; otherwise log
+only). `enter` is SUPPRESSED (a drive-through fires enter→exit without dwell — waiting for dwell means a
+pass never pings). This retires reliance on the GPS motion-gate for arrivals. **`sleep_segment`** /
+**`sleep_classify`** → new ES index `ll5_awareness_sleep` (kind `segment`|`classify`); a SUCCESS segment also
+writes a `sleep_summary` notable event (`Slept ~Xh Ym (00:10–07:05)`) for the morning wake (note: the
+classify key is `motion_level`, not `motion`). **`current_place`** `{candidates:[{name,types,lat,lon,
+likelihood}], timestamp}` → new ES index `ll5_awareness_current_place`, store-only enrichment, no agent wake.
+New **`GET /geofences`** (Bearer-auth) returns the user's known places as `[{place_id, name, lat, lon,
+radius_m}]` from `ll5_knowledge_places` (place_id = ES `_id`, lat/lon from `geo`, radius_m null-allowed),
+**filtering out places with no coordinates** (the app rejects null lat/lon). sourceMap entries added for all
+3 webhook types (default enabled). 11 new tests; full gateway suite 390 passing.
+
 ### FIX: GPS-jamming suspect filter — catch the impossible hop (2026-06-21)
 The suspect filter missed a real jamming snap (Binyamina→Amman airport, ~160km, current_timezone briefly
 flipped to Asia/Amman). Root cause: its two rules both require the >20km hop PLUS either a confident

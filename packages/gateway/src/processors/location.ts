@@ -259,7 +259,7 @@ function getArrivalEvaluator(pool: Pool): ArrivalCompositeEvaluator {
   return arrivalEvaluator;
 }
 
-interface LocationState {
+export interface LocationState {
   user_id: string;
   label: string;
   kind: 'place' | 'city';
@@ -297,7 +297,7 @@ export function phraseArrival(cur: CurrentLabel): string {
   return `You're in ${cur.label}`;
 }
 
-async function getLocationState(es: Client, userId: string): Promise<LocationState | null> {
+export async function getLocationState(es: Client, userId: string): Promise<LocationState | null> {
   try {
     const got = await es.get<LocationState>({ index: LOCATION_STATE_INDEX, id: userId });
     return got._source ?? null;
@@ -306,7 +306,7 @@ async function getLocationState(es: Client, userId: string): Promise<LocationSta
   }
 }
 
-async function setLocationState(es: Client, userId: string, state: Omit<LocationState, 'user_id' | 'updated_at'>): Promise<void> {
+export async function setLocationState(es: Client, userId: string, state: Omit<LocationState, 'user_id' | 'updated_at'>): Promise<void> {
   await es.index({
     index: LOCATION_STATE_INDEX,
     id: userId,

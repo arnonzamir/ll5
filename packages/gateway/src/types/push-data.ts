@@ -168,6 +168,61 @@ const PushBluetoothItemSchema = z.object({
     .optional(),
 });
 
+// Geofence transition — a hardware/Play-Services geofence crossing for a KNOWN
+// place (synced from ll5_knowledge_places via GET /geofences). `dwell` is the
+// authoritative arrival signal: the on-device 60s loiter already filtered out
+// drive-pasts, so a dwell means the user genuinely stopped at the place. `enter`
+// is suppressed (a drive-through fires enter→exit without dwell), `exit` is the
+// departure. This replaces fragile GPS-reconstruction of arrivals.
+const PushGeofenceTransitionSchema = z.object({
+  type: z.literal('geofence_transition'),
+  // The ES _id of the ll5_knowledge_places doc this geofence was built from.
+  place_id: z.string().min(1),
+  place_name: z.string().nullable().optional(),
+  transition: z.enum(['enter', 'dwell', 'exit']),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lon: z.number().min(-180).max(180).nullable().optional(),
+  timestamp: z.string().datetime({ offset: true }),
+});
+
+// Sleep segment — a completed sleep interval detected by the Sleep API on-device.
+// status SUCCESS = a real, confident segment; MISSING_DATA / NOT_DETECTED carry no
+// usable interval but are stored for completeness. Throttled on-device.
+const PushSleepSegmentSchema = z.object({
+  type: z.literal('sleep_segment'),
+  start: z.string().datetime({ offset: true }),
+  end: z.string().datetime({ offset: true }),
+  duration_min: z.number().int().nonnegative(),
+  status: z.enum(['SUCCESS', 'MISSING_DATA', 'NOT_DETECTED']),
+  timestamp: z.string().datetime({ offset: true }),
+});
+
+// Sleep classify — an instantaneous "how asleep are you right now" reading from the
+// Sleep API (light level + motion + a confidence). NOTE the key is `motion_level`.
+const PushSleepClassifySchema = z.object({
+  type: z.literal('sleep_classify'),
+  confidence: z.number().int().min(0).max(100),
+  light: z.number().int(),
+  motion_level: z.number().int(),
+  timestamp: z.string().datetime({ offset: true }),
+});
+
+// Current place — the on-device Places "current place" candidates (likelihood-ranked).
+// Pure enrichment: stored as-is, no agent wake. The agent can read the top candidate
+// for "what kind of place am I at" context.
+const PushCurrentPlaceCandidateSchema = z.object({
+  name: z.string(),
+  types: z.array(z.string()),
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+  likelihood: z.number().min(0).max(1),
+});
+const PushCurrentPlaceSchema = z.object({
+  type: z.literal('current_place'),
+  candidates: z.array(PushCurrentPlaceCandidateSchema),
+  timestamp: z.string().datetime({ offset: true }),
+});
+
 const PushItemSchema = z.discriminatedUnion('type', [
   PushLocationItemSchema,
   PushMessageItemSchema,
@@ -180,6 +235,10 @@ const PushItemSchema = z.discriminatedUnion('type', [
   PushTrackedDeviceSchema,
   PushDeviceActivityItemSchema,
   PushBluetoothItemSchema,
+  PushGeofenceTransitionSchema,
+  PushSleepSegmentSchema,
+  PushSleepClassifySchema,
+  PushCurrentPlaceSchema,
 ]);
 
 export const WebhookPayloadSchema = z.object({
@@ -200,6 +259,10 @@ export type PushCameraPhotoItem = z.infer<typeof PushCameraPhotoSchema>;
 export type PushTrackedDeviceItem = z.infer<typeof PushTrackedDeviceSchema>;
 export type PushDeviceActivityItem = z.infer<typeof PushDeviceActivityItemSchema>;
 export type PushBluetoothItem = z.infer<typeof PushBluetoothItemSchema>;
+export type PushGeofenceTransitionItem = z.infer<typeof PushGeofenceTransitionSchema>;
+export type PushSleepSegmentItem = z.infer<typeof PushSleepSegmentSchema>;
+export type PushSleepClassifyItem = z.infer<typeof PushSleepClassifySchema>;
+export type PushCurrentPlaceItem = z.infer<typeof PushCurrentPlaceSchema>;
 export type PushItem = z.infer<typeof PushItemSchema>;
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 

@@ -36,6 +36,9 @@ import { processCameraPhoto } from './processors/camera-photo.js';
 import { processTrackedDevice } from './processors/findhub.js';
 import { processDeviceActivity } from './processors/device-activity.js';
 import { processBluetooth } from './processors/bluetooth.js';
+import { processGeofence } from './processors/geofence.js';
+import { processSleepSegment, processSleepClassify } from './processors/sleep.js';
+import { processCurrentPlace } from './processors/current-place.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
@@ -120,6 +123,39 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
       },
     },
   },
+  {
+    // Sleep API output: completed segments (kind:'segment') and instantaneous
+    // classify readings (kind:'classify'), one doc per push. Written by
+    // processors/sleep.ts. SUCCESS segments also emit a sleep_summary notable event.
+    index: 'll5_awareness_sleep',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        kind: { type: 'keyword' }, // 'segment' | 'classify'
+        start: { type: 'date' },
+        end: { type: 'date' },
+        timestamp: { type: 'date' },
+        duration_min: { type: 'integer' },
+        status: { type: 'keyword' }, // SUCCESS | MISSING_DATA | NOT_DETECTED (segment)
+        confidence: { type: 'integer' }, // classify
+        light: { type: 'integer' }, // classify
+        motion_level: { type: 'integer' }, // classify (note: motion_level, not motion)
+      },
+    },
+  },
+  {
+    // On-device Places "current place" candidate sets — pure enrichment, one doc
+    // per push, no agent wake. Written by processors/current-place.ts. Candidates
+    // are store-only (not indexed); we query by user_id + timestamp recency only.
+    index: 'll5_awareness_current_place',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        timestamp: { type: 'date' },
+        candidates: { type: 'object', enabled: false },
+      },
+    },
+  },
 ];
 
 async function ensureIndices(client: Client): Promise<void> {
@@ -183,6 +219,10 @@ async function processItem(
       tracked_device: 'findhub',
       device_activity: 'device_activity',
       bluetooth: 'bluetooth',
+      geofence_transition: 'geofence',
+      sleep_segment: 'sleep',
+      sleep_classify: 'sleep',
+      current_place: 'current_place',
     };
     const sourceKey = sourceMap[item.type];
     if (sourceKey && pgPool && !await isSourceEnabled(pgPool, userId, sourceKey)) {
@@ -233,6 +273,18 @@ async function processItem(
         break;
       case 'bluetooth':
         await processBluetooth(es, userId, item);
+        break;
+      case 'geofence_transition':
+        await processGeofence(es, userId, item, pgPool);
+        break;
+      case 'sleep_segment':
+        await processSleepSegment(es, userId, item);
+        break;
+      case 'sleep_classify':
+        await processSleepClassify(es, userId, item);
+        break;
+      case 'current_place':
+        await processCurrentPlace(es, userId, item);
         break;
     }
     return { index: itemIndex, type: item.type, status: 'ok' };
@@ -1037,6 +1089,55 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Geofences (Android geofence registration) ---
+  //
+  // Returns the caller's known places as geofence definitions for the phone's
+  // Play-Services geofencing client to register. Built from ll5_knowledge_places:
+  // place_id = the ES _id, lat/lon from the `geo` geo_point, radius_m from the doc
+  // (null allowed → the app applies its own default). Places without coordinates
+  // are FILTERED OUT — the app's parser rejects null lat/lon, and a geofence needs
+  // a center. On these clean DWELL transitions the gateway records authoritative
+  // arrivals (see processors/geofence.ts), so we no longer rely on GPS motion-gate
+  // reconstruction for arrivals.
+  app.get('/geofences', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const result = await esClient.search({
+        index: 'll5_knowledge_places',
+        query: { bool: { filter: [{ term: { user_id: userId } }] } },
+        size: 1000,
+        _source: ['name', 'geo', 'radius_m'],
+      });
+
+      const geofences = (result.hits.hits as Array<{
+        _id: string;
+        _source?: { name?: string; geo?: { lat?: number; lon?: number }; radius_m?: number | null };
+      }>)
+        .map((h) => {
+          const src = h._source ?? {};
+          const lat = src.geo?.lat;
+          const lon = src.geo?.lon;
+          // Filter out places with no coordinates — the app rejects null lat/lon.
+          if (typeof lat !== 'number' || typeof lon !== 'number') return null;
+          return {
+            place_id: h._id,
+            name: src.name ?? '',
+            lat,
+            lon,
+            radius_m: typeof src.radius_m === 'number' ? src.radius_m : null,
+          };
+        })
+        .filter((g): g is { place_id: string; name: string; lat: number; lon: number; radius_m: number | null } => g !== null);
+
+      res.json(geofences);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][getGeofences] Failed to query geofences', { error: message });
+      // Index might not exist yet — return an empty array, never 500.
+      res.json([]);
+    }
+  });
+
   app.get('/sessions/:id', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     const sessionId = req.params.id as string;
@@ -1558,7 +1659,7 @@ export async function startServer(config: EnvConfig): Promise<void> {
     logger.info(`[startServer][listen] Gateway listening on port ${config.port}`, {
       env: config.nodeEnv,
       tokenCount: Object.keys(config.webhookTokens).length,
-      webhook_item_types: ['location', 'message', 'calendar_event', 'device_calendar', 'phone_contact', 'phone_status', 'wifi', 'tracked_device'],
+      webhook_item_types: ['location', 'message', 'calendar_event', 'device_calendar', 'phone_contact', 'phone_status', 'wifi', 'tracked_device', 'device_activity', 'bluetooth', 'geofence_transition', 'sleep_segment', 'sleep_classify', 'current_place'],
     });
   });
 }
