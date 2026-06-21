@@ -470,6 +470,13 @@ export function ChatWidget() {
   // the main /chat view (fixed there via the pinnedRef pattern).
   const pinnedRef = useRef(true);
   const lastLenRef = useRef(0);
+  // Mirror of `isWaiting` for use inside interval callbacks (which close over
+  // stale state). Set just before render below.
+  const waitingRef = useRef(false);
+  const convIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    convIdRef.current = convId;
+  }, [convId]);
 
   useEffect(() => {
     const el = scrollContainer.current;
@@ -550,6 +557,45 @@ export function ChatWidget() {
   useEffect(() => {
     saveCache(convId, messages);
   }, [convId, messages]);
+
+  // ---- Reconciliation fetch (shared by safety-sweep poll + SSE reconnect)
+  // Pulls a small window of recent rows and merges: updates status/content on
+  // known messages, appends any rows missed over SSE. Durable backstop for the
+  // non-durable LISTEN/NOTIFY stream (a NOTIFY fired during a reconnect gap is
+  // lost forever, so this is the only thing that recovers it).
+  const reconcile = useCallback(async () => {
+    const cid = convIdRef.current;
+    if (!cid) return;
+    try {
+      const res = await fetch(`/api/chat/messages?conversation_id=${cid}&limit=50`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const serverMsgs = (data.messages ?? []) as Message[];
+
+      setMessages((prev) => {
+        const serverMap = new Map(serverMsgs.map((m) => [m.id, m]));
+        let updated = prev.map((msg) => {
+          const server = serverMap.get(msg.id);
+          if (!server) return msg;
+          const needsUpdate =
+            server.status !== msg.status ||
+            (server.content?.length ?? 0) > (msg.content?.length ?? 0);
+          return needsUpdate
+            ? { ...msg, status: server.status, content: server.content ?? msg.content }
+            : msg;
+        });
+        const existingIds = new Set(prev.map((m) => m.id));
+        const newMsgs = serverMsgs.filter(
+          (m) => !existingIds.has(m.id) && !seenIds.current.has(m.id),
+        );
+        for (const m of newMsgs) seenIds.current.add(m.id);
+        if (newMsgs.length > 0) updated = [...updated, ...newMsgs];
+        return updated;
+      });
+    } catch (err) {
+      console.error("[chat] reconcile failed:", err);
+    }
+  }, []);
 
   // ---- SSE subscription ------------------------------------------------
   useEffect(() => {
@@ -653,49 +699,35 @@ export function ChatWidget() {
       }
     };
     es.onerror = () => {
-      /* auto-reconnects */
+      // EventSource auto-reconnects, but LISTEN/NOTIFY is not durable — any
+      // message/status NOTIFY fired during the reconnect gap is lost. Fire an
+      // immediate reconciliation so the reconnect catches missed rows in ~1s
+      // instead of waiting up to one safety-sweep interval.
+      reconcile();
     };
     return () => es.close();
-  }, [convId]);
+  }, [convId, reconcile]);
 
-  // ---- Safety sweep poll (30s) ----------------------------------------
+  // ---- Safety sweep poll ----------------------------------------------
+  // Adaptive cadence: while the user is waiting on an answer we poll every ~4s
+  // so a fully-missed SSE message surfaces quickly; otherwise back off to 30s.
+  // The interval re-reads waitingRef each tick, so we don't need to tear down
+  // and rebuild the timer on every waiting-state flip.
   useEffect(() => {
     if (!convId) return;
-    const interval = setInterval(async () => {
-      try {
-        // Sweep is reconciliation, not first paint — pull a small window
-        // of recent rows. Older messages don't change underneath us.
-        const res = await fetch(`/api/chat/messages?conversation_id=${convId}&limit=50`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const serverMsgs = (data.messages ?? []) as Message[];
-
-        setMessages((prev) => {
-          const serverMap = new Map(serverMsgs.map((m) => [m.id, m]));
-          let updated = prev.map((msg) => {
-            const server = serverMap.get(msg.id);
-            if (!server) return msg;
-            const needsUpdate =
-              server.status !== msg.status ||
-              (server.content?.length ?? 0) > (msg.content?.length ?? 0);
-            return needsUpdate
-              ? { ...msg, status: server.status, content: server.content ?? msg.content }
-              : msg;
-          });
-          const existingIds = new Set(prev.map((m) => m.id));
-          const newMsgs = serverMsgs.filter(
-            (m) => !existingIds.has(m.id) && !seenIds.current.has(m.id),
-          );
-          for (const m of newMsgs) seenIds.current.add(m.id);
-          if (newMsgs.length > 0) updated = [...updated, ...newMsgs];
-          return updated;
-        });
-      } catch (err) {
-        console.error("[chat] sweep failed:", err);
-      }
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [convId]);
+    const SLOW = 30000;
+    const FAST = 4000;
+    let current = SLOW;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      await reconcile();
+      const next = waitingRef.current ? FAST : SLOW;
+      if (next !== current) current = next;
+      timer = setTimeout(tick, current);
+    };
+    timer = setTimeout(tick, current);
+    return () => clearTimeout(timer);
+  }, [convId, reconcile]);
 
   // ---- Derived: parent lookup + reactions by target -------------------
   const { parentFor, reactionsFor, reactionIds } = useMemo(() => {
@@ -877,10 +909,48 @@ export function ChatWidget() {
   };
 
   // ---- Typing indicator visibility -----------------------------------
-  const lastUserMsg = [...messages].reverse().find((m) => m.role === "user" && !m.reaction);
-  const isWaiting =
-    (lastUserMsg?.status === "processing" || lastUserMsg?.status === "pending") &&
-    (!lastUserMsg?.created_at || Date.now() - new Date(lastUserMsg.created_at).getTime() < 60000);
+  // Drive the "thinking" indicator off whether a real answer has actually
+  // arrived — NOT a status timer. It shows when the most recent substantive
+  // message in the thread is the user's (no substantive assistant reply has
+  // landed AFTER it), and hides the instant that reply renders (via SSE or the
+  // safety poll). "Substantive assistant reply" excludes the agent's thinking /
+  // activity markers — a `metadata.kind === "thinking"` row (and any compact
+  // activity row) does NOT count as the answer; only a real assistant chat
+  // bubble clears it. A generous 150s safety cap covers long turns without
+  // prematurely dropping the indicator (the old 60s timer cut a slow turn off
+  // before its answer arrived), and stops it lingering forever if a turn dies.
+  const isWaiting = useMemo(() => {
+    // Find the last real user message (ignore reactions).
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "user" && !m.reaction) {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    if (lastUserIdx < 0) return false;
+    const lastUser = messages[lastUserIdx];
+
+    // Has a substantive assistant reply landed after the last user message?
+    // Thinking/activity markers and compact rows don't count as the answer.
+    for (let i = lastUserIdx + 1; i < messages.length; i++) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      if (m.reaction) continue;
+      if (m.metadata?.kind === "thinking") continue;
+      if (m.display_compact) continue;
+      return false; // real answer arrived — stop waiting.
+    }
+
+    // No answer yet. Show the indicator up to a generous safety cap.
+    if (lastUser.created_at) {
+      const age = Date.now() - new Date(lastUser.created_at).getTime();
+      if (age >= 150000) return false;
+    }
+    return true;
+  }, [messages]);
+  waitingRef.current = isWaiting;
 
   return (
     <div className="flex h-full">

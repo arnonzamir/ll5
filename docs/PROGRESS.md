@@ -8,6 +8,24 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FIX: Web chat "coach is thinking" stuck indicator + SSE reconnect gaps (2026-06-21)
+`packages/dashboard/src/components/chat-widget.tsx`. Two coupled bugs made the web chat hang on the
+thinking indicator. (1) **Indicator was a fragile 60s status-timer** keyed on the last user message's
+`status` (`processing`/`pending`) — a turn longer than 60s cleared the indicator BEFORE the answer arrived,
+and a missed/late status NOTIFY left it lingering after the answer showed. Replaced with a render-derived
+`isWaiting` (useMemo over `messages`): true only when NO substantive assistant reply has landed AFTER the
+last user message. "Substantive" EXCLUDES `metadata.kind === "thinking"` markers, compact/activity rows, and
+reactions — only a real assistant chat bubble clears it. Safety cap raised 60s → **150s** so a long turn
+keeps showing "thinking" until its answer renders (and never hangs forever if a turn dies). Net: indicator
+clears the instant the real answer renders via SSE or the safety poll. (2) **SSE reconnect lost messages** —
+`/chat/listen` streams non-durable Postgres LISTEN/NOTIFY; any NOTIFY fired during an `EventSource`
+reconnect gap is gone, and the only recovery was the 30s safety sweep (the visible "stuck" window).
+Extracted the sweep fetch/merge into a `reconcile()` callback; `es.onerror` now fires `reconcile()`
+immediately (~1s recovery instead of ≤30s), and the safety poll runs **adaptively** — every ~4s while
+`isWaiting`, backing off to 30s otherwise (de-dup/merge logic unchanged). Gateway `/chat/listen` keepalive
+checked: already 30s, comfortably under Cloudflare ~100s idle timeout — no gateway change needed. Build +
+typecheck + 61 tests green.
+
 ### FEATURE: Android geofence + sleep + current-place push types (2026-06-21)
 Gateway ingestion for four new Android push-item types (the app already emits them) plus a registration
 endpoint. **`geofence_transition`** `{place_id, place_name?, transition: enter|dwell|exit, lat?, lon?,
