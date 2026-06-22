@@ -8,6 +8,39 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: human-approval gate on conversation AUTHORITY (permission) changes (2026-06-22)
+The LL5 agent can no longer change a conversation's authority (`contact_settings.permission` — ignore |
+input | agent, controls whether the agent may read/reply/post) directly. It may only **file a request**;
+the change is applied solely by a **phone/dashboard-authed gateway endpoint** the agent has no path to.
+**Table** (gateway migration `034_permission_change_requests.sql`): `permission_change_requests`
+(id, user_id text, platform, conversation_id, target_type, target_id, display_name, current_permission,
+requested_permission, status `pending|applied|rejected|expired` default pending, created_at, decided_at,
+expires_at default now()+24h; index on (user_id,status)).
+**Messaging MCP — deferred write:** `update_conversation_permissions` resolves the target as before, reads
+the CURRENT permission, then INSERTs a pending request + `pg_notify('permission_approval', userId)` instead
+of upserting contact_settings — returns `{pending_approval:true, request_id, …, message:"…requires your
+fingerprint approval…NOT applied…"}` and audits `permission_change_requested`. `set_contact_settings`
+**still applies routing + download_media immediately** (the contact_settings upsert no longer touches the
+permission column at all) but **splits `permission` out** into the same pending-request+notify flow; if only
+permission was passed, nothing is written to contact_settings (fully pending). The shared helper is
+`packages/messaging/src/tools/permission-requests.ts` (`filePermissionChangeRequest`).
+**Gateway endpoints** (`packages/gateway/src/approvals.ts`, mounted on the app, same `chatAuthMiddleware`
+Bearer auth as other authed routes — phone/dashboard, scoped to the caller's user_id): `GET /approvals/pending`
+→ `{pending:[{id, platform, conversation_id, display_name, current_permission, requested_permission,
+created_at}]}` (non-expired pendings for the user); `POST /approvals/:id/decide` body `{decision:"approve"|
+"reject"}` — row scoped to caller+row user_id (404 on mismatch, no existence disclosure); **approve** upserts
+contact_settings.permission=requested_permission (same `ON CONFLICT (user_id,target_type,target_id)` shape the
+tool used) + status='applied'; **reject** → status='rejected'; non-pending → 409, expired → marked expired +
+409; audits `permission_change_approved`/`_rejected`. **This endpoint is the ONLY code that writes
+contact_settings.permission from a deferred request — the agent has NO apply path.**
+**Push:** durable Postgres `LISTEN permission_approval` started in gateway startup
+(`packages/gateway/src/utils/permission-approval-listener.ts`, mirrors the `/chat/listen` PG-listener pattern
+with auto-reconnect) → on notify sends an FCM (`sendFCMNotification`, level `alert`/high) so the phone
+prompts. Tests: messaging update-permissions-tool + contact-settings-tools rewritten (files pending, no
+contact_settings permission write; routing still instant) — 81 green; gateway `approvals.test.ts` +8
+(pending list, approve applies, reject leaves unchanged, cross-user 404, non-pending/expired rejected) —
+400 green. `tsc --noEmit` clean both packages.
+
 ### FEATURE: deterministic [LL5] outbound-identity gate on contact sends (2026-06-22)
 Every message the agent sends to a CONTACT (`send_whatsapp` / `send_telegram` — a non-LL5 channel, i.e.
 someone other than the user's own web/mobile thread) MUST begin with the `[LL5]` prefix, so the recipient

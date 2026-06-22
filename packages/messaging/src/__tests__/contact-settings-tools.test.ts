@@ -62,19 +62,73 @@ describe('contact-settings tools', () => {
       expect(res.isError).toBe(true);
     });
 
-    it('upserts a person setting and audits as contact_settings', async () => {
+    it('applies download_media immediately and DEFERS permission to approval', async () => {
       const pool = queuedPool([
-        { rows: [{ target_type: 'person', target_id: 'p1', display_name: 'Mom', routing: 'immediate', permission: 'agent', download_media: true }] },
+        { rows: [{ target_type: 'person', target_id: 'p1', display_name: 'Mom', routing: 'batch', permission: 'input', download_media: true }] }, // immediate upsert (routing/media only)
+        { rows: [{ permission: 'input' }] }, // current permission read (defer flow)
+        { rows: [{ id: 'req-9' }] }, // INSERT permission_change_requests
+        { rows: [] }, // pg_notify
       ]);
       const tools = captureTools((s) => registerContactSettingsTools(s, pool, getUserId));
       const res = await tools.get('set_contact_settings')!({ person_id: 'p1', permission: 'agent', download_media: true });
-      const parsed = parseToolResponse<{ success: boolean; permission: string }>(res);
+      const parsed = parseToolResponse<{ success: boolean; permission_pending_approval: boolean; requested_permission: string; applied: { download_media: boolean } }>(res);
       expect(parsed.success).toBe(true);
-      expect(parsed.permission).toBe('agent');
+      expect(parsed.permission_pending_approval).toBe(true);
+      expect(parsed.requested_permission).toBe('agent');
+      expect(parsed.applied.download_media).toBe(true);
+
+      const calls = (pool.query as ReturnType<typeof vi.fn>).mock.calls;
+      const allSql = calls.map((c) => c[0] as string).join('\n');
+      // The immediate upsert must NOT carry a permission param (it's hard-coded
+      // and only updates routing/media); the permission goes to the request table.
+      expect(allSql).toMatch(/INSERT INTO contact_settings/);
+      expect(allSql).toMatch(/INSERT INTO permission_change_requests/);
+      expect(allSql).toMatch(/pg_notify\('permission_approval'/);
+      // The contact_settings upsert must not DO UPDATE the permission column.
+      const csUpsert = calls.find((c) => /INSERT INTO contact_settings/.test(c[0] as string))![0] as string;
+      expect(csUpsert).not.toMatch(/permission = COALESCE/);
+
       expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'permission_change_requested',
         entity_type: 'contact_settings',
         entity_id: 'person:p1',
       }));
+    });
+
+    it('with ONLY permission, writes nothing to contact_settings — fully pending', async () => {
+      const pool = queuedPool([
+        { rows: [{ is_group: true, person_id: null, display_name: 'Group' }] }, // resolveTarget messaging_contacts
+        { rows: [{ permission: 'ignore' }] }, // current permission read
+        { rows: [{ id: 'req-10' }] }, // INSERT request
+        { rows: [] }, // pg_notify
+      ]);
+      const tools = captureTools((s) => registerContactSettingsTools(s, pool, getUserId));
+      const res = await tools.get('set_contact_settings')!({ platform: 'whatsapp', conversation_id: 'g@g.us', permission: 'agent' });
+      const parsed = parseToolResponse<{ success: boolean; permission_pending_approval: boolean; applied?: unknown }>(res);
+      expect(parsed.success).toBe(true);
+      expect(parsed.permission_pending_approval).toBe(true);
+      expect(parsed.applied).toBeUndefined();
+
+      const calls = (pool.query as ReturnType<typeof vi.fn>).mock.calls;
+      const allSql = calls.map((c) => c[0] as string).join('\n');
+      expect(allSql).not.toMatch(/INSERT INTO contact_settings/);
+      expect(allSql).toMatch(/INSERT INTO permission_change_requests/);
+    });
+
+    it('applies routing immediately with NO approval request when permission is absent', async () => {
+      const pool = queuedPool([
+        { rows: [{ target_type: 'person', target_id: 'p1', display_name: 'Mom', routing: 'immediate', permission: 'input', download_media: false }] }, // immediate upsert
+      ]);
+      const tools = captureTools((s) => registerContactSettingsTools(s, pool, getUserId));
+      const res = await tools.get('set_contact_settings')!({ person_id: 'p1', routing: 'immediate' });
+      const parsed = parseToolResponse<{ success: boolean; applied: { routing: string }; permission_pending_approval?: boolean }>(res);
+      expect(parsed.success).toBe(true);
+      expect(parsed.applied.routing).toBe('immediate');
+      expect(parsed.permission_pending_approval).toBeUndefined();
+
+      const allSql = (pool.query as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string).join('\n');
+      expect(allSql).not.toMatch(/permission_change_requests/);
+      expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'update' }));
     });
 
     it('resolves a 1:1 chat to its linked person target', async () => {
@@ -84,9 +138,9 @@ describe('contact-settings tools', () => {
       ]);
       const tools = captureTools((s) => registerContactSettingsTools(s, pool, getUserId));
       const res = await tools.get('set_contact_settings')!({ platform: 'whatsapp', conversation_id: '972500000000@s.whatsapp.net', routing: 'ignore' });
-      const parsed = parseToolResponse<{ target_type: string; target_id: string }>(res);
-      expect(parsed.target_type).toBe('person');
-      expect(parsed.target_id).toBe('p9');
+      const parsed = parseToolResponse<{ applied: { target_type: string; target_id: string } }>(res);
+      expect(parsed.applied.target_type).toBe('person');
+      expect(parsed.applied.target_id).toBe('p9');
       expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({ entity_id: 'person:p9' }));
     });
 

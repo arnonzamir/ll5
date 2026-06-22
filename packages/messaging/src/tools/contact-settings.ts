@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Pool } from 'pg';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logAudit } from '@ll5/shared';
+import { filePermissionChangeRequest } from './permission-requests.js';
 
 /**
  * Resolve a target identifier to a contact_settings (target_type, target_id) pair.
@@ -102,6 +103,8 @@ export function registerContactSettingsTools(
     'set_contact_settings',
     'Set communication settings for a contact or chat — change any of routing (Delivery), permission (Authority), or image download. ' +
       'Identify the target with person_id, or platform+conversation_id. Only the fields you pass are changed; others are left as-is. ' +
+      'routing and download_media apply IMMEDIATELY. permission (Authority) is protected: passing it does NOT apply the change — ' +
+      'it files a pending request that the user must approve with a fingerprint on the phone. ' +
       'routing: ignore | batch | immediate | agent. permission: ignore | input | agent. download_media: true/false (fetch incoming images & audio).',
     {
       person_id: z.string().optional().describe('KB person id, for a 1:1 contact'),
@@ -123,38 +126,84 @@ export function registerContactSettingsTools(
         return { content: [{ type: 'text' as const, text: resolved.error }], isError: true };
       }
 
-      const result = await pool.query(
-        `INSERT INTO contact_settings (user_id, target_type, target_id, routing, permission, download_media, platform, display_name)
-         VALUES ($1, $2, $3, COALESCE($4,'batch'), COALESCE($5,'input'), COALESCE($6,false), $7, $8)
-         ON CONFLICT (user_id, target_type, target_id)
-         DO UPDATE SET routing = COALESCE($4, contact_settings.routing),
-                       permission = COALESCE($5, contact_settings.permission),
-                       download_media = COALESCE($6, contact_settings.download_media),
-                       platform = COALESCE($7, contact_settings.platform),
-                       display_name = COALESCE($8, contact_settings.display_name),
-                       updated_at = now()
-         RETURNING target_type, target_id, display_name, routing, permission, download_media, platform`,
-        [userId, resolved.targetType, resolved.targetId, args.routing ?? null, args.permission ?? null, args.download_media ?? null, args.platform ?? null, resolved.displayName],
-      );
-      const row = result.rows[0];
+      // permission (Authority) is a protected setting — it is NEVER written here.
+      // It is split out into a pending approval request (fingerprint on the phone).
+      // routing + download_media still apply immediately.
+      const applyRouting = args.routing !== undefined;
+      const applyMedia = args.download_media !== undefined;
+      const applyNow = applyRouting || applyMedia;
 
-      const changes = [
-        args.routing !== undefined ? `routing=${args.routing}` : null,
-        args.permission !== undefined ? `permission=${args.permission}` : null,
-        args.download_media !== undefined ? `media=${args.download_media}` : null,
-      ].filter(Boolean).join(', ');
+      let appliedRow: Record<string, unknown> | undefined;
+      if (applyNow) {
+        const result = await pool.query(
+          `INSERT INTO contact_settings (user_id, target_type, target_id, routing, permission, download_media, platform, display_name)
+           VALUES ($1, $2, $3, COALESCE($4,'batch'), 'input', COALESCE($5,false), $6, $7)
+           ON CONFLICT (user_id, target_type, target_id)
+           DO UPDATE SET routing = COALESCE($4, contact_settings.routing),
+                         download_media = COALESCE($5, contact_settings.download_media),
+                         platform = COALESCE($6, contact_settings.platform),
+                         display_name = COALESCE($7, contact_settings.display_name),
+                         updated_at = now()
+           RETURNING target_type, target_id, display_name, routing, permission, download_media, platform`,
+          [userId, resolved.targetType, resolved.targetId, args.routing ?? null, args.download_media ?? null, args.platform ?? null, resolved.displayName],
+        );
+        appliedRow = result.rows[0];
 
-      logAudit({
-        user_id: userId,
-        source: 'messaging',
-        action: 'update',
-        entity_type: 'contact_settings',
-        entity_id: `${resolved.targetType}:${resolved.targetId}`,
-        summary: `Set ${resolved.targetType} ${row.display_name ?? resolved.targetId}: ${changes}`,
-        metadata: { target_type: resolved.targetType, target_id: resolved.targetId, ...args },
-      });
+        const changes = [
+          applyRouting ? `routing=${args.routing}` : null,
+          applyMedia ? `media=${args.download_media}` : null,
+        ].filter(Boolean).join(', ');
 
-      return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, ...row }, null, 2) }] };
+        logAudit({
+          user_id: userId,
+          source: 'messaging',
+          action: 'update',
+          entity_type: 'contact_settings',
+          entity_id: `${resolved.targetType}:${resolved.targetId}`,
+          summary: `Set ${resolved.targetType} ${(appliedRow?.display_name as string | null) ?? resolved.targetId}: ${changes}`,
+          metadata: { target_type: resolved.targetType, target_id: resolved.targetId, routing: args.routing, download_media: args.download_media },
+        });
+      }
+
+      // If permission was requested, defer it to human approval (never applied here).
+      let permissionRequest: { requestId: string; currentPermission: string | null } | undefined;
+      if (args.permission !== undefined) {
+        permissionRequest = await filePermissionChangeRequest(pool, {
+          userId,
+          platform: args.platform,
+          conversationId: args.conversation_id,
+          targetType: resolved.targetType,
+          targetId: resolved.targetId,
+          displayName: resolved.displayName,
+          requestedPermission: args.permission,
+        });
+
+        logAudit({
+          user_id: userId,
+          source: 'messaging',
+          action: 'permission_change_requested',
+          entity_type: 'contact_settings',
+          entity_id: `${resolved.targetType}:${resolved.targetId}`,
+          summary: `Requested authority change for ${resolved.targetType} ${resolved.displayName ?? resolved.targetId}: ${permissionRequest.currentPermission ?? 'default'} → ${args.permission} (pending fingerprint approval)`,
+          metadata: { target_type: resolved.targetType, target_id: resolved.targetId, requested_permission: args.permission, current_permission: permissionRequest.currentPermission, request_id: permissionRequest.requestId },
+        });
+      }
+
+      const payload: Record<string, unknown> = { success: true };
+      if (appliedRow) {
+        payload.applied = appliedRow;
+      }
+      if (permissionRequest) {
+        payload.permission_pending_approval = true;
+        payload.permission_request_id = permissionRequest.requestId;
+        payload.requested_permission = args.permission;
+        payload.current_permission = permissionRequest.currentPermission;
+        payload.message = applyNow
+          ? "Routing/download applied. The permission (Authority) change requires your fingerprint approval on the phone — NOT applied; the conversation's authority is unchanged until you approve."
+          : "Permission change requires your fingerprint approval on the phone — NOT applied. The conversation's authority is unchanged until you approve.";
+      }
+
+      return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
     },
   );
 }

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Pool } from 'pg';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logAudit } from '@ll5/shared';
+import { filePermissionChangeRequest } from './permission-requests.js';
 
 export function registerUpdatePermissionsTool(
   server: McpServer,
@@ -10,10 +11,11 @@ export function registerUpdatePermissionsTool(
 ): void {
   server.tool(
     'update_conversation_permissions',
-    "Set the agent's authority (permission) for a conversation: ignore (agent cannot read), " +
-      'input (read only), agent (read + can reply). Writes contact_settings.permission — the same ' +
-      'field the dashboard Authority control and the permission checker use. ' +
-      'To change Delivery/routing instead, use set_contact_settings.',
+    "Request a change to the agent's authority (permission) for a conversation: ignore (agent cannot read), " +
+      'input (read only), agent (read + can reply). This does NOT apply the change — the conversation authority ' +
+      'is a protected setting. The tool files a pending request and the change is applied ONLY after the user ' +
+      'approves it with a fingerprint on the phone. To change Delivery/routing instead, use set_contact_settings ' +
+      '(routing applies immediately; only permission requires approval).',
     {
       platform: z.enum(['whatsapp', 'telegram']).describe('Platform'),
       conversation_id: z.string().describe('Platform-specific conversation ID'),
@@ -40,37 +42,37 @@ export function registerUpdatePermissionsTool(
       const targetId = usePerson ? row!.person_id! : params.conversation_id;
       const displayName = row?.display_name ?? null;
 
-      const result = await pool.query(
-        `INSERT INTO contact_settings (user_id, target_type, target_id, permission, platform, display_name)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (user_id, target_type, target_id)
-         DO UPDATE SET permission = EXCLUDED.permission,
-                       platform = COALESCE(EXCLUDED.platform, contact_settings.platform),
-                       display_name = COALESCE(EXCLUDED.display_name, contact_settings.display_name),
-                       updated_at = now()
-         RETURNING id`,
-        [userId, targetType, targetId, params.permission, params.platform, displayName],
-      );
+      const request = await filePermissionChangeRequest(pool, {
+        userId,
+        platform: params.platform,
+        conversationId: params.conversation_id,
+        targetType,
+        targetId,
+        displayName,
+        requestedPermission: params.permission,
+      });
 
       logAudit({
         user_id: userId,
         source: 'messaging',
-        action: 'update',
+        action: 'permission_change_requested',
         entity_type: 'contact_settings',
         entity_id: `${targetType}:${targetId}`,
-        summary: `Set ${targetType} ${displayName ?? targetId}: permission=${params.permission}`,
-        metadata: { platform: params.platform, conversation_id: params.conversation_id, permission: params.permission, target_type: targetType, target_id: targetId },
+        summary: `Requested authority change for ${targetType} ${displayName ?? targetId}: ${request.currentPermission ?? 'default'} → ${params.permission} (pending fingerprint approval)`,
+        metadata: { platform: params.platform, conversation_id: params.conversation_id, requested_permission: params.permission, current_permission: request.currentPermission, target_type: targetType, target_id: targetId, request_id: request.requestId },
       });
 
       return {
         content: [{
           type: 'text' as const,
           text: JSON.stringify({
-            success: true,
-            id: result.rows[0]?.id,
+            pending_approval: true,
+            request_id: request.requestId,
             target_type: targetType,
             target_id: targetId,
-            permission: params.permission,
+            requested_permission: params.permission,
+            current_permission: request.currentPermission,
+            message: "Permission change requires your fingerprint approval on the phone — NOT applied. The conversation's authority is unchanged until you approve.",
           }, null, 2),
         }],
       };

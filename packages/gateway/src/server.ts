@@ -25,6 +25,7 @@ import { createAuthRouter } from './auth.js';
 import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { createAgentRouter } from './agent.js';
+import { createApprovalsRouter } from './approvals.js';
 import { processCalendar, phoneEventId } from './processors/calendar.js';
 import { processLocation, type StoredPoint } from './processors/location.js';
 import { processMessage } from './processors/message.js';
@@ -371,6 +372,9 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Mount agent-connection plane (self-scoped; owns /me/agent/*).
   app.use(createAgentRouter(pgPool, config.authSecret, config.encryptionKey, config.mcpBaseDomain));
+
+  // Human-approval gate for conversation authority (permission). Phone/dashboard-only.
+  app.use(createApprovalsRouter(pgPool, config.authSecret));
 
   // Resolves message routing/media from contact_settings (the unified source of truth).
   const notificationMatcher = new ContactRoutingResolver(pgPool);
@@ -1654,6 +1658,10 @@ export async function startServer(config: EnvConfig): Promise<void> {
   const { checkExpiredEscalations } = await import('./utils/escalation.js');
   setInterval(() => void checkExpiredEscalations(pgPool), 60_000);
   logger.info('[startServer][init] Escalation expiration checker started');
+
+  // Start permission-approval listener: pending authority changes → FCM push.
+  const { startPermissionApprovalListener } = await import('./utils/permission-approval-listener.js');
+  startPermissionApprovalListener(pgPool);
 
   app.listen(config.port, () => {
     logger.info(`[startServer][listen] Gateway listening on port ${config.port}`, {
