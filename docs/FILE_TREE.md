@@ -176,7 +176,7 @@ ll5/
 │       ├── collectors.ts              # macOS shell-based collectors (pmset, vm_stat, df, ps, os module) + threshold-based health summary
 │       └── index.ts                   # MCP server on StdioServerTransport, 6 tools
 │
-├── packages/messaging/                # @ll5/messaging — PG-backed MCP (live: mcp-messaging.noninoni.click)
+├── packages/messaging/                # @ll5/messaging — PG-backed MCP (live: mcp-messaging.noninoni.click). utils/ll5-prefix.ts (checkLl5Prefix — deterministic [LL5] outbound-identity gate; send-whatsapp.ts/send-telegram.ts reject a contact message lacking the prefix BEFORE any send, with a correction back to the agent).
 │   └── src/
 │       ├── clients/                   # Evolution API (WhatsApp), Telegram Bot API
 │       ├── repositories/postgres/     # Accounts, conversations, contacts (with person linking). conversation repo resolves `permission` from contact_settings via join (1:1→person_id, group→JID; default 'input') — the row no longer stores it.

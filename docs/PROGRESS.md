@@ -8,6 +8,18 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: deterministic [LL5] outbound-identity gate on contact sends (2026-06-22)
+Every message the agent sends to a CONTACT (`send_whatsapp` / `send_telegram` — a non-LL5 channel, i.e.
+someone other than the user's own web/mobile thread) MUST begin with the `[LL5]` prefix, so the recipient
+knows it's Arnon's AI assistant writing, not Arnon himself. Enforced **non-agentically** at the send
+chokepoint: new `packages/messaging/src/utils/ll5-prefix.ts` (`checkLl5Prefix`, regex `/^\s*\[LL5\]/`) is
+called FIRST in both send tools (before account/permission/first-contact gates); a non-compliant send is
+**rejected (not sent)** with `{sent:false, rejected:"missing_ll5_prefix", correction}` + a `send_rejected_no_prefix`
+audit row, and the correction tells the agent to resend with the prefix. The format also lives in the persona
+(ll5-run CLAUDE.md messaging section) so the agent normally complies; the gate is the hard floor that doesn't
+trust it. `push_to_user`/`reply` (user's own thread) are unaffected. Tests: send-gate.test.ts +3 (9 total),
+all existing send tests reprefixed; full messaging suite 79 green.
+
 ### FEATURE: Web chat upward pagination — load older history on scroll-up (2026-06-22)
 The dashboard chat tile (`packages/dashboard/src/components/chat-widget.tsx`) only ever loaded the most
 recent 30 messages with no way to reach older history. Added end-to-end upward pagination. **Gateway**

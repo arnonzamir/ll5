@@ -5,6 +5,7 @@ import type { AccountRepository } from '../repositories/interfaces/account.repos
 import type { ConversationRepository } from '../repositories/interfaces/conversation.repository.js';
 import { TelegramClient } from '../clients/telegram.client.js';
 import { getConversationPriority } from '../utils/permission-checker.js';
+import { checkLl5Prefix } from '../utils/ll5-prefix.js';
 import { logAudit } from '@ll5/shared';
 
 export function registerSendTelegramTool(
@@ -36,6 +37,27 @@ export function registerSendTelegramTool(
     },
     async (params) => {
       const userId = getUserId();
+
+      // Deterministic [LL5] identity gate — a contact-bound message MUST start with
+      // the [LL5] prefix. Reject + correct BEFORE any send (non-agentic, non-bypassable).
+      const prefix = checkLl5Prefix(params.message);
+      if (!prefix.ok) {
+        logAudit({
+          user_id: userId,
+          source: 'messaging',
+          action: 'send_rejected_no_prefix',
+          entity_type: 'telegram_message',
+          entity_id: params.chat_id,
+          summary: `Rejected Telegram message to chat ${params.chat_id} — missing [LL5] prefix`,
+          metadata: { account_id: params.account_id, chat_id: params.chat_id, reason: 'missing_ll5_prefix' },
+        });
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ sent: false, rejected: 'missing_ll5_prefix', correction: prefix.correction }, null, 2),
+          }],
+        };
+      }
 
       // Get account with decrypted bot token
       const account = await accountRepo.getTelegram(userId, params.account_id);

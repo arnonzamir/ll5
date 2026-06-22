@@ -461,7 +461,7 @@ describe('send_whatsapp tool handler', () => {
     const response = await tools.get('send_whatsapp')!({
       account_id: 'nonexistent',
       to: '972501234567',
-      message: 'hello',
+      message: '[LL5] hello',
     });
 
     expect(getWhatsApp).toHaveBeenCalledWith(USER_ID, 'nonexistent');
@@ -481,7 +481,7 @@ describe('send_whatsapp tool handler', () => {
     const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
-      message: 'hello',
+      message: '[LL5] hello',
     });
 
     expect(getWhatsApp).toHaveBeenCalledWith(USER_ID, 'account-1');
@@ -501,7 +501,7 @@ describe('send_whatsapp tool handler', () => {
     const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
-      message: 'hello',
+      message: '[LL5] hello',
     });
 
     expect(getWhatsApp).toHaveBeenCalledWith(USER_ID, 'account-1');
@@ -522,7 +522,7 @@ describe('send_whatsapp tool handler', () => {
     const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
-      message: 'hello',
+      message: '[LL5] hello',
     });
 
     const parsed = parseToolResponse<{ error: string; priority: string }>(response);
@@ -546,7 +546,7 @@ describe('send_whatsapp tool handler', () => {
     const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
-      message: 'hello',
+      message: '[LL5] hello',
     });
 
     const parsed = parseToolResponse<{ success: boolean; message_id: string }>(response);
@@ -571,7 +571,7 @@ describe('send_whatsapp tool handler', () => {
     await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
-      message: 'hello',
+      message: '[LL5] hello',
     });
 
     expect(mockGetConversationPriority).toHaveBeenCalledWith(
@@ -595,7 +595,7 @@ describe('send_whatsapp tool handler', () => {
     await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567@s.whatsapp.net',
-      message: 'hello',
+      message: '[LL5] hello',
     });
 
     expect(mockGetConversationPriority).toHaveBeenCalledWith(
@@ -618,7 +618,7 @@ describe('send_whatsapp tool handler', () => {
     const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
-      message: 'hello',
+      message: '[LL5] hello',
     });
 
     const parsed = parseToolResponse<{ error: string }>(response);

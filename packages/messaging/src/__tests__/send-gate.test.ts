@@ -149,7 +149,7 @@ describe('send_whatsapp first-contact gate', () => {
     const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
-      message: 'hello',
+      message: '[LL5] hello',
     });
 
     const parsed = parseToolResponse<{ sent: boolean; blocked: string; message: string }>(response);
@@ -185,7 +185,7 @@ describe('send_whatsapp first-contact gate', () => {
     const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
-      message: 'hello',
+      message: '[LL5] hello',
       confirmed: true,
     });
 
@@ -213,7 +213,7 @@ describe('send_whatsapp first-contact gate', () => {
     const response = await tools.get('send_whatsapp')!({
       account_id: 'account-1',
       to: '972501234567',
-      message: 'hello again',
+      message: '[LL5] hello again',
     });
 
     const parsed = parseToolResponse<{ success: boolean; message_id: string }>(response);
@@ -251,7 +251,7 @@ describe('send_telegram first-contact gate', () => {
     const response = await tools.get('send_telegram')!({
       account_id: 'account-tg-1',
       chat_id: '12345',
-      message: 'hi',
+      message: '[LL5] hi',
     });
 
     const parsed = parseToolResponse<{ sent: boolean; blocked: string }>(response);
@@ -282,7 +282,7 @@ describe('send_telegram first-contact gate', () => {
     const response = await tools.get('send_telegram')!({
       account_id: 'account-tg-1',
       chat_id: '12345',
-      message: 'hi',
+      message: '[LL5] hi',
       confirmed: true,
     });
 
@@ -309,7 +309,7 @@ describe('send_telegram first-contact gate', () => {
     const response = await tools.get('send_telegram')!({
       account_id: 'account-tg-1',
       chat_id: '12345',
-      message: 'hi again',
+      message: '[LL5] hi again',
     });
 
     const parsed = parseToolResponse<{ success: boolean }>(response);
@@ -318,5 +318,59 @@ describe('send_telegram first-contact gate', () => {
     expect(mockLogAudit).not.toHaveBeenCalledWith(
       expect.objectContaining({ action: 'send_blocked' }),
     );
+  });
+});
+
+// ===========================================================================
+describe('[LL5] outbound-identity prefix gate (deterministic)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetConversationPriority.mockResolvedValue('agent');
+  });
+
+  it('WhatsApp: REJECTS (not sent) a contact message without the [LL5] prefix, and corrects', async () => {
+    const accountRepo = makeAccountRepo({ getWhatsApp: vi.fn(async () => makeWhatsAppAccount()) });
+    const conversationRepo = makeConversationRepo({ get: vi.fn(async () => makeConversation()), touchLastMessage: vi.fn(async () => undefined) });
+    const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    const response = await tools.get('send_whatsapp')!({ account_id: 'account-1', to: '972501234567', message: 'hi there — no prefix' });
+    const parsed = parseToolResponse<{ sent: boolean; rejected: string; correction: string }>(response);
+    expect(parsed.sent).toBe(false);
+    expect(parsed.rejected).toBe('missing_ll5_prefix');
+    expect(parsed.correction).toContain('[LL5]');
+    expect(mockSendText).not.toHaveBeenCalled();
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: 'send_rejected_no_prefix' }));
+  });
+
+  it('WhatsApp: ALLOWS a contact message that starts with [LL5]', async () => {
+    const accountRepo = makeAccountRepo({
+      getWhatsApp: vi.fn(async () => makeWhatsAppAccount()),
+      countSentToRecipient: vi.fn(async () => 3), // established thread
+      logSentMessage: vi.fn(async () => undefined),
+    });
+    const conversationRepo = makeConversationRepo({ get: vi.fn(async () => makeConversation()), touchLastMessage: vi.fn(async () => undefined) });
+    mockSendText.mockResolvedValue({ success: true, message_id: 'm-ok' });
+    const { registerSendWhatsAppTool } = await import('../tools/send-whatsapp.js');
+    const tools = captureTools((s) => registerSendWhatsAppTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    const response = await tools.get('send_whatsapp')!({ account_id: 'account-1', to: '972501234567', message: '[LL5] hi there' });
+    const parsed = parseToolResponse<{ success: boolean; message_id: string }>(response);
+    expect(parsed.success).toBe(true);
+    expect(mockSendText).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).not.toHaveBeenCalledWith(expect.objectContaining({ action: 'send_rejected_no_prefix' }));
+  });
+
+  it('Telegram: REJECTS (not sent) a contact message without the [LL5] prefix', async () => {
+    const accountRepo = makeAccountRepo({ getTelegram: vi.fn(async () => makeTelegramAccount()) });
+    const conversationRepo = makeConversationRepo({ get: vi.fn(async () => makeConversation({ platform: 'telegram', conversation_id: '12345' })), touchLastMessage: vi.fn(async () => undefined) });
+    const { registerSendTelegramTool } = await import('../tools/send-telegram.js');
+    const tools = captureTools((s) => registerSendTelegramTool(s, accountRepo, conversationRepo, mockPool, getUserId));
+
+    const response = await tools.get('send_telegram')!({ account_id: 'account-tg-1', chat_id: '12345', message: 'no prefix here' });
+    const parsed = parseToolResponse<{ sent: boolean; rejected: string }>(response);
+    expect(parsed.sent).toBe(false);
+    expect(parsed.rejected).toBe('missing_ll5_prefix');
+    expect(mockTelegramSend).not.toHaveBeenCalled();
   });
 });
