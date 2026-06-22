@@ -432,11 +432,12 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
   // ---------------------------------------------------------------------------
   router.get('/messages', auth, async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
-    const { conversation_id, channel, status, since, limit: limitStr } = req.query as {
+    const { conversation_id, channel, status, since, before, limit: limitStr } = req.query as {
       conversation_id?: string;
       channel?: string;
       status?: string;
       since?: string;
+      before?: string;
       limit?: string;
     };
 
@@ -460,6 +461,14 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
     if (since) {
       conditions.push(`created_at > $${paramIdx++}`);
       params.push(since);
+    }
+    // `before` cursor — page OLDER rows (created_at strictly before the cursor).
+    // Independent of `since`; combined with the existing DESC … LIMIT … re-sorted
+    // ASC ordering this returns the `limit` newest rows that are still older than
+    // the cursor (i.e. the next page up when scrolling into history).
+    if (before) {
+      conditions.push(`created_at < $${paramIdx++}`);
+      params.push(before);
     }
 
     try {

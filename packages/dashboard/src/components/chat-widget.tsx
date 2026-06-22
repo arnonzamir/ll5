@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Archive,
@@ -470,6 +470,21 @@ export function ChatWidget() {
   // the main /chat view (fixed there via the pinnedRef pattern).
   const pinnedRef = useRef(true);
   const lastLenRef = useRef(0);
+  // ---- Upward pagination (load older history on scroll-up) ------------
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // Mirrors for use inside the scroll handler (closes over stale state).
+  const hasMoreOlderRef = useRef(true);
+  const loadingOlderRef = useRef(false);
+  // Scroll-anchor: when a prepend grows scrollHeight we must restore the
+  // viewport to the same message (set in loadOlder, applied in useLayoutEffect).
+  const anchorBeforeHeightRef = useRef<number | null>(null);
+  useEffect(() => {
+    hasMoreOlderRef.current = hasMoreOlder;
+  }, [hasMoreOlder]);
+  useEffect(() => {
+    loadingOlderRef.current = loadingOlder;
+  }, [loadingOlder]);
   // Mirror of `isWaiting` for use inside interval callbacks (which close over
   // stale state). Set just before render below.
   const waitingRef = useRef(false);
@@ -485,10 +500,25 @@ export function ChatWidget() {
       if (!el) return;
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       pinnedRef.current = distance < 80;
+      // Near the top → pull the previous page of older history. Guarded by
+      // hasMoreOlder + an in-flight flag so we don't fan out duplicate fetches
+      // while the prepend + scroll-anchor settles.
+      if (
+        el.scrollTop < 120 &&
+        hasMoreOlderRef.current &&
+        !loadingOlderRef.current
+      ) {
+        loadOlderRef.current?.();
+      }
     }
     el.addEventListener("scroll", onScroll);
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
+
+  // loadOlder is defined below (after the history effect) but referenced by the
+  // scroll handler above; route through a ref to avoid an ordering/stale-closure
+  // problem.
+  const loadOlderRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (messages.length === lastLenRef.current) return;
@@ -532,6 +562,11 @@ export function ChatWidget() {
   // ---- Load message history when conversation changes -----------------
   useEffect(() => {
     if (!convId) return;
+    // Switching conversations: assume there's older history to load again, and
+    // clear any in-flight older-load guard from the previous conversation.
+    setHasMoreOlder(true);
+    setLoadingOlder(false);
+    anchorBeforeHeightRef.current = null;
     (async () => {
       try {
         const res = await fetch(
@@ -547,11 +582,87 @@ export function ChatWidget() {
         }
         setMessages(loaded);
         setReplyTo(null);
+        // Fewer than a full page on the first fetch → nothing older exists.
+        if (loaded.length < FIRST_FETCH_LIMIT) setHasMoreOlder(false);
       } catch (err) {
         console.error("[chat] history load failed:", err);
       }
     })();
   }, [convId]);
+
+  // ---- Load OLDER history (upward pagination) -------------------------
+  // Triggered by the scroll handler when the user nears the top. Fetches the
+  // page of rows older than the current oldest message and PREPENDS them,
+  // de-duped by id. Captures scrollHeight before the state update so the
+  // layout effect can re-anchor the viewport on the same message afterward.
+  const loadOlder = useCallback(async () => {
+    const cid = convIdRef.current;
+    if (!cid) return;
+    if (loadingOlderRef.current || !hasMoreOlderRef.current) return;
+
+    // Oldest currently-loaded message is the cursor. messages are stored ASC,
+    // so index 0 is the oldest. Use a functional read to avoid stale state.
+    let cursor: string | null = null;
+    setMessages((prev) => {
+      cursor = prev.length > 0 ? prev[0].created_at : null;
+      return prev;
+    });
+    if (!cursor) return;
+
+    setLoadingOlder(true);
+    const el = scrollContainer.current;
+    anchorBeforeHeightRef.current = el ? el.scrollHeight : null;
+    try {
+      const res = await fetch(
+        `/api/chat/messages?conversation_id=${cid}&limit=${FIRST_FETCH_LIMIT}&before=${encodeURIComponent(cursor)}`,
+      );
+      if (!res.ok) {
+        anchorBeforeHeightRef.current = null;
+        return;
+      }
+      const data = await res.json();
+      const older = (data.messages ?? []) as Message[];
+
+      if (older.length < FIRST_FETCH_LIMIT) setHasMoreOlder(false);
+
+      const fresh = older.filter((m) => !seenIds.current.has(m.id));
+      if (fresh.length === 0) {
+        anchorBeforeHeightRef.current = null;
+        return;
+      }
+      for (const m of fresh) seenIds.current.add(m.id);
+      // Prepend. Server returns ASC within the page, so older fresh rows go in
+      // front of the existing array, preserving global chronological order.
+      setMessages((prev) => [...fresh, ...prev]);
+    } catch (err) {
+      console.error("[chat] load older failed:", err);
+      anchorBeforeHeightRef.current = null;
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadOlderRef.current = loadOlder;
+  }, [loadOlder]);
+
+  // ---- Scroll-anchor: keep the viewport on the same message after a prepend.
+  // Runs synchronously after the DOM updates (before paint) so there's no
+  // visible jump. Only adjusts when loadOlder captured a pre-prepend height.
+  useLayoutEffect(() => {
+    const before = anchorBeforeHeightRef.current;
+    if (before == null) return;
+    anchorBeforeHeightRef.current = null;
+    const el = scrollContainer.current;
+    if (!el) return;
+    const delta = el.scrollHeight - before;
+    if (delta > 0) {
+      el.scrollTop += delta;
+      // Re-anchored above the bottom → not pinned; keep the auto-scroll effect
+      // from yanking us to the bottom.
+      pinnedRef.current = false;
+    }
+  }, [messages]);
 
   // ---- Persist cache on every messages/convId change ------------------
   useEffect(() => {
@@ -992,6 +1103,11 @@ export function ChatWidget() {
 
         {/* Messages */}
         <div ref={scrollContainer} className="flex-1 overflow-y-auto p-4 space-y-2 min-h-0">
+          {loadingOlder && (
+            <p className="text-xs text-gray-400 text-center py-1">
+              Loading earlier messages…
+            </p>
+          )}
           {renderItems.length === 0 && (
             <p className="text-sm text-gray-400 text-center mt-8">
               Send a message to start a conversation
