@@ -520,6 +520,83 @@ describe('createChatRouter', () => {
       const selectParams = vi.mocked(pool.query).mock.calls[1][1] as unknown[];
       expect(selectParams[selectParams.length - 1]).toBe(500);
     });
+
+    it('pages OLDER rows with the before cursor, scoped + limited', async () => {
+      vi.mocked(pool.query)
+        .mockResolvedValueOnce({ rows: [{ count: '3' }] } as never)
+        .mockResolvedValueOnce({
+          rows: [{ id: 'old-1', content: 'older' }],
+        } as never);
+
+      const router = createChatRouter(pool, AUTH_SECRET);
+
+      const route = router.stack.find(
+        (layer: { route?: { path: string; methods: { get?: boolean } } }) =>
+          layer.route?.path === '/messages' && layer.route?.methods.get,
+      );
+
+      const handlers = route.route.stack
+        .map((s: { handle: Function }) => s.handle)
+        .filter((h: Function) => h.length <= 3);
+
+      const cursor = '2026-06-01T00:00:00.000Z';
+      const req = makeReq({
+        query: { conversation_id: 'conv-1', before: cursor, limit: '30' },
+      }) as unknown as Request & { userId: string };
+      req.userId = 'user-1';
+      const res = makeRes();
+
+      const handler = handlers[handlers.length - 1];
+      await handler(req, res);
+
+      expect(res._status).toBe(200);
+      const json = res._json as { messages: unknown[]; total: number };
+      expect(json.messages).toHaveLength(1);
+
+      // SELECT query: scoped by user + conversation, carries the cursor, and the
+      // last bound param is the limit.
+      const selectSql = vi.mocked(pool.query).mock.calls[1][0] as string;
+      const selectParams = vi.mocked(pool.query).mock.calls[1][1] as unknown[];
+      expect(selectSql).toContain('created_at < $');
+      expect(selectParams).toContain('user-1');
+      expect(selectParams).toContain('conv-1');
+      expect(selectParams).toContain(cursor);
+      expect(selectParams[selectParams.length - 1]).toBe(30);
+    });
+
+    it('treats since and before as independent filters', async () => {
+      vi.mocked(pool.query)
+        .mockResolvedValueOnce({ rows: [{ count: '0' }] } as never)
+        .mockResolvedValueOnce({ rows: [] } as never);
+
+      const router = createChatRouter(pool, AUTH_SECRET);
+
+      const route = router.stack.find(
+        (layer: { route?: { path: string; methods: { get?: boolean } } }) =>
+          layer.route?.path === '/messages' && layer.route?.methods.get,
+      );
+
+      const handlers = route.route.stack
+        .map((s: { handle: Function }) => s.handle)
+        .filter((h: Function) => h.length <= 3);
+
+      const req = makeReq({
+        query: {
+          conversation_id: 'conv-1',
+          since: '2026-05-01T00:00:00.000Z',
+          before: '2026-06-01T00:00:00.000Z',
+        },
+      }) as unknown as Request & { userId: string };
+      req.userId = 'user-1';
+      const res = makeRes();
+
+      const handler = handlers[handlers.length - 1];
+      await handler(req, res);
+
+      const selectSql = vi.mocked(pool.query).mock.calls[1][0] as string;
+      expect(selectSql).toContain('created_at > $');
+      expect(selectSql).toContain('created_at < $');
+    });
   });
 
   // -----------------------------------------------------------------------

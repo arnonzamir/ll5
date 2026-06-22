@@ -8,6 +8,24 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### FEATURE: Web chat upward pagination — load older history on scroll-up (2026-06-22)
+The dashboard chat tile (`packages/dashboard/src/components/chat-widget.tsx`) only ever loaded the most
+recent 30 messages with no way to reach older history. Added end-to-end upward pagination. **Gateway**
+(`packages/gateway/src/chat.ts` `GET /chat/messages`): new optional `before` query param adds
+`created_at < $N` to the WHERE — combined with the existing `ORDER BY created_at DESC … LIMIT … re-sorted
+ASC` it returns the `limit` newest rows still older than the cursor (the next page up). `since` (newer) and
+`before` (older) are independent. **Dashboard**: scroll handler fires `loadOlder()` when `scrollTop < 120`
+(guarded by `hasMoreOlder` + an in-flight `loadingOlder` flag, both mirrored to refs for the stale-closure
+scroll callback); it fetches `…&before=<oldest loaded created_at>` and **prepends** the de-duped older rows.
+**Scroll is anchored across the prepend**: `scrollHeight` is captured before `setMessages`, then a
+`useLayoutEffect` (pre-paint) adds the height delta to `scrollTop` so the viewport stays on the same message
+(no jump) and sets `pinnedRef=false` so the auto-scroll effect doesn't yank to the bottom. A page < 30 rows
+sets `hasMoreOlder=false`; switching `convId` resets pagination state. The `reconcile()` safety-sweep already
+merges as a union (maps `prev`, appends only unseen recent rows — never replaces the array), so it preserves
+already-loaded older messages; verified, no change needed. Small "Loading earlier messages…" affordance at
+the top while fetching. Gateway tests +2 (before-cursor scoped/limited; since+before independent) — 24 green;
+dashboard `tsc --noEmit` clean + build green. Did not touch optimistic send, reactions, isWaiting, or de-dup.
+
 ### FIX: Web chat "coach is thinking" stuck indicator + SSE reconnect gaps (2026-06-21)
 `packages/dashboard/src/components/chat-widget.tsx`. Two coupled bugs made the web chat hang on the
 thinking indicator. (1) **Indicator was a fragile 60s status-timer** keyed on the last user message's
