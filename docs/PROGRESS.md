@@ -69,6 +69,13 @@ related titles as chips, recent observations list) + a **Summarize** button (fir
 (`narrative/{kind}/{ref}`, Uri-encoded). Uses the Phase-2 gateway endpoints. `assembleDebug` BUILD SUCCESSFUL.
 **Living Narratives: all 4 phases shipped + verified (Phase 1 freshness live-checked: scheduler `Freshness
 trigger sent count:15`; Phase 2 endpoints 401-gated live; Phase 3/4 builds green).**
+**Freshness delivery fix (2026-06-23):** end-to-end verification found the first nudge (fired at gateway
+start, mid-deploy, 06:55Z) was LOST — the non-durable PG NOTIFY raced the channel MCP's SSE reconnect, so
+the agent never saw it (StuckMessageSweep later flipped the row to `delivered`, masking it; 0 narratives
+consolidated). Root cause: the scheduler fired on arbitrary restart ticks. Fix: added a **top-of-hour gate**
+(`fireWithinMinutes`, default 10) — the nudge only fires near the top of a qualifying hour, so a mid-hour
+restart (deploys, frequent ES-cascade restarts) neither races delivery nor re-triggers a consolidation
+burst; it fires on the clean cadence boundary instead.
 
 ### FEATURE: human-approval gate on conversation AUTHORITY (permission) changes (2026-06-22)
 The LL5 agent can no longer change a conversation's authority (`contact_settings.permission` — ignore |

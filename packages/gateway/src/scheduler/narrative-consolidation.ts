@@ -9,6 +9,9 @@ interface NarrativeConsolidationConfig {
   userId: string;
   /** Fire every N hours within the active window. Default 3. */
   intervalHours: number;
+  /** Only fire when the local minute is below this — keeps firing at the top of
+   *  the hour so restarts mid-hour don't re-trigger / race delivery. Default 10. */
+  fireWithinMinutes: number;
   /** Active window (local hours) — no consolidation outside it (quiet hours). */
   activeStartHour: number;
   activeEndHour: number;
@@ -89,6 +92,16 @@ export class NarrativeConsolidationScheduler {
         timeZone: this.config.timezone,
         hour: 'numeric',
         hour12: false,
+      }).format(new Date()),
+      10,
+    );
+  }
+
+  private getCurrentMinute(): number {
+    return parseInt(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: this.config.timezone,
+        minute: 'numeric',
       }).format(new Date()),
       10,
     );
@@ -208,11 +221,17 @@ export class NarrativeConsolidationScheduler {
   private async tick(): Promise<void> {
     try {
       const hour = this.getCurrentHour();
+      const minute = this.getCurrentMinute();
       const date = this.getCurrentDate();
 
       // Active-window + cadence gating (quiet hours never fire).
       if (hour < this.config.activeStartHour || hour > this.config.activeEndHour) return;
       if (hour % this.config.intervalHours !== 0) return;
+      // Only fire near the TOP of a qualifying hour. A gateway restart at an
+      // arbitrary minute (deploys, the frequent ES-cascade restarts) must NOT
+      // re-trigger a consolidation burst or race notify-delivery during the
+      // reconnect window — it fires on the clean cadence boundary instead.
+      if (minute >= this.config.fireWithinMinutes) return;
 
       const slot = `${date}:${hour}`;
       if (this.lastRunSlot === slot) return;

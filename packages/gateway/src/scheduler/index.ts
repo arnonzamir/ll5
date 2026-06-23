@@ -168,6 +168,7 @@ async function startSchedulersForUser(
   const narrativeConsolidationScheduler = new NarrativeConsolidationScheduler(es, pgPool, {
     enabled: (sched['narrative_consolidation_enabled'] as unknown as boolean) ?? true,
     intervalHours: s('narrative_freshness_interval_hours', 3),
+    fireWithinMinutes: s('narrative_freshness_fire_within_minutes', 10),
     activeStartHour: s('narrative_freshness_start_hour', 7),
     activeEndHour: s('narrative_freshness_end_hour', 22),
     debounceHours: s('narrative_freshness_debounce_hours', 6),
