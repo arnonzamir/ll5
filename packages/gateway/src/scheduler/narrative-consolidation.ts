@@ -98,6 +98,9 @@ export class NarrativeConsolidationScheduler {
   }
 
   private getCurrentHour(): number {
+    // Intl with hour12:false uses the h24 cycle, which renders midnight as "24",
+    // not "0" — that would fail the `hour <= activeEndHour(23)` gate and silently
+    // drop the midnight tick. Normalize 24 -> 0.
     return parseInt(
       new Intl.DateTimeFormat('en-US', {
         timeZone: this.config.timezone,
@@ -105,7 +108,7 @@ export class NarrativeConsolidationScheduler {
         hour12: false,
       }).format(new Date()),
       10,
-    );
+    ) % 24;
   }
 
   private getCurrentMinute(): number {

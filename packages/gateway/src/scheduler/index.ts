@@ -177,9 +177,13 @@ async function startSchedulersForUser(
     activeEndHour: s('narrative_freshness_end_hour', 23),
     debounceHours: s('narrative_freshness_debounce_hours', 6),
     activeWindowDays: s('narrative_freshness_window_days', 14),
-    maxNarratives: s('narrative_freshness_max', 15),
+    // Keep each nudge SMALL/digestible — a 24-item nudge (15 refresh + 10 create)
+    // made the agent balk and do nothing; the runs that worked were 2-5 items.
+    // The frequent around-the-clock cadence + debounce clears the backlog over
+    // many small ticks instead of one impossible one.
+    maxNarratives: s('narrative_freshness_max', 5),
     promoteThreshold: s('narrative_freshness_promote_threshold', 3),
-    maxOrphans: s('narrative_freshness_max_orphans', 10),
+    maxOrphans: s('narrative_freshness_max_orphans', 4),
     timezone, userId,
   });
   narrativeConsolidationScheduler.start();
