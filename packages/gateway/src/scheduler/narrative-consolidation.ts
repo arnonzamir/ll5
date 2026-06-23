@@ -21,22 +21,31 @@ interface NarrativeConsolidationConfig {
   activeWindowDays: number;
   /** Max narratives to name in one nudge. Default 15. */
   maxNarratives: number;
+  /** A subject with >= this many recent observations but NO narrative gets
+   *  promoted (the agent is told to CREATE a narrative for it). Default 3. */
+  promoteThreshold: number;
+  /** Max orphan subjects to promote in one nudge. Default 10. */
+  maxOrphans: number;
 }
 
 const NARRATIVES_INDEX = 'll5_knowledge_narratives';
 const OBSERVATIONS_INDEX = 'll5_knowledge_observations';
-
-interface ActiveNarrativeDoc {
-  subject: { kind: string; ref: string };
-  title: string;
-  last_consolidated_at?: string;
-}
 
 interface StaleNarrative {
   subject: { kind: string; ref: string };
   title: string;
   /** True latest observation timestamp (live, from the observations index). */
   liveLastObservedAt: string;
+}
+
+/** A subject with accumulated observations but no narrative yet — promote it. */
+interface OrphanSubject {
+  subject: { kind: string; ref: string };
+  count: number;
+  /** A sample observation so the agent (and the nudge) knows what this is —
+   *  person refs are UUIDs, so the text gives it an identity. */
+  sample: string;
+  latest: number;
 }
 
 /**
@@ -117,105 +126,90 @@ export class NarrativeConsolidationScheduler {
   }
 
   /**
-   * Narratives that are active, recently touched, have new activity since their
-   * last summary, and weren't refreshed within the debounce window.
+   * The freshness work for this tick:
+   *  - `stale`: existing ACTIVE narratives with new activity since their last
+   *    summary (refresh), measured against the LIVE max(observed_at) — never the
+   *    denormalized `last_observed_at`, which only updates at consolidation.
+   *  - `orphans`: subjects that have accumulated >= promoteThreshold recent
+   *    observations but have NO narrative at all (CREATE). This is what makes
+   *    net-new things you dealt with actually appear — without it, narratives are
+   *    only ever refreshed, never born, so today's new people/topics stay invisible.
    *
-   * Critically, "new activity" is measured against the LIVE latest observation
-   * timestamp (max(observed_at) from the observations index), NOT the narrative
-   * doc's `last_observed_at` — that field is only written at consolidation, so it
-   * always trails `last_consolidated_at` and would make this selection blind.
-   * We pull active narratives, compute live max(observed_at) per subject in one
-   * filters-aggregation, and select on that.
+   * Both are derived from one pass over recent observations aggregated by subject.
    */
-  private async selectStaleNarratives(): Promise<StaleNarrative[]> {
+  private async selectWork(): Promise<{ stale: StaleNarrative[]; orphans: OrphanSubject[] }> {
     const now = Date.now();
     const recentCutoff = now - this.config.activeWindowDays * 86_400_000;
     const debounceCutoff = now - this.config.debounceHours * 3_600_000;
+    const sinceIso = new Date(recentCutoff).toISOString();
 
-    // 1. Active narratives (bounded; working sets are dozens).
-    const resp = await this.es.search<ActiveNarrativeDoc>({
+    // 1. All narratives (any status) → subject key set + the active ones' consolidation time.
+    const nResp = await this.es.search<{ subject: { kind: string; ref: string }; status?: string; title?: string; last_consolidated_at?: string }>({
       index: NARRATIVES_INDEX,
-      size: 200,
-      _source: ['subject', 'title', 'last_consolidated_at'],
-      query: {
-        bool: {
-          filter: [
-            { term: { user_id: this.config.userId } },
-            { term: { status: 'active' } },
-          ],
-        },
-      },
+      size: 500,
+      _source: ['subject', 'status', 'title', 'last_consolidated_at'],
+      query: { bool: { filter: [{ term: { user_id: this.config.userId } }] } },
     });
-    const actives = resp.hits.hits
-      .map((h) => h._source)
-      .filter((d): d is ActiveNarrativeDoc => d != null && d.subject != null);
-    if (actives.length === 0) return [];
-
-    // 2. Live max(observed_at) per subject — one filters-agg over observations.
-    const filters: Record<string, unknown> = {};
-    for (const d of actives) {
-      filters[`${d.subject.kind}::${d.subject.ref}`] = {
-        nested: {
-          path: 'subjects',
-          query: {
-            bool: {
-              must: [
-                { term: { 'subjects.kind': d.subject.kind } },
-                { term: { 'subjects.ref': d.subject.ref } },
-              ],
-            },
-          },
-        },
-      };
-    }
-    const liveMax = new Map<string, number>();
-    try {
-      // Loose-typed body: the ES client's strict aggs typing rejects a
-      // dynamically-built filters map (same reason the knowledge repo uses a
-      // Record<string, any> query alias).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const searchBody: any = {
-        index: OBSERVATIONS_INDEX,
-        size: 0,
-        query: { bool: { filter: [{ term: { user_id: this.config.userId } }] } },
-        aggs: {
-          per_subject: {
-            filters: { filters },
-            aggs: { last_obs: { max: { field: 'observed_at' } } },
-          },
-        },
-      };
-      const agg = await this.es.search(searchBody);
-      const buckets =
-        (agg.aggregations as {
-          per_subject?: { buckets?: Record<string, { last_obs?: { value?: number } }> };
-        })?.per_subject?.buckets ?? {};
-      for (const [key, b] of Object.entries(buckets)) {
-        if (b.last_obs?.value != null) liveMax.set(key, b.last_obs.value);
-      }
-    } catch (err) {
-      logger.warn('[NarrativeConsolidationScheduler] live max(observed_at) agg failed', {
-        error: err instanceof Error ? err.message : String(err),
+    const narrativeByKey = new Map<string, { status: string; title: string; lastConsolidatedAt?: string }>();
+    for (const h of nResp.hits.hits) {
+      const s = h._source;
+      if (!s?.subject) continue;
+      narrativeByKey.set(`${s.subject.kind}::${s.subject.ref}`, {
+        status: s.status ?? 'active',
+        title: s.title ?? '',
+        lastConsolidatedAt: s.last_consolidated_at,
       });
-      return [];
     }
 
-    // 3. Select: warm + new activity since last summary + debounced.
-    const stale: StaleNarrative[] = [];
-    for (const d of actives) {
-      const key = `${d.subject.kind}::${d.subject.ref}`;
-      const last = liveMax.get(key);
-      if (last == null || last < recentCutoff) continue; // no obs / gone cold
-      const con = d.last_consolidated_at ? Date.parse(d.last_consolidated_at) : NaN;
-      const newSinceSummary = !Number.isFinite(con) || last > con;
-      const debounced = !Number.isFinite(con) || con <= debounceCutoff;
-      if (newSinceSummary && debounced) {
-        stale.push({ subject: d.subject, title: d.title, liveLastObservedAt: new Date(last).toISOString() });
+    // 2. Recent observations → aggregate by subject (count, latest, sample text).
+    const oResp = await this.es.search<{ subjects?: Array<{ kind: string; ref: string }>; observed_at?: string; text?: string }>({
+      index: OBSERVATIONS_INDEX,
+      size: 2000,
+      _source: ['subjects', 'observed_at', 'text'],
+      query: { bool: { filter: [{ term: { user_id: this.config.userId } }, { range: { observed_at: { gte: sinceIso } } }] } },
+      sort: [{ observed_at: { order: 'desc' } }],
+    });
+    const agg = new Map<string, { subject: { kind: string; ref: string }; count: number; latest: number; sample: string }>();
+    for (const h of oResp.hits.hits) {
+      const o = h._source;
+      const t = o?.observed_at ? Date.parse(o.observed_at) : NaN;
+      for (const s of o?.subjects ?? []) {
+        const key = `${s.kind}::${s.ref}`;
+        const cur = agg.get(key);
+        if (cur) {
+          cur.count += 1;
+          if (Number.isFinite(t) && t > cur.latest) cur.latest = t;
+        } else {
+          agg.set(key, { subject: { kind: s.kind, ref: s.ref }, count: 1, latest: Number.isFinite(t) ? t : 0, sample: o?.text ?? '' });
+        }
       }
     }
-    return stale
-      .sort((a, b) => Date.parse(b.liveLastObservedAt) - Date.parse(a.liveLastObservedAt))
-      .slice(0, this.config.maxNarratives);
+
+    // 3a. Stale (refresh existing active narratives with new activity, debounced).
+    const stale: StaleNarrative[] = [];
+    // 3b. Orphans (promote subjects with enough observations but no narrative).
+    const orphans: OrphanSubject[] = [];
+    for (const [key, a] of agg) {
+      const narr = narrativeByKey.get(key);
+      if (narr) {
+        if (narr.status !== 'active') continue; // dormant/closed — leave it
+        const con = narr.lastConsolidatedAt ? Date.parse(narr.lastConsolidatedAt) : NaN;
+        const newSinceSummary = !Number.isFinite(con) || a.latest > con;
+        const debounced = !Number.isFinite(con) || con <= debounceCutoff;
+        if (newSinceSummary && debounced) {
+          stale.push({ subject: a.subject, title: narr.title, liveLastObservedAt: new Date(a.latest).toISOString() });
+        }
+      } else if (a.count >= this.config.promoteThreshold) {
+        orphans.push({ subject: a.subject, count: a.count, sample: a.sample, latest: a.latest });
+      }
+    }
+
+    stale.sort((x, y) => Date.parse(y.liveLastObservedAt) - Date.parse(x.liveLastObservedAt));
+    orphans.sort((x, y) => y.count - x.count || y.latest - x.latest);
+    return {
+      stale: stale.slice(0, this.config.maxNarratives),
+      orphans: orphans.slice(0, this.config.maxOrphans),
+    };
   }
 
   private async tick(): Promise<void> {
@@ -237,31 +231,39 @@ export class NarrativeConsolidationScheduler {
       if (this.lastRunSlot === slot) return;
       this.lastRunSlot = slot;
 
-      const stale = await this.selectStaleNarratives();
-      if (stale.length === 0) {
-        logger.info('[NarrativeConsolidationScheduler][tick] No stale-active narratives — skipping');
+      const { stale, orphans } = await this.selectWork();
+      if (stale.length === 0 && orphans.length === 0) {
+        logger.info('[NarrativeConsolidationScheduler][tick] Nothing to refresh or promote — skipping');
         return;
       }
 
-      const list = stale
-        .map((d) => `  - ${d.title} (${d.subject.kind}:${d.subject.ref})`)
-        .join('\n');
-
-      const evt = createSchedulerEvent('narrative_consolidation');
-      await insertSystemMessage(
-        this.pool,
-        this.config.userId,
-        [
-          `[Narrative Freshness] ${stale.length} active narrative(s) have new activity since their last summary. Refresh each:`,
-          list,
-          'For each: consolidate_narrative({ subject }), draft an updated summary + current_mood + open_threads from the new observations, then upsert_narrative with last_consolidated_at: <now>. If any has gone quiet for 60+ days with no recent signal, transition it to dormant instead. Silent — no push_to_user; brief journal note when done.',
-        ].join('\n'),
-        undefined,
-        evt,
+      const sections: string[] = [
+        `[Narrative Freshness] Keep the narrative set current — ${stale.length} to refresh, ${orphans.length} to create.`,
+      ];
+      if (stale.length > 0) {
+        sections.push(
+          `REFRESH these existing narratives (new activity since their last summary):`,
+          stale.map((d) => `  - ${d.title} (${d.subject.kind}:${d.subject.ref})`).join('\n'),
+        );
+      }
+      if (orphans.length > 0) {
+        sections.push(
+          `CREATE a narrative for each of these — they have accumulated observations but NO narrative yet (person refs are ids; the sample tells you who/what it is):`,
+          orphans.map((o) => `  - ${o.subject.kind}:${o.subject.ref} (${o.count} obs) — e.g. "${(o.sample || '').slice(0, 70).replace(/\n/g, ' ')}"`).join('\n'),
+        );
+      }
+      sections.push(
+        'For REFRESH: consolidate_narrative({ subject }), draft an updated summary + current_mood + open_threads, then upsert_narrative with last_consolidated_at: <now>; transition to dormant if 60+ days quiet. ' +
+        'For CREATE: consolidate_narrative({ subject }) to pull the observations, then upsert_narrative with a title (required), summary, open_threads, and last_consolidated_at: <now> — give it a clear human title (resolve person ids to names). ' +
+        'Skip a CREATE only if the subject is genuinely a one-off non-thread. Silent — no push_to_user; brief journal note when done.',
       );
 
+      const evt = createSchedulerEvent('narrative_consolidation');
+      await insertSystemMessage(this.pool, this.config.userId, sections.join('\n'), undefined, evt);
+
       logger.info('[NarrativeConsolidationScheduler][tick] Freshness trigger sent', {
-        count: stale.length,
+        refresh: stale.length,
+        create: orphans.length,
       });
     } catch (err) {
       logger.warn('[NarrativeConsolidationScheduler][tick] Failed', {

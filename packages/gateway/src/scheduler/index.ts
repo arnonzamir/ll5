@@ -174,6 +174,8 @@ async function startSchedulersForUser(
     debounceHours: s('narrative_freshness_debounce_hours', 6),
     activeWindowDays: s('narrative_freshness_window_days', 14),
     maxNarratives: s('narrative_freshness_max', 15),
+    promoteThreshold: s('narrative_freshness_promote_threshold', 3),
+    maxOrphans: s('narrative_freshness_max_orphans', 10),
     timezone, userId,
   });
   narrativeConsolidationScheduler.start();
