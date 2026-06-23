@@ -12,7 +12,9 @@ interface NarrativeConsolidationConfig {
   /** Only fire when the local minute is below this — keeps firing at the top of
    *  the hour so restarts mid-hour don't re-trigger / race delivery. Default 10. */
   fireWithinMinutes: number;
-  /** Active window (local hours) — no consolidation outside it (quiet hours). */
+  /** Hour window (local) the cadence may fire in. Default 0–23 (around the clock):
+   *  consolidation is silent, and the agent clears silent work most reliably in the
+   *  quiet overnight hours — daytime it starves it behind real-time events. */
   activeStartHour: number;
   activeEndHour: number;
   /** Don't re-nudge a narrative consolidated within this many hours (debounce). Default 6. */

@@ -169,8 +169,12 @@ async function startSchedulersForUser(
     enabled: (sched['narrative_consolidation_enabled'] as unknown as boolean) ?? true,
     intervalHours: s('narrative_freshness_interval_hours', 3),
     fireWithinMinutes: s('narrative_freshness_fire_within_minutes', 10),
-    activeStartHour: s('narrative_freshness_start_hour', 7),
-    activeEndHour: s('narrative_freshness_end_hour', 22),
+    // Around the clock (every intervalHours). Consolidation/promotion is SILENT
+    // (no push), and the agent reliably clears silent system work in the quiet
+    // overnight hours — during busy daytime it starves it behind real-time events.
+    // So the overnight ticks (0/3/6) are the dependable ones that clear the backlog.
+    activeStartHour: s('narrative_freshness_start_hour', 0),
+    activeEndHour: s('narrative_freshness_end_hour', 23),
     debounceHours: s('narrative_freshness_debounce_hours', 6),
     activeWindowDays: s('narrative_freshness_window_days', 14),
     maxNarratives: s('narrative_freshness_max', 15),
