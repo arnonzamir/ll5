@@ -95,6 +95,12 @@ describe('narrativeRelevance', () => {
     expect(narrativeRelevance(loaded, now)).toBeGreaterThan(narrativeRelevance(base, now));
   });
 
+  it('boosts a more central (more connected) narrative at equal recency', () => {
+    const lonely = makeNarrative({ lastObservedAt: hoursAgo(2), participants: [] });
+    const central = makeNarrative({ lastObservedAt: hoursAgo(2), participants: ['a', 'b', 'c', 'd'], places: ['p1'] });
+    expect(narrativeRelevance(central, now)).toBeGreaterThan(narrativeRelevance(lonely, now));
+  });
+
   it('treats unknown activity as very old (low score)', () => {
     const unknown = narrativeRelevance(makeNarrative({ lastObservedAt: undefined, firstObservedAt: undefined }), now);
     const recent = narrativeRelevance(makeNarrative({ lastObservedAt: hoursAgo(1) }), now);

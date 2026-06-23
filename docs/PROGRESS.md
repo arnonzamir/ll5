@@ -82,7 +82,8 @@ entry, so the agent had no directive to act (it kept handling real-time WhatsApp
 dispatch entry in `ll5-run/channel/ll5-channel.mjs` (for each NAMED narrative: consolidate_narrative +
 upsert_narrative this turn, silent, don't defer). After the ll5-run redeploy cycled the agent session,
 a fired nudge produced exactly the 3 named narratives (Rotem 06-18→06-23, Aristo 06-17→06-23, Uriyah
-06-20→06-23) consolidated in one turn within ~3 min. **The freshness loop now verifiably refreshes
+06-20→06-23) consolidated in one turn within ~3 min. ****Relevance now weights centrality (2026-06-23):** `narrativeRelevance` rebalanced to the user's "timeliness + centerness" intent — recency 0.5 / **centrality 0.25** (participants+places, log-scaled) / status 0.1 / open-threads 0.075 / volume 0.075. Drives `sort=relevance` on web + the mobile Active tab. Also fixed a mobile detail-screen crash (ObservationDto.confidence was Double, backend sends a string enum) and added a type filter (person/place/group/topic) to the Active tab. 91 personal-knowledge tests green.
+The freshness loop now verifiably refreshes
 narratives end-to-end (fire → deliver → recognize → consolidate → fresh summary).** Note: the loop depends
 on the ll5-run channel dispatch entry being live (cycled with the agent session).
 

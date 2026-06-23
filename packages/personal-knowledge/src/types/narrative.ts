@@ -165,7 +165,11 @@ export function narrativeDocId(userId: string, subject: SubjectRef): string {
  * accumulated substance. Pure + deterministic so the list ordering is stable
  * within a request; pass a single `nowMs` for the whole batch.
  *
- * Weights: recency 0.6, status 0.2, open-threads 0.1, volume 0.1.
+ * The two headline factors are **timeliness** (recency) and **centrality**
+ * ("centerness" — how connected/central the entity is, via participants + places),
+ * with secondary nudges from status, open loops, and accumulated substance.
+ *
+ * Weights: recency 0.5, centrality 0.25, status 0.1, open-threads 0.075, volume 0.075.
  * Recency uses a ~3-day soft half-life (exp(-ageHours/72)).
  */
 export function narrativeRelevance(n: Narrative, nowMs: number): number {
@@ -178,5 +182,8 @@ export function narrativeRelevance(n: Narrative, nowMs: number): number {
   const statusWeight = n.status === 'active' ? 1 : n.status === 'dormant' ? 0.4 : 0.05;
   const openThreads = Math.min(n.openThreads?.length ?? 0, 5) / 5;
   const volume = Math.min(Math.log1p(n.observationCount ?? 0) / Math.log1p(50), 1);
-  return recency * 0.6 + statusWeight * 0.2 + openThreads * 0.1 + volume * 0.1;
+  // Centrality: how connected the entity is to the rest of the user's world.
+  const links = (n.participants?.length ?? 0) + (n.places?.length ?? 0);
+  const centrality = Math.min(Math.log1p(links) / Math.log1p(15), 1);
+  return recency * 0.5 + centrality * 0.25 + statusWeight * 0.1 + openThreads * 0.075 + volume * 0.075;
 }
