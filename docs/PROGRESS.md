@@ -32,7 +32,16 @@ ephemeral (read-only) snapshot; mobile simplified to an "Active" tab.
   consolidates precisely those — a 12-msg burst is one rewrite per debounce window, not twelve. Knobs:
   `user_settings.scheduler.narrative_freshness_{interval_hours,start_hour,end_hour,debounce_hours,window_days,max}`.
 - Tests: +5 `narrativeRelevance` unit tests (ordering/bounds) — personal-knowledge 90 green. Both packages
-  `tsc` clean. **Phases 2–4 (gateway API, web master-detail UI, mobile Active tab) pending.**
+  `tsc` clean.
+- **Live-timestamp correction (caught in verification):** a narrative's stored `last_observed_at` is only
+  written at consolidation, so it always trails `last_consolidated_at` — using it would make the freshness
+  selector blind (it returned "no stale-active" even though e.g. Ben C had fresh observations) and skew
+  relevance. Fixed: `liveObservationStats` now also computes live `max(observed_at)` per subject and
+  overwrites `lastObservedAt` on read (relevance now ranks by true activity); the scheduler selects on the
+  live max(observed_at) vs `last_consolidated_at`, not the stale doc field. Verified live: scheduler runs
+  with the cadenced config and server-selection returns a true result against real ES data; observation
+  writes confirmed healthy (48/24h, 95/48h, 354/7d).
+- **Phases 2–4 (gateway API, web master-detail UI, mobile Active tab) pending.**
 
 ### FEATURE: human-approval gate on conversation AUTHORITY (permission) changes (2026-06-22)
 The LL5 agent can no longer change a conversation's authority (`contact_settings.permission` — ignore |

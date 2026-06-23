@@ -78,20 +78,23 @@ export class ElasticsearchNarrativeRepository
   }
 
   /**
-   * Compute the real observation count per subject, live from the observations
-   * index. The `observation_count` stored on a narrative doc is only written
-   * during consolidation, so it goes stale the moment new observations are
-   * tagged to the subject (it sat at 0 for every narrative after the May
-   * cutover). Reads must reflect reality, so we always recompute here — one
-   * filters-aggregation covers every subject in the batch. On any failure we
-   * return an empty map and callers keep the stored value, so reads never break.
+   * Compute the real observation count AND the true latest observation timestamp
+   * per subject, live from the observations index. Both are denormalized onto the
+   * narrative doc only at consolidation, so they go stale the moment new
+   * observations are tagged to the subject — `observation_count` sat at 0 after the
+   * May cutover, and `last_observed_at` lags every consolidation (it's only ever
+   * <= last_consolidated_at), which would blind any "new activity since last
+   * summary" check and skew relevance ranking. Reads must reflect reality, so we
+   * recompute both here — one filters-aggregation (doc_count + max(observed_at))
+   * covers every subject in the batch. On failure we return an empty map and
+   * callers keep the stored values, so reads never break.
    */
-  private async liveObservationCounts(
+  private async liveObservationStats(
     userId: string,
     subjects: Array<{ kind: string; ref: string }>,
-  ): Promise<Map<string, number>> {
-    const counts = new Map<string, number>();
-    if (subjects.length === 0) return counts;
+  ): Promise<Map<string, { count: number; lastObservedAt?: string }>> {
+    const stats = new Map<string, { count: number; lastObservedAt?: string }>();
+    if (subjects.length === 0) return stats;
 
     const uniq = new Map<string, { kind: string; ref: string }>();
     for (const s of subjects) uniq.set(subjectKey(s), s);
@@ -118,34 +121,49 @@ export class ElasticsearchNarrativeRepository
         index: OBSERVATIONS_INDEX,
         size: 0,
         query: { bool: { filter: [{ term: { user_id: userId } }] } },
-        aggs: { per_subject: { filters: { filters } } },
+        aggs: {
+          per_subject: {
+            filters: { filters },
+            aggs: { last_obs: { max: { field: 'observed_at' } } },
+          },
+        },
       });
       const buckets =
         (resp.aggregations as {
-          per_subject?: { buckets?: Record<string, { doc_count?: number }> };
+          per_subject?: {
+            buckets?: Record<string, { doc_count?: number; last_obs?: { value_as_string?: string } }>;
+          };
         })?.per_subject?.buckets ?? {};
       for (const [key, bucket] of Object.entries(buckets)) {
-        counts.set(key, bucket.doc_count ?? 0);
+        stats.set(key, {
+          count: bucket.doc_count ?? 0,
+          lastObservedAt: bucket.last_obs?.value_as_string,
+        });
       }
     } catch (err) {
       logger.warn(
-        '[NarrativeRepository] live observation count failed — falling back to stored count',
+        '[NarrativeRepository] live observation stats failed — falling back to stored values',
         { error: err instanceof Error ? err.message : String(err) },
       );
     }
-    return counts;
+    return stats;
   }
 
-  /** Overwrite each narrative's observationCount with the live value. */
+  /** Overwrite each narrative's observationCount + lastObservedAt with live values. */
   private async withLiveCounts(userId: string, narratives: Narrative[]): Promise<Narrative[]> {
     if (narratives.length === 0) return narratives;
-    const counts = await this.liveObservationCounts(
+    const stats = await this.liveObservationStats(
       userId,
       narratives.map((n) => n.subject),
     );
     for (const n of narratives) {
-      const live = counts.get(subjectKey(n.subject));
-      if (live != null) n.observationCount = live;
+      const live = stats.get(subjectKey(n.subject));
+      if (live != null) {
+        n.observationCount = live.count;
+        // Only overwrite when there are real observations — a subject with zero
+        // observations has no live max, and we keep the stored value.
+        if (live.lastObservedAt) n.lastObservedAt = live.lastObservedAt;
+      }
     }
     return narratives;
   }

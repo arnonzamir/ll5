@@ -21,12 +21,19 @@ interface NarrativeConsolidationConfig {
 }
 
 const NARRATIVES_INDEX = 'll5_knowledge_narratives';
+const OBSERVATIONS_INDEX = 'll5_knowledge_observations';
 
-interface StaleNarrativeDoc {
+interface ActiveNarrativeDoc {
   subject: { kind: string; ref: string };
   title: string;
-  last_observed_at?: string;
   last_consolidated_at?: string;
+}
+
+interface StaleNarrative {
+  subject: { kind: string; ref: string };
+  title: string;
+  /** True latest observation timestamp (live, from the observations index). */
+  liveLastObservedAt: string;
 }
 
 /**
@@ -98,47 +105,103 @@ export class NarrativeConsolidationScheduler {
 
   /**
    * Narratives that are active, recently touched, have new activity since their
-   * last summary, and weren't refreshed within the debounce window. Comparing two
-   * date fields (last_observed_at > last_consolidated_at) isn't a plain ES filter,
-   * so we filter "never/long-ago consolidated" in ES and do the field-vs-field
-   * comparison in JS on the bounded candidate set.
+   * last summary, and weren't refreshed within the debounce window.
+   *
+   * Critically, "new activity" is measured against the LIVE latest observation
+   * timestamp (max(observed_at) from the observations index), NOT the narrative
+   * doc's `last_observed_at` — that field is only written at consolidation, so it
+   * always trails `last_consolidated_at` and would make this selection blind.
+   * We pull active narratives, compute live max(observed_at) per subject in one
+   * filters-aggregation, and select on that.
    */
-  private async selectStaleNarratives(): Promise<StaleNarrativeDoc[]> {
+  private async selectStaleNarratives(): Promise<StaleNarrative[]> {
     const now = Date.now();
-    const recentCutoff = new Date(now - this.config.activeWindowDays * 86_400_000).toISOString();
-    const debounceCutoff = new Date(now - this.config.debounceHours * 3_600_000).toISOString();
+    const recentCutoff = now - this.config.activeWindowDays * 86_400_000;
+    const debounceCutoff = now - this.config.debounceHours * 3_600_000;
 
-    const resp = await this.es.search<StaleNarrativeDoc>({
+    // 1. Active narratives (bounded; working sets are dozens).
+    const resp = await this.es.search<ActiveNarrativeDoc>({
       index: NARRATIVES_INDEX,
-      size: this.config.maxNarratives * 3,
-      _source: ['subject', 'title', 'last_observed_at', 'last_consolidated_at'],
+      size: 200,
+      _source: ['subject', 'title', 'last_consolidated_at'],
       query: {
         bool: {
           filter: [
             { term: { user_id: this.config.userId } },
             { term: { status: 'active' } },
-            { range: { last_observed_at: { gte: recentCutoff } } },
           ],
-          should: [
-            { bool: { must_not: { exists: { field: 'last_consolidated_at' } } } },
-            { range: { last_consolidated_at: { lte: debounceCutoff } } },
-          ],
-          minimum_should_match: 1,
         },
       },
-      sort: [{ last_observed_at: { order: 'desc', missing: '_last' } }],
     });
-
-    return resp.hits.hits
+    const actives = resp.hits.hits
       .map((h) => h._source)
-      .filter((d): d is StaleNarrativeDoc => d != null)
-      // New activity since the last summary (or never summarized).
-      .filter((d) => {
-        if (!d.last_consolidated_at) return true;
-        const obs = d.last_observed_at ? Date.parse(d.last_observed_at) : NaN;
-        const con = Date.parse(d.last_consolidated_at);
-        return Number.isFinite(obs) && obs > con;
-      })
+      .filter((d): d is ActiveNarrativeDoc => d != null && d.subject != null);
+    if (actives.length === 0) return [];
+
+    // 2. Live max(observed_at) per subject — one filters-agg over observations.
+    const filters: Record<string, unknown> = {};
+    for (const d of actives) {
+      filters[`${d.subject.kind}::${d.subject.ref}`] = {
+        nested: {
+          path: 'subjects',
+          query: {
+            bool: {
+              must: [
+                { term: { 'subjects.kind': d.subject.kind } },
+                { term: { 'subjects.ref': d.subject.ref } },
+              ],
+            },
+          },
+        },
+      };
+    }
+    const liveMax = new Map<string, number>();
+    try {
+      // Loose-typed body: the ES client's strict aggs typing rejects a
+      // dynamically-built filters map (same reason the knowledge repo uses a
+      // Record<string, any> query alias).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const searchBody: any = {
+        index: OBSERVATIONS_INDEX,
+        size: 0,
+        query: { bool: { filter: [{ term: { user_id: this.config.userId } }] } },
+        aggs: {
+          per_subject: {
+            filters: { filters },
+            aggs: { last_obs: { max: { field: 'observed_at' } } },
+          },
+        },
+      };
+      const agg = await this.es.search(searchBody);
+      const buckets =
+        (agg.aggregations as {
+          per_subject?: { buckets?: Record<string, { last_obs?: { value?: number } }> };
+        })?.per_subject?.buckets ?? {};
+      for (const [key, b] of Object.entries(buckets)) {
+        if (b.last_obs?.value != null) liveMax.set(key, b.last_obs.value);
+      }
+    } catch (err) {
+      logger.warn('[NarrativeConsolidationScheduler] live max(observed_at) agg failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
+
+    // 3. Select: warm + new activity since last summary + debounced.
+    const stale: StaleNarrative[] = [];
+    for (const d of actives) {
+      const key = `${d.subject.kind}::${d.subject.ref}`;
+      const last = liveMax.get(key);
+      if (last == null || last < recentCutoff) continue; // no obs / gone cold
+      const con = d.last_consolidated_at ? Date.parse(d.last_consolidated_at) : NaN;
+      const newSinceSummary = !Number.isFinite(con) || last > con;
+      const debounced = !Number.isFinite(con) || con <= debounceCutoff;
+      if (newSinceSummary && debounced) {
+        stale.push({ subject: d.subject, title: d.title, liveLastObservedAt: new Date(last).toISOString() });
+      }
+    }
+    return stale
+      .sort((a, b) => Date.parse(b.liveLastObservedAt) - Date.parse(a.liveLastObservedAt))
       .slice(0, this.config.maxNarratives);
   }
 
