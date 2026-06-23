@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,16 +17,24 @@ import {
   CheckCircle2,
   RotateCcw,
   Pause,
+  Network,
+  Clock,
+  Loader2,
+  Wand2,
 } from "lucide-react";
 import {
   closeNarrative,
   reopenNarrative,
   setDormant,
+  requestNarrativeSummary,
   type Narrative,
   type Observation,
   type SubjectRef,
   type SubjectKind,
+  type NarrativeConnections,
 } from "../narratives-server-actions";
+import { NarrativeGraph } from "../narrative-graph";
+import { NarrativeTimeline } from "../narrative-timeline";
 
 const KIND_ICON: Record<SubjectKind, React.ComponentType<{ className?: string }>> = {
   person: UserIcon,
@@ -39,16 +47,6 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "success" | "warn
   active: "success",
   dormant: "secondary",
   closed: "outline",
-};
-
-const SOURCE_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "outline"> = {
-  whatsapp: "success",
-  telegram: "default",
-  chat: "default",
-  system: "secondary",
-  journal: "warning",
-  inference: "outline",
-  user_statement: "default",
 };
 
 function formatTime(iso: string): string {
@@ -64,15 +62,156 @@ function formatTime(iso: string): string {
 interface NarrativeDetailViewProps {
   subject: SubjectRef;
   initial: { narrative: Narrative | null; observations: Observation[] };
+  /** Connection map for the graph. Null while loading or unavailable. */
+  connections?: NarrativeConnections | null;
+  /** "page" shows the Back link + outer wrapper; "pane" is the embedded right-pane form. */
+  variant?: "page" | "pane";
+  /** Selecting a related narrative node in the graph (pane mode). */
+  onSelectRelated?: (subject: SubjectRef) => void;
+  /** Narrow-screen back affordance in pane mode. */
+  onBack?: () => void;
 }
 
-export function NarrativeDetailView({ subject, initial }: NarrativeDetailViewProps) {
+// ---------------------------------------------------------------------------
+// "Fresh take" — ephemeral agent summary delivered over the chat SSE stream
+// ---------------------------------------------------------------------------
+
+type FreshTakeState =
+  | { status: "idle" }
+  | { status: "pending" }
+  | { status: "ready"; text: string }
+  | { status: "timeout" }
+  | { status: "error"; message: string };
+
+function FreshTakeCard({ state, onDismiss }: { state: FreshTakeState; onDismiss: () => void }) {
+  if (state.status === "idle") return null;
+  return (
+    <Card className="border-primary/30 bg-primary/5">
+      <CardContent className="p-4 space-y-1">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary">
+            <Wand2 className="h-3.5 w-3.5" />
+            Fresh take · just now
+          </div>
+          <button
+            onClick={onDismiss}
+            className="text-xs text-gray-400 hover:text-gray-700"
+            aria-label="Dismiss fresh take"
+          >
+            dismiss
+          </button>
+        </div>
+        {state.status === "pending" && (
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Asking the agent for a point-in-time read…
+          </div>
+        )}
+        {state.status === "ready" && (
+          <div className="text-sm whitespace-pre-line text-gray-800">{state.text}</div>
+        )}
+        {state.status === "timeout" && (
+          <div className="text-sm text-gray-600">Requested — it&apos;ll appear in your chat.</div>
+        )}
+        {state.status === "error" && (
+          <div className="text-sm text-red-600">{state.message}</div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function NarrativeDetailView({
+  subject,
+  initial,
+  connections = null,
+  variant = "page",
+  onSelectRelated,
+  onBack,
+}: NarrativeDetailViewProps) {
   const [narrative, setNarrative] = useState<Narrative | null>(initial.narrative);
   const observations = initial.observations;
   const [closeReason, setCloseReason] = useState("");
   const [showCloseForm, setShowCloseForm] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Reset local mutable state whenever the subject changes (pane re-use).
+  useEffect(() => {
+    setNarrative(initial.narrative);
+    setCloseReason("");
+    setShowCloseForm(false);
+    setError(null);
+  }, [initial.narrative, subject.kind, subject.ref]);
+
+  // ---- Fresh-take (Summarize now) ------------------------------------------
+  const [freshTake, setFreshTake] = useState<FreshTakeState>({ status: "idle" });
+  const esRef = useRef<EventSource | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestAtRef = useRef(0);
+
+  function cleanupListener() {
+    esRef.current?.close();
+    esRef.current = null;
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }
+
+  // Tear down the SSE listener + timer on unmount or subject change.
+  useEffect(() => {
+    return () => cleanupListener();
+  }, [subject.kind, subject.ref]);
+
+  // Reset the fresh take when navigating to a different subject.
+  useEffect(() => {
+    cleanupListener();
+    setFreshTake({ status: "idle" });
+  }, [subject.kind, subject.ref]);
+
+  async function doSummarize() {
+    if (freshTake.status === "pending") return;
+    cleanupListener();
+    setFreshTake({ status: "pending" });
+    requestAtRef.current = Date.now();
+
+    const res = await requestNarrativeSummary(subject);
+    if (res.error) {
+      setFreshTake({ status: "error", message: res.error });
+      return;
+    }
+
+    // Listen for the next assistant reply on the chat stream. The ephemeral
+    // summary lands as a normal assistant new_message; we accept the first
+    // assistant message created after we fired the request.
+    const es = new EventSource("/api/chat/listen");
+    esRef.current = es;
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "connected" || data.type === "error") return;
+        if (data.event !== "new_message" && data.event !== undefined) return;
+        if (data.role !== "assistant") return;
+        if (!data.content) return;
+        // Only accept messages created after the request fired (skip backfill).
+        const created = data.created_at ? new Date(data.created_at).getTime() : Date.now();
+        if (created < requestAtRef.current - 2000) return;
+        setFreshTake({ status: "ready", text: String(data.content) });
+        cleanupListener();
+      } catch {
+        /* ignore malformed frames */
+      }
+    };
+    es.onerror = () => {
+      /* EventSource auto-reconnects; the timeout below is the real backstop. */
+    };
+
+    timeoutRef.current = setTimeout(() => {
+      setFreshTake((prev) => (prev.status === "pending" ? { status: "timeout" } : prev));
+      cleanupListener();
+    }, 60_000);
+  }
 
   const Icon = KIND_ICON[subject.kind];
 
@@ -120,31 +259,64 @@ export function NarrativeDetailView({ subject, initial }: NarrativeDetailViewPro
 
   if (!narrative && observations.length === 0) {
     return (
-      <Card>
-        <CardContent className="p-12 text-center text-gray-500">
-          <Sparkles className="h-8 w-8 mx-auto mb-3 text-gray-300" />
-          <p>No narrative or observations exist for this subject yet.</p>
-          <Link href="/narratives" className="inline-block mt-4">
-            <Button variant="outline" size="sm">
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Back to narratives
-            </Button>
-          </Link>
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        {variant === "pane" && onBack && (
+          <Button variant="ghost" size="sm" onClick={onBack} className="lg:hidden">
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Back to list
+          </Button>
+        )}
+        <Card>
+          <CardContent className="p-12 text-center text-gray-500">
+            <Sparkles className="h-8 w-8 mx-auto mb-3 text-gray-300" />
+            <p>No narrative or observations exist for this subject yet.</p>
+            {variant === "page" && (
+              <Link href="/narratives" className="inline-block mt-4">
+                <Button variant="outline" size="sm">
+                  <ArrowLeft className="h-4 w-4 mr-1" />
+                  Back to narratives
+                </Button>
+              </Link>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <Link href="/narratives">
-          <Button variant="ghost" size="sm">
+        {variant === "page" ? (
+          <Link href="/narratives">
+            <Button variant="ghost" size="sm">
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Back
+            </Button>
+          </Link>
+        ) : onBack ? (
+          <Button variant="ghost" size="sm" onClick={onBack} className="lg:hidden">
             <ArrowLeft className="h-4 w-4 mr-1" />
-            Back
+            List
           </Button>
-        </Link>
+        ) : (
+          <span />
+        )}
         <div className="flex items-center gap-2">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={doSummarize}
+            disabled={freshTake.status === "pending"}
+            title="Ask the agent for a fresh point-in-time summary (delivered to your chat)"
+          >
+            {freshTake.status === "pending" ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Wand2 className="h-4 w-4 mr-1" />
+            )}
+            Summarize now
+          </Button>
           {narrative && narrative.status === "active" && (
             <Button variant="outline" size="sm" onClick={doDormant} disabled={pending}>
               <Pause className="h-4 w-4 mr-1" />
@@ -170,6 +342,8 @@ export function NarrativeDetailView({ subject, initial }: NarrativeDetailViewPro
           )}
         </div>
       </div>
+
+      <FreshTakeCard state={freshTake} onDismiss={() => { cleanupListener(); setFreshTake({ status: "idle" }); }} />
 
       {showCloseForm && narrative && (
         <Card>
@@ -315,46 +489,41 @@ export function NarrativeDetailView({ subject, initial }: NarrativeDetailViewPro
         </Card>
       )}
 
+      {/* Connection map */}
       <Card>
         <CardContent className="p-6">
-          <h3 className="text-lg font-semibold mb-4">
-            Observations
-            <span className="text-sm font-normal text-gray-500 ml-2">
-              ({observations.length}, newest first)
-            </span>
-          </h3>
-          <ul className="space-y-3">
-            {observations.map((o) => (
-              <li key={o.id} className="border-l-2 border-gray-200 pl-3 space-y-1">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <span>{formatTime(o.observedAt)}</span>
-                  <Badge variant={SOURCE_VARIANT[o.source] ?? "outline"} className="text-[10px]">
-                    {o.source}
-                  </Badge>
-                  <span>·</span>
-                  <span>{o.confidence}</span>
-                  {o.mood && <span className="italic">· {o.mood}</span>}
-                  {o.sensitive && (
-                    <Badge variant="outline" className="text-amber-700 border-amber-300 text-[10px]">
-                      <Lock className="h-3 w-3 mr-1" />
-                      sensitive
-                    </Badge>
-                  )}
-                </div>
-                <div className="text-sm whitespace-pre-line">{o.text}</div>
-                {o.sourceExcerpt && (
-                  <div className="text-xs text-gray-500 italic border-l-2 border-gray-100 pl-2">
-                    &ldquo;{o.sourceExcerpt}&rdquo;
-                  </div>
-                )}
-              </li>
-            ))}
-            {observations.length === 0 && (
-              <li className="text-sm text-gray-400 italic">No observations yet.</li>
+          <div className="flex items-center gap-2 mb-3">
+            <Network className="h-4 w-4 text-gray-400" />
+            <h3 className="text-lg font-semibold">Connections</h3>
+            {connections && (
+              <span className="text-sm font-normal text-gray-500">
+                ({connections.entities.length} entit{connections.entities.length === 1 ? "y" : "ies"},{" "}
+                {connections.related.length} related)
+              </span>
             )}
-          </ul>
+          </div>
+          <NarrativeGraph
+            subject={subject}
+            title={narrative?.title ?? `${subject.kind}:${subject.ref}`}
+            connections={connections}
+            onSelectRelated={onSelectRelated}
+          />
         </CardContent>
       </Card>
-    </>
+
+      {/* Development timeline */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Clock className="h-4 w-4 text-gray-400" />
+            <h3 className="text-lg font-semibold">Timeline</h3>
+            <span className="text-sm font-normal text-gray-500">
+              ({observations.length} observation{observations.length === 1 ? "" : "s"}, newest first)
+            </span>
+          </div>
+          <NarrativeTimeline narrative={narrative} observations={observations} />
+        </CardContent>
+      </Card>
+    </div>
   );
 }

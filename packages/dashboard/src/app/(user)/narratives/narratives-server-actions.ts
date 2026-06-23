@@ -1,6 +1,8 @@
 "use server";
 
 import { mcpCall, mcpCallJson, mcpCallList } from "@/lib/api";
+import { getToken } from "@/lib/auth";
+import { env } from "@/lib/env";
 
 export type SubjectKind = "person" | "place" | "group" | "topic";
 
@@ -55,6 +57,7 @@ export interface ListNarrativesFilters {
   participant_id?: string;
   stale_for_days?: number;
   query?: string;
+  sort?: "relevance" | "recency";
   limit?: number;
   offset?: number;
 }
@@ -66,8 +69,62 @@ export async function fetchNarratives(filters: ListNarrativesFilters = {}): Prom
   if (filters.participant_id) args.participant_id = filters.participant_id;
   if (filters.stale_for_days) args.stale_for_days = filters.stale_for_days;
   if (filters.query?.trim()) args.query = filters.query.trim();
+  if (filters.sort) args.sort = filters.sort;
   if (filters.offset) args.offset = filters.offset;
   return mcpCallList<Narrative>("knowledge", "list_narratives", args);
+}
+
+export type ConnectionVia = "shared-participant" | "shared-place" | "co-subject";
+
+export interface EntityNode {
+  kind: "person" | "place";
+  ref: string;
+  name?: string;
+}
+
+export interface RelatedNarrative {
+  subject: SubjectRef;
+  title: string;
+  status: "active" | "dormant" | "closed";
+  via: ConnectionVia[];
+  weight: number;
+  sharedKeys: string[];
+}
+
+export interface NarrativeConnections {
+  subject: SubjectRef;
+  entities: EntityNode[];
+  related: RelatedNarrative[];
+}
+
+/** The connection map for one narrative — entity spokes + related narratives. */
+export async function fetchNarrativeConnections(subject: SubjectRef): Promise<NarrativeConnections> {
+  const result = await mcpCallJson<NarrativeConnections>("knowledge", "get_narrative_connections", { subject });
+  return result ?? { subject, entities: [], related: [] };
+}
+
+/**
+ * Fire an EPHEMERAL point-in-time agent summary (gateway POST /narratives/summarize).
+ * The agent replies it into the chat thread; the stored narrative is NOT mutated.
+ * Returns the event_id so the caller can correlate the assistant reply over the
+ * chat SSE stream.
+ */
+export async function requestNarrativeSummary(
+  subject: SubjectRef,
+): Promise<{ event_id?: string; message_id?: string | null; error?: string }> {
+  const token = await getToken();
+  if (!token) return { error: "Not authenticated." };
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/narratives/summarize`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: subject.kind, ref: subject.ref }),
+    });
+    if (!res.ok) return { error: `Summary request failed (HTTP ${res.status}).` };
+    return await res.json();
+  } catch {
+    return { error: "Couldn't reach the agent." };
+  }
 }
 
 export async function fetchNarrativeDetail(

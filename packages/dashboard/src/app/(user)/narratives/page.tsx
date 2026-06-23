@@ -5,7 +5,7 @@ export const metadata = { title: "Narratives - LL5" };
 export const dynamic = "force-dynamic";
 
 export default async function NarrativesPage() {
-  const initial = await fetchNarratives({ status: "active", limit: 100 });
+  const initial = await fetchNarratives({ status: "active", sort: "relevance", limit: 100 });
   return (
     <div className="space-y-6">
       <div>

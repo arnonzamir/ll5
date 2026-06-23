@@ -1,5 +1,9 @@
 import { redirect } from "next/navigation";
-import { fetchNarrativeDetail, type SubjectKind } from "../narratives-server-actions";
+import {
+  fetchNarrativeDetail,
+  fetchNarrativeConnections,
+  type SubjectKind,
+} from "../narratives-server-actions";
 import { NarrativeDetailView } from "./narrative-detail-view";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +25,19 @@ export default async function NarrativeDetailPage({
   }
 
   const subject = { kind: kind as SubjectKind, ref };
-  const detail = await fetchNarrativeDetail(subject, 200);
+  const [detail, connections] = await Promise.all([
+    fetchNarrativeDetail(subject, 200),
+    fetchNarrativeConnections(subject),
+  ]);
 
   return (
     <div className="space-y-6">
-      <NarrativeDetailView subject={subject} initial={detail} />
+      <NarrativeDetailView
+        subject={subject}
+        initial={detail}
+        connections={connections}
+        variant="page"
+      />
     </div>
   );
 }

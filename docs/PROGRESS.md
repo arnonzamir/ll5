@@ -50,7 +50,25 @@ probe): `GET /narratives?status=&sort=&q=&subject_kind=&limit=&offset=` (default
 via `insertSystemMessage` (`[Narrative Summary Request]`, instructs push_to_user + DO NOT upsert) returning
 `{event_id, message_id}` for UI correlation. One API surface for web + mobile (mobile can't do the MCP
 handshake). gw `tsc` clean.
-- **Phases 3–4 (web master-detail UI, mobile Active tab) pending.**
+**Phase 3 (web master-detail UI) — shipped 2026-06-23:** dashboard `/narratives` refactored from list→separate-route
+into a **master-detail** screen. Left rail: search + status/kind filters + a **relevance/recency sort** toggle
+(default relevance). Right pane (`NarrativeDetailView variant="pane"`, shared with the still-working `/detail`
+deep-link route): summary/mood/open-threads/decisions + a **connections graph** (`narrative-graph.tsx` — zero-dep
+SVG radial; center = narrative, spokes = entities + related narratives, edges colored/dashed by via
+shared-participant/shared-place/co-subject, related nodes clickable to pivot) + a **development timeline**
+(`narrative-timeline.tsx` — pure-Tailwind rail merging observations + recentDecisions chronologically, source
+badges) + a **"Summarize now"** button (ephemeral: `requestNarrativeSummary` → gateway `POST /narratives/summarize`,
+then subscribes to `/api/chat/listen` and renders the agent's reply inline as "Fresh take", 60s fallback; does
+NOT mutate the stored narrative). server-actions gained `sort`, `fetchNarrativeConnections`, `requestNarrativeSummary`.
+Dashboard `next build` clean.
+**Phase 4 (mobile "Active" tab) — shipped 2026-06-23 (ll5-android repo):** new bottom-nav **Active** tab listing
+relevance-sorted active narratives (search), tap → detail (summary, open threads, participants/places as text,
+related titles as chips, recent observations list) + a **Summarize** button (fires gateway summarize, snackbar
+"check Chat"). New `NarrativesApi`/`NarrativeDtos` (camelCase, `{narratives:[...]}` envelope)/`NarrativesRepository`
++ `ui/narratives/` (list+detail VMs/screens) + `NarrativeTime.kt` (ISO relative-time); first arg-bearing nav route
+(`narrative/{kind}/{ref}`, Uri-encoded). Uses the Phase-2 gateway endpoints. `assembleDebug` BUILD SUCCESSFUL.
+**Living Narratives: all 4 phases shipped + verified (Phase 1 freshness live-checked: scheduler `Freshness
+trigger sent count:15`; Phase 2 endpoints 401-gated live; Phase 3/4 builds green).**
 
 ### FEATURE: human-approval gate on conversation AUTHORITY (permission) changes (2026-06-22)
 The LL5 agent can no longer change a conversation's authority (`contact_settings.permission` — ignore |
