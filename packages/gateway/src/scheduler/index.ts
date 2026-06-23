@@ -159,13 +159,20 @@ async function startSchedulersForUser(
   journalConsolidationScheduler.start();
   schedulers.push(journalConsolidationScheduler);
 
-  // Narrative consolidation — default ON (2026-05-22). Disable per-user via
+  // Narrative freshness — default ON (2026-05-22; upgraded to cadenced
+  // server-selected freshness 2026-06-23). Disable per-user via
   // user_settings.scheduler.narrative_consolidation_enabled = false.
-  // Fires once a day at configured hour (default 3am, an hour after journal
-  // consolidation so the agent has refreshed user_model first).
-  const narrativeConsolidationScheduler = new NarrativeConsolidationScheduler(pgPool, {
+  // Fires every intervalHours within the active window; itself selects the
+  // narratives with new activity since last summary (debounced), so the agent
+  // refreshes exactly those rather than scanning everything once a day.
+  const narrativeConsolidationScheduler = new NarrativeConsolidationScheduler(es, pgPool, {
     enabled: (sched['narrative_consolidation_enabled'] as unknown as boolean) ?? true,
-    consolidationHour: s('narrative_consolidation_hour', 3),
+    intervalHours: s('narrative_freshness_interval_hours', 3),
+    activeStartHour: s('narrative_freshness_start_hour', 7),
+    activeEndHour: s('narrative_freshness_end_hour', 22),
+    debounceHours: s('narrative_freshness_debounce_hours', 6),
+    activeWindowDays: s('narrative_freshness_window_days', 14),
+    maxNarratives: s('narrative_freshness_max', 15),
     timezone, userId,
   });
   narrativeConsolidationScheduler.start();

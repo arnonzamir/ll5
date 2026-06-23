@@ -2,11 +2,16 @@ import type { Client } from '@elastic/elasticsearch';
 import { BaseElasticsearchRepository, type EsQueryContainer } from './base.repository.js';
 import type { NarrativeRepository } from '../interfaces/narrative.repository.js';
 import {
+  type ConnectionVia,
+  type EntityNode,
   type Narrative,
+  type NarrativeConnections,
   type NarrativeFilters,
+  type RelatedNarrative,
   type SubjectRef,
   type UpsertNarrativeInput,
   narrativeDocId,
+  narrativeRelevance,
 } from '../../types/narrative.js';
 import { logger } from '../../utils/logger.js';
 
@@ -181,6 +186,9 @@ export class ElasticsearchNarrativeRepository
       const cutoff = new Date(Date.now() - filters.staleForDays * 86_400_000).toISOString();
       filterClauses.push({ range: { last_observed_at: { lte: cutoff } } });
     }
+    if (filters.placeId) {
+      filterClauses.push({ term: { places: filters.placeId } });
+    }
     if (filters.query) {
       mustClauses.push({
         multi_match: {
@@ -191,11 +199,37 @@ export class ElasticsearchNarrativeRepository
       });
     }
 
+    const limit = filters.limit ?? 50;
+    const offset = filters.offset ?? 0;
+
+    // Relevance is a composite of recency + live observation volume + status, so
+    // it can't be expressed as a single ES sort key (the live count isn't on the
+    // doc). Pull a bounded candidate window by recency, attach live counts, then
+    // score + sort + page in-app. Working sets are dozens, so this is cheap and
+    // exact. Recency sort stays a pure ES sort (the default, unchanged path).
+    if ((filters.sort ?? 'recency') === 'relevance') {
+      const CANDIDATE_CAP = 200;
+      const { hits, total } = await this.searchDocs<NarrativeDoc>(userId, {
+        filters: filterClauses,
+        musts: mustClauses,
+        size: CANDIDATE_CAP,
+        from: 0,
+        sort: [{ last_observed_at: { order: 'desc', missing: '_last' } }],
+      });
+      const candidates = hits
+        .filter((h) => h._source != null && h._id != null)
+        .map((h) => docToNarrative(h._source!, h._id!));
+      await this.withLiveCounts(userId, candidates);
+      const now = Date.now();
+      candidates.sort((a, b) => narrativeRelevance(b, now) - narrativeRelevance(a, now));
+      return { items: candidates.slice(offset, offset + limit), total };
+    }
+
     const { hits, total } = await this.searchDocs<NarrativeDoc>(userId, {
       filters: filterClauses,
       musts: mustClauses,
-      size: filters.limit ?? 50,
-      from: filters.offset ?? 0,
+      size: limit,
+      from: offset,
       sort: [{ last_observed_at: { order: 'desc', missing: '_last' } }],
     });
 
@@ -220,6 +254,128 @@ export class ElasticsearchNarrativeRepository
 
     await this.withLiveCounts(userId, items);
     return items;
+  }
+
+  /**
+   * Subjects that co-occur with `subject` in the same observation, with how many
+   * observations they share. This is the strongest "these threads are about the
+   * same thing" signal — two subjects tagged on one observation are genuinely
+   * linked, not just incidentally near each other. Bounded to the most recent
+   * 200 observations; failures degrade to an empty map (connections never break a
+   * read). Queries the observations index directly (sibling of liveObservationCounts).
+   */
+  private async coOccurringSubjects(
+    userId: string,
+    subject: SubjectRef,
+  ): Promise<Map<string, { subject: SubjectRef; count: number }>> {
+    const out = new Map<string, { subject: SubjectRef; count: number }>();
+    try {
+      const resp = await this.client.search<{ subjects?: Array<{ kind: string; ref: string }> }>({
+        index: OBSERVATIONS_INDEX,
+        size: 200,
+        _source: ['subjects'],
+        query: {
+          bool: {
+            filter: [
+              { term: { user_id: userId } },
+              {
+                nested: {
+                  path: 'subjects',
+                  query: {
+                    bool: {
+                      must: [
+                        { term: { 'subjects.kind': subject.kind } },
+                        { term: { 'subjects.ref': subject.ref } },
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+        sort: [{ observed_at: { order: 'desc' } }],
+      });
+      for (const h of resp.hits.hits) {
+        for (const s of h._source?.subjects ?? []) {
+          if (s.kind === subject.kind && s.ref === subject.ref) continue;
+          const key = subjectKey(s);
+          const cur = out.get(key);
+          if (cur) cur.count += 1;
+          else out.set(key, { subject: { kind: s.kind as SubjectRef['kind'], ref: s.ref }, count: 1 });
+        }
+      }
+    } catch (err) {
+      logger.warn('[NarrativeRepository] co-occurring subjects query failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return out;
+  }
+
+  async getConnections(userId: string, subject: SubjectRef): Promise<NarrativeConnections> {
+    const self = await this.getBySubject(userId, subject);
+    const participants = self?.participants ?? [];
+    const places = self?.places ?? [];
+    const selfKey = subjectKey(subject);
+
+    const relatedMap = new Map<string, RelatedNarrative>();
+    const addRelated = (n: Narrative, via: ConnectionVia, sharedKey: string, w: number): void => {
+      const key = subjectKey(n.subject);
+      if (key === selfKey) return;
+      let r = relatedMap.get(key);
+      if (!r) {
+        r = { subject: n.subject, title: n.title, status: n.status, via: [], weight: 0, sharedKeys: [] };
+        relatedMap.set(key, r);
+      }
+      if (!r.via.includes(via)) r.via.push(via);
+      if (!r.sharedKeys.includes(sharedKey)) r.sharedKeys.push(sharedKey);
+      r.weight += w;
+    };
+
+    // shared-participant: any narrative listing a participant in common. If the
+    // focus subject IS a person, include narratives where that person participates.
+    const participantKeys = new Set(participants);
+    if (subject.kind === 'person') participantKeys.add(subject.ref);
+    for (const pid of participantKeys) {
+      const sibs = await this.listForParticipant(userId, pid);
+      for (const s of sibs) addRelated(s, 'shared-participant', pid, 1);
+    }
+
+    // shared-place: narratives that touch any of the same places.
+    if (places.length > 0) {
+      const { hits } = await this.searchDocs<NarrativeDoc>(userId, {
+        filters: [{ terms: { places } }],
+        size: 100,
+        sort: [{ last_observed_at: { order: 'desc', missing: '_last' } }],
+      });
+      for (const h of hits) {
+        if (!h._source || !h._id) continue;
+        const n = docToNarrative(h._source, h._id);
+        for (const pl of (n.places ?? []).filter((p) => places.includes(p))) {
+          addRelated(n, 'shared-place', pl, 1);
+        }
+      }
+    }
+
+    // co-subject: subjects co-tagged on the focus subject's observations that
+    // themselves have a narrative.
+    const coSubjects = await this.coOccurringSubjects(userId, subject);
+    for (const { subject: cs, count } of coSubjects.values()) {
+      const n = await this.getBySubject(userId, cs);
+      if (n) addRelated(n, 'co-subject', `${cs.kind}:${cs.ref}`, count);
+    }
+
+    const entities: EntityNode[] = [
+      ...participants.map((p) => ({ kind: 'person' as const, ref: p })),
+      ...places.map((p) => ({ kind: 'place' as const, ref: p })),
+    ];
+
+    const related = [...relatedMap.values()]
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 50);
+
+    return { subject, entities, related };
   }
 
   async upsert(

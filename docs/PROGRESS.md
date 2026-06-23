@@ -8,6 +8,32 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### PROJECT: Living Narratives — Phase 1 substrate shipped (2026-06-23)
+Turning `narratives` (personal-knowledge MCP) into a living, edge-aware, observable substrate. Full spec +
+phasing + confirmed product decisions in `docs/decisions/DECISION-014-living-narratives.md`. Goal: fast,
+reliable on-the-fly context building (a narrative IS the agent's "context card"); the UI (Phases 3–4) is the
+window to see/steer it. **Decided:** substrate-first; debounced/cadenced freshness; "summarize now" =
+ephemeral (read-only) snapshot; mobile simplified to an "Active" tab.
+**Phase 1 (this commit) — backend substrate:**
+- **Relevance** (`personal-knowledge/src/types/narrative.ts`): `narrativeRelevance(n, now)` composite
+  (recency 0.6 / status 0.2 / open-threads 0.1 / volume 0.1; ~3-day recency half-life, 0..1). `list_narratives`
+  gains `sort="relevance"` — computed in-app over a 200-candidate window so it uses the LIVE observation count,
+  not the stale stored one (recency sort unchanged/default). Added `place_id` filter.
+- **Edges/map**: new `get_narrative_connections({subject})` tool +
+  `NarrativeRepository.getConnections` — returns entity spokes (participants+places, names resolved via
+  person/place repos) + related narratives via **shared-participant / shared-place / co-subject** (co-tagged
+  observations), each with `via[]`, `weight`, `sharedKeys[]`. Derived on read, no stored edges. Co-occurrence
+  helper queries `ll5_knowledge_observations` directly (sibling of `liveObservationCounts`).
+- **Freshness loop** (`gateway/src/scheduler/narrative-consolidation.ts`): upgraded from once/day blind nudge
+  to **cadenced + server-selected + debounced**. Now takes the ES client; fires every `intervalHours`
+  (default 3) within 07–22; itself queries `ll5_knowledge_narratives` for active narratives with
+  `last_observed_at > last_consolidated_at` (new activity since last summary) not refreshed within
+  `debounceHours` (default 6); nudge (`[Narrative Freshness]`) NAMES the exact narratives so the agent
+  consolidates precisely those — a 12-msg burst is one rewrite per debounce window, not twelve. Knobs:
+  `user_settings.scheduler.narrative_freshness_{interval_hours,start_hour,end_hour,debounce_hours,window_days,max}`.
+- Tests: +5 `narrativeRelevance` unit tests (ordering/bounds) — personal-knowledge 90 green. Both packages
+  `tsc` clean. **Phases 2–4 (gateway API, web master-detail UI, mobile Active tab) pending.**
+
 ### FEATURE: human-approval gate on conversation AUTHORITY (permission) changes (2026-06-22)
 The LL5 agent can no longer change a conversation's authority (`contact_settings.permission` — ignore |
 input | agent, controls whether the agent may read/reply/post) directly. It may only **file a request**;

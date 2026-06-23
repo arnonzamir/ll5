@@ -1,5 +1,6 @@
 import type {
   Narrative,
+  NarrativeConnections,
   NarrativeFilters,
   SubjectRef,
   UpsertNarrativeInput,
@@ -14,6 +15,13 @@ export interface NarrativeRepository {
 
   /** Get narratives that include a given subject as a participant or place. */
   listForParticipant(userId: string, personId: string): Promise<Narrative[]>;
+
+  /**
+   * The connection map for one narrative — its participant/place entity spokes and
+   * the other narratives it links to (via shared participants, shared places, or
+   * co-occurring observation subjects). Derived on read; no stored edges.
+   */
+  getConnections(userId: string, subject: SubjectRef): Promise<NarrativeConnections>;
 
   /**
    * Create or update a narrative keyed on subject. Sensitivity is bumped (logical OR),

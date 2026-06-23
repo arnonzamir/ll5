@@ -1,9 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Client } from '@elastic/elasticsearch';
 import { ElasticsearchNarrativeRepository } from '../repositories/elasticsearch/narrative.repository.js';
-import { narrativeDocId, type SubjectRef } from '../types/narrative.js';
+import { narrativeDocId, narrativeRelevance, type Narrative, type SubjectRef } from '../types/narrative.js';
 
 const USER_ID = 'user-test-1';
+
+function makeNarrative(over: Partial<Narrative> = {}): Narrative {
+  return {
+    id: 'n-1',
+    userId: USER_ID,
+    subject: { kind: 'topic', ref: 't-1' },
+    title: 'T',
+    summary: '',
+    openThreads: [],
+    recentDecisions: [],
+    participants: [],
+    places: [],
+    observationCount: 0,
+    sensitive: false,
+    status: 'active',
+    ...over,
+  };
+}
 
 function makeEsClient(overrides: Partial<{
   getResult: unknown;
@@ -46,6 +64,41 @@ describe('narrativeDocId', () => {
     const c = narrativeDocId(USER_ID, { kind: 'place', ref: 'p-1' });
     expect(a).not.toBe(b);
     expect(a).not.toBe(c);
+  });
+});
+
+describe('narrativeRelevance', () => {
+  const now = Date.parse('2026-06-23T12:00:00Z');
+  const hoursAgo = (h: number) => new Date(now - h * 3_600_000).toISOString();
+
+  it('returns a score in [0,1]', () => {
+    const s = narrativeRelevance(makeNarrative({ lastObservedAt: hoursAgo(1) }), now);
+    expect(s).toBeGreaterThanOrEqual(0);
+    expect(s).toBeLessThanOrEqual(1);
+  });
+
+  it('ranks a more-recently-active narrative higher (all else equal)', () => {
+    const fresh = narrativeRelevance(makeNarrative({ lastObservedAt: hoursAgo(1) }), now);
+    const stale = narrativeRelevance(makeNarrative({ lastObservedAt: hoursAgo(240) }), now);
+    expect(fresh).toBeGreaterThan(stale);
+  });
+
+  it('ranks active above closed at equal recency', () => {
+    const active = narrativeRelevance(makeNarrative({ lastObservedAt: hoursAgo(2), status: 'active' }), now);
+    const closed = narrativeRelevance(makeNarrative({ lastObservedAt: hoursAgo(2), status: 'closed' }), now);
+    expect(active).toBeGreaterThan(closed);
+  });
+
+  it('boosts open threads and observation volume', () => {
+    const base = makeNarrative({ lastObservedAt: hoursAgo(2) });
+    const loaded = makeNarrative({ lastObservedAt: hoursAgo(2), openThreads: ['a', 'b', 'c'], observationCount: 40 });
+    expect(narrativeRelevance(loaded, now)).toBeGreaterThan(narrativeRelevance(base, now));
+  });
+
+  it('treats unknown activity as very old (low score)', () => {
+    const unknown = narrativeRelevance(makeNarrative({ lastObservedAt: undefined, firstObservedAt: undefined }), now);
+    const recent = narrativeRelevance(makeNarrative({ lastObservedAt: hoursAgo(1) }), now);
+    expect(unknown).toBeLessThan(recent);
   });
 });
 

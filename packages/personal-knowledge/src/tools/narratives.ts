@@ -198,13 +198,15 @@ export function registerNarrativeTools(
   // -------------------------------------------------------------------------
   server.tool(
     'list_narratives',
-    'List narratives. Use for review skills and dashboard. Default returns active narratives sorted by recency.',
+    'List narratives. Use for review skills and dashboard. Default returns active narratives sorted by recency. Pass sort="relevance" for the "what matters now" ordering (recency-dominant, boosted by active status / open threads / volume).',
     {
       status: statusSchema.optional().describe('active / dormant / closed. Default active'),
       subject_kind: subjectKindSchema.optional().describe('Filter by subject kind'),
       participant_id: z.string().optional().describe('Person ID involved in the narrative'),
+      place_id: z.string().optional().describe('Place ID involved in the narrative'),
       stale_for_days: z.number().min(1).optional().describe('Active narratives untouched for N+ days'),
       query: z.string().optional().describe('Free-text search title + summary + open threads'),
+      sort: z.enum(['relevance', 'recency']).optional().describe('Ordering. Default recency (last activity). "relevance" = currently-relevant composite score.'),
       limit: z.number().min(1).max(200).optional().describe('Default 50'),
       offset: z.number().min(0).optional().describe('Pagination offset'),
     },
@@ -214,8 +216,10 @@ export function registerNarrativeTools(
         status: (params.status ?? 'active') as NarrativeStatus,
         subjectKind: params.subject_kind,
         participantId: params.participant_id,
+        placeId: params.place_id,
         staleForDays: params.stale_for_days,
         query: params.query,
+        sort: params.sort,
         limit: params.limit,
         offset: params.offset,
       });
@@ -261,6 +265,49 @@ export function registerNarrativeTools(
         content: [{
           type: 'text' as const,
           text: JSON.stringify({ narrative, observations }),
+        }],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // get_narrative_connections — the connection map for one narrative
+  // -------------------------------------------------------------------------
+  server.tool(
+    'get_narrative_connections',
+    [
+      'Map how a narrative connects to the rest of the world: its participant/place',
+      'entity spokes and the OTHER narratives it links to — via shared participants,',
+      'shared places, or subjects co-tagged on the same observations. Derived live',
+      '(no stored graph). Use to answer "what else is tied to this thread?" or to power',
+      'a connections view. Entity refs are resolved to display names where possible.',
+    ].join(' '),
+    {
+      subject: subjectSchema.describe('The narrative to map connections for'),
+    },
+    async (params) => {
+      const userId = getUserId();
+      const conn = await narrativeRepo.getConnections(userId, params.subject);
+
+      // Resolve person/place refs to display names (best-effort; ref kept on failure).
+      const entities = await Promise.all(
+        conn.entities.map(async (e) => {
+          try {
+            const name =
+              e.kind === 'person'
+                ? (await personRepo.get(userId, e.ref))?.name
+                : (await placeRepo.get(userId, e.ref))?.name;
+            return { ...e, name: name ?? undefined };
+          } catch {
+            return e;
+          }
+        }),
+      );
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ subject: conn.subject, entities, related: conn.related }),
         }],
       };
     },
