@@ -76,6 +76,15 @@ consolidated). Root cause: the scheduler fired on arbitrary restart ticks. Fix: 
 (`fireWithinMinutes`, default 10) — the nudge only fires near the top of a qualifying hour, so a mid-hour
 restart (deploys, frequent ES-cascade restarts) neither races delivery nor re-triggers a consolidation
 burst; it fires on the clean cadence boundary instead.
+**Loop closed (agent-action fix, ll5-run `b8453b9`):** end-to-end testing then found the agent IGNORED a
+correctly-delivered nudge — the channel MCP system-message dispatch table had no `[Narrative Freshness]`
+entry, so the agent had no directive to act (it kept handling real-time WhatsApp). Added an imperative
+dispatch entry in `ll5-run/channel/ll5-channel.mjs` (for each NAMED narrative: consolidate_narrative +
+upsert_narrative this turn, silent, don't defer). After the ll5-run redeploy cycled the agent session,
+a fired nudge produced exactly the 3 named narratives (Rotem 06-18→06-23, Aristo 06-17→06-23, Uriyah
+06-20→06-23) consolidated in one turn within ~3 min. **The freshness loop now verifiably refreshes
+narratives end-to-end (fire → deliver → recognize → consolidate → fresh summary).** Note: the loop depends
+on the ll5-run channel dispatch entry being live (cycled with the agent session).
 
 ### FEATURE: human-approval gate on conversation AUTHORITY (permission) changes (2026-06-22)
 The LL5 agent can no longer change a conversation's authority (`contact_settings.permission` — ignore |
