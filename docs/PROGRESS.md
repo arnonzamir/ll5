@@ -41,7 +41,16 @@ ephemeral (read-only) snapshot; mobile simplified to an "Active" tab.
   live max(observed_at) vs `last_consolidated_at`, not the stale doc field. Verified live: scheduler runs
   with the cadenced config and server-selection returns a true result against real ES data; observation
   writes confirmed healthy (48/24h, 95/48h, 354/7d).
-- **Phases 2–4 (gateway API, web master-detail UI, mobile Active tab) pending.**
+**Phase 2 (gateway `/narratives` API) — shipped 2026-06-23:** new `packages/gateway/src/narratives.ts`
+router (mounted in `server.ts`, same `chatAuthMiddleware` Bearer auth), proxying the personal-knowledge MCP
+by forwarding the caller's token (user-scoped, multi-tenant-safe; connects per request like the MCP health
+probe): `GET /narratives?status=&sort=&q=&subject_kind=&limit=&offset=` (default sort=relevance) → `{narratives,total}`;
+`GET /narratives/detail?kind=&ref=` → `{narrative, observations, connections}` (parallel `get_narrative` +
+`get_narrative_connections`); `POST /narratives/summarize {kind,ref}` → fires an **ephemeral** agent summary
+via `insertSystemMessage` (`[Narrative Summary Request]`, instructs push_to_user + DO NOT upsert) returning
+`{event_id, message_id}` for UI correlation. One API surface for web + mobile (mobile can't do the MCP
+handshake). gw `tsc` clean.
+- **Phases 3–4 (web master-detail UI, mobile Active tab) pending.**
 
 ### FEATURE: human-approval gate on conversation AUTHORITY (permission) changes (2026-06-22)
 The LL5 agent can no longer change a conversation's authority (`contact_settings.permission` — ignore |

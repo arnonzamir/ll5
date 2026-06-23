@@ -26,6 +26,7 @@ import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { createAgentRouter } from './agent.js';
 import { createApprovalsRouter } from './approvals.js';
+import { createNarrativesRouter } from './narratives.js';
 import { processCalendar, phoneEventId } from './processors/calendar.js';
 import { processLocation, type StoredPoint } from './processors/location.js';
 import { processMessage } from './processors/message.js';
@@ -375,6 +376,10 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Human-approval gate for conversation authority (permission). Phone/dashboard-only.
   app.use(createApprovalsRouter(pgPool, config.authSecret));
+
+  // Read-only narratives API (web + mobile) — proxies the personal-knowledge MCP
+  // (relevance-sorted list, detail+connections+timeline) + an ephemeral summarize.
+  app.use(createNarrativesRouter(pgPool, config.authSecret, config.mcpHealthUrls.knowledge));
 
   // Resolves message routing/media from contact_settings (the unified source of truth).
   const notificationMatcher = new ContactRoutingResolver(pgPool);
