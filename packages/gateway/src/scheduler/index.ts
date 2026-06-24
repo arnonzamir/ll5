@@ -159,14 +159,18 @@ async function startSchedulersForUser(
   journalConsolidationScheduler.start();
   schedulers.push(journalConsolidationScheduler);
 
-  // Narrative freshness — default ON (2026-05-22; upgraded to cadenced
-  // server-selected freshness 2026-06-23). Disable per-user via
-  // user_settings.scheduler.narrative_consolidation_enabled = false.
-  // Fires every intervalHours within the active window; itself selects the
-  // narratives with new activity since last summary (debounced), so the agent
-  // refreshes exactly those rather than scanning everything once a day.
+  // Narrative freshness — now DEFAULT OFF (2026-06-24, DECISION-015).
+  // SUPERSEDED by the async narrative-maintenance loop in the agent container
+  // (ll5-run/scripts/narrative-loop.sh): an ephemeral `claude -p` worker drives
+  // consolidation off the live agent's thread, much more sensitively, so this
+  // gateway heartbeat — which nudged the LIVE agent and only got ~1-2
+  // consolidations per nudge — is no longer the driver. Kept as a RE-ARMABLE
+  // FALLBACK: set user_settings.scheduler.narrative_consolidation_enabled = true
+  // to restore the live-agent path (e.g. if the loop is down). When both run they
+  // are idempotent (last_consolidated_at dedups), but the loop is the intended
+  // sole driver — leaving this off keeps the live agent's thread clean.
   const narrativeConsolidationScheduler = new NarrativeConsolidationScheduler(es, pgPool, {
-    enabled: (sched['narrative_consolidation_enabled'] as unknown as boolean) ?? true,
+    enabled: (sched['narrative_consolidation_enabled'] as unknown as boolean) ?? false,
     intervalHours: s('narrative_freshness_interval_hours', 3),
     fireWithinMinutes: s('narrative_freshness_fire_within_minutes', 10),
     // Around the clock (every intervalHours). Consolidation/promotion is SILENT

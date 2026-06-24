@@ -2,6 +2,8 @@ import type {
   Narrative,
   NarrativeConnections,
   NarrativeFilters,
+  NarrativeWork,
+  NarrativeWorkOptions,
   SubjectRef,
   UpsertNarrativeInput,
 } from '../../types/narrative.js';
@@ -22,6 +24,15 @@ export interface NarrativeRepository {
    * co-occurring observation subjects). Derived on read; no stored edges.
    */
   getConnections(userId: string, subject: SubjectRef): Promise<NarrativeConnections>;
+
+  /**
+   * Select the narratives to REFRESH and the subjects to CREATE for one maintenance
+   * pass — the driver query for the async narrative loop. `stale` = active narratives
+   * with new activity since their last summary (debounced); `orphans` = subjects with
+   * >= promoteThreshold recent observations and no narrative yet. Both computed against
+   * the LIVE max(observed_at), never the denormalized last_observed_at.
+   */
+  selectConsolidationWork(userId: string, options?: NarrativeWorkOptions): Promise<NarrativeWork>;
 
   /**
    * Create or update a narrative keyed on subject. Sensitivity is bumped (logical OR),

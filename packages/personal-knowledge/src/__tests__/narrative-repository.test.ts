@@ -496,4 +496,107 @@ describe('ElasticsearchNarrativeRepository', () => {
       expect(items[0].observationCount).toBe(9); // stored fallback — reads never break
     });
   });
+
+  describe('selectConsolidationWork', () => {
+    const now = Date.now();
+    const minsAgo = (m: number) => new Date(now - m * 60_000).toISOString();
+
+    /** ES mock dispatching narrative-index vs observations-index searches. */
+    function makeWorkClient(opts: {
+      narratives: Array<{ kind: string; ref: string; status?: string; title?: string; last_consolidated_at?: string }>;
+      observations: Array<{ subjects: Array<{ kind: string; ref: string }>; observed_at: string; text?: string }>;
+    }): Client {
+      return {
+        get: vi.fn().mockResolvedValue({ _source: null }),
+        search: vi.fn().mockImplementation((params: { index?: string }) => {
+          if (params.index === 'll5_knowledge_observations') {
+            return Promise.resolve({ hits: { hits: opts.observations.map((o) => ({ _source: o })) } });
+          }
+          return Promise.resolve({
+            hits: {
+              hits: opts.narratives.map((n) => ({
+                _source: {
+                  user_id: USER_ID,
+                  subject: { kind: n.kind, ref: n.ref },
+                  status: n.status ?? 'active',
+                  title: n.title ?? `${n.kind}:${n.ref}`,
+                  last_consolidated_at: n.last_consolidated_at,
+                },
+              })),
+            },
+          });
+        }),
+        index: vi.fn(),
+        deleteByQuery: vi.fn(),
+      } as unknown as Client;
+    }
+
+    it('promotes a subject with no narrative to CREATE at threshold 1', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeWorkClient({
+        narratives: [],
+        observations: [{ subjects: [{ kind: 'person', ref: 'p-new' }], observed_at: minsAgo(5), text: 'met someone new' }],
+      }));
+      const work = await r.selectConsolidationWork(USER_ID);
+      expect(work.orphans.map((o) => o.subject.ref)).toContain('p-new');
+      expect(work.orphans[0].sample).toBe('met someone new');
+      expect(work.stale).toHaveLength(0);
+    });
+
+    it('marks an active narrative STALE when it has new activity past the debounce', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeWorkClient({
+        narratives: [{ kind: 'topic', ref: 't-1', last_consolidated_at: minsAgo(180) }],
+        observations: [{ subjects: [{ kind: 'topic', ref: 't-1' }], observed_at: minsAgo(10) }],
+      }));
+      const work = await r.selectConsolidationWork(USER_ID);
+      expect(work.stale.map((s) => s.subject.ref)).toContain('t-1');
+      expect(work.orphans).toHaveLength(0);
+    });
+
+    it('debounces a narrative consolidated within debounce_minutes', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeWorkClient({
+        narratives: [{ kind: 'topic', ref: 't-1', last_consolidated_at: minsAgo(5) }],
+        observations: [{ subjects: [{ kind: 'topic', ref: 't-1' }], observed_at: minsAgo(2) }],
+      }));
+      const work = await r.selectConsolidationWork(USER_ID, { debounceMinutes: 45 });
+      expect(work.stale).toHaveLength(0);
+    });
+
+    it('skips dormant/closed narratives even with new activity', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeWorkClient({
+        narratives: [{ kind: 'topic', ref: 't-dorm', status: 'dormant', last_consolidated_at: minsAgo(500) }],
+        observations: [{ subjects: [{ kind: 'topic', ref: 't-dorm' }], observed_at: minsAgo(10) }],
+      }));
+      const work = await r.selectConsolidationWork(USER_ID);
+      expect(work.stale).toHaveLength(0);
+      expect(work.orphans).toHaveLength(0); // it HAS a narrative, just not active — not an orphan
+    });
+
+    it('does not refresh a narrative already consolidated past its latest observation', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeWorkClient({
+        narratives: [{ kind: 'topic', ref: 't-fresh', last_consolidated_at: minsAgo(60) }],
+        observations: [{ subjects: [{ kind: 'topic', ref: 't-fresh' }], observed_at: minsAgo(120) }],
+      }));
+      const work = await r.selectConsolidationWork(USER_ID);
+      expect(work.stale).toHaveLength(0);
+    });
+
+    it('respects promote_threshold (a 1-observation subject is excluded at threshold 2)', async () => {
+      const r = new ElasticsearchNarrativeRepository(makeWorkClient({
+        narratives: [],
+        observations: [{ subjects: [{ kind: 'topic', ref: 't-once' }], observed_at: minsAgo(5) }],
+      }));
+      const work = await r.selectConsolidationWork(USER_ID, { promoteThreshold: 2 });
+      expect(work.orphans).toHaveLength(0);
+    });
+
+    it('caps each side at max', async () => {
+      const observations = Array.from({ length: 10 }, (_, i) => ({
+        subjects: [{ kind: 'topic', ref: `orphan-${i}` }],
+        observed_at: minsAgo(i + 1),
+      }));
+      const r = new ElasticsearchNarrativeRepository(makeWorkClient({ narratives: [], observations }));
+      const work = await r.selectConsolidationWork(USER_ID, { max: 3 });
+      expect(work.orphans).toHaveLength(3);
+    });
+  });
 });

@@ -7,6 +7,8 @@ import {
   type Narrative,
   type NarrativeConnections,
   type NarrativeFilters,
+  type NarrativeWork,
+  type NarrativeWorkOptions,
   type RelatedNarrative,
   type SubjectRef,
   type UpsertNarrativeInput,
@@ -394,6 +396,100 @@ export class ElasticsearchNarrativeRepository
       .slice(0, 50);
 
     return { subject, entities, related };
+  }
+
+  /**
+   * The driver query for the async narrative maintenance loop: one pass over recent
+   * observations aggregated by subject, split into REFRESH (existing active narratives
+   * with new activity since their last summary) and CREATE (subjects with enough
+   * observations but no narrative yet). Mirrors the gateway scheduler's old `selectWork`
+   * but lives here as the canonical, sensitivity-parameterized source — and always
+   * measures activity against the LIVE max(observed_at), never the denormalized
+   * last_observed_at (which only updates at consolidation and would blind the check).
+   */
+  async selectConsolidationWork(userId: string, options: NarrativeWorkOptions = {}): Promise<NarrativeWork> {
+    const windowDays = options.windowDays ?? 14;
+    const promoteThreshold = options.promoteThreshold ?? 1;
+    const debounceMinutes = options.debounceMinutes ?? 45;
+    const max = options.max ?? 25;
+
+    const now = Date.now();
+    const sinceIso = new Date(now - windowDays * 86_400_000).toISOString();
+    const debounceCutoff = now - debounceMinutes * 60_000;
+
+    // 1. All narratives → subject-key set + the active ones' status/title/consolidation time.
+    const nResp = await this.client.search<NarrativeDoc>({
+      index: INDEX,
+      size: 1000,
+      _source: ['subject', 'status', 'title', 'last_consolidated_at'],
+      query: { bool: { filter: [{ term: { user_id: userId } }] } },
+    });
+    const narrativeByKey = new Map<string, { status: string; title: string; lastConsolidatedAt?: string }>();
+    for (const h of nResp.hits.hits) {
+      const s = h._source;
+      if (!s?.subject) continue;
+      narrativeByKey.set(subjectKey(s.subject), {
+        status: s.status ?? 'active',
+        title: s.title ?? '',
+        lastConsolidatedAt: s.last_consolidated_at,
+      });
+    }
+
+    // 2. Recent observations → aggregate by subject (count, latest, sample text).
+    const oResp = await this.client.search<{ subjects?: Array<{ kind: string; ref: string }>; observed_at?: string; text?: string }>({
+      index: OBSERVATIONS_INDEX,
+      size: 3000,
+      _source: ['subjects', 'observed_at', 'text'],
+      query: { bool: { filter: [{ term: { user_id: userId } }, { range: { observed_at: { gte: sinceIso } } }] } },
+      sort: [{ observed_at: { order: 'desc' } }],
+    });
+    const agg = new Map<string, { subject: SubjectRef; count: number; latest: number; sample: string }>();
+    for (const h of oResp.hits.hits) {
+      const o = h._source;
+      const t = o?.observed_at ? Date.parse(o.observed_at) : NaN;
+      for (const s of o?.subjects ?? []) {
+        const key = subjectKey(s);
+        const cur = agg.get(key);
+        if (cur) {
+          cur.count += 1;
+          if (Number.isFinite(t) && t > cur.latest) cur.latest = t;
+        } else {
+          agg.set(key, {
+            subject: { kind: s.kind as SubjectRef['kind'], ref: s.ref },
+            count: 1,
+            latest: Number.isFinite(t) ? t : 0,
+            sample: o?.text ?? '',
+          });
+        }
+      }
+    }
+
+    // 3. Split into stale (refresh) and orphans (create).
+    const stale: NarrativeWork['stale'] = [];
+    const orphans: NarrativeWork['orphans'] = [];
+    for (const [key, a] of agg) {
+      const narr = narrativeByKey.get(key);
+      if (narr) {
+        if (narr.status !== 'active') continue; // dormant/closed — leave it
+        const con = narr.lastConsolidatedAt ? Date.parse(narr.lastConsolidatedAt) : NaN;
+        const newSinceSummary = !Number.isFinite(con) || a.latest > con;
+        const debounced = !Number.isFinite(con) || con <= debounceCutoff;
+        if (newSinceSummary && debounced) {
+          stale.push({
+            subject: a.subject,
+            title: narr.title,
+            lastObservedAt: new Date(a.latest).toISOString(),
+            lastConsolidatedAt: narr.lastConsolidatedAt,
+          });
+        }
+      } else if (a.count >= promoteThreshold) {
+        orphans.push({ subject: a.subject, count: a.count, sample: a.sample, latest: a.latest });
+      }
+    }
+
+    stale.sort((x, y) => Date.parse(y.lastObservedAt) - Date.parse(x.lastObservedAt));
+    orphans.sort((x, y) => y.count - x.count || y.latest - x.latest);
+    return { stale: stale.slice(0, max), orphans: orphans.slice(0, max) };
   }
 
   async upsert(

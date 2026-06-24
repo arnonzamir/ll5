@@ -314,6 +314,56 @@ export function registerNarrativeTools(
   );
 
   // -------------------------------------------------------------------------
+  // list_narrative_work — the driver query for the async maintenance loop
+  // -------------------------------------------------------------------------
+  server.tool(
+    'list_narrative_work',
+    [
+      'Return the narrative consolidation work-list: which existing narratives to REFRESH',
+      '(active, with new activity since their last summary) and which subjects to CREATE',
+      '(enough recent observations but no narrative yet). This is the entry point for the',
+      'background narrative-maintenance loop — call it first, then consolidate_narrative +',
+      'upsert_narrative each item. Activity is measured against the LIVE latest observation,',
+      'not the stale stored timestamp. Defaults are sensitive (promote_threshold 1).',
+    ].join(' '),
+    {
+      window_days: z.number().int().positive().optional().describe('Only consider observations newer than this many days. Default 14.'),
+      promote_threshold: z.number().int().positive().optional().describe('Min observations for a no-narrative subject to be promoted to CREATE. Default 1.'),
+      debounce_minutes: z.number().int().positive().optional().describe('Skip refreshing a narrative consolidated within this many minutes. Default 45.'),
+      max: z.number().int().positive().optional().describe('Safety cap per side (stale, orphans). Default 25.'),
+    },
+    async (params) => {
+      const userId = getUserId();
+      const work = await narrativeRepo.selectConsolidationWork(userId, {
+        windowDays: params.window_days,
+        promoteThreshold: params.promote_threshold,
+        debounceMinutes: params.debounce_minutes,
+        max: params.max,
+      });
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            refresh_count: work.stale.length,
+            create_count: work.orphans.length,
+            refresh: work.stale.map((s) => ({
+              subject: s.subject,
+              title: s.title,
+              last_observed_at: s.lastObservedAt,
+              last_consolidated_at: s.lastConsolidatedAt,
+            })),
+            create: work.orphans.map((o) => ({
+              subject: o.subject,
+              observation_count: o.count,
+              sample: (o.sample || '').slice(0, 160),
+            })),
+          }),
+        }],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // upsert_narrative — explicit create/update
   // -------------------------------------------------------------------------
   server.tool(

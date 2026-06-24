@@ -150,6 +150,45 @@ export interface NarrativeConnections {
   related: RelatedNarrative[];
 }
 
+/** A subject whose narrative should be REFRESHED — it exists, is active, and has new
+ *  activity since its last summary (measured against the LIVE max(observed_at)). */
+export interface StaleNarrativeWork {
+  subject: SubjectRef;
+  title: string;
+  /** True latest observation timestamp (live, from the observations index). */
+  lastObservedAt: string;
+  lastConsolidatedAt?: string;
+}
+
+/** A subject with accumulated observations but NO narrative yet — it should be CREATED. */
+export interface OrphanSubjectWork {
+  subject: SubjectRef;
+  /** Observation count within the selection window. */
+  count: number;
+  /** A sample observation text so the worker knows who/what this is (person refs are ids). */
+  sample: string;
+  /** Latest observation timestamp (ms epoch). */
+  latest: number;
+}
+
+/** The consolidation work-list for a tick of the narrative maintenance loop. */
+export interface NarrativeWork {
+  stale: StaleNarrativeWork[];
+  orphans: OrphanSubjectWork[];
+}
+
+/** Tunable sensitivity for {@link NarrativeRepository.selectConsolidationWork}. */
+export interface NarrativeWorkOptions {
+  /** Only consider observations newer than this many days. Default 14. */
+  windowDays?: number;
+  /** A subject with >= this many observations but no narrative is promoted to CREATE. Default 1. */
+  promoteThreshold?: number;
+  /** Don't re-refresh a narrative consolidated within this many minutes (coalesce bursts). Default 45. */
+  debounceMinutes?: number;
+  /** Safety cap on items returned per side (stale, orphans). Default 25. */
+  max?: number;
+}
+
 /**
  * Deterministic doc id for a narrative — one per (user, subject).
  * Application-layer uniqueness; ES has no unique constraints.

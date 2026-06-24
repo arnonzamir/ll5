@@ -8,7 +8,32 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
-### Narrative freshness → delegated to a background subagent (2026-06-24)
+### Narrative maintenance → async ephemeral-worker loop (2026-06-24, DECISION-015)
+Superseded the same-day "live agent spawns a subagent" approach below. The live agent — even just
+spawning a Task — still rode its own thread and depended on it noticing the nudge. New design: a
+**dedicated, self-pacing loop in the agent container** runs an **ephemeral `claude -p` worker** every
+~20 min, completely off the live agent, and **much more sensitive** (the live-agent bottleneck was what
+forced the low sensitivity). Full rationale in `docs/decisions/DECISION-015-narrative-maintenance-loop.md`.
+- **`list_narrative_work`** tool + `selectConsolidationWork` repo method (personal-knowledge MCP): the
+  worker's single driver query — returns `{refresh, create}` against the LIVE `max(observed_at)`, knobs
+  `promote_threshold` (default **1**, was ≥3), `debounce_minutes` (45), `window_days` (14), `max` (25).
+  +7 unit tests (39 in the narrative repo suite; personal-knowledge tsc clean).
+- **ll5-run worker**: `.mcp.narrate.json` (minimal 2-MCP set: knowledge + awareness), `prompts/narrative-loop.md`
+  (the silent consolidation task), `scripts/narrative-loop.sh` (sleep-loop driver: `nice`/`ionice`,
+  ephemeral `claude -p` sonnet-4-6, `--max-budget-usd`, `--no-session-persistence`, `bypassPermissions`,
+  neutral cwd so no CLAUDE.md/hooks load, off-switch `~/.ll5/narrative-loop.disabled`), started from
+  `docker-entrypoint.sh` alongside the autoheal watcher. Validated `claude -p` flags + sonnet-4-6 + OAuth
+  live in the container.
+- **Why ephemeral, not `/loop`-proper**: a one-shot `--print` worker exits, so ScheduleWakeup/`/loop` can't
+  re-arm it; a standing 2nd `claude` is a real cost on the shared box. The sleep-loop = same self-paced,
+  off-main-agent behavior at ~10-15% duty cycle, crash-robust, version-independent. Container runs claude 2.1.138.
+- **Gateway heartbeat now DEFAULT OFF** (`narrative_consolidation_enabled ?? false`) — the loop is the sole
+  driver; the live-agent path (subagent + dispatch + nudge) stays in place as a **re-armable fallback**
+  (flip the flag true to restore it).
+- Verify next: loop ticks in the container log create/refresh narratives + write one journal note; orphan
+  backlog drains over the first cycles; box stays healthy.
+
+### Narrative freshness → delegated to a background subagent (2026-06-24, SUPERSEDED by DECISION-015 above)
 The freshness loop ships and fires correctly, but the **live agent only did ~1–2 consolidations per
 `[Narrative Freshness]` nudge** — it won't grind a silent multi-item chore while prioritizing real-time life,
 even with small batches at idle hours. Detection/scheduling/UI were all correct; the weak link was the agent
