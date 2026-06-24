@@ -258,9 +258,9 @@ export class NarrativeConsolidationScheduler {
         );
       }
       sections.push(
-        'For REFRESH: consolidate_narrative({ subject }), draft an updated summary + current_mood + open_threads, then upsert_narrative with last_consolidated_at: <now>; transition to dormant if 60+ days quiet. ' +
-        'For CREATE: consolidate_narrative({ subject }) to pull the observations, then upsert_narrative with a title (required), summary, open_threads, and last_consolidated_at: <now> — give it a clear human title (resolve person ids to names). ' +
-        'Skip a CREATE only if the subject is genuinely a one-off non-thread. Silent — no push_to_user; brief journal note when done.',
+        'Do NOT consolidate inline — spawn the narrative-consolidator subagent ONCE (Task, subagent_type "narrative-consolidator", run_in_background: true), handing it the REFRESH and CREATE lists above verbatim. It works the whole list to completion and reports back; you do not wait on it. ' +
+        '(For reference, the chore it runs is: REFRESH → consolidate_narrative({ subject }) then upsert_narrative with an updated summary/current_mood/open_threads and last_consolidated_at: <now>, dormant if 60+ days quiet; CREATE → consolidate_narrative({ subject }) then upsert_narrative with a required human title (resolve person ids to names), summary, open_threads, last_consolidated_at: <now>; skip a CREATE only if a genuine one-off.) ' +
+        'If the Task tool is unavailable, fall back to doing the (small, ≤9-item) list yourself. Silent — no push_to_user; the subagent writes one brief journal note when done.',
       );
 
       const evt = createSchedulerEvent('narrative_consolidation');

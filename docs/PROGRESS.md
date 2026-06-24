@@ -8,6 +8,27 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Narrative freshness → delegated to a background subagent (2026-06-24)
+The freshness loop ships and fires correctly, but the **live agent only did ~1–2 consolidations per
+`[Narrative Freshness]` nudge** — it won't grind a silent multi-item chore while prioritizing real-time life,
+even with small batches at idle hours. Detection/scheduling/UI were all correct; the weak link was the agent
+*doing* the work. Fix: the live agent no longer consolidates inline — it now spawns a **single-purpose
+background subagent** that works the whole named list to completion.
+- **New subagent** `ll5-run/.claude/agents/narrative-consolidator.md` (knowledge-MCP narrative tools +
+  `write_journal`; silent — no user-contact tools). Job = "REFRESH/CREATE exactly these named subjects
+  (consolidate_narrative → upsert_narrative with `last_consolidated_at`), finish the list, return a one-line
+  tally." Gets no real-time events, so unlike the live agent it has no excuse to leave items undone.
+- **Dispatch rewired:** the `[Narrative Freshness]` entry in `ll5-run/channel/ll5-channel.mjs` and the
+  trailing action sentence in `gateway/src/scheduler/narrative-consolidation.ts` now say "spawn the
+  narrative-consolidator subagent ONCE (Task, `run_in_background: true`) with the REFRESH/CREATE lists" instead
+  of "do it yourself." Rationale: spawning one Task is a tiny action a busy agent WILL do; a single-purpose
+  subagent works its list to completion. Falls back to inline if Task is unavailable (batch is ≤9: max 5
+  refresh + 4 create). The server-side selection logic (live `max(observed_at)`, debounce, orphan promotion)
+  is unchanged — only the *action* the agent is told to take changed.
+- Gateway `tsc` clean. Verify on the next freshness cycle: a `[Narrative Freshness]` nudge should produce a
+  `narrative-consolidator` subagent run + a "Narrative freshness: refreshed N, created M" journal note, and
+  the named narratives' `last_consolidated_at` should advance.
+
 ### PROJECT: Living Narratives — Phase 1 substrate shipped (2026-06-23)
 Turning `narratives` (personal-knowledge MCP) into a living, edge-aware, observable substrate. Full spec +
 phasing + confirmed product decisions in `docs/decisions/DECISION-014-living-narratives.md`. Goal: fast,
