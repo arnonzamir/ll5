@@ -8,6 +8,17 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Chat left rail → live "Active topics" (2026-06-25)
+The web chat's left sidebar now defaults to a lightweight, live **Active topics** rail (the consumer surface
+of the narrative substrate) instead of the chat list. `components/chat/active-topics-rail.tsx`: active
+narratives relevance-ranked (timeliness+centrality), with kind filter (All/Topics/Groups/People) + sort
+(Top/Recent) + client-side search; rows are title + freshness dot (recency-colored) + open-threads count;
+polls `fetchNarratives` every 45s so it re-ranks as the consolidation loop folds in new activity. A
+**Topics | Chats** tab in `chat-root.tsx` keeps the old `ConversationList` one tap away (default Topics).
+Clicking a topic opens `topic-card-drawer.tsx` — a slide-over reusing the narratives `NarrativeDetailView`
+(pane) + a **Jump in** action (`requestNarrativeSummary` → the agent drops the topic's point-in-time read
+into the live chat thread, so you continue with its context in hand). Dashboard `tsc` + `next build` clean.
+
 ### Narrative maintenance → async ephemeral-worker loop (2026-06-24, DECISION-015)
 Superseded the same-day "live agent spawns a subagent" approach below. The live agent — even just
 spawning a Task — still rode its own thread and depended on it noticing the nudge. New design: a

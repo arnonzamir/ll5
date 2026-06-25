@@ -15,9 +15,12 @@ import {
 } from "@/hooks/use-chat-store";
 import { Composer } from "./composer";
 import { ConversationList } from "./conversation-list";
+import { ActiveTopicsRail } from "./active-topics-rail";
+import { TopicCardDrawer } from "./topic-card-drawer";
 import { MessageStream } from "./message-stream";
 import { CommandPalette } from "./command-palette";
 import { NewConversationDialog } from "./new-conversation-dialog";
+import type { Narrative } from "@/app/(user)/narratives/narratives-server-actions";
 
 /**
  * Top-level client shell for /chat. Owns:
@@ -38,6 +41,8 @@ export function ChatRoot() {
   const thinking = useThinking();
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [leftTab, setLeftTab] = useState<"topics" | "chats">("topics");
+  const [selectedTopic, setSelectedTopic] = useState<Narrative | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -134,14 +139,41 @@ export function ChatRoot() {
   return (
     <div className="flex h-full bg-surface-page chat-surface">
       {sidebarOpen && (
-        <div className="w-72 shrink-0 hidden md:block">
-          <ConversationList
-            activeId={convId}
-            onSelect={handleSelectConv}
-            onNewConversation={() => setNewDialogOpen(true)}
-            onClose={() => setSidebarOpen(false)}
-            refreshKey={refreshKey}
-          />
+        <div className="w-72 shrink-0 hidden md:flex flex-col bg-surface-rail">
+          {/* Topics is the default left view; Chats is one tap away. */}
+          <div className="flex items-stretch border-b border-ink-300/40 text-[11px] font-mono uppercase tracking-wide shrink-0">
+            {(["topics", "chats"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setLeftTab(t)}
+                className={`flex-1 py-2 transition-colors ${
+                  leftTab === t
+                    ? "text-primary border-b-2 border-primary -mb-px"
+                    : "text-ink-400 hover:text-ink-700"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 min-h-0">
+            {leftTab === "topics" ? (
+              <ActiveTopicsRail
+                activeRef={selectedTopic ? `${selectedTopic.subject.kind}:${selectedTopic.subject.ref}` : null}
+                onSelect={setSelectedTopic}
+                onClose={() => setSidebarOpen(false)}
+                refreshKey={refreshKey}
+              />
+            ) : (
+              <ConversationList
+                activeId={convId}
+                onSelect={handleSelectConv}
+                onNewConversation={() => setNewDialogOpen(true)}
+                onClose={() => setSidebarOpen(false)}
+                refreshKey={refreshKey}
+              />
+            )}
+          </div>
         </div>
       )}
 
@@ -205,6 +237,14 @@ export function ChatRoot() {
         onClose={() => setNewDialogOpen(false)}
         onConfirm={handleNewConv}
       />
+
+      {selectedTopic && (
+        <TopicCardDrawer
+          topic={selectedTopic}
+          onClose={() => setSelectedTopic(null)}
+          onJumpedIn={() => setSelectedTopic(null)}
+        />
+      )}
     </div>
   );
 }
