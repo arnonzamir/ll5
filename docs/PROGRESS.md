@@ -8,6 +8,19 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Durability: retire CronCreate → DB-backed ticklers (2026-06-27)
+Audit ("nothing the agent relies on should be session-scoped"). Found: the agent's `CronCreate` jobs are
+**session-scoped in visibility** — `CronList` only lists the current session's crons, so after a restart/
+compaction the agent can't see or manage a cron it created earlier and wrongly concludes it's gone (this is
+how a real user-set "brothers-trip" watch at 11:23/19:23 was lost). Fix (ll5-run persona): **all recurring
+schedules / reminders / self-wakes now go through ticklers** (`create_tickler`, `kind:"instruction"` for
+silent self-wakes, `recurrence`, in the calendar DB, always listable via `list_ticklers`) — `CronCreate` is
+retired (Hard Rule 6 rewritten; "Scheduling"/"Schedule your own attention"/situation-check updated; stop =
+`complete_tickler`; welcome.md cron-reconciliation marked legacy). `/schedule` cloud routines kept ONLY for
+separate cloud-agent work. **Memories were already DB-backed** (DECISION-013 governed memory + the
+`memory-intercept.sh` Write/Edit hook → `ll5_agent_lessons`; container has no native memory files) — verified,
+no change.
+
 ### Monitor "second agent" coverage (2026-06-27)
 Closed the two gaps in watching the narrative-loop worker: (1) the `ToolFailureMonitor` alert now surfaces the
 failing calls' `session_id`(s) (a `sessions` sub-agg) for live-vs-worker attribution; (2) the worker
