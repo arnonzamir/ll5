@@ -19,7 +19,7 @@ retired (Hard Rule 6 rewritten; "Scheduling"/"Schedule your own attention"/situa
 `complete_tickler`; welcome.md cron-reconciliation marked legacy). `/schedule` cloud routines kept ONLY for
 separate cloud-agent work. **Memories were already DB-backed** (DECISION-013 governed memory + the
 `memory-intercept.sh` Write/Edit hook → `ll5_agent_lessons`; container has no native memory files) — verified,
-no change. **Enforcement (2026-06-27):** a PreToolUse hook `ll5-run/.claude/hooks/cron-block.sh` (matcher `CronCreate`) hard-DENIES `CronCreate` with a redirect to `create_tickler` (CronList/CronDelete pass through; fail-open). So the no-cron rule is deterministic, not just persona.
+no change. **Enforcement (2026-06-27):** a PreToolUse hook `ll5-run/.claude/hooks/cron-block.sh` (matcher `CronCreate`) hard-DENIES `CronCreate` with a redirect to `create_tickler` (CronList/CronDelete pass through; fail-open). So the no-cron rule is deterministic, not just persona. Also `repo-write-block.sh` (PreToolUse Write|Edit) denies the agent writing inside /workspace/ll5-run/ (its own code/skills/persona — Hard Rule 1, and self-edits are lost on deploy) and routes it to the durable alternative (governed memory / push_to_user / /tmp scratch).
 
 ### Monitor "second agent" coverage (2026-06-27)
 Closed the two gaps in watching the narrative-loop worker: (1) the `ToolFailureMonitor` alert now surfaces the
