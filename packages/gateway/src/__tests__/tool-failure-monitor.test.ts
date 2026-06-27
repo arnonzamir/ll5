@@ -14,7 +14,7 @@ vi.mock('../utils/scheduler-health.js', () => ({
 
 import { ToolFailureMonitor } from '../scheduler/tool-failure-monitor.js';
 
-function esWithTools(tools: Array<{ tool: string; total: number; fails: number; err?: string }>): Client {
+function esWithTools(tools: Array<{ tool: string; total: number; fails: number; err?: string; sessions?: string[] }>): Client {
   return {
     search: vi.fn(async () => ({
       aggregations: {
@@ -25,6 +25,7 @@ function esWithTools(tools: Array<{ tool: string; total: number; fails: number; 
             fails: {
               doc_count: t.fails,
               sample: { hits: { hits: t.err ? [{ _source: { error_message: t.err } }] : [] } },
+              sessions: { buckets: (t.sessions ?? []).map((s) => ({ key: s })) },
             },
           })),
         },
@@ -42,12 +43,13 @@ const arg = (n: number) => raiseAlert.mock.calls[n][1] as Record<string, unknown
 describe('ToolFailureMonitor', () => {
   beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
 
-  it('alerts a tool failing the majority of its calls (>= minFailures AND ratio)', async () => {
-    await tick(mk(esWithTools([{ tool: 'inspect_image', total: 6, fails: 6, err: "Cannot read properties of undefined" }])));
+  it('alerts a tool failing the majority of its calls (>= minFailures AND ratio) + surfaces the session for attribution', async () => {
+    await tick(mk(esWithTools([{ tool: 'inspect_image', total: 6, fails: 6, err: "Cannot read properties of undefined", sessions: ['abc12345-dead-beef'] }])));
     expect(raiseAlert).toHaveBeenCalledTimes(1);
     expect(arg(0).key).toBe('tool.inspect_image');
     expect(arg(0).value).toContain('6/6');
     expect(String(arg(0).value)).toContain('Cannot read properties');
+    expect(String(arg(0).value)).toContain('abc12345'); // session id surfaced for live-vs-worker attribution
   });
 
   it('does NOT alert a high-traffic tool with a low failure ratio', async () => {

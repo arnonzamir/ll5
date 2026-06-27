@@ -27,6 +27,9 @@ interface ToolStat {
   total: number;
   fails: number;
   sampleError?: string;
+  /** Distinct session_ids of the failing calls — the key to attribute live-agent vs the
+   *  background narrative-loop worker (whose session_ids are logged in narrative-loop.log). */
+  failSessions: string[];
 }
 
 /**
@@ -93,6 +96,7 @@ export class ToolFailureMonitor {
                 sample: {
                   top_hits: { size: 1, _source: ['error_message'], sort: [{ timestamp: { order: 'desc' } }] },
                 },
+                sessions: { terms: { field: 'session_id', size: 3 } },
               },
             },
           },
@@ -106,7 +110,11 @@ export class ToolFailureMonitor {
           buckets?: Array<{
             key: string;
             doc_count: number;
-            fails?: { doc_count?: number; sample?: { hits?: { hits?: Array<{ _source?: { error_message?: string } }> } } };
+            fails?: {
+            doc_count?: number;
+            sample?: { hits?: { hits?: Array<{ _source?: { error_message?: string } }> } };
+            sessions?: { buckets?: Array<{ key: string }> };
+          };
           }>;
         };
       })?.tools?.buckets ?? [];
@@ -116,6 +124,7 @@ export class ToolFailureMonitor {
       total: b.doc_count,
       fails: b.fails?.doc_count ?? 0,
       sampleError: b.fails?.sample?.hits?.hits?.[0]?._source?.error_message,
+      failSessions: (b.fails?.sessions?.buckets ?? []).map((s) => s.key).filter(Boolean),
     }));
   }
 
@@ -131,14 +140,17 @@ export class ToolFailureMonitor {
 
       stillFailing.add(key);
       const severity: AlertSeverity = CRITICAL_TOOLS.has(s.tool) ? 'critical' : 'warning';
+      const sess = s.failSessions.length
+        ? ` [session${s.failSessions.length > 1 ? 's' : ''}: ${s.failSessions.map((x) => x.slice(0, 8)).join(', ')}]`
+        : '';
       await raiseAlert(this.pool, {
         userId: this.config.userId,
         key,
         severity,
         summary: `Tool "${s.tool}" failing`,
-        value: `${s.fails}/${s.total} calls failed in the last ${this.config.windowMinutes}m${s.sampleError ? ` — e.g. "${s.sampleError.slice(0, 100)}"` : ''}`,
+        value: `${s.fails}/${s.total} calls failed in the last ${this.config.windowMinutes}m${s.sampleError ? ` — e.g. "${s.sampleError.slice(0, 100)}"` : ''}${sess}`,
         expected: 'tool succeeds',
-        suggestion: `Likely a real breakage (backend/code/auth) OR the agent's own call drifted (Hard Rule 14). Check the agent transcript / the tool's MCP.`,
+        suggestion: `Likely a real breakage (backend/code/auth) OR the agent's own call drifted (Hard Rule 14). Attribute via the session id: the background narrative-loop worker logs its session in ~/.ll5/narrative-loop.log (so a match there = the worker); otherwise it's the live agent. Check that session's transcript / the tool's MCP.`,
       });
       this.active.add(key);
     }

@@ -8,6 +8,16 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Monitor "second agent" coverage (2026-06-27)
+Closed the two gaps in watching the narrative-loop worker: (1) the `ToolFailureMonitor` alert now surfaces the
+failing calls' `session_id`(s) (a `sessions` sub-agg) for live-vs-worker attribution; (2) the worker
+(`narrative-loop.sh`) runs `claude -p --output-format json` and logs `sess=<id>` + real cost per tick, so an
+alerting session maps definitively to the worker (vs the live agent); (3) the worker prompt
+(`prompts/narrative-loop.md`) gained a Rule-14-lite self-heal (malformed-arg error → re-read schema + retry
+once). The worker still runs without CLAUDE.md/hooks (neutral cwd) by design — full Rule 14 + eval-moments
+don't apply — but its tool failures + liveness ARE covered (`app_log` + `loop.narrative_consolidation`
+staleness). +1 test (15 monitor total).
+
 ### Post-compact re-grounding via active narratives (2026-06-27)
 After a context compaction the live agent came back "clueless about the past day" — the compact branch of
 `ll5-run/.claude/hooks/session-start.sh` (fires on `source=compact`) loaded only open journal entries. Fix:
