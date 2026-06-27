@@ -8,6 +8,21 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Tool-failure backstop monitor (2026-06-27)
+The deterministic net under agent Hard Rule 14 — independent of whether the agent notices, the system
+alerts when a tool is *failing repeatedly* (the inspect_image breakage went unnoticed for 2 days).
+- **Channel-tool telemetry**: the channel MCP (in the agent container, no ES access) now reports every tool
+  result to the new gateway `POST /telemetry/tool-result` (authed) → `appLog.info('tool_call', …)`, closing
+  the blind spot where channel tools (inspect_image/reply/push) never reached `ll5_app_log`. Central wrap in
+  `ll5-channel.mjs` (renamed handler to `__callToolImpl` + a logging wrapper + `logToolResult`); success-logs
+  skipped for chatty no-risk tools (get_current_time/narrate/…), failures always logged.
+- **`ToolFailureMonitor`** (`gateway/src/scheduler/tool-failure-monitor.ts`): every 15 min queries
+  `ll5_app_log` per-tool over a 60 min window; `raiseAlert` (existing spine → phone push + `[ALERT]` to the
+  agent) when a tool has **≥4 failures AND fails ≥50% of its calls** (broken, not flaky); delivery/perception
+  tools (reply/push_to_user/send_*/inspect_image) escalate to `critical`; auto-clears on recovery. Knobs:
+  `tool_failure_{monitor_minutes,window_minutes,min_failures,min_ratio}`. +5 unit tests; gateway `tsc` clean.
+- Next: the generic anomaly monitor (declarative metric list + threshold/staleness/rate-shift detectors).
+
 ### Chat left rail → live "Active topics" (2026-06-25)
 The web chat's left sidebar now defaults to a lightweight, live **Active topics** rail (the consumer surface
 of the narrative substrate) instead of the chat list. `components/chat/active-topics-rail.tsx`: active

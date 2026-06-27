@@ -561,6 +561,30 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Tool-result telemetry (channel MCP → app_log) ---
+  // The channel MCP runs in the agent container and has no ES access, so its tool
+  // calls (inspect_image, reply, push_to_user, …) never reached ll5_app_log — unlike
+  // the HTTP MCPs. This endpoint lets it report each tool result so the
+  // ToolFailureMonitor can see channel-tool breakages (the inspect_image blind spot).
+  app.post('/telemetry/tool-result', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { tool_name, success, duration_ms, error_message, source } = req.body ?? {};
+    if (!tool_name || typeof tool_name !== 'string') {
+      res.status(400).json({ error: 'tool_name required' });
+      return;
+    }
+    const ok = success !== false;
+    appLog.info('tool_call', `${tool_name} ${ok ? 'ok' : 'failed'}`, {
+      user_id: userId,
+      tool_name,
+      success: ok,
+      duration_ms: typeof duration_ms === 'number' ? duration_ms : undefined,
+      error_message: ok ? undefined : String(error_message ?? '').slice(0, 300),
+      metadata: { source: typeof source === 'string' ? source : 'll5-channel' },
+    });
+    res.json({ ok: true });
+  });
+
   // --- Contact settings (unified routing/permission/media) ---
 
   app.get('/contact-settings', authMw, async (req: Request, res: Response) => {

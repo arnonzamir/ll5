@@ -24,6 +24,7 @@ import { CharacterRefreshScheduler } from './character-refresh.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MetricsMonitor } from './metrics-monitor.js';
+import { ToolFailureMonitor } from './tool-failure-monitor.js';
 import { ChatSearchIndexer } from './chat-search-indexer.js';
 import { logger } from '../utils/logger.js';
 
@@ -274,6 +275,19 @@ async function startSchedulersForUser(
   });
   metricsMonitor.start();
   schedulers.push(metricsMonitor);
+
+  // Tool-failure backstop — watches ll5_app_log for tools failing repeatedly
+  // (the deterministic net under agent Hard Rule 14; the inspect_image breakage
+  // should have alerted within the hour, not gone unnoticed for two days).
+  const toolFailureMonitor = new ToolFailureMonitor(pgPool, es, {
+    intervalMinutes: s('tool_failure_monitor_minutes', 15),
+    windowMinutes: s('tool_failure_window_minutes', 60),
+    minFailures: s('tool_failure_min_failures', 4),
+    minRatio: s('tool_failure_min_ratio', 0.5),
+    userId,
+  });
+  toolFailureMonitor.start();
+  schedulers.push(toolFailureMonitor);
 
   // Phone liveness — Android notification/location service dying is invisible
   // from the server side until the heartbeat message happens to notice.
