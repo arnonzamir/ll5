@@ -8,6 +8,17 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Post-compact re-grounding via active narratives (2026-06-27)
+After a context compaction the live agent came back "clueless about the past day" — the compact branch of
+`ll5-run/.claude/hooks/session-start.sh` (fires on `source=compact`) loaded only open journal entries. Fix:
+it now also loads the **active narratives** (relevance-sorted top 12 — the agent's living context cards, kept
+fresh by the consolidation loop) so the agent re-grounds on the real recent threads (trips, family-medical
+arc, school schedule, …) + open journal + user_model + lessons, and is told to `recall_everything` on
+anything uncertain before acting. Added `KNOWLEDGE_URL` to the hook. Live-tested the query (rich, current
+recap). A compounding payoff of the loop: fresh narratives make a *reliable* recovery source. (The companion
+"somewhat broken" tool issue after compaction = the `inspect_image` arg-drift, already fixed via Hard Rule 14
++ the channel handler.)
+
 ### Tool-failure backstop monitor (2026-06-27)
 The deterministic net under agent Hard Rule 14 — independent of whether the agent notices, the system
 alerts when a tool is *failing repeatedly* (the inspect_image breakage went unnoticed for 2 days).
