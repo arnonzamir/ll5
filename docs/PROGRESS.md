@@ -21,7 +21,17 @@ alerts when a tool is *failing repeatedly* (the inspect_image breakage went unno
   agent) when a tool has **≥4 failures AND fails ≥50% of its calls** (broken, not flaky); delivery/perception
   tools (reply/push_to_user/send_*/inspect_image) escalate to `critical`; auto-clears on recovery. Knobs:
   `tool_failure_{monitor_minutes,window_minutes,min_failures,min_ratio}`. +5 unit tests; gateway `tsc` clean.
-- Next: the generic anomaly monitor (declarative metric list + threshold/staleness/rate-shift detectors).
+### Generic anomaly monitor — Phase A (2026-06-27)
+`gateway/src/scheduler/anomaly-monitor.ts`: a declarative, no-ML anomaly watcher on the same alert spine.
+Two detector kinds wired: **staleness** ("did it stop" — newest data point older than maxMinutes) and
+**rate-shift** (count in the current window vs the SAME window *yesterday* — seasonality-proof, alerts on a
+big drop). Starter checks: **narrative-loop liveness** (no `list_narrative_work` call in 45 min → the loop
+died), **journaling staleness** (18 h), **inbound-message throughput drop** (< 20% of same-window-yesterday,
+baseline ≥ 8). Auto-clears on recovery. Knob `anomaly_monitor_minutes` (15). +7 unit tests (12 total with the
+backstop). Adding a metric = push one object into `buildChecks()`.
+**Phase B (pending, user chose "ship eval moments to ES"):** index `record_moment` eval moments (currently
+container-local JSONL `~/.ll5/eval_log/*.jsonl`) to ES, then add agent-behavior rate-shift checks
+(suppress/prep/mismatch — catches the suppress-spike/prep-freeze regime change) to this same monitor.
 
 ### Chat left rail → live "Active topics" (2026-06-25)
 The web chat's left sidebar now defaults to a lightweight, live **Active topics** rail (the consumer surface

@@ -25,6 +25,7 @@ import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MetricsMonitor } from './metrics-monitor.js';
 import { ToolFailureMonitor } from './tool-failure-monitor.js';
+import { AnomalyMonitor } from './anomaly-monitor.js';
 import { ChatSearchIndexer } from './chat-search-indexer.js';
 import { logger } from '../utils/logger.js';
 
@@ -288,6 +289,16 @@ async function startSchedulersForUser(
   });
   toolFailureMonitor.start();
   schedulers.push(toolFailureMonitor);
+
+  // Generic anomaly monitor — declarative "did it stop / dropped" checks over ES
+  // (narrative-loop liveness, journaling staleness, inbound-message rate-shift).
+  // Same alert spine. Agent-behavior checks land here once eval moments ship to ES.
+  const anomalyMonitor = new AnomalyMonitor(pgPool, es, {
+    intervalMinutes: s('anomaly_monitor_minutes', 15),
+    userId,
+  });
+  anomalyMonitor.start();
+  schedulers.push(anomalyMonitor);
 
   // Phone liveness — Android notification/location service dying is invisible
   // from the server side until the heartbeat message happens to notice.
