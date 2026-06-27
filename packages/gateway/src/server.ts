@@ -98,6 +98,26 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
     },
   },
   {
+    // Per-turn proactivity eval moments (shipped from the agent's eval recorder).
+    // Lean behavior fields only — the AnomalyMonitor's agent-behavior checks read
+    // this (suppress/ping decisions, self-consistency mismatch) for regime-shift.
+    index: 'll5_eval_moments',
+    mappings: {
+      properties: {
+        timestamp: { type: 'date' },
+        user_id: { type: 'keyword' },
+        decision: { type: 'keyword' },          // ground truth: 'ping_now' | 'suppress'
+        decision_claimed: { type: 'keyword' },   // what record_moment said
+        decision_mismatch: { type: 'boolean' },  // claimed vs actual disagreement
+        trigger_class: { type: 'keyword' },
+        source: { type: 'keyword' },
+        message_sent: { type: 'boolean' },
+        cold_start: { type: 'boolean' },
+        session_id: { type: 'keyword' },
+      },
+    },
+  },
+  {
     index: 'll5_audit_log',
     mappings: {
       properties: {
@@ -583,6 +603,42 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       metadata: { source: typeof source === 'string' ? source : 'll5-channel' },
     });
     res.json({ ok: true });
+  });
+
+  // --- Proactivity eval moments (agent's eval recorder → ll5_eval_moments) ---
+  // Lean per-turn behavior fields, shipped from the box-side eval recorder so the
+  // AnomalyMonitor's agent-behavior checks (suppress spike / mismatch spike — the
+  // regime-shift the inspect_image breakage caused) can read them from ES.
+  app.post('/telemetry/eval-moment', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ts = (b.ts ?? b.timestamp) as string | undefined;
+    if (!ts || typeof ts !== 'string') {
+      res.status(400).json({ error: 'ts required' });
+      return;
+    }
+    const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+    const bool = (v: unknown) => (v == null ? undefined : Boolean(v));
+    try {
+      await esClient.index({
+        index: 'll5_eval_moments',
+        document: {
+          timestamp: ts,
+          user_id: userId,
+          decision: str(b.decision),
+          decision_claimed: str(b.decision_claimed),
+          decision_mismatch: bool(b.decision_mismatch),
+          trigger_class: str(b.trigger_class),
+          source: str(b.source),
+          message_sent: bool(b.message_sent),
+          cold_start: bool(b.cold_start),
+          session_id: str(b.session_id),
+        },
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'index failed' });
+    }
   });
 
   // --- Contact settings (unified routing/permission/media) ---

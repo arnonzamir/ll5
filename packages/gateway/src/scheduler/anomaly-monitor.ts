@@ -38,10 +38,13 @@ interface RateShiftCheck {
   severity: AlertSeverity;
   suggestion: string;
   windowMinutes: number;
-  /** Min baseline count to bother comparing (avoid dividing tiny numbers). */
+  /** 'drop' (a feed went quiet) or 'rise' (a spike, e.g. over-suppressing). Default 'drop'. */
+  direction?: 'drop' | 'rise';
+  /** Min baseline count to bother comparing (avoid judging tiny numbers). */
   minBaseline: number;
-  /** Alert if current <= baseline * (1 - minDropPct). */
-  minDropPct: number;
+  /** Fractional change vs same-window-yesterday to trip:
+   *  drop → current <= baseline*(1-minChangePct); rise → current >= baseline*(1+minChangePct). */
+  minChangePct: number;
   index: string;
   timestampField: string;
   filter?: Record<string, unknown>[];
@@ -146,10 +149,14 @@ export class AnomalyMonitor {
     const baseline = await this.countInWindow(c.index, c.timestampField, baseGte, baseLt, c.filter);
     if (current < 0 || baseline < 0) return false;          // query failed → skip
     if (baseline < c.minBaseline) return false;             // baseline too quiet to judge
-    if (current > baseline * (1 - c.minDropPct)) return false;
+    const dir = c.direction ?? 'drop';
+    const tripped = dir === 'drop'
+      ? current <= baseline * (1 - c.minChangePct)
+      : current >= baseline * (1 + c.minChangePct);
+    if (!tripped) return false;
     await raiseAlert(this.pool, {
       userId: this.config.userId, key: c.key, severity: c.severity,
-      summary: `${c.label} dropped`,
+      summary: `${c.label} ${dir === 'drop' ? 'dropped' : 'spiked'}`,
       value: `${current} in the last ${c.windowMinutes}m vs ${baseline} same window yesterday`,
       expected: `≈ ${baseline}`,
       suggestion: c.suggestion,
@@ -217,11 +224,45 @@ function buildChecks(): Check[] {
       severity: 'warning',
       suggestion: 'Far fewer inbound messages than the same time yesterday — a phone listener / channel may be down.',
       windowMinutes: 120,
+      direction: 'drop',
       minBaseline: 8,
-      minDropPct: 0.8, // current is < 20% of yesterday's same window
+      minChangePct: 0.8, // current is < 20% of yesterday's same window
       index: 'll5_awareness_messages',
       timestampField: 'timestamp',
       filter: [{ term: { from_me: false } }],
+    },
+    // AGENT BEHAVIOR (Phase B) — reads ll5_eval_moments (shipped from the eval
+    // recorder). Catches the regime change the inspect_image breakage caused: the
+    // agent suddenly suppressing far more proactive turns than the day before.
+    {
+      kind: 'rateShift',
+      key: 'behavior.suppress_spike',
+      label: 'Proactive-turn suppression',
+      severity: 'warning',
+      suggestion: 'The agent is suppressing far more proactive turns than the same time yesterday — often a downstream symptom of a broken tool (it can\'t act, so it suppresses). Check recent tool failures.',
+      windowMinutes: 180,
+      direction: 'rise',
+      minBaseline: 12,
+      minChangePct: 1.0, // doubled vs same window yesterday
+      index: 'll5_eval_moments',
+      timestampField: 'timestamp',
+      filter: [{ term: { decision: 'suppress' } }],
+    },
+    // Self-consistency degrading: the agent's claimed decision disagrees with what
+    // it actually did, far more than yesterday.
+    {
+      kind: 'rateShift',
+      key: 'behavior.mismatch_spike',
+      label: 'Decision self-mismatch',
+      severity: 'warning',
+      suggestion: 'The agent\'s claimed vs actual proactive decision is disagreeing more than usual — a quality/grounding signal worth a look.',
+      windowMinutes: 180,
+      direction: 'rise',
+      minBaseline: 4,
+      minChangePct: 1.0,
+      index: 'll5_eval_moments',
+      timestampField: 'timestamp',
+      filter: [{ term: { decision_mismatch: true } }],
     },
   ];
 }

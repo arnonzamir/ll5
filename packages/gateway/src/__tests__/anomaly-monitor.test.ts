@@ -35,7 +35,11 @@ function esCount(seq: number[]): Client {
 }
 const rsCheck = {
   kind: 'rateShift', key: 'tp.msgs', label: 'Msgs', severity: 'warning', suggestion: 's',
-  windowMinutes: 120, minBaseline: 8, minDropPct: 0.8, index: 'i', timestampField: 'timestamp',
+  windowMinutes: 120, direction: 'drop', minBaseline: 8, minChangePct: 0.8, index: 'i', timestampField: 'timestamp',
+};
+const riseCheck = {
+  kind: 'rateShift', key: 'behavior.suppress_spike', label: 'Suppress', severity: 'warning', suggestion: 's',
+  windowMinutes: 180, direction: 'rise', minBaseline: 12, minChangePct: 1.0, index: 'll5_eval_moments', timestampField: 'timestamp',
 };
 
 describe('AnomalyMonitor — staleness detector', () => {
@@ -75,5 +79,15 @@ describe('AnomalyMonitor — rate-shift detector (same window yesterday)', () =>
   });
   it('does NOT alert when a count query fails (negative)', async () => {
     expect(await priv(mk(esCount([-1, 20]))).runRateShift(rsCheck)).toBe(false);
+  });
+
+  it('rise: alerts when current spikes >= (1+minChangePct)*baseline', async () => {
+    // current=40, baseline=15 → 40 >= 15*2=30 → suppress spike
+    expect(await priv(mk(esCount([40, 15]))).runRateShift(riseCheck)).toBe(true);
+    expect(String(lastArg().summary)).toContain('spiked');
+  });
+  it('rise: no alert when current is only modestly above baseline', async () => {
+    // current=20, baseline=15 → 20 < 30 → no alert
+    expect(await priv(mk(esCount([20, 15]))).runRateShift(riseCheck)).toBe(false);
   });
 });

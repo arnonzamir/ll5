@@ -29,9 +29,14 @@ big drop). Starter checks: **narrative-loop liveness** (no `list_narrative_work`
 died), **journaling staleness** (18 h), **inbound-message throughput drop** (< 20% of same-window-yesterday,
 baseline ≥ 8). Auto-clears on recovery. Knob `anomaly_monitor_minutes` (15). +7 unit tests (12 total with the
 backstop). Adding a metric = push one object into `buildChecks()`.
-**Phase B (pending, user chose "ship eval moments to ES"):** index `record_moment` eval moments (currently
-container-local JSONL `~/.ll5/eval_log/*.jsonl`) to ES, then add agent-behavior rate-shift checks
-(suppress/prep/mismatch — catches the suppress-spike/prep-freeze regime change) to this same monitor.
+**Phase B (2026-06-27, built):** agent-behavior anomalies now wired. The eval recorder
+(`ll5-run/.claude/hooks/eval-record.sh` + `lib/eval_record.py` new `ship_body()`) backgrounded-curls each
+proactivity moment's lean behavior fields to NEW gateway `POST /telemetry/eval-moment` → NEW `ll5_eval_moments`
+index (mapping in `GATEWAY_INFRA_INDICES`). The rate-shift detector gained a `direction` ('drop'|'rise');
+two behavior checks added: **`behavior.suppress_spike`** (proactive-turn suppression rising ≥2× vs the same
+window yesterday — the regime change a broken tool causes) and **`behavior.mismatch_spike`** (claimed-vs-actual
+decision disagreement rising). Backgrounded curl keeps the Stop hook non-blocking + dodges the Cloudflare
+urllib-403. +2 tests (14 total). Both gateway + ll5-run deploy.
 
 ### Chat left rail → live "Active topics" (2026-06-25)
 The web chat's left sidebar now defaults to a lightweight, live **Active topics** rail (the consumer surface
