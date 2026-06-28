@@ -22,6 +22,7 @@ framed as a noisy last resort. Fix (awareness MCP):
   branch adds a forceful "you just lost your thread — read the last 7 days before acting." Persona Hard Rule 12
   updated (recall includes recent sessions; read the week on recovery). Tests: recall-everything.test.ts +6 (19).
 - Deferred follow-up: per-session distilled summaries so "read full week" is cheap (DECISION-017 open item).
+- **Recency-weighted ranking (2026-06-28):** default `relevant` sort is now a blend — normalized BM25 + a time-decay bonus (half-life 7d, weight 0.5) — so a fresh hit rises without ignoring relevance (recency-blind BM25 buried decisive recent updates). `timeline` stays pure-recency. Session floor now merges BEFORE the sort (ranked, not tail-appended). Recovery steers `mode:"timeline"` (compact hook + digest directive). +2 tests (21 recall / 196 awareness).
 
 ### Durable precise-time self-wake — `create_wake` (DECISION-016, 2026-06-28)
 The CronCreate retirement (below) left a gap: ticklers are durable but **coarse** (the gateway

@@ -95,6 +95,12 @@ const SESSION_DEFAULT_DAYS = 7;
 // recent session can match yet never make the fetch window. Since sessions are a default
 // source now, guarantee at least this many surface via a dedicated session fetch.
 const SESSION_FLOOR = 3;
+// Default ('relevant') ranking is a recency-weighted blend: normalized BM25 relevance plus a
+// time-decay bonus, so a decisive recent hit rises without ignoring relevance. Recency is
+// rarely irrelevant, and after a compaction it's usually what matters most. timeline mode
+// stays pure recency.
+const RECENCY_HALFLIFE_DAYS = 7;
+const RECENCY_WEIGHT = 0.5;
 const ALL_LABELED_INDICES = Object.keys(INDEX_LABEL);
 const DEFAULT_INDICES = ALL_LABELED_INDICES; // sessions included by default (time-bounded below)
 const LESSONS_INDEX = 'll5_agent_lessons';
@@ -218,7 +224,7 @@ export function registerRecallEverythingTool(
         .enum(['relevant', 'timeline'])
         .optional()
         .describe(
-          "'relevant' (default): top matches by relevance, capped per source — best for \"what do we know about X\". " +
+          "'relevant' (default): RECENCY-WEIGHTED relevance — best lexical matches lifted by a recency bonus (half-life ~7d), capped per source — best for \"what do we know about X\" where a fresh update should still win. " +
             "'timeline': EXHAUSTIVE — EVERY match, most-recent-FIRST, NO per-source cap — use for status / \"did X happen / " +
             'what\'s the latest" questions. In relevant mode a decisive recent update (e.g. "picked up the glasses Friday") ' +
             'can be out-ranked and capped out by verbose older entries (the original order); timeline mode guarantees you see it.',
@@ -374,24 +380,12 @@ export function registerRecallEverythingTool(
           }
         }
 
-        // Order: timeline = most-recent-first (the decisive update leads, and recency is
-        // guaranteed in the slice); relevant = best-scoring first.
-        if (mode === 'timeline') {
-          flattened.sort((a, b) => {
-            const ta = a.timestamp ? Date.parse(a.timestamp) : -Infinity;
-            const tb = b.timestamp ? Date.parse(b.timestamp) : -Infinity;
-            return tb - ta;
-          });
-        } else {
-          flattened.sort((a, b) => b.score - a.score);
-        }
-        const results = flattened.slice(0, limit);
-
-        // Session floor: a relevant recent session can match yet be out-scored out of the fetch
-        // window by short distilled docs. Sessions are a default source now, so guarantee a few
-        // surface — pull the top matching recent sessions directly and merge (deduped). Runs only
-        // when sessions are in scope and under-represented; best-effort.
-        if (indices.includes(SESSION_INDEX) && results.filter((r) => r.source === 'session').length < SESSION_FLOOR) {
+        // Session floor (merged BEFORE ranking): a relevant recent session can be out-scored out
+        // of the fetch window by short distilled docs (BM25 length bias). Sessions are a default
+        // source now, so pull the top recent sessions directly and merge them into the candidate
+        // set — the recency-weighted ranking below then lifts them into view (rather than the old
+        // tail-append). Runs only when sessions are in scope and under-represented; best-effort.
+        if (indices.includes(SESSION_INDEX) && flattened.filter((r) => r.source === 'session').length < SESSION_FLOOR) {
           try {
             const sres = await esClient.search<Record<string, unknown>>({
               index: SESSION_INDEX,
@@ -413,11 +407,11 @@ export function registerRecallEverythingTool(
               sort: queryText ? undefined : [{ last_message: { order: 'desc' } }],
               highlight: { fields: { transcript_text: {} }, fragment_size: 140, number_of_fragments: 1 },
             });
-            const seen = new Set(results.map((r) => r.id));
+            const seen = new Set(flattened.map((r) => r.id));
             for (const h of ((sres.hits?.hits ?? []) as unknown as Hit[])) {
               if (h._index !== SESSION_INDEX || seen.has(h._id)) continue; // only real session docs
               const hl = h.highlight ? Object.values(h.highlight).flat()[0] ?? null : null;
-              results.push({
+              flattened.push({
                 source: 'session', id: h._id, score: h._score, timestamp: pickTimestamp(h._source),
                 summary: summarize('session', h._source), highlight: hl, data: h._source,
               });
@@ -427,6 +421,28 @@ export function registerRecallEverythingTool(
             /* best-effort floor — never fail the sweep over it */
           }
         }
+
+        // Order results. timeline = pure recency (most-recent-first). Default ('relevant') =
+        // recency-weighted blend: normalized relevance + time-decay bonus (half-life ~7d).
+        const nowMs = Date.now();
+        const recency = (ts: string | null): number => {
+          if (!ts) return 0;
+          const ageDays = (nowMs - Date.parse(ts)) / 86_400_000;
+          return ageDays <= 0 ? 1 : Math.pow(0.5, ageDays / RECENCY_HALFLIFE_DAYS);
+        };
+        if (mode === 'timeline') {
+          flattened.sort((a, b) => {
+            const ta = a.timestamp ? Date.parse(a.timestamp) : -Infinity;
+            const tb = b.timestamp ? Date.parse(b.timestamp) : -Infinity;
+            return tb - ta;
+          });
+        } else {
+          const maxScore = Math.max(1, ...flattened.map((f) => f.score || 0));
+          const rank = (f: { score: number; timestamp: string | null }) =>
+            (f.score || 0) / maxScore + RECENCY_WEIGHT * recency(f.timestamp);
+          flattened.sort((a, b) => rank(b) - rank(a));
+        }
+        const results = flattened.slice(0, limit);
         const total = results.length;
 
         // True matched-per-source (from the agg) vs what we actually returned → the cap signal.

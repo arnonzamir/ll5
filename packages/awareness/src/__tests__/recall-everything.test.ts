@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { registerRecallEverythingTool } from '../tools/recall-everything.js';
 import { captureTools, parseToolResponse, makeMockEsClient } from './_helpers.js';
 
@@ -33,6 +33,26 @@ interface Resp {
 }
 
 describe('recall_everything — unified cross-store sweep', () => {
+  // Pin "now" far past the fixture dates so the recency bonus is ~0 for all of them —
+  // the default-rank order then reduces to pure relevance (what the order tests assert).
+  // The dedicated recency test below moves "now" next to its fixtures.
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2030-06-01T00:00:00Z')); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('recency-weighted default lifts a fresh hit above a higher-scoring stale one', async () => {
+    vi.setSystemTime(new Date('2026-06-20T12:00:00Z'));
+    const es = esReturning([
+      { _index: 'll5_agent_journal', _id: 'stale', _score: 10, _source: { topic: 't', content: 'old but term-dense match match match', created_at: '2026-05-01T00:00:00Z' } },
+      { _index: 'll5_agent_journal', _id: 'fresh', _score: 8, _source: { topic: 't', content: 'recent note', created_at: '2026-06-19T00:00:00Z' } },
+    ]);
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    const res = await tools.get('recall_everything')!({ query: 'match' });
+    const out = parseToolResponse<Resp>(res);
+    // fresh (1 day old, recency ~1) leads despite a lower BM25 score than the 50-day-old hit
+    expect(out.results[0].id).toBe('fresh');
+    expect(out.results[1].id).toBe('stale');
+  });
+
   it('groups hits by source, ranks by score, reports rich coverage', async () => {
     const es = esReturning([
       { _index: 'll5_knowledge_facts', _id: 'f1', _score: 9, _source: { content: 'Rotem is the wife' } },
