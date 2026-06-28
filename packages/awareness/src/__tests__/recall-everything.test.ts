@@ -176,6 +176,21 @@ describe('recall_everything — unified cross-store sweep', () => {
     expect(out.note).toContain('all_sessions');
   });
 
+  it('session floor: surfaces a recent session even when out-scored out of the main fetch', async () => {
+    const search = vi.fn()
+      // main sweep: only a high-scoring journal hit, no session in the window
+      .mockResolvedValueOnce({ hits: { hits: [{ _index: 'll5_agent_journal', _id: 'j1', _score: 50, _source: { topic: 't', content: 'server stuff' } }] } })
+      // dedicated session floor fetch returns the relevant recent session
+      .mockResolvedValueOnce({ hits: { hits: [{ _index: 'll5_session_history', _id: 's9', _score: 2, _source: { message_count: 80, last_message: '2026-06-28T06:00:00Z', transcript_text: 'about server-coolify' }, highlight: { transcript_text: ['about <em>server-coolify</em>'] } }] } });
+    const es = makeMockEsClient({ search });
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    const res = await tools.get('recall_everything')!({ query: 'server-coolify' });
+    const out = parseToolResponse<Resp>(res);
+    expect(es.search).toHaveBeenCalledTimes(2); // main + floor
+    expect(out.by_source.session).toBe(1);
+    expect(out.results.some((r) => r.source === 'session' && r.id === 's9')).toBe(true);
+  });
+
   it('recent_sessions returns a compact 7d map with the opener line', async () => {
     const es = makeMockEsClient({ search: vi.fn().mockResolvedValue({ hits: { hits: [
       { _index: 'll5_session_history', _id: 's1', _source: { session_id: 'sid1', first_message: '2026-06-27T10:00:00Z', last_message: '2026-06-27T11:00:00Z', message_count: 12, messages: [{ role: 'human', text: '  what about the trip\n plans' }, { role: 'assistant', text: '...' }] } },

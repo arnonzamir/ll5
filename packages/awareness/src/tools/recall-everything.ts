@@ -91,6 +91,10 @@ const INDEX_LABEL: Record<string, string> = {
 // patient that only ever reads the distilled summaries.
 const SESSION_INDEX = 'll5_session_history';
 const SESSION_DEFAULT_DAYS = 7;
+// Long transcripts get out-scored by short distilled docs (BM25 length bias), so a relevant
+// recent session can match yet never make the fetch window. Since sessions are a default
+// source now, guarantee at least this many surface via a dedicated session fetch.
+const SESSION_FLOOR = 3;
 const ALL_LABELED_INDICES = Object.keys(INDEX_LABEL);
 const DEFAULT_INDICES = ALL_LABELED_INDICES; // sessions included by default (time-bounded below)
 const LESSONS_INDEX = 'll5_agent_lessons';
@@ -382,6 +386,47 @@ export function registerRecallEverythingTool(
           flattened.sort((a, b) => b.score - a.score);
         }
         const results = flattened.slice(0, limit);
+
+        // Session floor: a relevant recent session can match yet be out-scored out of the fetch
+        // window by short distilled docs. Sessions are a default source now, so guarantee a few
+        // surface — pull the top matching recent sessions directly and merge (deduped). Runs only
+        // when sessions are in scope and under-represented; best-effort.
+        if (indices.includes(SESSION_INDEX) && results.filter((r) => r.source === 'session').length < SESSION_FLOOR) {
+          try {
+            const sres = await esClient.search<Record<string, unknown>>({
+              index: SESSION_INDEX,
+              ignore_unavailable: true,
+              size: SESSION_FLOOR,
+              query: {
+                bool: {
+                  must: [
+                    queryText
+                      ? { multi_match: { query: queryText, fields: SEARCH_FIELDS, type: 'best_fields', fuzziness: 'AUTO', lenient: true } }
+                      : { match_all: {} },
+                  ],
+                  filter: [
+                    { bool: { should: [{ term: { user_id: userId } }, { term: { 'user_id.keyword': userId } }], minimum_should_match: 1 } },
+                    ...(allSessions ? [] : [{ range: { last_message: { gte: `now-${sessionDays}d` } } }]),
+                  ],
+                },
+              },
+              sort: queryText ? undefined : [{ last_message: { order: 'desc' } }],
+              highlight: { fields: { transcript_text: {} }, fragment_size: 140, number_of_fragments: 1 },
+            });
+            const seen = new Set(results.map((r) => r.id));
+            for (const h of ((sres.hits?.hits ?? []) as unknown as Hit[])) {
+              if (h._index !== SESSION_INDEX || seen.has(h._id)) continue; // only real session docs
+              const hl = h.highlight ? Object.values(h.highlight).flat()[0] ?? null : null;
+              results.push({
+                source: 'session', id: h._id, score: h._score, timestamp: pickTimestamp(h._source),
+                summary: summarize('session', h._source), highlight: hl, data: h._source,
+              });
+              bySource.session = (bySource.session ?? 0) + 1;
+            }
+          } catch {
+            /* best-effort floor — never fail the sweep over it */
+          }
+        }
         const total = results.length;
 
         // True matched-per-source (from the agg) vs what we actually returned → the cap signal.

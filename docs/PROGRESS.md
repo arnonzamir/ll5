@@ -16,7 +16,7 @@ framed as a noisy last resort. Fix (awareness MCP):
 - `recall_everything` now sweeps `ll5_session_history` **by default, time-bounded to 7 days** (per-index
   `last_message >= now-7d` filter; non-session indices unrestricted). New params `session_days` (default 7) /
   `all_sessions:true` to widen; **empty query → `match_all`** (read-back the window with `mode:"timeline"`).
-  Thin hint flipped from "use sources:[session]" → "**widen** session_days/all_sessions — dig, don't give up."
+  Thin hint flipped from "use sources:[session]" → "**widen** session_days/all_sessions — dig, don't give up." Plus a **session floor**: long transcripts get out-scored by short distilled docs (BM25 length bias) and miss the fetch window, so a dedicated session fetch guarantees ≥3 recent sessions surface.
 - NEW tool `recent_sessions(days,limit)` — compact one-row-per-session map (span, msg count, opener; no bodies). Opener = first non-assistant message (role is `human` in newer session docs, `user` in older — fixed after live verify showed empty openers).
 - ll5-run `session-start.sh` injects a 7-day session digest on EVERY start + a dig-in directive; the compact
   branch adds a forceful "you just lost your thread — read the last 7 days before acting." Persona Hard Rule 12
