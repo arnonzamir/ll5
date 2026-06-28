@@ -17,7 +17,7 @@ framed as a noisy last resort. Fix (awareness MCP):
   `last_message >= now-7d` filter; non-session indices unrestricted). New params `session_days` (default 7) /
   `all_sessions:true` to widen; **empty query → `match_all`** (read-back the window with `mode:"timeline"`).
   Thin hint flipped from "use sources:[session]" → "**widen** session_days/all_sessions — dig, don't give up."
-- NEW tool `recent_sessions(days,limit)` — compact one-row-per-session map (span, msg count, opener; no bodies).
+- NEW tool `recent_sessions(days,limit)` — compact one-row-per-session map (span, msg count, opener; no bodies). Opener = first non-assistant message (role is `human` in newer session docs, `user` in older — fixed after live verify showed empty openers).
 - ll5-run `session-start.sh` injects a 7-day session digest on EVERY start + a dig-in directive; the compact
   branch adds a forceful "you just lost your thread — read the last 7 days before acting." Persona Hard Rule 12
   updated (recall includes recent sessions; read the week on recovery). Tests: recall-everything.test.ts +6 (19).

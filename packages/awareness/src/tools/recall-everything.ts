@@ -534,7 +534,9 @@ export function registerRecallEverythingTool(
         const sessions = (res.hits?.hits ?? []).map((h) => {
           const s = h._source as Record<string, unknown>;
           const msgs = (s.messages as Array<{ role?: string; text?: string }> | undefined) ?? [];
-          const opener = msgs.find((m) => m.role === 'user' && (m.text ?? '').trim())?.text ?? '';
+          // Role label varies across the corpus ('user' in older docs, 'human' in newer) —
+          // the opener is the first non-assistant message that carries text.
+          const opener = msgs.find((m) => m.role !== 'assistant' && (m.text ?? '').trim())?.text ?? '';
           return {
             session_id: s.session_id,
             from: s.first_message,

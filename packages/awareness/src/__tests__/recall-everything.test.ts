@@ -178,7 +178,7 @@ describe('recall_everything — unified cross-store sweep', () => {
 
   it('recent_sessions returns a compact 7d map with the opener line', async () => {
     const es = makeMockEsClient({ search: vi.fn().mockResolvedValue({ hits: { hits: [
-      { _index: 'll5_session_history', _id: 's1', _source: { session_id: 'sid1', first_message: '2026-06-27T10:00:00Z', last_message: '2026-06-27T11:00:00Z', message_count: 12, messages: [{ role: 'user', text: '  what about the trip\n plans' }, { role: 'assistant', text: '...' }] } },
+      { _index: 'll5_session_history', _id: 's1', _source: { session_id: 'sid1', first_message: '2026-06-27T10:00:00Z', last_message: '2026-06-27T11:00:00Z', message_count: 12, messages: [{ role: 'human', text: '  what about the trip\n plans' }, { role: 'assistant', text: '...' }] } },
     ] } }) });
     const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
     const res = await tools.get('recent_sessions')!({ days: 7 });
