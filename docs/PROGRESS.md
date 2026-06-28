@@ -8,6 +8,17 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Fix: stuck `mcp.errors.*` alert never clearing (2026-06-28)
+`mcp-health-monitor.ts` raised `mcp.errors.<service>` on elevated tool-error rate but only CLEARED a
+service still being SAMPLED (>= errorRateMinSamples) below threshold. A service that errored in a burst
+then went QUIET (dropped out of the 15-min sample set entirely) left its alert firing forever — observed:
+the Ritalin-migration's one-off `complete_tickler` 410s (05:47-06:31Z, benign idempotent-delete) still
+alerting `mcp.errors.google` 12h later. Fix: after raising, sweep all FIRING `mcp.errors.*` rows from
+`system_alerts` (PG) and clear any whose service isn't spiking THIS tick — covers went-quiet + dropped-below
+AND is restart-safe (no in-memory state). +3 tests (`mcp-health-monitor-clear.test.ts`). The
+`tool.complete_tickler` twin (ToolFailureMonitor) already auto-resolved correctly; the suppress_spike alert
+is a real-but-benign noisy-evening measurement (its "broken tool" hint didn't apply — no tool was broken).
+
 ### Recent sessions in recall by default + read-the-week on recovery (DECISION-017, 2026-06-28)
 Root-caused the "lost after restart" feeling: not missing capability but UNUSED — `recall_everything` is used
 regularly (115 sweeps/10d) but passed `sources:["session"]` **0 of 115 times**; the agent never searched the

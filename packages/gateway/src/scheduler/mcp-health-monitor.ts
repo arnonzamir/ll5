@@ -329,10 +329,11 @@ export class MCPHealthMonitorScheduler {
 
     // 2. Tool-call error rate sweep from ll5_app_log
     const errorRates = await this.computeErrorRates();
+    const spiking = new Set<string>();
     for (const sample of errorRates) {
       if (sample.total_calls < this.config.errorRateMinSamples) continue; // too few to judge
-      const errKey = `mcp.errors.${sample.service}`;
       if (sample.error_rate >= this.config.errorRateThreshold) {
+        spiking.add(sample.service);
         logger.error('[MCPHealthMonitor][toolErrors] Elevated tool error rate', {
           service: sample.service,
           errors: sample.errors,
@@ -341,16 +342,31 @@ export class MCPHealthMonitorScheduler {
         });
         await raiseAlert(this.pool, {
           userId: this.config.userId,
-          key: errKey,
+          key: `mcp.errors.${sample.service}`,
           severity: 'warning',
           summary: `Tool errors spiking: ${sample.service}`,
           value: `${sample.errors}/${sample.total_calls} failed (${Math.round(sample.error_rate * 100)}%) in 15min`,
           expected: `< ${Math.round(this.config.errorRateThreshold * 100)}%`,
           suggestion: `Check ${sample.service} logs; transient backend/ES errors inflate this.`,
         });
-      } else {
-        await clearAlert(this.pool, this.config.userId, errKey);
       }
+    }
+    // Clear any FIRING mcp.errors.* whose service is NOT spiking this tick. The old code only
+    // cleared a service still being SAMPLED (>= min-samples) — so a service that errored in a
+    // burst then went quiet (dropped out of the sample set entirely) left its alert stuck
+    // firing forever (observed: a one-off migration error burst still alerting 12h later).
+    // Driving the clear from the persisted firing set also makes it restart-safe.
+    try {
+      const firing = await this.pool.query<{ alert_key: string }>(
+        "SELECT alert_key FROM system_alerts WHERE user_id = $1 AND status = 'firing' AND alert_key LIKE 'mcp.errors.%'",
+        [this.config.userId],
+      );
+      for (const row of firing.rows) {
+        const svc = row.alert_key.slice('mcp.errors.'.length);
+        if (!spiking.has(svc)) await clearAlert(this.pool, this.config.userId, row.alert_key);
+      }
+    } catch (err) {
+      logger.warn('[MCPHealthMonitor][toolErrors] clear-stale sweep failed', { error: err instanceof Error ? err.message : String(err) });
     }
 
     const unhealthy = results.filter((r) => !r.healthy).map((r) => `${r.name}(${r.error ?? 'unknown'})`);
