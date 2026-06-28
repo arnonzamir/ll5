@@ -6,6 +6,7 @@ import { CalendarSyncScheduler } from './calendar-sync.js';
 import { CalendarReviewScheduler } from './calendar-review.js';
 import { DailyReviewScheduler } from './daily-review.js';
 import { TicklerAlertScheduler } from './tickler-alert.js';
+import { WakeScheduler } from './wake-scheduler.js';
 import { GTDHealthScheduler } from './gtd-health.js';
 import { WeeklyReviewReminder } from './weekly-review.js';
 import { CoachScanScheduler } from './coach-scan.js';
@@ -112,6 +113,14 @@ async function startSchedulersForUser(
   });
   weeklyReviewScheduler.start();
   schedulers.push(weeklyReviewScheduler);
+
+  // Durable precise-time self-wakes (DECISION-016) — the agent's create_wake
+  // (awareness MCP) writes ll5_scheduled_wakes; this fires due rows every 60s as
+  // [Agent Instruction] / reminders. Deterministic replacement for session-scoped
+  // CronCreate (no re-arm; survives restart/compaction).
+  const wakeScheduler = new WakeScheduler(pgPool, es, { userId, timezone });
+  wakeScheduler.start();
+  schedulers.push(wakeScheduler);
 
   // Coach scan — weekly STRATEGIC review (goals/narratives/commitments + the
   // 2-4-week calendar horizon). Strategic counterpart to the tactical weekly

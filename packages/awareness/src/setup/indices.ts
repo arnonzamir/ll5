@@ -118,6 +118,31 @@ const AWARENESS_EXCLUSIVE_INDICES: IndexDefinition[] = [
       },
     },
   },
+  // Durable precise-time self-wakes (DECISION-016). The agent's replacement for
+  // session-scoped CronCreate: create_wake writes here; the gateway WakeScheduler
+  // reads due rows and fires them as [Agent Instruction] / user reminders at the
+  // chosen minute. Recurring wakes fire by local wall-clock compare (DST-safe).
+  {
+    index: 'll5_scheduled_wakes',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        kind: { type: 'keyword' },              // instruction | reminder
+        payload: { type: 'text', analyzer: 'multilingual' },
+        recurrence: { type: 'keyword' },        // none | daily | weekly | weekdays
+        fire_at: { type: 'date' },              // one-off: absolute instant
+        fire_local: { type: 'keyword' },        // recurring: 'HH:MM' wall-clock
+        tz: { type: 'keyword' },                // recurring: IANA zone override (else effective tz)
+        weekly_dow: { type: 'integer' },        // recurring weekly: 0=Sun..6=Sat
+        status: { type: 'keyword' },            // pending | fired | cancelled
+        last_fired_date: { type: 'keyword' },   // recurring per-day dedup 'YYYY-MM-DD'
+        source: { type: 'keyword' },
+        created_at: { type: 'date' },
+        fired_at: { type: 'date' },
+        last_fired_at: { type: 'date' },
+      },
+    },
+  },
 ];
 
 export async function ensureIndices(client: Client): Promise<void> {

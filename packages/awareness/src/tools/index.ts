@@ -18,6 +18,7 @@ import { registerNotableEventTools } from './notable-events.js';
 import { registerSituationTools } from './situation.js';
 import { registerJournalTools } from './journal.js';
 import { registerLessonTools } from './lessons.js';
+import { registerWakeTools } from './wakes.js';
 import { registerRecallEverythingTool } from './recall-everything.js';
 import { registerMediaTools } from './media.js';
 import { registerGeoSearchTools } from './geo-search.js';
@@ -77,6 +78,7 @@ export function registerAllTools(
     registerLessonTools(server, esClient, getUserId);
     registerRecallEverythingTool(server, esClient, getUserId);
     registerMediaTools(server, esClient, getUserId);
+    registerWakeTools(server, esClient, getUserId);
   }
   registerGeoSearchTools(server, getUserId);
   registerPhoneStatusTools(server, repos.phoneStatus, getUserId);

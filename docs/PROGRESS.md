@@ -8,6 +8,17 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Durable precise-time self-wake — `create_wake` (DECISION-016, 2026-06-28)
+The CronCreate retirement (below) left a gap: ticklers are durable but **coarse** (the gateway
+`TicklerAlertScheduler` fires on a **2-hour lookahead**, not at the tickler's minute), so they can't do
+time-of-day or staggered self-wakes — which is exactly what the agent reached `CronCreate` for (the Ritalin
+escalation "arm a 4-step cron chain"; `cron=5` blocked attempts/day in the behavior watch). Fix: a first-class
+**precise-time self-wake**, gateway-executed (deterministic — no re-arm, survives restart/compaction).
+- **awareness MCP** NEW `src/tools/wakes.ts` — `create_wake({fire_at ISO+offset, payload, kind:instruction|reminder, recurrence:none|daily|weekly|weekdays, tz?, source?})`, `list_wakes`, `cancel_wake`; new ES index `ll5_scheduled_wakes` (`setup/indices.ts`); registered in `tools/index.ts`.
+- **gateway** NEW `src/scheduler/wake-scheduler.ts` `WakeScheduler` — ticks 60s, fires due rows as `[Agent Instruction]`/`[Reminder]` via `insertSystemMessage`; one-offs at their instant (expire >6h late), recurring by **local wall-clock compare** in the wake's effective tz (DST-safe), per-day dedup, 90-min catch-up cap so a missed recurring wake never fires stale. Registered in `scheduler/index.ts`; `__tests__/wake-scheduler.test.ts` (10). No active-hours gate (agent owns timing).
+- **ll5-run:** Hard Rule 6 + "Scheduling"/"Schedule your own attention" rewritten to split **precise self-wake → `create_wake`** vs **user calendar reminder / coarse lead-time review → `create_tickler`**; `cron-block.sh` redirect now points at `create_wake`. Chosen over "shadow+reconcile real crons" (re-arm is agent-mediated, fragile for a health-critical med path) — see DECISION-016.
+- **Ritalin migration:** the "arm a session cron chain" tickler playbook → 4 recurring daily `create_wake`s at 08:45/09:00/09:10/09:25, each idempotent (check dose GTD action; escalate or no-op).
+
 ### Durability: retire CronCreate → DB-backed ticklers (2026-06-27)
 Audit ("nothing the agent relies on should be session-scoped"). Found: the agent's `CronCreate` jobs are
 **session-scoped in visibility** — `CronList` only lists the current session's crons, so after a restart/
