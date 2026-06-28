@@ -132,24 +132,62 @@ describe('recall_everything — unified cross-store sweep', () => {
     expect(es.search).not.toHaveBeenCalled();
   });
 
-  it('does NOT sweep session history by default (opt-in only)', async () => {
+  it('sweeps session history by DEFAULT, time-bounded to the recent window (7d)', async () => {
     const es = esReturning([]);
     const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
     await tools.get('recall_everything')!({ query: 'q' });
     const call = (es.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
-    expect(call.index).not.toContain('ll5_session_history');
-    // but the user filter is ready to scope dynamic-mapped session docs too
+    expect(call.index).toContain('ll5_session_history');
+    // a session time-bound is present (range on last_message, default 7d)
+    expect(JSON.stringify(call.query.bool.filter)).toContain('now-7d');
     const should = call.query.bool.filter[0].bool.should;
     expect(should).toContainEqual({ term: { 'user_id.keyword': 'user-1' } });
   });
 
-  it('thin default sweep suggests the session layer as a deeper reach', async () => {
+  it('session_days widens the session window; all_sessions removes the bound', async () => {
+    const es = esReturning([]);
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    await tools.get('recall_everything')!({ query: 'q', session_days: 30 });
+    const c1 = (es.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(JSON.stringify(c1.query.bool.filter)).toContain('now-30d');
+
+    const es2 = esReturning([]);
+    const tools2 = captureTools((s) => registerRecallEverythingTool(s, es2 as never, getUserId));
+    await tools2.get('recall_everything')!({ query: 'q', all_sessions: true });
+    const c2 = (es2.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(c2.index).toContain('ll5_session_history');
+    expect(JSON.stringify(c2.query.bool.filter)).not.toContain('now-'); // no time bound
+  });
+
+  it('empty query → match_all (read back the recent window)', async () => {
+    const es = esReturning([]);
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    await tools.get('recall_everything')!({ query: '', mode: 'timeline' });
+    const call = (es.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.query.bool.must[0]).toEqual({ match_all: {} });
+  });
+
+  it('thin default sweep nudges WIDENING sessions (they are already searched)', async () => {
     const es = esReturning([]);
     const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
     const res = await tools.get('recall_everything')!({ query: 'q' });
-    const out = parseToolResponse<Resp>(res);
-    expect(out.suggest_sessions).toBe(true);
-    expect(out.note).toContain('sources:["session"]');
+    const out = parseToolResponse<Resp & { suggest_widen_sessions?: boolean }>(res);
+    expect(out.suggest_widen_sessions).toBe(true);
+    expect(out.note).toContain('all_sessions');
+  });
+
+  it('recent_sessions returns a compact 7d map with the opener line', async () => {
+    const es = makeMockEsClient({ search: vi.fn().mockResolvedValue({ hits: { hits: [
+      { _index: 'll5_session_history', _id: 's1', _source: { session_id: 'sid1', first_message: '2026-06-27T10:00:00Z', last_message: '2026-06-27T11:00:00Z', message_count: 12, messages: [{ role: 'user', text: '  what about the trip\n plans' }, { role: 'assistant', text: '...' }] } },
+    ] } }) });
+    const tools = captureTools((s) => registerRecallEverythingTool(s, es as never, getUserId));
+    const res = await tools.get('recent_sessions')!({ days: 7 });
+    const out = parseToolResponse<{ days: number; total: number; sessions: Array<{ session_id: string; opener: string; messages: number }> }>(res);
+    expect(out.total).toBe(1);
+    expect(out.sessions[0].session_id).toBe('sid1');
+    expect(out.sessions[0].opener).toBe('what about the trip plans');
+    const call = (es.search as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(JSON.stringify(call.query.bool.filter)).toContain('now-7d');
   });
 
   it('opt-in: sources:["session"] adds ll5_session_history and summarizes a transcript hit', async () => {

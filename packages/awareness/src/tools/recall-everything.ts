@@ -83,13 +83,16 @@ const INDEX_LABEL: Record<string, string> = {
   // Raw Claude session transcripts — the un-distilled layer. OPT-IN only (see below).
   ll5_session_history: 'session',
 };
-// Sessions are the raw transcript layer; they are NOT swept by default so months-old
-// conversational chatter never dilutes the distilled "what do we know" result. They join
-// the query only when the caller passes sources:["session"] — the deeper-reach rung of the
-// same escalation ladder as the Postgres stores.
+// Sessions are the raw transcript layer. They ARE swept by default now, but TIME-BOUNDED
+// to the recent window (default 7 days) so months-old chatter never dilutes the result
+// while the agent still always sees the recent conversational detail — the layer that holds
+// "what were we actually mid-thread on". Widen with session_days:N or all_sessions:true.
+// Philosophy: better to work through muddy recent sessions than behave like a memory-loss
+// patient that only ever reads the distilled summaries.
 const SESSION_INDEX = 'll5_session_history';
-const DEFAULT_INDICES = Object.keys(INDEX_LABEL).filter((i) => i !== SESSION_INDEX);
+const SESSION_DEFAULT_DAYS = 7;
 const ALL_LABELED_INDICES = Object.keys(INDEX_LABEL);
+const DEFAULT_INDICES = ALL_LABELED_INDICES; // sessions included by default (time-bounded below)
 const LESSONS_INDEX = 'll5_agent_lessons';
 
 // Below this total, the ES sweep is "thin" and the agent should also check Postgres stores.
@@ -171,19 +174,20 @@ export function registerRecallEverythingTool(
 ): void {
   server.tool(
     'recall_everything',
-    'THE first call for "what do we know about X". One unified fuzzy search across EVERY stored ' +
+    'THE first call for "what do we know about X" and "what were we doing". One unified fuzzy search across EVERY stored ' +
       'knowledge source in one query: facts, people, places, profile, observations, narratives, ' +
       'journal entries (topic AND content), operating lessons, calendar events, IM messages, ' +
-      'entity statuses, and notable events. Use this before asking the user or concluding we have ' +
-      'no information — it closes the gap where data existed in a store but was never surfaced. ' +
-      'If results come back thin, the response says so and names the deeper layers to check next: ' +
-      'the raw conversation transcripts (pass sources:["session"] — NOT swept by default, since it is ' +
-      'un-distilled chatter) and the Postgres stores (gtd, gmail). ' +
+      'entity statuses, notable events, AND the raw conversation transcripts of the last 7 days ' +
+      '(sessions are now swept by DEFAULT — the recent window is always included so you see what you ' +
+      'were actually mid-thread on, not just the distilled summaries). Use this before asking the user or ' +
+      'concluding we have no information. To reach further back into transcripts, widen with session_days:N ' +
+      '(e.g. 30) or all_sessions:true — prefer working through muddy older sessions over giving up. ' +
       'For a STATUS / "did X happen / what is the latest" question, pass mode:"timeline" — it returns EVERY ' +
-      'match most-recent-first with no per-source cap, so a decisive recent update is never out-ranked by ' +
-      'older verbose entries. The default response also flags (more_available) when ranking hid more than it showed.',
+      'match most-recent-first with no per-source cap. With an EMPTY query + mode:"timeline" it simply returns ' +
+      'the most recent sessions/items in the window (use to read back the last week). ' +
+      'The response flags (more_available) when ranking hid more than it showed, and suggests widening when thin.',
     {
-      query: z.string().describe('Topic / name / phrase to look up (Hebrew or English).'),
+      query: z.string().optional().describe('Topic / name / phrase to look up (Hebrew or English). Leave empty to just pull the most recent items in the window (pair with mode:"timeline").'),
       limit: z.number().min(1).max(100).optional().describe('Max results returned. Default 30.'),
       per_source_cap: z
         .number()
@@ -195,8 +199,17 @@ export function registerRecallEverythingTool(
         .array(z.string())
         .optional()
         .describe(
-          'Restrict to these source labels (e.g. ["journal","calendar","fact"]). Default: all sources.',
+          'Restrict to these source labels (e.g. ["journal","calendar","fact","session"]). Default: all sources incl. recent sessions.',
         ),
+      session_days: z
+        .number()
+        .min(1)
+        .optional()
+        .describe('How many days of raw session transcripts to include. Default 7. Raise to dig further back.'),
+      all_sessions: z
+        .boolean()
+        .optional()
+        .describe('Search ALL session transcripts ever (ignores session_days). Use as the liberal fallback when the recent window came up short.'),
       mode: z
         .enum(['relevant', 'timeline'])
         .optional()
@@ -213,9 +226,12 @@ export function registerRecallEverythingTool(
       // Timeline (exhaustive) mode: more results, no per-source cap, time-ordered.
       const limit = params.limit ?? (mode === 'timeline' ? 50 : 30);
       const perSourceCap = mode === 'timeline' ? Infinity : (params.per_source_cap ?? 8);
+      const queryText = (params.query ?? '').trim();
+      const sessionDays = params.session_days ?? SESSION_DEFAULT_DAYS;
+      const allSessions = params.all_sessions ?? false;
 
-      // Default sweep = distilled stores only. A sources filter can opt INTO the raw
-      // session layer (and/or narrow to specific distilled stores).
+      // Default sweep = ALL distilled stores + the recent session window. A sources filter
+      // can narrow to specific stores (incl. "session"). Sessions are time-bounded below.
       let indices = DEFAULT_INDICES;
       if (params.sources && params.sources.length > 0) {
         const wanted = new Set(params.sources.map((x) => x.toLowerCase()));
@@ -252,16 +268,20 @@ export function registerRecallEverythingTool(
           aggs: { by_index: { terms: { field: '_index', size: 30 } } },
           query: {
             bool: {
+              // Empty query → match_all (just pull the most recent items in the window;
+              // pair with mode:"timeline" to read back the last week of sessions).
               must: [
-                {
-                  multi_match: {
-                    query: params.query,
-                    fields: SEARCH_FIELDS,
-                    type: 'best_fields',
-                    fuzziness: 'AUTO',
-                    lenient: true,
-                  },
-                },
+                queryText
+                  ? {
+                      multi_match: {
+                        query: queryText,
+                        fields: SEARCH_FIELDS,
+                        type: 'best_fields',
+                        fuzziness: 'AUTO',
+                        lenient: true,
+                      },
+                    }
+                  : { match_all: {} },
               ],
               // user_id scoping: every user index matches the tenant; the world-scoped
               // lessons index (no user_id) is admitted by _index.
@@ -276,6 +296,29 @@ export function registerRecallEverythingTool(
                     minimum_should_match: 1,
                   },
                 },
+                // Time-bound the raw session layer to the recent window so old chatter
+                // never dilutes results; non-session indices are unrestricted. all_sessions
+                // removes the bound. (last_message is the session doc's recency field.)
+                ...(allSessions
+                  ? []
+                  : [
+                      {
+                        bool: {
+                          should: [
+                            { bool: { must_not: [{ term: { _index: SESSION_INDEX } }] } },
+                            {
+                              bool: {
+                                must: [
+                                  { term: { _index: SESSION_INDEX } },
+                                  { range: { last_message: { gte: `now-${sessionDays}d` } } },
+                                ],
+                              },
+                            },
+                          ],
+                          minimum_should_match: 1,
+                        },
+                      },
+                    ]),
               ],
               // Retired lessons should never resurface. No other swept index uses
               // status:'retired', so this is a lessons-only exclusion in practice.
@@ -358,8 +401,9 @@ export function registerRecallEverythingTool(
         const coverage = total === 0 ? 'empty' : total < THIN_THRESHOLD ? 'thin' : 'rich';
         const thin = coverage !== 'rich';
 
+        const queryLabel = queryText || '(recent window)';
         logger.info('[recall_everything] sweep', {
-          query: params.query,
+          query: queryLabel,
           userId,
           indices: indices.length,
           total,
@@ -374,17 +418,20 @@ export function registerRecallEverythingTool(
           source: 'awareness',
           action: 'recall_sweep',
           entity_type: 'recall',
-          entity_id: params.query.slice(0, 64),
-          summary: `recall "${params.query}" → ${coverage} (${total} hits / ${Object.keys(bySource).length} sources)`,
+          entity_id: queryLabel.slice(0, 64),
+          summary: `recall "${queryLabel}" → ${coverage} (${total} hits / ${Object.keys(bySource).length} sources)`,
           metadata: {
-            query: params.query,
+            query: queryLabel,
             mode,
             coverage,
             total,
             by_source: bySource,
             sources_searched: indices.map((i) => INDEX_LABEL[i] ?? i),
             session_searched: sessionSearched,
-            suggest_sessions: thin && !sessionSearched,
+            session_days: allSessions ? 'all' : sessionDays,
+            all_sessions: allSessions,
+            // Sessions are default-on now; the liberal next step when thin is to widen the window.
+            suggest_widen_sessions: thin && !allSessions,
             capped_sources: Object.keys(moreAvailable),
           },
         });
@@ -398,8 +445,9 @@ export function registerRecallEverythingTool(
             {
               type: 'text' as const,
               text: JSON.stringify({
-                query: params.query,
+                query: queryLabel,
                 mode,
+                session_window: allSessions ? 'all' : `${sessionDays}d`,
                 coverage,
                 total,
                 by_source: bySource,
@@ -416,12 +464,12 @@ export function registerRecallEverythingTool(
                 ...(thin
                   ? {
                       suggest_postgres: ['gtd', 'gmail'],
-                      ...(sessionSearched ? {} : { suggest_sessions: true }),
+                      ...(allSessions ? {} : { suggest_widen_sessions: true }),
                       note:
-                        'Distilled sweep was sparse. ' +
-                        (sessionSearched
+                        'Sweep was sparse. ' +
+                        (allSessions
                           ? ''
-                          : 'Re-run with sources:["session"] to search the raw conversation transcripts, and ') +
+                          : `Sessions were searched only ${sessionDays}d back — widen with session_days:30 or all_sessions:true to work through older transcripts (prefer digging over giving up), and `) +
                         'check the Postgres stores not covered here — gtd (search_actions / list_projects) and gmail — ' +
                         'before concluding we have nothing.',
                     }
@@ -431,7 +479,7 @@ export function registerRecallEverythingTool(
           ],
         };
       } catch (err) {
-        logger.error('[recall_everything] search failed', { error: String(err), query: params.query });
+        logger.error('[recall_everything] search failed', { error: String(err), query: (params.query ?? '').trim() || '(recent window)' });
         return {
           content: [
             {
@@ -443,6 +491,61 @@ export function registerRecallEverythingTool(
             },
           ],
         };
+      }
+    },
+  );
+
+  // ---------------------------------------------------------------------------
+  // recent_sessions — the map of the last N days of conversations. Returns one
+  // compact row per session (no transcript bodies) so you can see at a glance
+  // what threads ran, then dig into any with recall_everything (sessions are
+  // default-on) or by topic. This is the "read back the last week" entry point
+  // used at session start / after compaction so you never start blind.
+  // ---------------------------------------------------------------------------
+  server.tool(
+    'recent_sessions',
+    'List your recent conversation sessions (default last 7 days), newest first — one compact row each ' +
+      '(time span, message count, and the opening user line), NO transcript bodies. Use it to see what ' +
+      'threads ran lately and then dig into any with recall_everything. Call it at session start / after a ' +
+      'compaction to re-ground on the past week before acting.',
+    {
+      days: z.number().min(1).max(90).optional().describe('How many days back. Default 7.'),
+      limit: z.number().min(1).max(100).optional().describe('Max sessions. Default 40.'),
+    },
+    async ({ days, limit }) => {
+      const userId = getUserId();
+      const since = days ?? 7;
+      try {
+        const res = await esClient.search<Record<string, unknown>>({
+          index: SESSION_INDEX,
+          ignore_unavailable: true,
+          size: limit ?? 40,
+          sort: [{ last_message: { order: 'desc' } }],
+          _source: ['session_id', 'first_message', 'last_message', 'message_count', 'messages'],
+          query: {
+            bool: {
+              filter: [
+                { bool: { should: [{ term: { user_id: userId } }, { term: { 'user_id.keyword': userId } }], minimum_should_match: 1 } },
+                { range: { last_message: { gte: `now-${since}d` } } },
+              ],
+            },
+          },
+        });
+        const sessions = (res.hits?.hits ?? []).map((h) => {
+          const s = h._source as Record<string, unknown>;
+          const msgs = (s.messages as Array<{ role?: string; text?: string }> | undefined) ?? [];
+          const opener = msgs.find((m) => m.role === 'user' && (m.text ?? '').trim())?.text ?? '';
+          return {
+            session_id: s.session_id,
+            from: s.first_message,
+            to: s.last_message,
+            messages: s.message_count,
+            opener: opener.replace(/\s+/g, ' ').trim().slice(0, 160),
+          };
+        });
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ days: since, total: sessions.length, sessions }) }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'recent_sessions failed', detail: err instanceof Error ? err.message : String(err) }) }] };
       }
     },
   );

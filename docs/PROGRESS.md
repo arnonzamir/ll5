@@ -8,6 +8,21 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Recent sessions in recall by default + read-the-week on recovery (DECISION-017, 2026-06-28)
+Root-caused the "lost after restart" feeling: not missing capability but UNUSED — `recall_everything` is used
+regularly (115 sweeps/10d) but passed `sources:["session"]` **0 of 115 times**; the agent never searched the
+raw transcripts (`ll5_session_history`, healthy, 39 sessions last 7d) because session search was opt-in +
+framed as a noisy last resort. Fix (awareness MCP):
+- `recall_everything` now sweeps `ll5_session_history` **by default, time-bounded to 7 days** (per-index
+  `last_message >= now-7d` filter; non-session indices unrestricted). New params `session_days` (default 7) /
+  `all_sessions:true` to widen; **empty query → `match_all`** (read-back the window with `mode:"timeline"`).
+  Thin hint flipped from "use sources:[session]" → "**widen** session_days/all_sessions — dig, don't give up."
+- NEW tool `recent_sessions(days,limit)` — compact one-row-per-session map (span, msg count, opener; no bodies).
+- ll5-run `session-start.sh` injects a 7-day session digest on EVERY start + a dig-in directive; the compact
+  branch adds a forceful "you just lost your thread — read the last 7 days before acting." Persona Hard Rule 12
+  updated (recall includes recent sessions; read the week on recovery). Tests: recall-everything.test.ts +6 (19).
+- Deferred follow-up: per-session distilled summaries so "read full week" is cheap (DECISION-017 open item).
+
 ### Durable precise-time self-wake — `create_wake` (DECISION-016, 2026-06-28)
 The CronCreate retirement (below) left a gap: ticklers are durable but **coarse** (the gateway
 `TicklerAlertScheduler` fires on a **2-hour lookahead**, not at the tickler's minute), so they can't do
