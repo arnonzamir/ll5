@@ -9,6 +9,13 @@ interface AnomalyMonitorConfig {
   userId: string;
 }
 
+/** Median of a non-empty list (even length → rounded mean of the middle two). */
+function median(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+}
+
 /**
  * A "did it stop?" check: a metric that should keep moving is stale if its newest
  * data point is older than `maxMinutes`. The most robust simple anomaly — no
@@ -143,11 +150,25 @@ export class AnomalyMonitor {
     const now = Date.now();
     const curGte = new Date(now - w).toISOString();
     const curLt = new Date(now).toISOString();
-    const baseGte = new Date(now - 86_400_000 - w).toISOString();
-    const baseLt = new Date(now - 86_400_000).toISOString();
     const current = await this.countInWindow(c.index, c.timestampField, curGte, curLt, c.filter);
-    const baseline = await this.countInWindow(c.index, c.timestampField, baseGte, baseLt, c.filter);
-    if (current < 0 || baseline < 0) return false;          // query failed → skip
+    if (current < 0) return false;                          // query failed → skip
+    // Baseline: the SAME window on the SAME weekday, over the last 3 weeks (7/14/21d back).
+    // Weekly seasonality dominates daily — this Friday looks like last Friday, not like
+    // yesterday. "Same window yesterday" crosses the weekday/weekend (Shabbat) boundary and
+    // false-fired overnight (a quiet pre-dawn vs a fluke-busy one). Median over 3 same-weekday
+    // samples is robust to a single anomalous week.
+    const WEEK = 7 * 86_400_000;
+    const samples: number[] = [];
+    for (const weeksBack of [1, 2, 3]) {
+      const off = weeksBack * WEEK;
+      const n = await this.countInWindow(
+        c.index, c.timestampField,
+        new Date(now - off - w).toISOString(), new Date(now - off).toISOString(), c.filter,
+      );
+      if (n >= 0) samples.push(n);
+    }
+    if (samples.length === 0) return false;                 // no usable history → skip
+    const baseline = median(samples);
     if (baseline < c.minBaseline) return false;             // baseline too quiet to judge
     const dir = c.direction ?? 'drop';
     const tripped = dir === 'drop'
@@ -157,7 +178,7 @@ export class AnomalyMonitor {
     await raiseAlert(this.pool, {
       userId: this.config.userId, key: c.key, severity: c.severity,
       summary: `${c.label} ${dir === 'drop' ? 'dropped' : 'spiked'}`,
-      value: `${current} in the last ${c.windowMinutes}m vs ${baseline} same window yesterday`,
+      value: `${current} in the last ${c.windowMinutes}m vs ${baseline} median for this window over the last ${samples.length} same weekdays`,
       expected: `≈ ${baseline}`,
       suggestion: c.suggestion,
     });
@@ -215,8 +236,9 @@ function buildChecks(): Check[] {
       suggestion: 'No new journal entries for most of a day — the agent may be stuck or not processing events.',
       ageMinutes: (m) => m.lastDocAgeMinutes('ll5_agent_journal', 'created_at', []),
     },
-    // THROUGHPUT — a big drop vs the same window yesterday means the agent suddenly
-    // went quiet (a feed died, or it's stuck). Seasonality-proof (same hour yesterday).
+    // THROUGHPUT — a big drop vs the same window on prior same-weekdays means the agent
+    // suddenly went quiet (a feed died, or it's stuck). Seasonality-proof on BOTH axes:
+    // same time-of-day AND same day-of-week (median over the last 3 weeks).
     {
       kind: 'rateShift',
       key: 'throughput.inbound_messages',

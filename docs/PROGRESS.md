@@ -8,6 +8,21 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Fix: inbound-throughput anomaly false-fires overnight — day-of-week baseline (2026-06-30)
+`anomaly-monitor.ts` `throughput.inbound_messages` ("Inbound message volume dropped") compared the current
+2h inbound count to the SAME window **yesterday** — seasonality-proof for the daily curve but not for the
+WEEK. On 2026-06-30 04:37 it fired `18 in the last 120m vs 116 same window yesterday` (Jun 29's pre-dawn
+window was a fluke burst; Jun 30's was the normal dead-of-night trough), re-notified 6×, auto-resolved 07:07
+when morning traffic returned — and the live agent surfaced it in the AM briefing as "fix the bridge." The
+bridge was healthy throughout: `messaging` up 7d / 0 restarts / 0 errors, inbound flowed every hour for 60h
+with no gap. Root cause: "same window yesterday" crosses the weekday/weekend (Shabbat) boundary and is
+high-variance in the low-count overnight trough. Same family as the Jun 27 `channel.whatsapp` "ingestion
+stalled" alert (notify ×19, the one that confused Rotem). Fix: baseline is now the **median of the same
+window on the same weekday over the last 3 weeks (7/14/21d back)** — robust on both axes (time-of-day AND
+day-of-week) and to a single anomalous week. `median()` helper; current-window query failure still skips;
+`minBaseline`/`minChangePct` semantics unchanged. Tests rewritten for the 4-count call order + a fluke-week
+robustness case (the exact 18-vs-116 incident now does NOT fire) + a dead-feed-with-one-missing-week case.
+
 ### Fix: stuck `mcp.errors.*` alert never clearing (2026-06-28)
 `mcp-health-monitor.ts` raised `mcp.errors.<service>` on elevated tool-error rate but only CLEARED a
 service still being SAMPLED (>= errorRateMinSamples) below threshold. A service that errored in a burst

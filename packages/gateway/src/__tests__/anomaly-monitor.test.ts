@@ -61,33 +61,44 @@ describe('AnomalyMonitor — staleness detector', () => {
   });
 });
 
-describe('AnomalyMonitor — rate-shift detector (same window yesterday)', () => {
+describe('AnomalyMonitor — rate-shift detector (same window, same weekday, 3-week median)', () => {
   beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
+  // count call order: current, then 3 baseline samples (1/2/3 weeks back).
 
-  it('alerts on a big drop vs the same window yesterday', async () => {
-    // current=2, baseline=20 → 2 <= 20*(1-0.8)=4 → alert
-    expect(await priv(mk(esCount([2, 20]))).runRateShift(rsCheck)).toBe(true);
+  it('alerts on a big drop vs the same-weekday median', async () => {
+    // current=2, baseline=median(20,22,21)=21 → 2 <= 21*0.2=4.2 → alert
+    expect(await priv(mk(esCount([2, 20, 22, 21]))).runRateShift(rsCheck)).toBe(true);
     expect(String(lastArg().value)).toContain('2 in the last');
-    expect(String(lastArg().value)).toContain('20 same window yesterday');
+    expect(String(lastArg().value)).toContain('21 median for this window over the last 3 same weekdays');
   });
-  it('does NOT alert when current is near the baseline', async () => {
-    expect(await priv(mk(esCount([18, 20]))).runRateShift(rsCheck)).toBe(false);
+  it('does NOT alert when current is near the same-weekday median', async () => {
+    expect(await priv(mk(esCount([18, 20, 22, 21]))).runRateShift(rsCheck)).toBe(false);
     expect(raiseAlert).not.toHaveBeenCalled();
   });
-  it('does NOT alert when the baseline is too quiet to judge', async () => {
-    expect(await priv(mk(esCount([0, 3]))).runRateShift(rsCheck)).toBe(false); // baseline 3 < minBaseline 8
+  it('does NOT alert when the baseline median is too quiet to judge', async () => {
+    expect(await priv(mk(esCount([0, 3, 4, 2]))).runRateShift(rsCheck)).toBe(false); // median 3 < minBaseline 8
   });
-  it('does NOT alert when a count query fails (negative)', async () => {
-    expect(await priv(mk(esCount([-1, 20]))).runRateShift(rsCheck)).toBe(false);
+  it('does NOT alert when the current-window query fails (negative)', async () => {
+    expect(await priv(mk(esCount([-1, 20, 22, 21]))).runRateShift(rsCheck)).toBe(false);
+  });
+  it('is robust to a single fluke-busy week (median ignores the outlier)', async () => {
+    // last week was an anomalous burst (116), the prior two were normal (10, 12).
+    // median(116,10,12)=12, current=18 → 18 > 12*0.2 → NO alert (old "vs yesterday" would have fired).
+    expect(await priv(mk(esCount([18, 116, 10, 12]))).runRateShift(rsCheck)).toBe(false);
+    expect(raiseAlert).not.toHaveBeenCalled();
+  });
+  it('still alerts on a real dead feed despite one missing week (0) in history', async () => {
+    // current=0; samples = [0 (missing/quiet week), 30, 28] → median 28 ≥ minBaseline, 0 <= 5.6 → alert
+    expect(await priv(mk(esCount([0, 0, 30, 28]))).runRateShift(rsCheck)).toBe(true);
   });
 
-  it('rise: alerts when current spikes >= (1+minChangePct)*baseline', async () => {
-    // current=40, baseline=15 → 40 >= 15*2=30 → suppress spike
-    expect(await priv(mk(esCount([40, 15]))).runRateShift(riseCheck)).toBe(true);
+  it('rise: alerts when current spikes >= (1+minChangePct)*median', async () => {
+    // current=40, baseline=median(15,15,15)=15 → 40 >= 15*2=30 → suppress spike
+    expect(await priv(mk(esCount([40, 15, 15, 15]))).runRateShift(riseCheck)).toBe(true);
     expect(String(lastArg().summary)).toContain('spiked');
   });
-  it('rise: no alert when current is only modestly above baseline', async () => {
+  it('rise: no alert when current is only modestly above the median', async () => {
     // current=20, baseline=15 → 20 < 30 → no alert
-    expect(await priv(mk(esCount([20, 15]))).runRateShift(riseCheck)).toBe(false);
+    expect(await priv(mk(esCount([20, 15, 15, 15]))).runRateShift(riseCheck)).toBe(false);
   });
 });
