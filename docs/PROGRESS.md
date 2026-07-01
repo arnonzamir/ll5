@@ -8,6 +8,22 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Forward-planning made a first-class, measured outcome (2026-07-01)
+Investigated "the agent isn't doing enough prep/forward planning" — confirmed true and found the eval
+governor was **blind to it**. `eval_record.py`'s `decision` field was 2-way (`ping_now` if a message was
+delivered, else `suppress`), so `ping_later` (staging) was folded into `suppress` — a staged prep brief scored
+identically to silence, and `eval_moments` had **0 `ping_later` docs all-time** despite the agent claiming it
+~26×/6d (the real intent lived only in `decision_claimed`). Fix (ll5-run `eval_record.py`): `decision` is now
+a 3-way ground truth — `ping_now` (delivered), **`ping_later` (BOOKED a `create_wake`/`create_tickler` this
+turn — a real forward commitment)**, `suppress` (neither). `decision_mismatch` redefined to `claimed != actual`,
+which now flags the key failure: a claimed `ping_later` that scheduled nothing is a hollow miss. Gateway
+already stores `decision` as a free keyword (no enum) so `ping_later` indexes fine (comment updated). Persona
+`[Calendar Review]` gained a "commit the prep, don't just name it" rule (stage via `ping_later`+`create_wake`
+or an instruction-tickler; the governor now only credits `ping_later` when a wake/tickler was booked). Tests:
+`test_eval_record.py` updated for the 3-way + a staged-wake case (all eval-record + frozen tests pass). Diagnosis
+notes: `coach-scan` IS firing weekly (Jun 28/21/20, produced the Jun 28 tickler burst) — the gap is the DAILY
+loop not committing prep between the weekly strategic bursts. The 48h skill-watch now also traces forward-work.
+
 ### Fix: nightly journal-consolidation skipped on "Unknown skill: consolidate" (2026-07-01)
 The live agent skipped its 02:00 consolidation the night of Jun 30→Jul 1 (journal: *"skill unavailable,
 chore skipped"*). Root cause: `journal-consolidation.ts` nudge said **"Run /consolidate"**, but the LL5

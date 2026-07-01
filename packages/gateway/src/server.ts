@@ -106,7 +106,7 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
       properties: {
         timestamp: { type: 'date' },
         user_id: { type: 'keyword' },
-        decision: { type: 'keyword' },          // ground truth: 'ping_now' | 'suppress'
+        decision: { type: 'keyword' },          // ground truth: 'ping_now' | 'ping_later' (booked a wake/tickler) | 'suppress'
         decision_claimed: { type: 'keyword' },   // what record_moment said
         decision_mismatch: { type: 'boolean' },  // claimed vs actual disagreement
         trigger_class: { type: 'keyword' },
