@@ -8,6 +8,21 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Fix: nightly journal-consolidation skipped on "Unknown skill: consolidate" (2026-07-01)
+The live agent skipped its 02:00 consolidation the night of Jun 30→Jul 1 (journal: *"skill unavailable,
+chore skipped"*). Root cause: `journal-consolidation.ts` nudge said **"Run /consolidate"**, but the LL5
+skills are flat `.claude/skills/*.md` files — NOT registered slash-commands/Skills in this harness (there is
+no `.claude/commands/` dir; the available-skills registry is built-ins only). The agent called the Skill tool,
+got `Unknown skill: consolidate`, and — at 02:00 — treated it as a hard stop and skipped the whole chore. It
+had worked the two prior nights only because the agent happened to do the work INLINE from the nudge's own
+instructions; the failure was a brittle give-up, not a registry regression (the skill file exists, CLI 2.1.138
+unchanged). The last SUCCESSFUL consolidation was the night of Jun 29→30 (02:00, "Overnight consolidation
+done"). The async narrative-loop (DECISION-015) was healthy throughout — unrelated. Fix: the nudge now tells
+the agent to **read and follow `.claude/skills/consolidate.md`** (explicitly "read it, do not call it as a
+Skill") and adds an anti-skip guard — the chore MUST complete; if the file is unavailable, do it inline,
+never skip on an unknown-skill error. Matches how every other LL5 skill is invoked (read the file). +3 tests
+(`journal-consolidation.test.ts`: asserts no `Run /consolidate`, references the file, has the anti-skip guard).
+
 ### Fix: inbound-throughput anomaly false-fires overnight — day-of-week baseline (2026-06-30)
 `anomaly-monitor.ts` `throughput.inbound_messages` ("Inbound message volume dropped") compared the current
 2h inbound count to the SAME window **yesterday** — seasonality-proof for the daily curve but not for the
