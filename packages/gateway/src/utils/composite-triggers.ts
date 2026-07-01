@@ -4,7 +4,7 @@ import { logger } from './logger.js';
 
 /**
  * Composite triggers — the deterministic, EVENT-DRIVEN half of the
- * situation-check catalog (ll5-run/.claude/skills/situation-check.md).
+ * situation-check catalog (ll5-run/.claude/skills/situation-check/SKILL.md).
  *
  * These fire an IMMEDIATE, targeted `[Situation] …` system message the instant
  * a high-value condition becomes true, instead of waiting for the ~5-min

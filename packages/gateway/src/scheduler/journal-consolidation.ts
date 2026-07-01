@@ -72,7 +72,7 @@ export class JournalConsolidationScheduler {
       await insertSystemMessage(
         this.pool,
         this.config.userId,
-        '[Journal Consolidation] Time to consolidate — run your consolidation routine by reading and following `.claude/skills/consolidate.md` (that file IS the /consolidate chore; it is not a registered slash-command in this harness, so read it, do not call it as a Skill). Review today\'s journal entries and session data, and update user model sections as needed. This chore MUST complete: if the skill file is somehow unavailable, do the consolidation inline from the journal + session data — never skip it on an "unknown skill" error.\n\nAfter consolidation: 1) call read_user_model() to reload the updated model, 2) push_to_user a brief summary of what changed (level: silent).',
+        '[Journal Consolidation] Time to consolidate — invoke your `consolidate` skill (via the Skill tool). Review today\'s journal entries and session data, and update user model sections as needed. This chore MUST complete: if the skill invocation ever fails, do the consolidation inline from the journal + session data — never skip it on a lookup / "unknown skill" error.\n\nAfter consolidation: 1) call read_user_model() to reload the updated model, 2) push_to_user a brief summary of what changed (level: silent).',
         undefined,
         evt,
       );

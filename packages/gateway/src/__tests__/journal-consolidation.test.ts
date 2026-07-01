@@ -23,14 +23,16 @@ describe('JournalConsolidationScheduler — nightly nudge', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('fires at the consolidation hour and points at the skill FILE, not a slash-command', async () => {
+  it('fires at the consolidation hour and invokes the registered skill (not a broken flat path)', async () => {
     const m = new JournalConsolidationScheduler(pool, { consolidationHour: 2, timezone: 'UTC', userId: 'u1' });
     await tick(m);
     expect(insertSystemMessage).toHaveBeenCalledTimes(1);
     const text = msg();
     // The regression that skipped consolidation: "Run /consolidate" tried as a Skill → "Unknown skill".
     expect(text).not.toMatch(/run \/consolidate/i);
-    expect(text).toContain('.claude/skills/consolidate.md');
+    // Skills are now registered dirs — invoke the skill; do NOT point at the old flat .md path.
+    expect(text).toMatch(/invoke your `?consolidate`? skill/i);
+    expect(text).not.toContain('.claude/skills/consolidate.md');
     // Anti-skip hardening must be present.
     expect(text).toMatch(/never skip|MUST complete|inline/i);
     // The post-steps are preserved.

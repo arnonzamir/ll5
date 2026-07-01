@@ -17,11 +17,20 @@ got `Unknown skill: consolidate`, and — at 02:00 — treated it as a hard stop
 had worked the two prior nights only because the agent happened to do the work INLINE from the nudge's own
 instructions; the failure was a brittle give-up, not a registry regression (the skill file exists, CLI 2.1.138
 unchanged). The last SUCCESSFUL consolidation was the night of Jun 29→30 (02:00, "Overnight consolidation
-done"). The async narrative-loop (DECISION-015) was healthy throughout — unrelated. Fix: the nudge now tells
-the agent to **read and follow `.claude/skills/consolidate.md`** (explicitly "read it, do not call it as a
-Skill") and adds an anti-skip guard — the chore MUST complete; if the file is unavailable, do it inline,
-never skip on an unknown-skill error. Matches how every other LL5 skill is invoked (read the file). +3 tests
-(`journal-consolidation.test.ts`: asserts no `Run /consolidate`, references the file, has the anti-skip guard).
+done"). The async narrative-loop (DECISION-015) was healthy throughout — unrelated.
+
+**Proper fix (2026-07-01, follow-up):** the real root cause was that all 16 LL5 workflows were flat
+`.claude/skills/*.md` files, which Claude Code does NOT register as invokable skills — so `Skill("consolidate")`
+was genuinely unknown. Verified empirically that the container harness DOES register dir-format project skills.
+**ll5-run:** converted all 16 to `.claude/skills/<name>/SKILL.md` dirs + `name:` frontmatter (fixed a
+YAML-breaking `": "` in coach-scan's description that would have silently blocked it); added a persona "Your
+skills — registered; invoke them" section (rule: a named skill/nudge = invoke via the Skill tool; never skip a
+chore on a lookup error — do it inline if invocation fails) + by-trigger map; updated 5 stale skill-path refs +
+the channel [Morning Briefing] dispatch. **gateway:** the `journal-consolidation` nudge now says **invoke your
+`consolidate` skill** (was the interim "read the flat file", whose path no longer exists after the move), with
+the anti-skip guard retained; composite-triggers comment path updated. +3 tests (`journal-consolidation.test.ts`:
+no `Run /consolidate`, invokes the skill, not the old flat path, anti-skip guard present). A 48h skill-usage
+watch traces real invocations post-deploy.
 
 ### Fix: inbound-throughput anomaly false-fires overnight — day-of-week baseline (2026-06-30)
 `anomaly-monitor.ts` `throughput.inbound_messages` ("Inbound message volume dropped") compared the current
