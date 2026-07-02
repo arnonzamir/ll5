@@ -8,6 +8,27 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Companion program — live verification complete (2026-07-02 evening)
+End-to-end verified in production: **HabitScheduler** (test habit fired at its exact minute; the live
+agent handled the [Habit Check] correctly — logged `done` silently; eval moment recorded
+suppress/suppress with grounding_calls=1, i.e. the recorder fix works — the old recorder would have
+scored that turn a phantom ping_now). **Evening close** fired with a real self-carried collection
+(1 staged + 20 open journal + 1 habit, 12 overflow) and the agent DELIVERED the close (tonight's
+timeline, ≤3 loose ends, Ritalin line) — then self-grounded the "(no title) 19:00" event by reading the
+calendar (recurring personal-time block) and updated the plan unprompted: Hard Rule 15 in live behavior.
+**Ritalin migration:** `Ritalin 40mg AM` habit (id 37d6f9b6…, 5 escalation steps 07:20→09:25) ACTIVE in
+parallel with the legacy `ritalin-escalation` wakes; one-off eval wake (source `habit-migration-eval`)
+fires Jul 5 09:30 to check 3 days of habit_trends and cut over (PM/late-PM stay dynamic one-off chains —
+their times depend on the actual AM dose; the eval wake asks for a recommendation). **Visibility agg**
+verified live post-hotfix (2,352 from_me docs/30d bucket correctly). **KNOWN ISSUE (new, real):** system
+messages inserted while the channel SSE is reconnecting (e.g. during gateway restarts) lose their PG
+NOTIFY and sit `pending`; tonight's [Evening Close] + 16 burst rows were lost this way (recovered via a
+manual re-nudge; agent processed immediately). Worse, **StuckMessageSweep flips such rows to `delivered`
+after 30 min, silently MASKING the loss** (same class as the 2026-06-23 freshness-nudge loss). Follow-up
+needed: sweep should distinguish handled-but-unflipped from never-delivered (e.g. require agent activity
+after the row's insert, or re-notify instead of flipping beat/nudge rows). Evening-close knobs restored
+to default 20:30 after the knob-override live test; dev verification habit retired.
+
 ### Hotfix: visibility agg broke query_im_messages — aggregate on conversation_id.keyword (2026-07-02)
 Caught live by the ToolFailureMonitor ~10 min post-deploy (4/5 calls failing,
 search_phase_execution_exception): the new getConversationVisibility filtered+aggregated on

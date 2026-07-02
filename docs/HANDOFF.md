@@ -6,6 +6,14 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
+**Lost-NOTIFY delivery race [2026-07-02, known issue]:** system messages inserted while the channel
+MCP's SSE is reconnecting (gateway restart window) lose their non-durable PG NOTIFY and sit `pending`
+forever; StuckMessageSweep then flips them `delivered` after 30 min, MASKING the loss. Bit tonight's
+[Evening Close] + 16 restart-burst rows (recovered by inserting a fresh `[Agent Instruction]` telling
+the agent to `check_messages` the pending backlog — worked immediately). If a beat/nudge seems ignored,
+CHECK THE ROW STATUS FIRST: `pending` older than ~2 min = lost delivery, not agent failure. Durable fix
+pending (sweep should re-notify or verify agent activity instead of blind-flipping).
+
 **ES agg gotcha [2026-07-02]:** `ll5_awareness_messages.conversation_id` is mapped **text + `.keyword`
 subfield** — any terms/cardinality aggregation or exact-id terms filter on it MUST use
 `conversation_id.keyword` (fielddata is disabled on text; the visibility feature shipped aggregating on
