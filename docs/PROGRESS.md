@@ -8,6 +8,16 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Hotfix: visibility agg broke query_im_messages — aggregate on conversation_id.keyword (2026-07-02)
+Caught live by the ToolFailureMonitor ~10 min post-deploy (4/5 calls failing,
+search_phase_execution_exception): the new getConversationVisibility filtered+aggregated on
+`conversation_id`, which is mapped text (+`.keyword` subfield) in ll5_awareness_messages — fielddata
+disabled → every query_im_messages call threw. Fix: terms filter + terms agg on
+`conversation_id.keyword`; also fixed the same latent bug in `countActiveConversations` (cardinality on
+the text field — called by get_situation, likely silently degraded). Tests updated (204 green).
+Lesson: aggregations on dynamically/text-mapped ES fields need the .keyword subfield — check the LIVE
+mapping, not the assumed one.
+
 ### Companion-usability program SHIPPED — Phases 0-4 built (2026-07-02)
 All of DECISION-018/019/020 implemented in one release across ll5 + ll5-run (Phase 5 Today-card stays
 gated on two weeks of beat data per the plan). **Gateway:** NEW `scheduler/evening-close.ts`

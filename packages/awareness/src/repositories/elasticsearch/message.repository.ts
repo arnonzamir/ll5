@@ -156,7 +156,9 @@ export class ElasticsearchMessageRepository
       aggs: {
         unique_conversations: {
           cardinality: {
-            field: 'conversation_id',
+            // conversation_id is mapped text + .keyword subfield; aggregations
+            // need the keyword (fielddata is disabled on text).
+            field: 'conversation_id.keyword',
           },
         },
       },
@@ -182,14 +184,16 @@ export class ElasticsearchMessageRepository
       index: this.index,
       size: 0,
       query: this.buildBoolQuery(userId, [
-        { terms: { conversation_id: conversationIds } },
+        // conversation_id is text + .keyword; ids contain @/- and would be
+        // tokenized on the text field — filter AND aggregate on the keyword.
+        { terms: { 'conversation_id.keyword': conversationIds } },
         { term: { from_me: true } },
         { range: { timestamp: { gte: `now-${windowDays}d` } } },
       ]),
       aggs: {
         outbound_conversations: {
           terms: {
-            field: 'conversation_id',
+            field: 'conversation_id.keyword',
             size: conversationIds.length,
           },
         },

@@ -6,6 +6,12 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
+**ES agg gotcha [2026-07-02]:** `ll5_awareness_messages.conversation_id` is mapped **text + `.keyword`
+subfield** — any terms/cardinality aggregation or exact-id terms filter on it MUST use
+`conversation_id.keyword` (fielddata is disabled on text; the visibility feature shipped aggregating on
+the text field and broke every `query_im_messages` call until the ToolFailureMonitor caught it ~10 min
+post-deploy). Check the LIVE mapping before aggregating on any dynamically-mapped field.
+
 **Companion-usability program [2026-07-02] — BUILT same day (Phases 0-4; Phase 5 Today-card gated on
 beat data):** operational notes — EveningCloseScheduler fires 20:30 local (knobs
 `evening_close_enabled/_hour/_minute` under user_settings.scheduler; durable dedup = a today

@@ -180,12 +180,12 @@ describe('ElasticsearchMessageRepository.getConversationVisibility', () => {
     // user-scoped + batched terms filter + outbound + trailing window
     expect(body.query.bool.filter).toEqual(expect.arrayContaining([
       { term: { user_id: USER_ID } },
-      { terms: { conversation_id: ['whatsapp:alice', 'slack:sitter'] } },
+      { terms: { 'conversation_id.keyword': ['whatsapp:alice', 'slack:sitter'] } },
       { term: { from_me: true } },
       { range: { timestamp: { gte: 'now-30d' } } },
     ]));
     expect(body.aggs.outbound_conversations.terms).toEqual({
-      field: 'conversation_id',
+      field: 'conversation_id.keyword',
       size: 2,
     });
 
