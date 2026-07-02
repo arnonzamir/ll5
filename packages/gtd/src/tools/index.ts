@@ -1,7 +1,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { HorizonRepository } from '../repositories/interfaces/horizon.repository.js';
 import type { InboxRepository } from '../repositories/interfaces/inbox.repository.js';
+import type { HabitRepository } from '../repositories/interfaces/habit.repository.js';
 import { registerActionTools } from './actions.js';
+import { registerHabitTools } from './habits.js';
 import { registerProjectTools } from './projects.js';
 import { registerHorizonTools } from './horizons.js';
 import { registerInboxTools } from './inbox.js';
@@ -13,6 +15,7 @@ import { registerChatTools } from './chat.js';
 export interface ToolDependencies {
   horizonRepo: HorizonRepository;
   inboxRepo: InboxRepository;
+  habitRepo: HabitRepository;
   gatewayUrl: string;
   authSecret: string;
 }
@@ -26,6 +29,7 @@ export function registerAllTools(
   registerProjectTools(server, deps.horizonRepo, getUserId);
   registerHorizonTools(server, deps.horizonRepo, getUserId);
   registerInboxTools(server, deps.inboxRepo, getUserId);
+  registerHabitTools(server, deps.habitRepo, getUserId);
   registerShoppingTools(server, deps.horizonRepo, getUserId);
   registerRecommendationTools(server, deps.horizonRepo, getUserId);
   registerHealthTools(server, deps.horizonRepo, getUserId);

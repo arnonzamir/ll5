@@ -12,6 +12,7 @@ import type { LogLevel } from './utils/logger.js';
 import { runMigrations } from './utils/migration-runner.js';
 import { PostgresHorizonRepository } from './repositories/postgres/horizon.repository.js';
 import { PostgresInboxRepository } from './repositories/postgres/inbox.repository.js';
+import { PostgresHabitRepository } from './repositories/postgres/habit.repository.js';
 import { registerAllTools } from './tools/index.js';
 
 const { Pool } = pg;
@@ -76,8 +77,9 @@ export async function startServer(): Promise<void> {
   // -------------------------------------------------------------------------
   const horizonRepo = new PostgresHorizonRepository(pool);
   const inboxRepo = new PostgresInboxRepository(pool);
+  const habitRepo = new PostgresHabitRepository(pool);
 
-  const deps = { horizonRepo, inboxRepo, gatewayUrl: env.gatewayUrl, authSecret: env.authSecret || '' };
+  const deps = { horizonRepo, inboxRepo, habitRepo, gatewayUrl: env.gatewayUrl, authSecret: env.authSecret || '' };
 
   // -------------------------------------------------------------------------
   // Express app with auth middleware

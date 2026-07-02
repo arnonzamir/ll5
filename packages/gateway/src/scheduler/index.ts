@@ -5,8 +5,10 @@ import { createGoogleCalendarClient } from './google-calendar-client.js';
 import { CalendarSyncScheduler } from './calendar-sync.js';
 import { CalendarReviewScheduler } from './calendar-review.js';
 import { DailyReviewScheduler } from './daily-review.js';
+import { EveningCloseScheduler } from './evening-close.js';
 import { TicklerAlertScheduler } from './tickler-alert.js';
 import { WakeScheduler } from './wake-scheduler.js';
+import { HabitScheduler } from './habit-scheduler.js';
 import { GTDHealthScheduler } from './gtd-health.js';
 import { WeeklyReviewReminder } from './weekly-review.js';
 import { CoachScanScheduler } from './coach-scan.js';
@@ -106,13 +108,37 @@ async function startSchedulersForUser(
   gtdHealthScheduler.start();
   schedulers.push(gtdHealthScheduler);
 
-  const weeklyReviewScheduler = new WeeklyReviewReminder(pgPool, {
+  // Weekly review session + solo fallback (DECISION-018 §3) — needs ES to book
+  // the durable +45 min fallback wake in ll5_scheduled_wakes.
+  const weeklyReviewScheduler = new WeeklyReviewReminder(pgPool, es, {
     reviewDay: s('weekly_review_day', config.weeklyReviewDay),
     reviewHour: s('weekly_review_hour', config.weeklyReviewHour),
     timezone, userId,
   });
   weeklyReviewScheduler.start();
   schedulers.push(weeklyReviewScheduler);
+
+  // Evening close beat (DECISION-018 §1-2) — once per local evening, embeds the
+  // day's unengaged staged items (chat + open journal + habit outcomes) so the
+  // agent's close has the collection in hand.
+  const eveningCloseScheduler = new EveningCloseScheduler(pgPool, es, {
+    enabled: (sched['evening_close_enabled'] as unknown as boolean) ?? true,
+    closeHour: s('evening_close_hour', 20),
+    closeMinute: s('evening_close_minute', 30),
+    timezone, userId,
+  });
+  eveningCloseScheduler.start();
+  schedulers.push(eveningCloseScheduler);
+
+  // Habit contracts firing engine (DECISION-019) — reads gtd_habits/gtd_habit_log
+  // (gtd MCP migration, same ll5 database) and fires [Habit Check] escalation
+  // steps; end-of-day auto-`missed` sweep. Queries defensively pre-migration.
+  const habitScheduler = new HabitScheduler(pgPool, {
+    enabled: (sched['habit_scheduler_enabled'] as unknown as boolean) ?? true,
+    timezone, userId,
+  });
+  habitScheduler.start();
+  schedulers.push(habitScheduler);
 
   // Durable precise-time self-wakes (DECISION-016) — the agent's create_wake
   // (awareness MCP) writes ll5_scheduled_wakes; this fires due rows every 60s as

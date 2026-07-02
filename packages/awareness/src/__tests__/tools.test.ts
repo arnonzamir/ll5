@@ -53,6 +53,9 @@ function makeMessageRepo(overrides: Partial<MessageRepository> = {}): MessageRep
     query: unimpl('query'),
     create: unimpl('create'),
     countActiveConversations: unimpl('countActiveConversations'),
+    // Visibility is only computed when results carry conversation_ids;
+    // default to an empty map so plain-query tests stay unaffected.
+    getConversationVisibility: vi.fn(async () => ({})),
     ...overrides,
   } as MessageRepository;
 }

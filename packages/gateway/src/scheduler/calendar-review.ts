@@ -12,6 +12,13 @@ interface ReviewConfig {
   userId: string;
 }
 
+// DECISION-018 §4 / DECISION-020 §2: the mechanical prep obligation appended to
+// every calendar-review nudge. "Naming the prep" measurably never became a
+// booking (1 ping_later in 932 moments) — the rule makes the booking itself the
+// contract, and the behavior.forward_work_stalled anomaly check is its backstop.
+const PREP_OBLIGATION =
+  'PREP OBLIGATION: For each event in the next 48h that needs prep, BOOK the prep THIS TURN (create_wake or tickler) — naming it is not enough; the governor only credits ping_later when a booking exists.';
+
 /**
  * Periodic calendar review that sends system channel messages.
  * Runs every N minutes during configured hours, with a fuller morning review.
@@ -165,6 +172,9 @@ export class CalendarReviewScheduler {
       }
     }
 
+    lines.push('');
+    lines.push(PREP_OBLIGATION);
+
     await this.sendSystemMessage(lines.join('\n'));
     logger.info('[CalendarReviewScheduler][runMorningReview] Morning review sent', { events: todayEvents.length, ticklers: ticklers.length });
   }
@@ -213,6 +223,9 @@ export class CalendarReviewScheduler {
         lines.push(`- ${tickler.title}`);
       }
     }
+
+    lines.push('');
+    lines.push(PREP_OBLIGATION);
 
     await this.sendSystemMessage(lines.join('\n'));
     logger.info('[CalendarReviewScheduler][runPeriodicReview] Periodic review sent', { events: upcomingEvents.length, ticklers: ticklers.length });

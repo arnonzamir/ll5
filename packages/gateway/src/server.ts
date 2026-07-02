@@ -113,6 +113,9 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         source: { type: 'keyword' },
         message_sent: { type: 'boolean' },
         cold_start: { type: 'boolean' },
+        // Lookup-class tool calls made this turn (DECISION-020 §5). The
+        // behavior.ungrounded_pings anomaly check reads ping_now + grounding_calls:0.
+        grounding_calls: { type: 'integer' },
         session_id: { type: 'keyword' },
       },
     },
@@ -619,6 +622,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
     const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
     const bool = (v: unknown) => (v == null ? undefined : Boolean(v));
+    const int = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : undefined);
     try {
       await esClient.index({
         index: 'll5_eval_moments',
@@ -632,6 +636,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
           source: str(b.source),
           message_sent: bool(b.message_sent),
           cold_start: bool(b.cold_start),
+          grounding_calls: int(b.grounding_calls),
           session_id: str(b.session_id),
         },
       });

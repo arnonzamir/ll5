@@ -6,7 +6,28 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
-**Companion-usability program [2026-07-02]:** the next body of work is the phased plan in
+**Companion-usability program [2026-07-02] — BUILT same day (Phases 0-4; Phase 5 Today-card gated on
+beat data):** operational notes — EveningCloseScheduler fires 20:30 local (knobs
+`evening_close_enabled/_hour/_minute` under user_settings.scheduler; durable dedup = a today
+`[Evening Close]` chat_messages row, so re-firing for tests requires deleting that row or waiting a
+day); staged-item detection is the UNENGAGED fallback (notification level is NOT persisted on
+chat_messages — only drives FCM; if a writer ever persists metadata.notification_level the scheduler
+surfaces it opportunistically). HabitScheduler reads gtd_habits/gtd_habit_log (gtd migration
+`002_habit_contracts.sql` — gtd + gateway share the `ll5` PG database) — schedule jsonb
+`{"days":"daily"|[0..6, 0=Sun],"times":["HH:MM"]}`, escalation `[{offset_minutes,level}]`, step dedup
+in steps_fired, UNIQUE(habit_id,due_date,due_time), auto-`missed` sweep on first tick of a new local
+day; knob `habit_scheduler_enabled`. Weekly review books its +45min solo-fallback as a one-off
+ll5_scheduled_wakes doc (source `weekly-review-fallback`) — payload prefix `[Weekly Review — Solo
+Fallback]` is dispatch-matched in ll5-run. **Eval recorder semantics changed 2026-07-02:**
+`reply(channel:"system")` no longer counts as delivery (was the cause of ~110 phantom ping_nows + the
+Jul 1 inversion) — `decision` distributions and `decision_mismatch` before this date are CONTAMINATED;
+don't baseline `behavior.ungrounded_pings`/suppress_spike against pre-fix weeks. `grounding_calls`
+(int) now ships per eval moment and is mapped in ll5_eval_moments. awareness `query_im_messages`
+returns `conversations[].visibility` (`full`|`inbound_only` from `from_me` docs, trailing 30d) —
+staleness/unanswered claims REQUIRE full (persona Hard Rule 15). Ritalin migration protocol: create the
+3 dose habits via create_habit, run IN PARALLEL with the ~9 legacy recurring wakes ≥3 clean days, then
+cancel_wake the legacy chain — never cut over blind (health-critical). Plan + KPIs:
+`docs/implementation/companion-usability-plan.md`; decisions 018/019/020. Original plan context:
 `docs/implementation/companion-usability-plan.md`, implementing DECISION-018 (planning beats: NEW
 gateway `evening-close` scheduler whose nudge EMBEDS the day's unengaged silent-staged chat messages +
 open journal entries so collection never depends on agent recall; NEW ll5-run `evening-close` skill;

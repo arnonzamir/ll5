@@ -3,7 +3,7 @@ import { BaseElasticsearchRepository } from './base.repository.js';
 import type { EsQueryContainer } from './base.repository.js';
 import type { MessageRepository, MessageQueryParams } from '../interfaces/message.repository.js';
 import type { PushMessage } from '../../types/message.js';
-import type { MessageSearchResult } from '../../types/message.js';
+import type { MessageSearchResult, ConversationVisibility } from '../../types/message.js';
 
 const INDEX = 'll5_awareness_messages';
 
@@ -164,5 +164,49 @@ export class ElasticsearchMessageRepository
 
     const aggs = response.aggregations as Record<string, { value?: number }> | undefined;
     return aggs?.unique_conversations?.value ?? 0;
+  }
+
+  async getConversationVisibility(
+    userId: string,
+    conversationIds: string[],
+    windowDays = 30,
+  ): Promise<Record<string, ConversationVisibility>> {
+    if (conversationIds.length === 0) return {};
+
+    // One terms aggregation over the batch: which of these conversations have
+    // at least one outbound (from_me) message in the trailing window. from_me
+    // is written by the gateway message processor (dynamically mapped boolean);
+    // docs predating outbound capture simply never match — correctly yielding
+    // "inbound_only" for threads whose outbound side is not captured.
+    const response = await this.client.search({
+      index: this.index,
+      size: 0,
+      query: this.buildBoolQuery(userId, [
+        { terms: { conversation_id: conversationIds } },
+        { term: { from_me: true } },
+        { range: { timestamp: { gte: `now-${windowDays}d` } } },
+      ]),
+      aggs: {
+        outbound_conversations: {
+          terms: {
+            field: 'conversation_id',
+            size: conversationIds.length,
+          },
+        },
+      },
+    });
+
+    const aggs = response.aggregations as
+      | Record<string, { buckets?: Array<{ key: string }> }>
+      | undefined;
+    const withOutbound = new Set(
+      (aggs?.outbound_conversations?.buckets ?? []).map((b) => b.key),
+    );
+
+    const result: Record<string, ConversationVisibility> = {};
+    for (const id of conversationIds) {
+      result[id] = withOutbound.has(id) ? 'full' : 'inbound_only';
+    }
+    return result;
   }
 }

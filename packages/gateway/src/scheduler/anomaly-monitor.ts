@@ -286,5 +286,39 @@ function buildChecks(): Check[] {
       timestampField: 'timestamp',
       filter: [{ term: { decision_mismatch: true } }],
     },
+    // Forward work stalled (DECISION-018 §4): the daily loop should be BOOKING
+    // prep (decision=ping_later, ground truth since 2026-07-01). No ping_later
+    // moment for 48h means the calendar-review prep obligation isn't being
+    // honored. Staleness convention: no ping_later doc at ALL → null age → never
+    // alert (no baseline yet — the check arms itself once the first booking lands).
+    {
+      kind: 'staleness',
+      key: 'behavior.forward_work_stalled',
+      label: 'Forward work (ping_later bookings)',
+      maxMinutes: 2880, // 48h
+      severity: 'warning',
+      suggestion: 'No ping_later eval moment in 48h — the daily loop isn\'t booking prep. Re-read the calendar-review prep obligation: for each prep-needing event in the next 48h, BOOK the prep THIS TURN (create_wake/tickler); naming it is not enough.',
+      ageMinutes: (m) => m.lastDocAgeMinutes('ll5_eval_moments', 'timestamp', [{ term: { decision: 'ping_later' } }]),
+    },
+    // Ungrounded pings rising (DECISION-020 §5): ping_now turns with ZERO
+    // lookup-class tool calls — asserting/acting without consulting the sensors
+    // and stores. Defensive by construction: `grounding_calls` is absent on docs
+    // written before the field shipped, and a `term: 0` filter simply doesn't
+    // match absent fields — old docs never count toward current or baseline, so
+    // the minBaseline gate holds the check silent until real history accrues.
+    {
+      kind: 'rateShift',
+      key: 'behavior.ungrounded_pings',
+      label: 'Ungrounded pings',
+      severity: 'warning',
+      suggestion: 'ping_now turns with zero grounding lookups are rising vs baseline — the agent is pinging without consulting its sensors/stores first. Re-read the sensor-before-assertion rule and the claim-class lookup map.',
+      windowMinutes: 180,
+      direction: 'rise',
+      minBaseline: 8,
+      minChangePct: 1.0,
+      index: 'll5_eval_moments',
+      timestampField: 'timestamp',
+      filter: [{ term: { decision: 'ping_now' } }, { term: { grounding_calls: 0 } }],
+    },
   ];
 }

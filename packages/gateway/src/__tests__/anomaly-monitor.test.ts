@@ -102,3 +102,74 @@ describe('AnomalyMonitor — rate-shift detector (same window, same weekday, 3-w
     expect(await priv(mk(esCount([20, 15, 15, 15]))).runRateShift(riseCheck)).toBe(false);
   });
 });
+
+describe('AnomalyMonitor — behavior checks (DECISION-018/020)', () => {
+  beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
+
+  type WithChecks = { checks: Array<Record<string, unknown>> };
+  const checkByKey = (m: AnomalyMonitor, key: string) =>
+    (m as unknown as WithChecks).checks.find((c) => c.key === key)!;
+
+  it('registers behavior.forward_work_stalled (48h staleness) and behavior.ungrounded_pings (rise)', () => {
+    const m = mk({} as Client);
+    const stalled = checkByKey(m, 'behavior.forward_work_stalled');
+    expect(stalled.kind).toBe('staleness');
+    expect(stalled.maxMinutes).toBe(2880);
+    const ungrounded = checkByKey(m, 'behavior.ungrounded_pings');
+    expect(ungrounded.kind).toBe('rateShift');
+    expect(ungrounded.direction).toBe('rise');
+    expect(ungrounded.index).toBe('ll5_eval_moments');
+    expect(ungrounded.timestampField).toBe('timestamp');
+    expect(ungrounded.minBaseline).toBe(8);
+    expect(ungrounded.filter).toEqual([
+      { term: { decision: 'ping_now' } },
+      { term: { grounding_calls: 0 } },
+    ]);
+  });
+
+  it('forward_work_stalled: alerts when the newest ping_later moment is older than 48h', async () => {
+    const staleTs = new Date(Date.now() - 72 * 3_600_000).toISOString(); // 3 days ago
+    const search = vi.fn(async () => ({ hits: { hits: [{ _source: { timestamp: staleTs } }] } }));
+    const m = mk({ search } as unknown as Client);
+    const check = checkByKey(m, 'behavior.forward_work_stalled');
+    expect(await priv(m).runStaleness(check)).toBe(true);
+    expect(lastArg().key).toBe('behavior.forward_work_stalled');
+    // The query targets ping_later moments on the `timestamp` field (NOT @timestamp).
+    const q = search.mock.calls[0][0] as { index: string; sort: unknown[]; query: { bool: { filter: unknown[] } } };
+    expect(q.index).toBe('ll5_eval_moments');
+    expect(q.sort).toEqual([{ timestamp: { order: 'desc' } }]);
+    expect(q.query.bool.filter).toContainEqual({ term: { decision: 'ping_later' } });
+  });
+
+  it('forward_work_stalled: fresh ping_later → no alert; no ping_later at all → no alert (no baseline)', async () => {
+    const freshTs = new Date(Date.now() - 60 * 60_000).toISOString(); // 1h ago
+    const fresh = mk({ search: vi.fn(async () => ({ hits: { hits: [{ _source: { timestamp: freshTs } }] } })) } as unknown as Client);
+    expect(await priv(fresh).runStaleness(checkByKey(fresh, 'behavior.forward_work_stalled'))).toBe(false);
+    const empty = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    expect(await priv(empty).runStaleness(checkByKey(empty, 'behavior.forward_work_stalled'))).toBe(false);
+    expect(raiseAlert).not.toHaveBeenCalled();
+  });
+
+  it('ungrounded_pings: alerts when zero-grounding pings double vs the same-weekday median', async () => {
+    // count call order: current, then 3 baseline samples (1/2/3 weeks back).
+    const es = esCount([20, 9, 8, 8]); // current=20 >= median(8,8,9)=8 * 2
+    const m = mk(es);
+    expect(await priv(m).runRateShift(checkByKey(m, 'behavior.ungrounded_pings'))).toBe(true);
+    expect(String(lastArg().summary)).toContain('spiked');
+    // Every count query carries the decision + grounding_calls filter.
+    const countMock = (es as unknown as { count: ReturnType<typeof vi.fn> }).count;
+    for (const call of countMock.mock.calls) {
+      const filters = (call[0] as { query: { bool: { filter: unknown[] } } }).query.bool.filter;
+      expect(filters).toContainEqual({ term: { decision: 'ping_now' } });
+      expect(filters).toContainEqual({ term: { grounding_calls: 0 } });
+    }
+  });
+
+  it('ungrounded_pings: stays silent while the baseline is below the floor (old docs lack grounding_calls)', async () => {
+    // Pre-field history: baseline windows count 0 (term filter matches nothing) →
+    // median 0 < minBaseline 8 → never alert, however big the current window looks.
+    const m = mk(esCount([25, 0, 0, 0]));
+    expect(await priv(m).runRateShift(checkByKey(m, 'behavior.ungrounded_pings'))).toBe(false);
+    expect(raiseAlert).not.toHaveBeenCalled();
+  });
+});

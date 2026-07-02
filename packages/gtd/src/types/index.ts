@@ -1,4 +1,5 @@
 export * from './horizon.js';
+export * from './habit.js';
 export * from './inbox.js';
 export * from './review.js';
 export * from './user-context.js';

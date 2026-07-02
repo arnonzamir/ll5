@@ -1,5 +1,5 @@
 import type { PushMessage } from '../../types/message.js';
-import type { MessageSearchResult } from '../../types/message.js';
+import type { MessageSearchResult, ConversationVisibility } from '../../types/message.js';
 
 export interface MessageQueryParams {
   from?: string;
@@ -29,4 +29,15 @@ export interface MessageRepository {
 
   /** Count conversations with messages in a time range. */
   countActiveConversations(userId: string, since: string): Promise<number>;
+
+  /**
+   * Outbound visibility per conversation: "full" when any from_me message
+   * exists in the conversation within the trailing window (default 30 days),
+   * else "inbound_only". One aggregation query for the whole batch.
+   */
+  getConversationVisibility(
+    userId: string,
+    conversationIds: string[],
+    windowDays?: number,
+  ): Promise<Record<string, ConversationVisibility>>;
 }

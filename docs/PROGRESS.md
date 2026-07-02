@@ -8,6 +8,49 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Companion-usability program SHIPPED — Phases 0-4 built (2026-07-02)
+All of DECISION-018/019/020 implemented in one release across ll5 + ll5-run (Phase 5 Today-card stays
+gated on two weeks of beat data per the plan). **Gateway:** NEW `scheduler/evening-close.ts`
+(EveningCloseScheduler — 20:30 local via effective tz, 60-min catch-up window, in-memory + durable
+already-sent dedup [queries chat_messages for a today `[Evening Close]` row]; SELF-CARRYING nudge embeds
+(a) today's non-compact unengaged assistant messages, (b) open journal entries, (c) gtd_habit_log
+outcomes [42P01-defensive pre-migration]; caps 10 + overflow note; knobs evening_close_enabled/_hour/
+_minute). NOTE: notification level is NOT persisted on chat_messages (only drives FCM) — staged
+detection = unengaged fallback, documented in code. NEW `scheduler/habit-scheduler.ts` (HabitScheduler —
+60s tick, per-habit tz else effective, DST-safe wall-clock, 90-min catch-up cap, durable step dedup via
+steps_fired jsonb upsert ON CONFLICT(habit_id,due_date,due_time) with race guard, `[Habit Check]` naming
+habit/step k/N/level/check, first-tick-of-day sweep auto-`missed` on yesterday's open rows).
+`weekly-review.ts`: opens with the FIRST CONCRETE Phase-1 question; books a durable +45min one-off wake
+doc directly into ll5_scheduled_wakes (source weekly-review-fallback, deduped) whose payload starts
+`[Weekly Review — Solo Fallback]` and carries the solo one-pager contract; calendar block delegated to
+the agent (`create_tickler` in nudge — gateway Google client is read-only). `calendar-review.ts`: prep
+obligation appended (book the prep THIS TURN, governor only credits booked ping_later).
+`anomaly-monitor.ts` +2 checks: behavior.forward_work_stalled (staleness, ping_later >48h) +
+behavior.ungrounded_pings (rate-shift rise, ping_now with grounding_calls=0). server.ts: eval-moments
+mapping + telemetry passthrough for `grounding_calls` int. Gateway 462/462 tests, tsc clean. **gtd:**
+migration `002_habit_contracts.sql` (gtd_habits + gtd_habit_log per DECISION-019 schema, idempotent);
+habit repository (interface+PG) + 5 tools create_habit/update_habit/log_habit_outcome/list_habits/
+habit_trends (validation, tz-aware defaults, weekly completion buckets, excused-neutral streaks,
+recent misses); 97/97 tests. **awareness:** query_im_messages now returns per-conversation
+`visibility: full|inbound_only` (outbound field = `from_me` bool, dynamically mapped — written by
+gateway processors/message.ts; ONE size-0 terms-agg query over trailing 30d) + a visibility_hint
+forbidding "you haven't replied" claims on inbound_only threads; 204/204 tests. **ll5-run:** EVAL
+RECORDER ROOT CAUSE found+fixed — `reply(channel:"system")` scheduler acks counted as user delivery,
+forcing decision=ping_now (110/135 mismatches were this; the Jul 1 131-ping_now inversion was 128 system
+acks from the trip-return backlog, NOT a behavior change). Fix: `_is_user_delivery` — push_to_user
+always, reply only web-channel. `grounding_calls` (GROUNDING_TOOLS occurrences per turn) shipped in the
+telemetry body. **Pre-fix eval history (Jun 27–Jul 2) is contaminated — don't baseline against it.**
+Persona: Hard Rule 15 (grounded action claim-class→source map + relative-time-resolves-against-source-
+timestamp + absolute-day format), staging-is-a-deferral contract, habit-tools routing. Skills: NEW
+`evening-close` (2-min close: ≤3 loose ends, tomorrow's ONE thing, habit line, explicit pick-up/drop per
+embedded item); `review` solo mode (`[Weekly Review — Solo Fallback]` → one-pager, 30d+ → someday,
+groceries → shopping, ≤3 decisions); `calendar-review` dossier step (get_person + narratives + GTD
+mentions before the brief) + prep-commit. Channel dispatch: `[Evening Close]`, `[Habit Check]`, updated
+`[Weekly Review]`. All 5 hook test files pass. Deploy = gateway+gtd+awareness (CI) + ll5-run together.
+Post-deploy verify: fire evening-close via knob override, near-term test habit through HabitScheduler,
+create 3 Ritalin habit rows IN PARALLEL with legacy wakes (cancel wakes only after 3 clean days),
+confirm grounding_calls indexing + visibility field live.
+
 ### Companion-usability review → DECISION-018/019/020 + phased plan (2026-07-02)
 Full system + audit review of Jun 25 – Jul 2 (932 eval moments, 27 sessions, week of journal/GTD/chat/
 audit-log telemetry, qualitative read of live-agent transcripts). Verdict: excellent at running the

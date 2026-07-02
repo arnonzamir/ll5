@@ -82,6 +82,71 @@ export function mapReviewRow(row: Record<string, unknown>): Record<string, unkno
   };
 }
 
+/**
+ * Maps a snake_case habits row to a camelCase domain object (DECISION-019).
+ */
+export function mapHabitRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    description: row.description ?? null,
+    schedule: parseJsonb(row.schedule, {}),
+    checkKind: row.check_kind,
+    checkConfig: parseJsonb(row.check_config, {}),
+    escalation: parseJsonb(row.escalation, []),
+    status: row.status,
+    timezone: row.timezone ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Maps a snake_case habit log row to a camelCase domain object.
+ * due_date is normalized to YYYY-MM-DD (pg returns DATE as a local-midnight Date).
+ */
+export function mapHabitLogRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    habitId: row.habit_id,
+    userId: row.user_id,
+    dueDate: normalizeDate(row.due_date),
+    dueTime: row.due_time,
+    dueAt: row.due_at ?? null,
+    outcome: row.outcome ?? null,
+    closedAt: row.closed_at ?? null,
+    note: row.note ?? null,
+    stepsFired: parseJsonb(row.steps_fired, []),
+    createdAt: row.created_at,
+  };
+}
+
+/** Renders a pg DATE value (Date at local midnight, or string) as YYYY-MM-DD. */
+function normalizeDate(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(value).slice(0, 10);
+}
+
+function parseJsonb<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as T;
+    } catch (err) {
+      console.warn('[parseJsonb] Failed to parse JSONB value:', err instanceof Error ? err.message : String(err));
+      return fallback;
+    }
+  }
+  return value as T;
+}
+
 function parseJsonbArray(value: unknown): string[] {
   if (value == null) return [];
   if (typeof value === 'string') {
