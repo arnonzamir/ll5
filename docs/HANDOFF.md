@@ -6,6 +6,25 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
+**Companion-usability program [2026-07-02]:** the next body of work is the phased plan in
+`docs/implementation/companion-usability-plan.md`, implementing DECISION-018 (planning beats: NEW
+gateway `evening-close` scheduler whose nudge EMBEDS the day's unengaged silent-staged chat messages +
+open journal entries so collection never depends on agent recall; NEW ll5-run `evening-close` skill;
+weekly review becomes a calendar-blocked session with a +45min no-engagement check → solo one-pager
+fallback incl. GTD 30-day decay proposals; calendar-review nudge gains a book-the-prep-THIS-turn
+obligation), DECISION-019 (habit contracts: `gtd_habits` + `gtd_habit_log` PG tables — gtd shares the
+gateway's `ll5` database — 5 gtd tools, gateway `HabitScheduler` [WakeScheduler shape] firing `[Habit
+Check]` escalation steps, idempotent via log rows, end-of-day auto-`missed`; Ritalin migrates FIRST in
+parallel with its ~9 legacy wakes before those are cancelled — health-critical), and DECISION-020
+(grounded action: sensor-before-assertion Hard Rule + claim-class→source map in ll5-run persona;
+messaging MCP per-conversation `visibility: full|inbound_only` — staleness/unanswered claims REQUIRE
+full; relative-time resolved against the SOURCE message timestamp with absolute date stated; meeting-
+prep dossier obligation [person + narratives + open GTD mentions before the brief]; `grounding_calls`
+added to eval moments + `behavior.ungrounded_pings`/`behavior.forward_work_stalled` anomaly checks).
+**Phase 0 first and independent:** verify the eval recorder — the 138 `claimed suppress/actual
+ping_now` mismatches and Jul 1's inverted 131-ping_now day look like recorder semantics, and later
+phases are judged by these metrics. Review evidence + KPI baselines live in the plan doc.
+
 **Authority-change approval gate [2026-06-22]:** the agent CANNOT change a conversation's authority (`contact_settings.permission`) directly — it can only FILE a request; the change is applied only by a phone/dashboard-authed gateway endpoint the agent has no path to. Gateway table `permission_change_requests` (migration `034`; user_id is **text** here — the approve path casts `user_id::uuid` for the contact_settings upsert). Messaging MCP `update_conversation_permissions` and the `permission` field of `set_contact_settings` now INSERT a pending row + `pg_notify('permission_approval', userId)` instead of writing the permission (shared helper `packages/messaging/src/tools/permission-requests.ts`); **routing + download_media in `set_contact_settings` still apply instantly** (its contact_settings upsert no longer touches the permission column). The ONLY code that writes `contact_settings.permission` from a deferred request is `packages/gateway/src/approvals.ts` `POST /approvals/:id/decide` (`approve`). **Android/dashboard contract:** `GET /approvals/pending` (Bearer ll5 token) → `{pending:[{id, platform, conversation_id, display_name, current_permission, requested_permission, created_at}]}`; `POST /approvals/:id/decide` body `{decision:"approve"|"reject"}` → approve `{status:"applied", request_id, applied:{target_type,target_id,display_name,permission}}`, reject `{status:"rejected", request_id}`, foreign/missing id → 404, already-decided → 409 `{status}`, expired → 409 `{status:"expired"}`. Push: durable `LISTEN permission_approval` in gateway startup (`utils/permission-approval-listener.ts`) → FCM (`type:"permission_approval"`, level alert) so the phone prompts; auto-reconnects on listener error.
 
 **Web chat upward pagination [2026-06-22]:** the dashboard chat tile (`chat-widget.tsx`) loads older history on scroll-up. Gateway `GET /chat/messages` takes an optional `before` cursor (`created_at < $N`, independent of `since`); with the existing DESC…LIMIT…re-sorted-ASC it returns the `limit` newest rows older than the cursor. The widget fetches `…&before=<oldest loaded created_at>` when `scrollTop<120` (guarded by `hasMoreOlder`+`loadingOlder` refs) and PREPENDS de-duped rows. Scroll is anchored across the prepend via a `useLayoutEffect` that adds the `scrollHeight` delta to `scrollTop` (captured pre-`setMessages`) and forces `pinnedRef=false` so auto-scroll doesn't jump to bottom — DO NOT remove the anchor or the viewport will leap on every load-older. `<30`-row page ⇒ `hasMoreOlder=false`; convId change resets it. `reconcile()` must stay a UNION merge (it maps `prev` + appends only unseen recent rows) or it would drop loaded older messages.

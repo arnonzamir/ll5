@@ -66,8 +66,10 @@ ll5/
 │   │   ├── data-source-config.md   # Per-source enable/disable toggles
 │   │   ├── skill-gtd-review.md     # GTD daily + weekly review workflows
 │   │   └── agent-routing-rename.md # Rename notification rules → routing rules
+│   ├── decisions/                    # DECISION-001..020 (architectural choices; 018 planning beats/weekly session, 019 habit contracts, 020 grounded action)
 │   └── implementation/
 │       ├── mcp-implementation.md     # Phased build plan for all MCPs
+│       ├── companion-usability-plan.md # Phased plan for DECISION-018/019/020 (evening close, weekly-review solo fallback, habit contracts, grounding + KPIs)
 │       ├── deployment.md             # Docker, CI/CD, Coolify
 │       ├── deployment-log.md         # What was deployed, lessons learned
 │       ├── coolify-setup.md          # Step-by-step Coolify guide

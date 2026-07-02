@@ -8,6 +8,33 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Companion-usability review → DECISION-018/019/020 + phased plan (2026-07-02)
+Full system + audit review of Jun 25 – Jul 2 (932 eval moments, 27 sessions, week of journal/GTD/chat/
+audit-log telemetry, qualitative read of live-agent transcripts). Verdict: excellent at running the
+existing day (morning decision-locks, in-day logistics, Ritalin escalation), weak at forward/weekly
+planning and non-deterministic habits. Key findings: `ping_later` = **1 of 932** moments (persona rule
+alone didn't move behavior); silent-level staging is a black hole (free-block/triage proposals get zero
+engagement — "published where the user doesn't look"; user msgs fell 20-36/day → 6-8 by Jul 1-2);
+weekly review never ran despite the "run it WITH them" nudge (inbox 40→48, overdue 57→76, April-stale
+actions poisoning free-block suggestions); habits without deterministic machinery decay (training skips
+absorbed silently) while the wake-driven Ritalin chain works; 5 trust incidents in one week from
+asserting inference over available sensors/stores (wifi, stale next_event, one-sided WhatsApp thread
+staleness, relative-date "יתפנה למחר" miss, sitter thread) — ~20% of user messages were system
+troubleshooting; tool telemetry shows self-maintenance dominance (list_narratives 3,530 / recall_lessons
+1,892 / write_journal 1,832 vs get_situation 41 / list_events 31 / get_person 13). Also flagged:
+eval-recorder suspect (138 mismatches all `claimed suppress/actual ping_now` + inverted Jul 1
+distribution — verify before trusting). Decisions (accepted): **DECISION-018** planning beats (new
+evening-close scheduler+skill with gateway-embedded staged-item collection, staging=deferral contract,
+weekly review as calendar-blocked session with +45min solo fallback + GTD decay, prep-commit obligation
++ `behavior.forward_work_stalled` anomaly check, Today card later); **DECISION-019** habit contracts
+(gtd PG `gtd_habits`+`gtd_habit_log`, 5 tools, gateway HabitScheduler firing `[Habit Check]` steps,
+outcomes into evening close + trends into weekly review; Ritalin migrates first, then training/sleep/
+bright-lines); **DECISION-020** grounded action (sensor-before-assertion hard rule + claim-class lookup
+map, meeting-prep dossier obligation, deterministic one-sided-thread visibility guard in messaging MCP,
+relative-time resolution rule, `grounding_calls` per eval moment + `behavior.ungrounded_pings` check).
+Phased plan with KPIs/baselines: `docs/implementation/companion-usability-plan.md` (Phase 0 trust+
+instrumentation first). Docs only — no code shipped yet.
+
 ### Forward-planning made a first-class, measured outcome (2026-07-01)
 Investigated "the agent isn't doing enough prep/forward planning" — confirmed true and found the eval
 governor was **blind to it**. `eval_record.py`'s `decision` field was 2-way (`ping_now` if a message was
