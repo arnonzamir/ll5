@@ -10,25 +10,36 @@ interface StuckMessageSweepConfig {
    *  user-visible channels (web/android/cli) keep waiting for an explicit
    *  agent reply to flip them — the user-facing UX needs that signal. */
   channels: string[];
+  /** PENDING rows older than this get their NOTIFY re-emitted (lost-delivery
+   *  recovery) before any flip is considered. */
+  renotifyAfterMinutes: number;
+  /** How many re-notify attempts a pending row gets before the sweep gives up
+   *  and flips it (loudly). */
+  maxRenotifies: number;
   /** Optional user_id scoping. Empty = all users. */
   userId?: string;
 }
 
 /**
- * Periodic sweep that flips long-pending/processing system messages to
- * `delivered`. Closes the gap caused by claude legitimately handling a
- * system event via push_to_user / journal / silent acknowledgment instead
- * of via the `reply` tool — without an explicit reply_to_id, channel MCP
- * never gets a chance to mark `delivered`, and the row pins at
- * `processing` (or `pending` if the PATCH to processing failed first).
+ * Periodic sweep over long-pending/processing system messages, in two passes:
  *
- * On 2026-05-12 this leaked 15+ rows pinned for 30+ hours (caught only
- * incidentally — the then-extant channel-liveness monitor read them as
- * "agent disconnected" and false-paged before it was retired 2026-05-15).
- * Channel MCP now marks system rows `delivered` directly on delivery
- * (ll5-run commit f56a..), but this sweep is the safety net for any row
- * that slips through (network blip on the PATCH, future code path that
- * forgets to mark, etc.).
+ * PASS A — re-notify lost deliveries. A system row still `pending` minutes
+ * after insert was never picked up by the channel MCP at all: its PG NOTIFY
+ * is non-durable and is lost when the insert lands inside an SSE-reconnect
+ * window (observed 2026-07-02: two gateway restarts orphaned 17 rows,
+ * including that evening's [Evening Close] beat). For those rows the sweep
+ * re-emits the SAME `new_message` NOTIFY the insert trigger sends (payload
+ * shape: migration 018), up to `maxRenotifies` times, tracking attempts in
+ * `metadata.re_notify_count`. A `processing` row is NOT re-notified — the
+ * channel demonstrably received it.
+ *
+ * PASS B — flip genuinely handled rows. `processing` rows older than
+ * `stuckAfterMinutes` flip to `delivered` (claude legitimately handles system
+ * events via push_to_user / journal / silent ack instead of the `reply` tool,
+ * so the row never gets flipped by the channel — the original 2026-05-12
+ * leak). `pending` rows only flip after their re-notifies are EXHAUSTED, and
+ * loudly (error log with ids): before 2026-07-03 the blind flip silently
+ * MASKED real delivery loss as "delivered".
  *
  * Per-row update path uses parameterised SQL with explicit user_id filter
  * when configured — no destructive wildcards.
@@ -45,6 +56,8 @@ export class StuckMessageSweep {
     logger.info('[StuckMessageSweep][start] Started', {
       intervalMinutes: this.config.intervalMinutes,
       stuckAfterMinutes: this.config.stuckAfterMinutes,
+      renotifyAfterMinutes: this.config.renotifyAfterMinutes,
+      maxRenotifies: this.config.maxRenotifies,
       channels: this.config.channels,
       userId: this.config.userId ?? '<all>',
     });
@@ -60,37 +73,118 @@ export class StuckMessageSweep {
     }
   }
 
+  private userClause(params: Array<string | number | string[]>): string {
+    if (!this.config.userId) return '';
+    params.push(this.config.userId);
+    return `AND user_id = $${params.length}::uuid`;
+  }
+
+  /** PASS A: re-emit the insert trigger's NOTIFY for never-delivered pending rows. */
+  private async renotifyLostPending(): Promise<void> {
+    const { channels, renotifyAfterMinutes, maxRenotifies } = this.config;
+    const params: Array<string | number | string[]> = [channels, renotifyAfterMinutes, maxRenotifies];
+    const userClause = this.userClause(params);
+
+    // Bump the attempt counter and re-emit the same `new_message` payload the
+    // insert trigger sends (migration 018) so the channel MCP treats it as a
+    // fresh delivery. The metadata-only UPDATE does not re-fire the trigger
+    // (its UPDATE branch requires a status change), so the explicit pg_notify
+    // is the only signal emitted.
+    const sql = `
+      WITH bumped AS (
+        UPDATE chat_messages
+        SET metadata = jsonb_set(
+              COALESCE(metadata, '{}'::jsonb),
+              '{re_notify_count}',
+              to_jsonb(COALESCE((metadata->>'re_notify_count')::int, 0) + 1)
+            )
+        WHERE channel = ANY($1::text[])
+          AND status = 'pending'
+          AND created_at < now() - ($2 || ' minutes')::interval
+          AND COALESCE((metadata->>'re_notify_count')::int, 0) < $3
+          ${userClause}
+        RETURNING id, user_id, conversation_id, channel, direction, role,
+                  content, status, metadata, created_at
+      )
+      SELECT id, (metadata->>'re_notify_count')::int AS attempt,
+             pg_notify('chat_messages', json_build_object(
+               'event', 'new_message',
+               'id', id,
+               'user_id', user_id,
+               'conversation_id', conversation_id,
+               'channel', channel,
+               'direction', direction,
+               'role', role,
+               'content', substring(content from 1 for 4000),
+               'status', status,
+               'has_attachments', (metadata ? 'attachments') IS NOT NULL
+                 AND jsonb_array_length(metadata -> 'attachments') > 0,
+               'source', CASE WHEN metadata ? 'source' THEN metadata -> 'source' ELSE NULL END,
+               'created_at', created_at
+             )::text)
+      FROM bumped
+    `;
+    const result = await this.pool.query(sql, params);
+    if (result.rowCount && result.rowCount > 0) {
+      logger.warn('[StuckMessageSweep][renotify] Re-notified lost pending rows', {
+        count: result.rowCount,
+        ids: result.rows.map((r) => r.id),
+        attempts: result.rows.map((r) => r.attempt),
+        renotifyAfterMinutes,
+      });
+    }
+  }
+
+  /** PASS B: flip handled/exhausted rows to delivered. */
+  private async flipStuck(): Promise<void> {
+    const { channels, stuckAfterMinutes, maxRenotifies } = this.config;
+    const params: Array<string | number | string[]> = [channels, stuckAfterMinutes, maxRenotifies];
+    const userClause = this.userClause(params);
+
+    // `processing` = the channel received it (original handled-but-unflipped
+    // case). `pending` only flips once re-notifies are exhausted — and that is
+    // a real delivery loss, logged loudly, never a silent mask.
+    const sql = `
+      UPDATE chat_messages
+      SET status = 'delivered'
+      WHERE channel = ANY($1::text[])
+        AND created_at < now() - ($2 || ' minutes')::interval
+        AND (
+          status = 'processing'
+          OR (status = 'pending' AND COALESCE((metadata->>'re_notify_count')::int, 0) >= $3)
+        )
+        ${userClause}
+      RETURNING id, (metadata->>'re_notify_count') AS re_notify_count
+    `;
+    const result = await this.pool.query(sql, params);
+    if (result.rowCount && result.rowCount > 0) {
+      const lost = result.rows.filter((r) => r.re_notify_count != null);
+      logger.info('[StuckMessageSweep][tick] Flipped stuck rows to delivered', {
+        count: result.rowCount,
+        channels,
+        stuckAfterMinutes,
+      });
+      if (lost.length > 0) {
+        logger.error('[StuckMessageSweep][lost] Rows NEVER delivered despite re-notifies — flipped to stop re-processing, but this was a real delivery loss', {
+          count: lost.length,
+          ids: lost.map((r) => r.id),
+        });
+      }
+    } else {
+      logger.debug('[StuckMessageSweep][tick] No stuck rows found');
+    }
+  }
+
   private async tick(): Promise<void> {
     try {
-      const { channels, stuckAfterMinutes, userId } = this.config;
-      // Build a parameterised query. channels[] uses ANY() so the array can
-      // be any length without composing the SQL string at runtime.
-      const params: Array<string | number | string[]> = [channels, stuckAfterMinutes];
-      let userClause = '';
-      if (userId) {
-        params.push(userId);
-        userClause = `AND user_id = $${params.length}::uuid`;
-      }
-
-      const sql = `
-        UPDATE chat_messages
-        SET status = 'delivered'
-        WHERE channel = ANY($1::text[])
-          AND status IN ('pending', 'processing')
-          AND created_at < now() - ($2 || ' minutes')::interval
-          ${userClause}
-        RETURNING id
-      `;
-      const result = await this.pool.query(sql, params);
-      if (result.rowCount && result.rowCount > 0) {
-        logger.info('[StuckMessageSweep][tick] Flipped stuck rows to delivered', {
-          count: result.rowCount,
-          channels,
-          stuckAfterMinutes,
-        });
-      } else {
-        logger.debug('[StuckMessageSweep][tick] No stuck rows found');
-      }
+      await this.renotifyLostPending();
+    } catch (err) {
+      logger.error('[StuckMessageSweep][renotify] Failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    try {
+      await this.flipStuck();
     } catch (err) {
       logger.error('[StuckMessageSweep][tick] Failed', {
         error: err instanceof Error ? err.message : String(err),

@@ -237,6 +237,8 @@ async function startSchedulersForUser(
   const stuckMessageSweep = new StuckMessageSweep(pgPool, {
     intervalMinutes: s('stuck_message_sweep_minutes', 10),
     stuckAfterMinutes: s('stuck_message_after_minutes', 30),
+    renotifyAfterMinutes: s('stuck_message_renotify_minutes', 3),
+    maxRenotifies: s('stuck_message_max_renotifies', 3),
     channels: ['system'],
     userId,
   });

@@ -8,6 +8,23 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### StuckMessageSweep: re-notify lost deliveries instead of masking them + weekly review → Friday (2026-07-03)
+The lost-NOTIFY known issue (below) is fixed at the sweep: `stuck-message-sweep.ts` is now TWO passes.
+Pass A: system rows still `pending` after `stuck_message_renotify_minutes` (3) were never picked up (their
+insert NOTIFY died in an SSE-reconnect window) — the sweep re-emits the SAME `new_message` pg_notify the
+insert trigger sends (migration-018 payload shape), up to `stuck_message_max_renotifies` (3) attempts
+tracked in `metadata.re_notify_count` (metadata-only UPDATE doesn't re-fire the trigger — the explicit
+pg_notify is the only signal; `processing` rows are never re-notified, the channel had them). Pass B:
+`processing` rows >30min flip as before (handled-but-unflipped); `pending` rows flip ONLY after
+re-notifies are exhausted, with an error-level log naming the ids — a real delivery loss is now loud,
+never silently "delivered". +5 tests (467 gateway). Also: weekly review moved to its documented slot —
+`user_settings.scheduler.weekly_review_day` 4→5 (0=Sunday, so 5=Friday; the code fires by
+Intl weekday in the effective tz). NOTE the review had been firing THURSDAYS all along (docs said Friday);
+2026-07-03's review was fired manually to live-verify the new session+solo-fallback contract (opened with
+calendar block + first concrete inbox question at 14:08; fallback wake fired 14:52 sharp; solo one-pager
+14:53; user replied "agree" → agent executed the safe archives/trash/someday immediately). First natural
+Friday fire: 2026-07-10 14:00.
+
 ### Companion program — live verification complete (2026-07-02 evening)
 End-to-end verified in production: **HabitScheduler** (test habit fired at its exact minute; the live
 agent handled the [Habit Check] correctly — logged `done` silently; eval moment recorded

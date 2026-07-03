@@ -6,6 +6,14 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
+**Lost-NOTIFY delivery race — FIXED at the sweep [2026-07-03]:** StuckMessageSweep now re-notifies
+never-delivered `pending` system rows (re-emits the migration-018 `new_message` pg_notify, 3 attempts
+from 3 min of age, counter in `metadata.re_notify_count`; knobs `stuck_message_renotify_minutes` /
+`stuck_message_max_renotifies`) and only flips them `delivered` after attempts are exhausted — with an
+error log naming the ids, so a real loss is loud. `processing` rows keep the old flip (channel had them).
+Also `weekly_review_day` is now **5 = Friday** (0=Sunday; it had been 4=Thursday since forever while the
+docs said Friday). Original incident notes:
+
 **Lost-NOTIFY delivery race [2026-07-02, known issue]:** system messages inserted while the channel
 MCP's SSE is reconnecting (gateway restart window) lose their non-durable PG NOTIFY and sit `pending`
 forever; StuckMessageSweep then flips them `delivered` after 30 min, MASKING the loss. Bit tonight's
