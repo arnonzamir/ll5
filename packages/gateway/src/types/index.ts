@@ -6,6 +6,7 @@ export {
   type PushCalendarItem,
   type PushPhoneStatusItem,
   type PushWifiItem,
+  type PushWifiScanItem,
   type PushCameraPhotoItem,
   type PushTrackedDeviceItem,
   type PushDeviceActivityItem,

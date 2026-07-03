@@ -34,6 +34,7 @@ import { ContactRoutingResolver } from './processors/contact-routing.js';
 import { processPhoneContacts } from './processors/phone-contacts.js';
 import { processPhoneStatus } from './processors/phone-status.js';
 import { processWifi } from './processors/wifi.js';
+import { processWifiScan } from './processors/wifi-scan.js';
 import { processCameraPhoto } from './processors/camera-photo.js';
 import { processTrackedDevice } from './processors/findhub.js';
 import { processDeviceActivity } from './processors/device-activity.js';
@@ -240,6 +241,7 @@ async function processItem(
       calendar_event: 'calendar',
       phone_status: 'phone_status',
       wifi: 'wifi',
+      wifi_scan: 'wifi', // scans ride the same per-source toggle as connection events
       camera_photo: 'camera_photos',
       tracked_device: 'findhub',
       device_activity: 'device_activity',
@@ -286,6 +288,9 @@ async function processItem(
         break;
       case 'wifi':
         await processWifi(es, userId, item);
+        break;
+      case 'wifi_scan':
+        await processWifiScan(es, userId, item);
         break;
       case 'camera_photo':
         await processCameraPhoto(es, pgPool, userId, item);
@@ -1757,7 +1762,7 @@ export async function startServer(config: EnvConfig): Promise<void> {
     logger.info(`[startServer][listen] Gateway listening on port ${config.port}`, {
       env: config.nodeEnv,
       tokenCount: Object.keys(config.webhookTokens).length,
-      webhook_item_types: ['location', 'message', 'calendar_event', 'device_calendar', 'phone_contact', 'phone_status', 'wifi', 'tracked_device', 'device_activity', 'bluetooth', 'geofence_transition', 'sleep_segment', 'sleep_classify', 'current_place'],
+      webhook_item_types: ['location', 'message', 'calendar_event', 'device_calendar', 'phone_contact', 'phone_status', 'wifi', 'wifi_scan', 'tracked_device', 'device_activity', 'bluetooth', 'geofence_transition', 'sleep_segment', 'sleep_classify', 'current_place'],
     });
   });
 }

@@ -88,6 +88,131 @@ describe('resolveLocation — fusion tiers', () => {
   });
 });
 
+describe('resolveLocation — visible-fingerprint tier (DECISION-021)', () => {
+  const visible = (
+    networks: Array<{ rssi: number; place?: typeof HOME; confident?: boolean; bssid?: string }>,
+    ageMs = 120_000,
+  ) => ({
+    ageMs,
+    networks: networks.map((n, i) => ({
+      bssid: n.bssid ?? `aa:bb:cc:dd:ee:0${i}`,
+      ssid: `net-${i}`,
+      rssi: n.rssi,
+      place: { ...(n.place ?? HOME), confident: n.confident ?? true },
+    })),
+  });
+
+  it('ANCHORS when GPS is absent: two same-place visible networks → place, medium, wifi_scan', () => {
+    const r = resolveLocation({
+      gps: null, wifi: null,
+      visibleKnown: visible([{ rssi: -70 }, { rssi: -72 }]),
+    });
+    expect(r).toMatchObject({
+      place: 'Home', placeId: 'home-uuid', confidence: 'medium', source: 'wifi_scan', labelKind: 'place',
+    });
+    expect(r.reasoning).toContain('approximate');
+  });
+
+  it('ANCHORS when GPS is stale', () => {
+    const r = resolveLocation({
+      gps: gps({ matchedPlace: null, ageMs: 12 * 60 * 1000 }), wifi: null,
+      visibleKnown: visible([{ rssi: -70 }, { rssi: -72 }]),
+    });
+    expect(r).toMatchObject({ place: 'Home', source: 'wifi_scan' });
+  });
+
+  it('ANCHORS when fresh GPS is COARSE (accuracy > 100m) with no place match', () => {
+    const r = resolveLocation({
+      gps: gps({ matchedPlace: null, accuracyM: 350 }), wifi: null,
+      visibleKnown: visible([{ rssi: -70 }, { rssi: -72 }]),
+    });
+    expect(r).toMatchObject({ place: 'Home', source: 'wifi_scan', confidence: 'medium' });
+  });
+
+  it('one STRONG network (rssi >= -65) is enough on its own', () => {
+    const r = resolveLocation({ gps: null, wifi: null, visibleKnown: visible([{ rssi: -60 }]) });
+    expect(r).toMatchObject({ place: 'Home', source: 'wifi_scan' });
+  });
+
+  it('one WEAK network (< -65) is NOT enough — needs 2 same-place matches', () => {
+    const r = resolveLocation({ gps: null, wifi: null, visibleKnown: visible([{ rssi: -70 }]) });
+    expect(r).toMatchObject({ place: null, source: 'none' });
+  });
+
+  it('two weak networks at DIFFERENT places do not elect either', () => {
+    const OFFICE = { placeId: 'office-uuid', placeName: 'Office' };
+    const r = resolveLocation({
+      gps: null, wifi: null,
+      visibleKnown: visible([{ rssi: -70, place: HOME }, { rssi: -71, place: OFFICE }]),
+    });
+    expect(r.place).toBeNull();
+  });
+
+  it('STALE scan (> 10 min) is ignored entirely', () => {
+    const r = resolveLocation({
+      gps: null, wifi: null,
+      visibleKnown: visible([{ rssi: -55 }, { rssi: -60 }], 11 * 60 * 1000),
+    });
+    expect(r).toMatchObject({ place: null, source: 'none' });
+  });
+
+  it('non-confident bindings never vote', () => {
+    const r = resolveLocation({
+      gps: null, wifi: null,
+      visibleKnown: visible([{ rssi: -55, confident: false }, { rssi: -60, confident: false }]),
+    });
+    expect(r.place).toBeNull();
+  });
+
+  it('CORROBORATES a fresh GPS place match (stays high, reasoning notes the fingerprint)', () => {
+    const r = resolveLocation({
+      gps: gps(), wifi: null,
+      visibleKnown: visible([{ rssi: -60 }, { rssi: -70 }]),
+    });
+    expect(r).toMatchObject({ place: 'Home', confidence: 'high', source: 'gps' });
+    expect(r.reasoning).toContain('corroborates');
+  });
+
+  it('GPS WINS on disagreement: fresh precise fix with no place match → city, not the scan place', () => {
+    // Drive-past protection: a clean fix says you are NOT at Home even though
+    // Home\'s fingerprint is still visible from the road.
+    const r = resolveLocation({
+      gps: gps({ matchedPlace: null, accuracyM: 25 }), wifi: null,
+      visibleKnown: visible([{ rssi: -60 }, { rssi: -70 }]),
+    });
+    expect(r.place).toBeNull();
+    expect(r).toMatchObject({ label: 'Zikhron Yaakov', labelKind: 'city' });
+  });
+
+  it('GPS WINS on disagreement: fresh fix matched to a DIFFERENT place beats the scan', () => {
+    const OFFICE = { placeId: 'office-uuid', placeName: 'Office' };
+    const r = resolveLocation({
+      gps: gps({ matchedPlace: OFFICE }), wifi: null,
+      visibleKnown: visible([{ rssi: -60 }, { rssi: -70 }]),
+    });
+    expect(r).toMatchObject({ place: 'Office', confidence: 'high' });
+  });
+
+  it('the CONNECTED-wifi anchor outranks the scan tier', () => {
+    const OFFICE = { placeId: 'office-uuid', placeName: 'Office' };
+    const r = resolveLocation({
+      gps: null,
+      wifi: homeWifi(),
+      visibleKnown: visible([{ rssi: -55, place: OFFICE }, { rssi: -60, place: OFFICE }]),
+    });
+    expect(r).toMatchObject({ place: 'Home', source: 'wifi' });
+  });
+
+  it('stale-usable GPS at the same place: scan anchors and notes the agreement', () => {
+    const r = resolveLocation({
+      gps: gps({ ageMs: 12 * 60 * 1000 }), wifi: null,
+      visibleKnown: visible([{ rssi: -70 }, { rssi: -72 }]),
+    });
+    expect(r).toMatchObject({ place: 'Home', confidence: 'medium', source: 'wifi_scan' });
+    expect(r.reasoning).toContain('stale GPS agrees');
+  });
+});
+
 describe('resolveLocation — departure hysteresis (write path)', () => {
   const prior = { label: 'Home', kind: 'place' as const, placeId: 'home-uuid' };
 

@@ -8,6 +8,29 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Wifi scan fingerprinting — see ALL visible networks, map them to places (DECISION-021, 2026-07-03)
+The agent now sees every wifi network around the phone, not just the connected one, and visible-network
+sets resolve to places. **Android (ll5-android):** new WifiScanRepository reads OS-cached
+getScanResults() (no startScan — no throttle/battery cost), top 12 by RSSI, pushed as new webhook item
+`wifi_scan` on the existing cycles (PushSyncWorker 15-min + heartbeat hourly), gated ≥5 min between
+pushes + skip-if-BSSID-set-unchanged (resend after 30 min); Room offline queue (schema v7,
+pending_wifi_scans); REMOVED `neverForLocation` from NEARBY_WIFI_DEVICES (it was present and strips
+scan data!). BSSIDs lowercased. assembleDebug green. **Backend:** new ES index
+`ll5_awareness_wifi_scans` (nested networks); gateway `processors/wifi-scan.ts` stores + AUTO-LEARNS
+`visible` bindings into known_networks when the location state confirms a known place within ±10 min
+(rssi ≥ −75, cap 10 visible bindings/place, same key-mutex + observation-cap as connected auto-learn;
+`binding: connected|visible` field, legacy defaults connected). **Shared resolver** gains a
+visible-fingerprint tier (4b, below connected-wifi anchor): confident visible bindings vote by place —
+≥2 BSSIDs same place or 1 at rssi ≥ −65 → medium-confidence `source: wifi_scan` anchor when GPS is
+absent/stale/coarse; corroborates (boost) when GPS agrees; fresh accurate disagreeing GPS wins
+(drive-past intact). Wired on BOTH the awareness read path (LocationService) and gateway write path
+(processors/location.ts) per DECISION-009 symmetry. **where_is_user** gains `wifi.visible`
+{scan_age_s, total_visible, known:[{place,ssid,rssi}]} (≤10 min else omitted); get_situation inherits.
+Contract gotcha handled: Android's Moshi OMITS null keys — gateway schema defaults missing ssid/
+connected_bssid to null. Tests: shared 117 / gateway 481 / knowledge 104 / awareness 210, all tsc clean.
+Deploy = gateway+awareness+knowledge together (mappings auto-ensured on boot; gateway also PUT-adds
+`binding` to the live knowledge mapping). Android = local assembleDebug APK, manual install (no CI).
+
 ### StuckMessageSweep: re-notify lost deliveries instead of masking them + weekly review → Friday (2026-07-03)
 The lost-NOTIFY known issue (below) is fixed at the sweep: `stuck-message-sweep.ts` is now TWO passes.
 Pass A: system rows still `pending` after `stuck_message_renotify_minutes` (3) were never picked up (their

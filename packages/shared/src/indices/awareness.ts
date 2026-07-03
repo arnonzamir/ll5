@@ -185,6 +185,30 @@ export const AWARENESS_INDICES: IndexDefinition[] = [
     },
   },
   {
+    // Visible-network scans (DECISION-021): one doc per accepted `wifi_scan`
+    // push — the top ~12 networks by RSSI the phone could SEE (not necessarily
+    // join). Deliberately separate from ll5_awareness_wifi_connections: scans
+    // are multi-network fingerprint documents (latest-fingerprint lookup,
+    // nested match), not connect/disconnect events.
+    index: 'll5_awareness_wifi_scans',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        timestamp: { type: 'date' },
+        networks: {
+          type: 'nested',
+          properties: {
+            ssid: { type: 'keyword' },
+            bssid: { type: 'keyword' },
+            rssi: { type: 'integer' },
+            frequency_mhz: { type: 'integer' },
+          },
+        },
+        connected_bssid: { type: 'keyword' },
+      },
+    },
+  },
+  {
     // Current location of trackable devices and Bluetooth tags reported by the
     // Google Find Hub (Find My Device) network — phones/tablets/watches shared
     // to the account and registered trackers (keys, bag, car tag, ESP32 etc.).

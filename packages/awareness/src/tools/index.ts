@@ -7,6 +7,7 @@ import type { CalendarEventRepository } from '../repositories/interfaces/calenda
 import type { NotableEventRepository } from '../repositories/interfaces/notable-event.repository.js';
 import type { PhoneStatusRepository } from '../repositories/interfaces/phone-status.repository.js';
 import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
+import type { WifiScanRepository } from '../repositories/interfaces/wifi-scan.repository.js';
 import type { TrackedDeviceRepository } from '../repositories/interfaces/tracked-device.repository.js';
 import type { DeviceActivityRepository } from '../repositories/interfaces/device-activity.repository.js';
 import type { BluetoothRepository } from '../repositories/interfaces/bluetooth.repository.js';
@@ -34,6 +35,7 @@ export interface Repositories {
   notableEvent: NotableEventRepository;
   phoneStatus: PhoneStatusRepository;
   wifi: WifiRepository;
+  wifiScan: WifiScanRepository;
   trackedDevice: TrackedDeviceRepository;
   deviceActivity: DeviceActivityRepository;
   bluetooth: BluetoothRepository;
@@ -51,7 +53,7 @@ export function registerAllTools(
   if (!esClient) {
     throw new Error('esClient is required for LocationService');
   }
-  const locationService = new LocationService(repos.location, repos.wifi, esClient);
+  const locationService = new LocationService(repos.location, repos.wifi, esClient, repos.wifiScan);
   registerLocationTools(server, repos.location, getUserId, locationService, esClient);
   registerMessageTools(server, repos.message, getUserId);
   registerEntityStatusTools(server, repos.entityStatus, getUserId);

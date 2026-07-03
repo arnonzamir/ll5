@@ -56,6 +56,24 @@ export const WIFI_CONNECTED_ANCHOR_MS = 2 * 60 * 60 * 1000;
  *  trusted (a manual binding is always trusted regardless of count). */
 export const BSSID_MIN_OBSERVATIONS = 3;
 
+// --- Visible-scan fingerprinting (DECISION-021) ----------------------------
+/** A wifi SCAN younger than this is "fresh" — usable as a visible-network
+ *  fingerprint by the resolver, and the co-occurrence window for auto-learning
+ *  visible bindings against the location state. */
+export const SCAN_FRESH_MS = 10 * 60 * 1000;
+/** Min RSSI (dBm) for a scanned network to be auto-learned as a `visible`
+ *  binding — weaker signals are transient neighbors, not the place fingerprint. */
+export const VISIBLE_MIN_RSSI_LEARN = -75;
+/** A SINGLE visible known network at/above this RSSI (dBm) is strong enough to
+ *  make its place a candidate on its own. */
+export const VISIBLE_STRONG_RSSI = -65;
+/** Minimum same-place visible BSSIDs for the fingerprint vote to elect a place
+ *  (unless one of them clears VISIBLE_STRONG_RSSI alone). */
+export const VISIBLE_MIN_MATCHES = 2;
+/** Cap on auto-learned `visible` bindings per place — bounds fingerprint growth
+ *  the same way MAX_PLACE_OBSERVATIONS bounds a promiscuous BSSID's doc. */
+export const VISIBLE_LEARN_CAP_PER_PLACE = 10;
+
 // --- Stay-point / visit detection ----------------------------------------
 export const STAY_RADIUS_M = 150;
 export const MIN_DWELL_MS = 10 * 60 * 1000;

@@ -21,7 +21,9 @@ import {
   TRIP_PULSE_MS,
   WIFI_CONNECTED_ANCHOR_MS,
   BSSID_MIN_OBSERVATIONS,
+  SCAN_FRESH_MS,
   type WifiSignal,
+  type VisibleScanSignal,
   type PriorLabel,
   type Motion,
 } from '@ll5/shared';
@@ -208,6 +210,50 @@ async function getWifiSignal(es: Client, userId: string): Promise<WifiSignal | u
   }
 }
 
+/**
+ * Build the visible-fingerprint signal for the resolver (DECISION-021, write-path
+ * half of the DECISION-009 symmetry): the latest wifi SCAN, if fresh, with its
+ * BSSIDs matched against known_networks bindings (connected AND visible — the
+ * same manual/>=N-observations confidence rule as the connected anchor).
+ * Resilient — any failure yields `undefined` so a scan hiccup never blocks a
+ * location push.
+ */
+async function getVisibleScanSignal(
+  es: Client,
+  userId: string,
+): Promise<VisibleScanSignal | undefined> {
+  try {
+    const res = await es.search({
+      index: 'll5_awareness_wifi_scans',
+      query: { bool: { filter: [{ term: { user_id: userId } }] } },
+      sort: [{ timestamp: { order: 'desc' } }],
+      size: 1,
+    });
+    const hit = res.hits.hits[0]?._source as
+      | { timestamp?: string; networks?: Array<{ ssid?: string | null; bssid?: string; rssi?: number }> }
+      | undefined;
+    if (!hit?.timestamp || !hit.networks?.length) return undefined;
+
+    const ageMs = Date.now() - new Date(hit.timestamp).getTime();
+    if (ageMs >= SCAN_FRESH_MS) return undefined; // stale scan carries no signal
+
+    const matched: VisibleScanSignal['networks'] = [];
+    for (const n of hit.networks) {
+      if (!n.bssid || typeof n.rssi !== 'number') continue;
+      const bssidPlace = await resolveBssidPlace(es, userId, n.bssid);
+      if (!bssidPlace) continue;
+      matched.push({ bssid: n.bssid, ssid: n.ssid ?? null, rssi: n.rssi, place: bssidPlace });
+    }
+    if (matched.length === 0) return undefined;
+    return { ageMs, networks: matched };
+  } catch (err) {
+    logger.debug('[location][getVisibleScanSignal] failed (continuing without scan)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+}
+
 /** Resolve a BSSID to a confident known place (manual binding or >= N observations). */
 async function resolveBssidPlace(
   es: Client,
@@ -356,6 +402,7 @@ async function detectPlaceTransitionAndNotify(
   geocode: GeocodingResult | null,
   placeMatch: PlaceMatchResult | null,
   wifiSignal: WifiSignal | undefined,
+  visibleScan: VisibleScanSignal | undefined,
   motionInfo: MotionInfo,
 ): Promise<void> {
   // Serialize the per-user state read-modify-write (G5): concurrent webhooks for
@@ -363,7 +410,7 @@ async function detectPlaceTransitionAndNotify(
   // double-fire the transition push / clobber last_push_at.
   try {
     await gatewayKeyMutex.runExclusive(`location-state:${userId}`, async () => {
-      await runTransition(es, pool, userId, item, geocode, placeMatch, wifiSignal, motionInfo);
+      await runTransition(es, pool, userId, item, geocode, placeMatch, wifiSignal, visibleScan, motionInfo);
     });
   } catch (err) {
     logger.warn('[location][transition] transition detection failed (non-blocking)', {
@@ -380,6 +427,7 @@ async function runTransition(
   geocode: GeocodingResult | null,
   placeMatch: PlaceMatchResult | null,
   wifiSignal: WifiSignal | undefined,
+  visibleScan: VisibleScanSignal | undefined,
   motionInfo: MotionInfo,
 ): Promise<void> {
     const state = await getLocationState(es, userId);
@@ -412,6 +460,9 @@ async function runTransition(
         speedMps: motionInfo.mps > 0 ? motionInfo.mps : (item.speed_mps ?? item.speed ?? null),
       },
       wifi: wifiSignal,
+      // DECISION-021/DECISION-009: the SAME visible-fingerprint signal the
+      // awareness read path feeds the resolver, so write and read can't disagree.
+      visibleKnown: visibleScan,
       prior,
     });
 
@@ -695,11 +746,12 @@ export async function processLocation(
     });
   }
 
-  // Run geocoding, place matching, and the latest-wifi fetch concurrently.
-  const [geocodeResult, placeMatch, wifiSignal] = await Promise.all([
+  // Run geocoding, place matching, and the latest-wifi/scan fetches concurrently.
+  const [geocodeResult, placeMatch, wifiSignal, visibleScan] = await Promise.all([
     reverseGeocode(item.lat, item.lon, geocodingApiKey),
     matchKnownPlace(es, userId, item.lat, item.lon),
     getWifiSignal(es, userId),
+    getVisibleScanSignal(es, userId),
   ]);
 
   // ---- GPS-jamming / spoof guard (G10) --------------------------------------
@@ -796,7 +848,7 @@ export async function processLocation(
 
   if (pgPool && !suspect) {
     await updateCurrentTimezoneFromLocation(pgPool, userId, item.lat, item.lon);
-    await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, effectivePlaceMatch, wifiSignal, motionInfo);
+    await detectPlaceTransitionAndNotify(es, pgPool, userId, item, geocodeResult, effectivePlaceMatch, wifiSignal, visibleScan, motionInfo);
   }
 
   // Build the location document

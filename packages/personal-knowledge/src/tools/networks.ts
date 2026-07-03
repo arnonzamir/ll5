@@ -171,6 +171,9 @@ export function registerNetworkTools(
         bssid: n.bssid,
         ssid: n.ssid ?? null,
         label: n.label ?? null,
+        // 'connected' = the phone joins it there; 'visible' = part of the
+        // place's visible-scan fingerprint (DECISION-021).
+        binding: n.binding,
         manual_place_id: n.manualPlaceId ?? null,
         manual_place_name: n.manualPlaceName ?? null,
         place_observations: n.placeObservations.map((o) => ({

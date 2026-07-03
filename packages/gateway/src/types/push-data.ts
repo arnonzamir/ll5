@@ -97,6 +97,28 @@ const PushWifiItemSchema = z.object({
   trigger: z.enum(['connect', 'disconnect', 'ssid_change', 'heartbeat']).optional(),
 });
 
+// WiFi scan — the top networks by RSSI the phone could SEE (not necessarily
+// join), from the OS-cached WifiManager scan results (DECISION-021). NOTE the
+// frozen contract nests the payload under `data` (unlike the flat legacy items).
+const PushWifiScanNetworkSchema = z.object({
+  // Android's Moshi OMITS null keys — a hidden network arrives with no ssid
+  // key at all (and connected_bssid is absent when disconnected). Treat
+  // missing as null.
+  ssid: z.string().nullable().optional().default(null),
+  bssid: z.string().min(1),
+  rssi: z.number().int(),
+  frequency_mhz: z.number().int().optional(),
+});
+const PushWifiScanItemSchema = z.object({
+  type: z.literal('wifi_scan'),
+  data: z.object({
+    timestamp: z.string().datetime({ offset: true }),
+    // Contract says top 12 — accept a little slack, reject unbounded blobs.
+    networks: z.array(PushWifiScanNetworkSchema).max(32),
+    connected_bssid: z.string().nullable().optional(),
+  }),
+});
+
 const PushCameraPhotoSchema = z.object({
   type: z.literal('camera_photo'),
   timestamp: z.string().datetime({ offset: true }), // when the photo was taken (EXIF/date-taken)
@@ -231,6 +253,7 @@ const PushItemSchema = z.discriminatedUnion('type', [
   PushPhoneContactSchema,
   PushPhoneStatusItemSchema,
   PushWifiItemSchema,
+  PushWifiScanItemSchema,
   PushCameraPhotoSchema,
   PushTrackedDeviceSchema,
   PushDeviceActivityItemSchema,
@@ -255,6 +278,7 @@ export type PushCalendarItem = z.infer<typeof PushCalendarItemSchema>;
 export type PushPhoneContactItem = z.infer<typeof PushPhoneContactSchema>;
 export type PushPhoneStatusItem = z.infer<typeof PushPhoneStatusItemSchema>;
 export type PushWifiItem = z.infer<typeof PushWifiItemSchema>;
+export type PushWifiScanItem = z.infer<typeof PushWifiScanItemSchema>;
 export type PushCameraPhotoItem = z.infer<typeof PushCameraPhotoSchema>;
 export type PushTrackedDeviceItem = z.infer<typeof PushTrackedDeviceSchema>;
 export type PushDeviceActivityItem = z.infer<typeof PushDeviceActivityItemSchema>;

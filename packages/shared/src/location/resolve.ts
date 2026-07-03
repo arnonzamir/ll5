@@ -5,6 +5,10 @@ import {
   WIFI_CONNECTED_ANCHOR_MS,
   DEPARTURE_ACCURACY_M,
   DRIVING_SPEED_MPS,
+  LOW_ACCURACY_METERS,
+  SCAN_FRESH_MS,
+  VISIBLE_MIN_MATCHES,
+  VISIBLE_STRONG_RSSI,
 } from './constants.js';
 import { describeLocation } from './describe.js';
 import type {
@@ -27,6 +31,10 @@ type Core = Omit<ResolvedLocation, 'description' | 'motion'>;
  *  1. GPS+wifi fusion (7 tiers) → place / confidence / source / reasoning.
  *  2. Wifi anchoring: a confident BSSID->place wins when GPS has no/stale place
  *     match (this is what stops home GPS-jitter flapping to the city label).
+ *  2b. Visible-fingerprint tier (DECISION-021): known networks visible in a
+ *     fresh SCAN vote by place; anchors when GPS is absent/stale/coarse and
+ *     no connected-wifi anchor applies, corroborates when GPS agrees, and
+ *     loses to a fresh precise disagreeing GPS fix.
  *  3. City-level fallback label when no known place but a city is known.
  *  4. Departure hysteresis: when `prior` is a known place and the current fix
  *     can't confidently say you left, HOLD the prior place instead of flipping
@@ -58,6 +66,38 @@ export function resolveLocation(input: ResolveInput): ResolvedLocation {
       : null;
 
   const city = gps?.city ?? null;
+
+  // Visible-scan fingerprint tier (DECISION-021): from a FRESH scan (< SCAN_FRESH_MS
+  // — a stale scan is ignored entirely), the already-matched CONFIDENT known
+  // networks vote by place. >= VISIBLE_MIN_MATCHES same-place BSSIDs, or a single
+  // one at RSSI >= VISIBLE_STRONG_RSSI, elect the place as a candidate (precision
+  // `approximate` — a fingerprint says "at/around", never a coordinate).
+  interface ScanVote {
+    place: BssidPlace;
+    votes: number;
+    bestRssi: number;
+  }
+  const scan = input.visibleKnown ?? null;
+  const scanFresh = !!scan && scan.ageMs < SCAN_FRESH_MS;
+  let scanPlace: ScanVote | null = null;
+  if (scan && scanFresh && scan.networks.length > 0) {
+    const byPlace = new Map<string, ScanVote>();
+    for (const n of scan.networks) {
+      if (!n.place.confident) continue; // non-confident bindings never vote
+      const cur = byPlace.get(n.place.placeId);
+      if (cur) {
+        cur.votes += 1;
+        if (n.rssi > cur.bestRssi) cur.bestRssi = n.rssi;
+      } else {
+        byPlace.set(n.place.placeId, { place: n.place, votes: 1, bestRssi: n.rssi });
+      }
+    }
+    scanPlace =
+      [...byPlace.values()]
+        .filter((v) => v.votes >= VISIBLE_MIN_MATCHES || v.bestRssi >= VISIBLE_STRONG_RSSI)
+        .sort((a, b) => b.votes - a.votes || b.bestRssi - a.bestRssi)[0] ?? null;
+  }
+  const scanAgeS = scan ? Math.floor(scan.ageMs / 1000) : null;
 
   // recently-left hint: GPS not fresh + a recent wifi DISCONNECT from a known place.
   const wifiFresh = !!wifi && wifi.ageMs < WIFI_FRESH_MS;
@@ -107,15 +147,22 @@ export function resolveLocation(input: ResolveInput): ResolvedLocation {
   return { ...result, description, motion };
 
   function decide(): Core {
+    // Corroboration (DECISION-021): the visible fingerprint agreeing with a
+    // GPS-matched place is extra reasoning weight on the GPS tiers below.
+    const scanAgrees = !!scanPlace && !!gpsPlace && scanPlace.place.placeId === gpsPlace.placeId;
+    const corroboration = scanAgrees
+      ? `; visible wifi fingerprint corroborates (${scanPlace!.votes} known network(s))`
+      : '';
+
     // 1. Fresh GPS + matched place + wifi agrees
     if (gpsFresh && gpsPlace && wifiPlace && wifiPlace.placeName === gpsPlace.placeName) {
       return place(gpsPlace.placeName, wifiPlace.placeId, 'high', 'gps+wifi',
-        `GPS (${ageS}s) at ${gpsPlace.placeName}, wifi confirms`);
+        `GPS (${ageS}s) at ${gpsPlace.placeName}, wifi confirms${corroboration}`);
     }
     // 2. Fresh GPS + matched place (wifi silent/disagrees)
     if (gpsFresh && gpsPlace) {
       return place(gpsPlace.placeName, gpsPlace.placeId, 'high', 'gps',
-        `GPS fix (${ageS}s old) at ${gpsPlace.placeName}`);
+        `GPS fix (${ageS}s old) at ${gpsPlace.placeName}${corroboration}`);
     }
     // 3. Stale GPS, wifi fresh + BSSID resolves
     if (!gpsFresh && wifiPlace) {
@@ -126,6 +173,20 @@ export function resolveLocation(input: ResolveInput): ResolvedLocation {
     if (gpsFresh && !gpsPlace && wifiPlace) {
       return place(wifiPlace.placeName, wifiPlace.placeId, 'medium', 'gps+wifi',
         `GPS fresh but no place match; wifi BSSID → ${wifiPlace.placeName}`);
+    }
+    // 4b. Visible-fingerprint anchor (DECISION-021) — below the connected-wifi
+    // tiers. The scan's known networks elected a place and GPS can't do better:
+    // absent, stale, or too coarse (accuracy > LOW_ACCURACY_METERS) to disagree.
+    // A FRESH fix at/under that accuracy without a place match falls through to
+    // tier 5 instead — a precise disagreeing GPS wins (drive-past protection).
+    const gpsCoarse = !!gps && gps.accuracyM != null && gps.accuracyM > LOW_ACCURACY_METERS;
+    if (scanPlace && !wifiPlace && (!gps || !gpsFresh || gpsCoarse)) {
+      const p = scanPlace.place;
+      const staleGpsAgrees = !gpsFresh && gpsUsable && gpsPlace?.placeId === p.placeId;
+      return place(p.placeName, p.placeId, 'medium', 'wifi_scan',
+        `visible wifi fingerprint → ${p.placeName} (approximate: ${scanPlace.votes} known ` +
+        `network(s), strongest ${scanPlace.bestRssi} dBm, scan ${scanAgeS}s old` +
+        `${staleGpsAgrees ? '; stale GPS agrees' : ''})`);
     }
     // 5. Fresh GPS without matched place, no wifi anchor → city-level / unknown
     if (gpsFresh && !gpsPlace) {

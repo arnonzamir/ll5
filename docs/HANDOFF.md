@@ -6,6 +6,20 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
+**Wifi scan fingerprinting [2026-07-03, DECISION-021]:** Android pushes `wifi_scan` items (top 12
+visible networks by RSSI, OS-cached scan results, ≥5 min apart, skip-unchanged-set) → gateway stores
+`ll5_awareness_wifi_scans` + auto-learns `binding:"visible"` known_networks rows when the location
+state confirms a known place ±10 min (rssi ≥ −75, cap 10/place); shared resolver tier 4b anchors on
+≥2 same-place visible BSSIDs (or 1 ≥ −65) at medium confidence / `source: wifi_scan` when GPS is
+absent/stale/coarse — fresh accurate disagreeing GPS still wins. `where_is_user.wifi.visible` exposes
+{scan_age_s, total_visible, known:[{place,ssid,rssi}]}. GOTCHAS: Android Moshi omits null JSON keys
+(gateway schema defaults missing ssid/connected_bssid to null — keep it that way); BSSIDs are
+lowercase-colon everywhere (doc identity `${userId}::${bssid}` would split on case); the `wifi`
+data-source toggle also gates `wifi_scan` items; a queued offline scan pushed hours late is stored but
+never learned from (±10 min window). NEARBY_WIFI_DEVICES in the Android manifest must NEVER carry
+`neverForLocation` — it silently strips scan data (was present, removed 2026-07-03). Android repo has
+no CI: build `./gradlew assembleDebug`, install manually.
+
 **Lost-NOTIFY delivery race — FIXED at the sweep [2026-07-03]:** StuckMessageSweep now re-notifies
 never-delivered `pending` system rows (re-emits the migration-018 `new_message` pg_notify, 3 attempts
 from 3 min of age, counter in `metadata.re_notify_count`; knobs `stuck_message_renotify_minutes` /

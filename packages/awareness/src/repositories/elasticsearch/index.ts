@@ -5,5 +5,6 @@ export { ElasticsearchCalendarEventRepository } from './calendar-event.repositor
 export { ElasticsearchNotableEventRepository } from './notable-event.repository.js';
 export { ElasticsearchPhoneStatusRepository } from './phone-status.repository.js';
 export { ElasticsearchWifiRepository } from './wifi.repository.js';
+export { ElasticsearchWifiScanRepository } from './wifi-scan.repository.js';
 export { ElasticsearchDeviceActivityRepository } from './device-activity.repository.js';
 export { ElasticsearchBluetoothRepository } from './bluetooth.repository.js';

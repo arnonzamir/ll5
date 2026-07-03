@@ -7,7 +7,7 @@ export type Freshness = 'live' | 'recent' | 'stale' | 'unknown';
 /** How precise a GPS fix is, bucketed from its accuracy radius. */
 export type Precision = 'high' | 'approximate' | 'coarse' | 'unknown';
 export type Confidence = 'high' | 'medium' | 'low' | 'unknown';
-export type LocationSource = 'gps' | 'wifi' | 'gps+wifi' | 'stale_gps' | 'hold' | 'none';
+export type LocationSource = 'gps' | 'wifi' | 'gps+wifi' | 'wifi_scan' | 'stale_gps' | 'hold' | 'none';
 export type LabelKind = 'place' | 'city' | null;
 /** Inferred from device speed. 'unknown' when no speed is available. */
 export type Motion = 'stationary' | 'walking' | 'driving' | 'unknown';
@@ -57,6 +57,24 @@ export interface WifiSignal {
   bssidPlace?: BssidPlace | null;
 }
 
+/** One known network VISIBLE in the latest wifi scan (not necessarily joined),
+ *  already matched by the caller to its BSSID->place binding (`connected` or
+ *  `visible` — both participate). DECISION-021. */
+export interface VisibleKnownNetwork {
+  bssid?: string | null;
+  ssid?: string | null;
+  /** Signal strength in the scan, dBm (e.g. -58). */
+  rssi: number;
+  /** The place this BSSID is bound to. Non-confident bindings never vote. */
+  place: BssidPlace;
+}
+
+/** The latest visible-scan fingerprint: scan age + the matched known networks. */
+export interface VisibleScanSignal {
+  ageMs: number;
+  networks: VisibleKnownNetwork[];
+}
+
 /** The prior committed semantic label (from the location-state doc) for hysteresis. */
 export interface PriorLabel {
   label: string;
@@ -67,6 +85,11 @@ export interface PriorLabel {
 export interface ResolveInput {
   gps?: GpsSignal | null;
   wifi?: WifiSignal | null;
+  /** Already-matched known networks visible in the latest wifi SCAN (fresh
+   *  scans only matter — a stale scan is ignored). Votes by place: it anchors
+   *  when GPS is absent/stale/coarse, corroborates when a good GPS fix agrees,
+   *  and loses to a fresh precise GPS fix that disagrees. DECISION-021. */
+  visibleKnown?: VisibleScanSignal | null;
   /** Prior committed label — enables departure hysteresis (don't flip off a place
    *  on a single low-confidence fix). Omit on the read path if not needed. */
   prior?: PriorLabel | null;

@@ -23,6 +23,10 @@ export const KNOWLEDGE_NETWORKS_INDEX: IndexDefinition = {
       },
       manual_place_id: { type: 'keyword' },
       manual_place_name: { type: 'keyword' },
+      // DECISION-021: how this network relates to its place — 'connected'
+      // (the phone joins it there) or 'visible' (part of the place's visible
+      // fingerprint, learned from scans). Absent on legacy docs = 'connected'.
+      binding: { type: 'keyword' },
       label: { type: 'text' },
       total_observations: { type: 'integer' },
       first_seen: { type: 'date' },

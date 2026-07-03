@@ -17,6 +17,7 @@ import { ElasticsearchCalendarEventRepository } from './repositories/elasticsear
 import { ElasticsearchNotableEventRepository } from './repositories/elasticsearch/notable-event.repository.js';
 import { ElasticsearchPhoneStatusRepository } from './repositories/elasticsearch/phone-status.repository.js';
 import { ElasticsearchWifiRepository } from './repositories/elasticsearch/wifi.repository.js';
+import { ElasticsearchWifiScanRepository } from './repositories/elasticsearch/wifi-scan.repository.js';
 import { ElasticsearchTrackedDeviceRepository } from './repositories/elasticsearch/tracked-device.repository.js';
 import { ElasticsearchDeviceActivityRepository } from './repositories/elasticsearch/device-activity.repository.js';
 import { ElasticsearchBluetoothRepository } from './repositories/elasticsearch/bluetooth.repository.js';
@@ -91,6 +92,7 @@ export async function startServer(): Promise<void> {
     notableEvent: new ElasticsearchNotableEventRepository(esClient),
     phoneStatus: new ElasticsearchPhoneStatusRepository(esClient),
     wifi: new ElasticsearchWifiRepository(esClient),
+    wifiScan: new ElasticsearchWifiScanRepository(esClient),
     trackedDevice: new ElasticsearchTrackedDeviceRepository(esClient),
     deviceActivity: new ElasticsearchDeviceActivityRepository(esClient),
     bluetooth: new ElasticsearchBluetoothRepository(esClient),

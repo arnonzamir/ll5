@@ -12,6 +12,23 @@ export interface WifiConnection {
   timestamp: string;
 }
 
+/** One network seen in a wifi SCAN (DECISION-021) — visible, not necessarily joined. */
+export interface WifiScanNetwork {
+  ssid: string | null;
+  bssid: string;
+  rssi: number;
+  frequencyMhz?: number;
+}
+
+/** A visible-network scan doc from ll5_awareness_wifi_scans. */
+export interface WifiScan {
+  id: string;
+  userId: string;
+  timestamp: string;
+  networks: WifiScanNetwork[];
+  connectedBssid: string | null;
+}
+
 export interface WifiQuery {
   startTime?: string;
   endTime?: string;

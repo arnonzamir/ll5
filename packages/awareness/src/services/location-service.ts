@@ -1,6 +1,8 @@
 import type { Client } from '@elastic/elasticsearch';
 import type { LocationRepository } from '../repositories/interfaces/location.repository.js';
 import type { WifiRepository } from '../repositories/interfaces/wifi.repository.js';
+import type { WifiScanRepository } from '../repositories/interfaces/wifi-scan.repository.js';
+import type { WifiScanNetwork } from '../types/wifi.js';
 import {
   resolveLocation,
   freshnessLabel,
@@ -9,8 +11,12 @@ import {
   cardinal,
   GPS_FRESH_MS,
   WIFI_CONNECTED_ANCHOR_MS,
+  SCAN_FRESH_MS,
+  BSSID_MIN_OBSERVATIONS,
   type GpsSignal,
   type WifiSignal,
+  type VisibleScanSignal,
+  type VisibleKnownNetwork,
   type Confidence,
   type LocationSource,
   type Motion,
@@ -56,12 +62,22 @@ export interface Heading {
   cardinal: string;
 }
 
+/** The visible-scan fingerprint block (DECISION-021): what the phone could SEE
+ *  in the latest fresh scan, and which of those networks map to known places.
+ *  Omitted entirely when the latest scan is stale (> SCAN_FRESH_MS) or absent. */
+export interface VisibleWifiBlock {
+  scan_age_s: number;
+  total_visible: number;
+  known: Array<{ place: string; ssid: string | null; rssi: number }>;
+}
+
 export interface WifiBlock {
   bssid: string | null;
   ssid: string | null;
   connected: boolean;
   age_s: number;
   place_from_bssid?: { place_id: string; place_name: string } | null;
+  visible?: VisibleWifiBlock;
 }
 
 export interface RecentlyLeft {
@@ -128,13 +144,17 @@ export class LocationService {
     private readonly locationRepo: LocationRepository,
     private readonly wifiRepo: WifiRepository,
     private readonly es: Client,
+    /** Optional so older wirings/tests keep working; without it the visible
+     *  fingerprint block + resolver tier simply don't engage. */
+    private readonly wifiScanRepo?: WifiScanRepository,
   ) {}
 
   async getCurrentLocation(userId: string): Promise<CurrentLocation> {
     const now = Date.now();
-    const [latestGps, latestWifi, recent] = await Promise.all([
+    const [latestGps, latestWifi, latestScan, recent] = await Promise.all([
       this.locationRepo.getLatest(userId),
       this.wifiRepo.getLatest(userId),
+      this.wifiScanRepo ? this.wifiScanRepo.getLatest(userId) : Promise.resolve(null),
       this.locationRepo.query(userId, {
         startTime: new Date(now - TRAIL_WINDOW_MS).toISOString(),
         endTime: new Date(now).toISOString(),
@@ -231,10 +251,52 @@ export class LocationService {
       };
     }
 
-    // No `prior` on the read path → pure fusion (no departure hysteresis).
-    const resolved = resolveLocation({ gps: gpsSignal, wifi: wifiSignal });
+    // --- Visible-scan fingerprint (DECISION-021): latest scan, fresh only ---
+    // Match the scan's BSSIDs against known_networks bindings (connected AND
+    // visible) and feed the matched set into the shared resolver, so the place
+    // resolution itself benefits — the read-path half of the DECISION-009
+    // symmetry (the gateway write path passes the same signal).
+    let visibleBlock: VisibleWifiBlock | undefined;
+    let visibleSignal: VisibleScanSignal | undefined;
+    if (latestScan && latestScan.networks.length > 0) {
+      const scanAgeMs = now - new Date(latestScan.timestamp).getTime();
+      if (scanAgeMs < SCAN_FRESH_MS) {
+        const matched = await this.matchScanNetworks(userId, latestScan.networks);
+        visibleBlock = {
+          scan_age_s: Math.floor(scanAgeMs / 1000),
+          total_visible: latestScan.networks.length,
+          known: matched.map((m) => ({
+            place: m.place.placeName,
+            ssid: m.ssid ?? null,
+            rssi: m.rssi,
+          })),
+        };
+        if (matched.length > 0) {
+          visibleSignal = { ageMs: scanAgeMs, networks: matched };
+        }
+      }
+      // stale scan → block omitted entirely, resolver sees nothing
+    }
 
-    if (resolved.source === 'wifi' || resolved.source === 'gps+wifi') {
+    if (visibleBlock) {
+      if (wifiBlock) {
+        wifiBlock.visible = visibleBlock;
+      } else {
+        // Not connected to anything, but the scan still says what's around.
+        wifiBlock = {
+          bssid: null,
+          ssid: null,
+          connected: false,
+          age_s: visibleBlock.scan_age_s,
+          visible: visibleBlock,
+        };
+      }
+    }
+
+    // No `prior` on the read path → pure fusion (no departure hysteresis).
+    const resolved = resolveLocation({ gps: gpsSignal, wifi: wifiSignal, visibleKnown: visibleSignal });
+
+    if (resolved.source === 'wifi' || resolved.source === 'gps+wifi' || resolved.source === 'wifi_scan') {
       logger.debug('[LocationService][getCurrentLocation] resolved with wifi assist', {
         source: resolved.source,
         confidence: resolved.confidence,
@@ -263,6 +325,62 @@ export class LocationService {
           }
         : undefined,
     };
+  }
+
+  /**
+   * Match the scan's BSSIDs against known_networks in ONE mget. A network
+   * matches when its doc carries a manual binding or a dominant place with
+   * >= BSSID_MIN_OBSERVATIONS observations — the same confidence rule as the
+   * connected anchor. Both `connected` and `visible` bindings participate:
+   * the binding field describes provenance, not matching eligibility.
+   * Resilient — any failure returns [] so a networks-index hiccup never breaks
+   * where_is_user.
+   */
+  private async matchScanNetworks(
+    userId: string,
+    networks: WifiScanNetwork[],
+  ): Promise<VisibleKnownNetwork[]> {
+    try {
+      const ids = networks.map((n) => `${userId}::${n.bssid}`);
+      const res = await this.es.mget<NetworkDoc>({ index: 'll5_knowledge_networks', ids });
+      const matched: VisibleKnownNetwork[] = [];
+      res.docs.forEach((d, i) => {
+        const doc = d as { found?: boolean; _source?: NetworkDoc };
+        if (!doc.found || !doc._source) return;
+        const src = doc._source;
+        if (src.user_id !== userId) {
+          logger.warn('cross_user_access_denied', {
+            actor_user_id: userId,
+            owner_user_id: src.user_id,
+            resource: 'network',
+            id: ids[i],
+          });
+          return;
+        }
+        let place: { placeId: string; placeName: string } | null = null;
+        if (src.manual_place_id && src.manual_place_name) {
+          place = { placeId: src.manual_place_id, placeName: src.manual_place_name };
+        } else if (src.place_observations && src.place_observations.length > 0) {
+          const dominant = [...src.place_observations].sort((a, b) => b.count - a.count)[0];
+          if (dominant.count >= BSSID_MIN_OBSERVATIONS) {
+            place = { placeId: dominant.place_id, placeName: dominant.place_name };
+          }
+        }
+        if (!place) return;
+        matched.push({
+          bssid: networks[i].bssid,
+          ssid: networks[i].ssid,
+          rssi: networks[i].rssi,
+          place: { ...place, confident: true },
+        });
+      });
+      return matched;
+    } catch (err) {
+      logger.warn('[LocationService][matchScanNetworks] Failed (continuing without scan)', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return [];
+    }
   }
 
   private async lookupBssidPlace(

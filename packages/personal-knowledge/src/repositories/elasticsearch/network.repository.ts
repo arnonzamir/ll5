@@ -1,7 +1,7 @@
 import type { Client } from '@elastic/elasticsearch';
 import { BaseElasticsearchRepository } from './base.repository.js';
 import type { NetworkRepository } from '../interfaces/network.repository.js';
-import type { KnownNetwork, PlaceObservation, ResolvedPlaceForBssid } from '../../types/network.js';
+import type { KnownNetwork, NetworkBinding, PlaceObservation, ResolvedPlaceForBssid } from '../../types/network.js';
 
 const INDEX = 'll5_knowledge_networks';
 
@@ -21,6 +21,8 @@ interface NetworkDoc {
   }>;
   manual_place_id?: string;
   manual_place_name?: string;
+  /** DECISION-021: 'connected' | 'visible'. Absent on legacy docs = connected. */
+  binding?: NetworkBinding;
   label?: string;
   total_observations: number;
   first_seen: string;
@@ -45,6 +47,8 @@ function docToNetwork(doc: NetworkDoc): KnownNetwork {
     })),
     manualPlaceId: doc.manual_place_id,
     manualPlaceName: doc.manual_place_name,
+    // Back-compat: rows written before DECISION-021 carry no binding = connected.
+    binding: doc.binding ?? 'connected',
     label: doc.label,
     totalObservations: doc.total_observations,
     firstSeen: doc.first_seen,
@@ -151,6 +155,7 @@ export class ElasticsearchNetworkRepository
       })),
       manual_place_id: placeId,
       manual_place_name: placeName,
+      binding: existing?.binding ?? 'connected',
       label: label ?? existing?.label,
       total_observations: existing?.totalObservations ?? 0,
       first_seen: existing?.firstSeen ?? now,
@@ -192,6 +197,7 @@ export class ElasticsearchNetworkRepository
       })),
       manual_place_id: undefined,
       manual_place_name: undefined,
+      binding: existing.binding,
       label: existing.label,
       total_observations: existing.totalObservations,
       first_seen: existing.firstSeen,
