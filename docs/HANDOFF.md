@@ -23,7 +23,7 @@ the `ll5` instance issues a NEW per-instance apikey that must be re-encrypted in
 401s and flaps the row to `disconnected`; (5) instance-scoped apikeys can't call /instance/create —
 use `AUTHENTICATION_API_KEY` from the evolution container env; (6) this Evolution build never issues
 pairingCode — QR only (self-refresh loop on the Mac screen, or dashboard /settings/messaging).
-The proper re-provision path is the messaging MCP `provision_whatsapp_account` tool (does
+Vaultwarden ops gotchas 2026-07-04: bw CLI must stay pinned 2024.4.1 (userDecryptionOptions incompat with newer CLIs on --apikey login); Traefik router/service names must be GLOBALLY unique across all compose stacks (an ll5-vault name collision between the Vaultwarden service and the vault MCP merged their backends — mcp-vault round-robined into Vaultwarden); multi-network containers need traefik.docker.network=coolify or Traefik picks an unreachable network IP. The proper re-provision path is the messaging MCP `provision_whatsapp_account` tool (does
 create+webhook+encrypt+persist in one shot) — prefer it over manual curl when the MCP is reachable.
 
 **Wifi scan fingerprinting [2026-07-03, DECISION-021]:** Android pushes `wifi_scan` items (top 12

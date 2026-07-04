@@ -3,9 +3,9 @@
 # Differences from Dockerfile.mcp:
 #   - PACKAGE_NAME is fixed to `vault`.
 #   - Runtime is node:20-slim (Debian/glibc) instead of alpine: the official
-#     @bitwarden/cli npm package is only exercised upstream on glibc; musl is
+#     @bitwarden/cli@2024.4.1 npm package is only exercised upstream on glibc; musl is
 #     where bw breakage reports cluster.
-#   - `npm i -g @bitwarden/cli` layer provides the `bw` binary the service
+#   - `npm i -g @bitwarden/cli@2024.4.1` layer provides the `bw` binary the service
 #     spawns (config server -> login --apikey -> serve).
 #   - bw needs a writable state dir: BITWARDENCLI_APPDATA_DIR=/tmp/bw.
 
@@ -42,7 +42,12 @@ ENV NODE_ENV=production
 
 # Bitwarden CLI (the bw serve sidecar). Pinned major via dist-tag `latest` at
 # build time; the layer is cached until the base image changes.
-RUN npm install -g @bitwarden/cli && bw --version
+# PINNED 2024.4.1: newer bw CLIs (2025+) require userDecryptionOptions in the
+# identity response for --apikey login, which Vaultwarden (<=1.34) does not send
+# — login fails with "User Decryption Options are required". Verified live
+# 2026-07-04: 2026.6.0 fails, 2024.4.1 logs in + unlocks cleanly. Re-test before
+# any bump.
+RUN npm install -g @bitwarden/cli@2024.4.1 && bw --version
 
 WORKDIR /app
 
