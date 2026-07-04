@@ -6,6 +6,26 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
+**WhatsApp topology + re-pair traps [2026-07-04 incident]:** ONE Evolution server
+(evolution.noninoni.click, container in the wa-search Coolify stack i0okcoo8…) hosts TWO separate
+WhatsApp device links on the user's number: instance **`ll5`** (webhook →
+https://gateway.noninoni.click/webhook/whatsapp + X-Webhook-Secret — feeds LL5) and instance
+**`was_*`** (webhook → wa-api.noninoni.click — feeds the wa-search archive). LL5's registered instance
+name lives in `messaging_whatsapp_accounts.instance_name` — CHECK IT FIRST in any WhatsApp outage.
+Traps learned 2026-07-04 (10h outage + a wrong fix): (1) Evolution DELETES an instance entirely on
+logout/device_removed — a missing instance ≠ never existed; (2) re-pairing the only VISIBLE instance
+may be the OTHER system's (this restored the archive, not LL5 — and adding a new linked device may be
+what pushed WhatsApp to purge LL5's remaining link); (3) `state: open` and even a brief message burst
+are NOT proof of recovery — only sustained gateway `processWhatsAppWebhook` hits are; (4) recreating
+the `ll5` instance issues a NEW per-instance apikey that must be re-encrypted into
+`messaging_whatsapp_accounts.api_key` (column `api_key`, AES-GCM hex via messaging
+`/app/dist/utils/encryption.js` with ENCRYPTION_KEY) + `instance_id` updated, else the status poller
+401s and flaps the row to `disconnected`; (5) instance-scoped apikeys can't call /instance/create —
+use `AUTHENTICATION_API_KEY` from the evolution container env; (6) this Evolution build never issues
+pairingCode — QR only (self-refresh loop on the Mac screen, or dashboard /settings/messaging).
+The proper re-provision path is the messaging MCP `provision_whatsapp_account` tool (does
+create+webhook+encrypt+persist in one shot) — prefer it over manual curl when the MCP is reachable.
+
 **Wifi scan fingerprinting [2026-07-03, DECISION-021]:** Android pushes `wifi_scan` items (top 12
 visible networks by RSSI, OS-cached scan results, ≥5 min apart, skip-unchanged-set) → gateway stores
 `ll5_awareness_wifi_scans` + auto-learns `binding:"visible"` known_networks rows when the location

@@ -66,7 +66,7 @@ ll5/
 │   │   ├── data-source-config.md   # Per-source enable/disable toggles
 │   │   ├── skill-gtd-review.md     # GTD daily + weekly review workflows
 │   │   └── agent-routing-rename.md # Rename notification rules → routing rules
-│   ├── decisions/                    # DECISION-001..021 (architectural choices; 018 planning beats/weekly session, 019 habit contracts, 020 grounded action, 021 wifi-scan fingerprinting)
+│   ├── decisions/                    # DECISION-001..021 (see also HANDOFF "WhatsApp topology + re-pair traps" 2026-07-04) (architectural choices; 018 planning beats/weekly session, 019 habit contracts, 020 grounded action, 021 wifi-scan fingerprinting)
 │   └── implementation/
 │       ├── mcp-implementation.md     # Phased build plan for all MCPs
 │       ├── companion-usability-plan.md # Phased plan for DECISION-018/019/020 (evening close, weekly-review solo fallback, habit contracts, grounding + KPIs)

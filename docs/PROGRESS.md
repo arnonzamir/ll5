@@ -8,6 +8,20 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Incident: WhatsApp 10h outage — device link culled, wrong-instance re-pair, recovered (2026-07-04)
+Fri ~22:00 → Sat ~13:10. WhatsApp removed LL5's linked device (`device_removed` conflict) → Evolution
+DELETED the logged-out `ll5` instance → LL5 ingestion dead. Morning misstep: re-paired the only visible
+instance (`was_7536a4eeda67` — the wa-search ARCHIVE's link, not LL5's); a brief 08:10-08:24 burst from
+the dying ll5 session masked the miss; WhatsApp hard-killed LL5's link 09:50 (possibly BECAUSE the new
+pairing bumped it). Real fix: recreated instance `ll5` (global AUTHENTICATION_API_KEY; webhook →
+gateway /webhook/whatsapp + secret), QR re-pair via self-refreshing Preview on the Mac, re-encrypted
+the NEW per-instance apikey into messaging_whatsapp_accounts.api_key + instance_id (stale key made the
+status poller flap the row to disconnected). Verified END-TO-END on webhook hits (user test message →
+gateway → thread), status stable `connected`, channel.whatsapp resolved. Alert spine + agent behaved
+well throughout (agent's 09:50 heads-up + fallback to recall during blindness). Full topology + 6 traps
+recorded in HANDOFF ("WhatsApp topology + re-pair traps"). The throughput warning self-resolves as the
+2h window refills.
+
 ### Wifi scan fingerprinting — see ALL visible networks, map them to places (DECISION-021, 2026-07-03)
 The agent now sees every wifi network around the phone, not just the connected one, and visible-network
 sets resolve to places. **Android (ll5-android):** new WifiScanRepository reads OS-cached
