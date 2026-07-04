@@ -238,18 +238,22 @@ async function syncProfile(token: string): Promise<SyncProfile['profile']> {
 async function main(): Promise<void> {
   console.log(`Bootstrapping vault at ${VAULT_URL} for machine account ${EMAIL}`);
 
-  // 1. Register (skip when the account exists).
-  const existingIterations = await preloginIterations();
-  if (existingIterations === null) {
+  // 1+2. Login-first (Vaultwarden answers /prelogin with default KDF params for
+  // UNKNOWN emails too, so prelogin success does NOT imply the account exists —
+  // learned live 2026-07-04). Try to log in; only on auth failure, register and
+  // log in again.
+  let token: string;
+  let mk: Buffer;
+  try {
+    const iterations = (await preloginIterations()) ?? KDF_ITERATIONS;
+    ({ token, mk } = await login(iterations));
+    did.push(`Machine account ${EMAIL} already exists — logged in, register skipped`);
+  } catch {
     await registerAccount();
-  } else {
-    did.push(`Machine account ${EMAIL} already exists (prelogin ok) — register skipped`);
+    const iterations = (await preloginIterations()) ?? KDF_ITERATIONS;
+    ({ token, mk } = await login(iterations));
+    did.push('Registered machine account + logged in');
   }
-
-  // 2. Login + decrypt the user's keys.
-  const iterations = (await preloginIterations()) ?? KDF_ITERATIONS;
-  const { token, mk } = await login(iterations);
-  did.push('Logged in as the machine account');
 
   const profile = await syncProfile(token);
   const stretched = stretchKey(mk);
@@ -357,7 +361,7 @@ async function main(): Promise<void> {
   }
 
   // 5. Machine account API key for the vault MCP env.
-  const mkForHash = masterKey(PASSWORD, EMAIL, iterations);
+  const mkForHash = mk;
   const apiKeyRes = await api('/api/accounts/api-key', {
     method: 'POST',
     token,
