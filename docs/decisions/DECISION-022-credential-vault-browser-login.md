@@ -84,3 +84,51 @@ steered by page content into filling secrets on the wrong site.
 - Prompt-injection residual risk drops to "agent browses somewhere bad while
   already logged in" — mitigated by existing --blocked-origins and by the
   allowlist keeping the credentialed surface small.
+
+## Tenant scoping (2026-07-04 addendum)
+
+The initial implementation was single-tenant (one hardcoded "LL5" org resolved
+by name; operator provisioned via bootstrap script + bw CLI) — violating
+principle #3 (multi-tenancy from day one). Amended as follows:
+
+1. **One Vaultwarden Organization per tenant** — named `LL5 <first-8-of-userId>`
+   with one `agent` collection each. The single machine account creates every
+   tenant org and stays Owner of all of them (that's how the one bw sidecar can
+   serve every tenant); each tenant's human is Owner of their own org only.
+   Cross-tenant isolation therefore does NOT come from Bitwarden membership —
+   it comes from the mapping below.
+
+2. **userId→org mapping lives in gateway PG** (`vault_tenants`, migration 035:
+   user_id pk, org_id, collection_id, status provisioning|invited|active) —
+   MCPs stay stateless. The vault MCP reads it via GET /vault/tenant (self-
+   scoped, token-authed) before EVERY bw query and REFUSES when unmapped
+   ("vault not provisioned for this user"). All bw list/get calls carry
+   `organizationId` (+ collectionId) filters, and every returned item's org id
+   is asserted against the caller's org before use — `list_login_sites` /
+   `browser_login` cannot return another tenant's items by construction.
+   Mapping WRITES (PUT /vault/tenant) require a `service`-role token that only
+   AUTH_SECRET holders (the vault MCP) can mint — an agent token can never
+   remap its row onto another tenant's org. The pre-tenancy admin org is
+   seeded by the migration so the existing setup keeps working.
+
+3. **Provisioning is agent-driven, self-scoped** (revised from dashboard-only):
+   the lifecycle ships as vault MCP tools — `provision_vault({user_email})`
+   (idempotent: org + collection + Owner-invite email via SMTP, registers the
+   mapping), `confirm_vault_membership()` (owner-confirm after the user
+   accepts the emailed invite), `vault_status()`. Safe as agent tools because
+   they only ever act on the CALLER's tenant (userId from the auth token,
+   never an argument) and touch no credential material. The onboarding UX is
+   the agent walking its user through the flow in chat (persona section in
+   ll5-run/CLAUDE.md). What stays user-authority is unchanged: site approval
+   (agent files requests; only user surfaces grant) and the credentials
+   themselves (entered in the user's own vault UI, never in chat).
+   Implementation: scripts/bootstrap.ts's client-side Bitwarden KDF/org/invite
+   code became the src/provision.ts library (TenantProvisioner; needs
+   BW_EMAIL + BW_PASSWORD); src/tenancy.ts is the one lifecycle service behind
+   both the tools and the vault MCP's internal HTTP routes.
+
+4. **Gateway /me/vault/* routes** (chatAuth, same shape as /me/agent/*) are the
+   dashboard's future contract, proxying the vault MCP's /internal/tenant/*
+   surface (service-to-service, token-authed, NOT MCP tools):
+   POST /me/vault/provision, POST /me/vault/confirm, GET /me/vault/status →
+   {status, org_id, sites_count, approved_sites}. No dashboard page yet.

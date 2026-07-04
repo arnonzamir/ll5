@@ -378,24 +378,40 @@ git push  # triggers CI build + auto-deploy (~3-4 min total)
   `--block-service-workers`/basicAuth are unchanged. The vault MCP fills credentials
   into this same browser via `http://browser:9222`.
 
-- **Vault MCP (DECISION-022, 2026-07-04):** `vault` compose service
+- **Vault MCP (DECISION-022 + tenant addendum, 2026-07-04):** `vault` compose service
   (`ghcr.io/arnonzamir/ll5-vault`, `docker/Dockerfile.vault` = Dockerfile.mcp on
   node:20-slim + `npm i -g @bitwarden/cli`) at `mcp-vault.noninoni.click/mcp`.
   Runs `bw serve` on localhost:8087 as the machine account against Vaultwarden
   (`https://vault.noninoni.click`, separate Coolify service — its ADMIN_TOKEN is in
   that service's Coolify env as VAULTWARDEN_ADMIN_TOKEN). Tools: `list_login_sites`
   (names+domains only), `browser_login` (server-side fill in the shared browser;
-  domain-binding + approved-sites gate), `login_status`. Allowlist lives in
+  domain-binding + approved-sites gate), `login_status`, plus the tenant lifecycle
+  `provision_vault({user_email})` / `confirm_vault_membership()` / `vault_status()`
+  (self-scoped, agent-driven onboarding). Allowlist lives in
   `user_settings.vault.approved_sites`; gateway endpoints GET/PUT
   `/vault/approved-sites` + POST `/vault/approval-request` (raiseAlert
-  `vault.approval.<domain>`, warning). **Onboarding:** run
-  `packages/vault/scripts/bootstrap.ts` once (registers machine account, creates
-  org `LL5` + collection `agent`, invites the user, prints BW_CLIENTID/
-  BW_CLIENTSECRET); then set GitHub secrets `BW_CLIENTID`/`BW_CLIENTSECRET`/
-  `BW_PASSWORD` — the DEPLOY JOB injects them into the on-host `.env` (Coolify env
-  does NOT reach it). Until they land the service runs "unconfigured" (health 200,
-  loud log, tools report vault down). Agent `.mcp.json` needs a `vault` server
-  entry (mcp-vault.noninoni.click) in ll5-run to expose the tools.
+  `vault.approval.<domain>`, warning).
+  **TENANCY:** one Vaultwarden org PER TENANT (`LL5 <first-8-of-userId>`, collection
+  `agent`); the machine account creates + Owns them all. The userId→org mapping is
+  gateway PG `vault_tenants` (migration 035; seeded with the admin's pre-tenancy org
+  `LL5`: user f08f46b3… → org 3ef6bab6…, collection_id NULL = resolve `agent` by
+  name). The vault MCP resolves the caller's org via gateway GET `/vault/tenant`
+  before every bw query and refuses when unmapped; every bw list is organizationId-
+  scoped + org-asserted per item. PUT `/vault/tenant` requires a `service`-role
+  token (only the vault MCP mints those). The vault MCP also serves
+  `/internal/tenant/provision|confirm|status` (token-authed HTTP, not MCP tools) for
+  the gateway's `/me/vault/provision|confirm|status` chatAuth wrappers (dashboard
+  contract; gateway env `VAULT_MCP_URL`, default `http://vault:3000`).
+  **Secrets:** GitHub secrets `BW_CLIENTID`/`BW_CLIENTSECRET`/`BW_PASSWORD` + NEW
+  `BW_EMAIL` (machine-account email — required for the client-side Bitwarden KDF in
+  tenant provisioning) — the DEPLOY JOB injects them into the on-host `.env`
+  (Coolify env does NOT reach it). Without BW_EMAIL, provisioning reports
+  "not configured" while logins keep working; without BW_* entirely the service runs
+  "unconfigured" (health 200, loud log, tools report vault down). The old
+  `packages/vault/scripts/bootstrap.ts` is machine-account registration only now —
+  per-tenant orgs come from `provision_vault` (or POST /me/vault/provision). Agent
+  `.mcp.json` needs a `vault` server entry (mcp-vault.noninoni.click) in ll5-run to
+  expose the tools.
 
 Deploy is fully automated: push to main triggers build, then SSH deploy with health check.
 

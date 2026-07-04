@@ -47,6 +47,9 @@ export interface EnvConfig {
   /** Base domain for the public MCP endpoints (mcp-*.<domain>) baked into the
    *  generated agent .mcp.json. Defaults to the live deploy domain. */
   mcpBaseDomain: string;
+  /** Internal URL of the vault MCP — the /me/vault/* lifecycle wrappers proxy
+   *  its /internal/tenant/* routes. Defaults to the compose service name. */
+  vaultMcpUrl: string;
   /** Base URL of the (separate) agent-orchestrator service. Optional — when
    *  unset, agent provision/stop degrade to a clear "runtime not configured"
    *  error instead of crashing. */
@@ -163,6 +166,7 @@ export function loadEnv(): EnvConfig {
     whatsappWebhookSecret,
     dashboardUrl: process.env.DASHBOARD_URL ?? 'https://ll5.noninoni.click',
     mcpBaseDomain: process.env.MCP_BASE_DOMAIN ?? 'noninoni.click',
+    vaultMcpUrl: process.env.VAULT_MCP_URL ?? 'http://vault:3000',
     orchestratorUrl: process.env.ORCHESTRATOR_URL,
     orchestratorSecret: process.env.ORCHESTRATOR_SECRET,
     smtp: loadSmtpConfig(),

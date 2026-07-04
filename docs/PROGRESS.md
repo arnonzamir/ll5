@@ -8,6 +8,35 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Vault multi-tenancy + agent-driven self-service provisioning (DECISION-022 addendum, 2026-07-04)
+The vault is now TENANT-SCOPED with an agent-driven onboarding lifecycle (was single-tenant,
+operator-provisioned — violated principle #3). **Model:** one Vaultwarden org per tenant
+(`LL5 <first-8-of-userId>`, one `agent` collection each); the machine account creates and Owns
+every tenant org (one bw sidecar serves all); isolation comes from the **userId→org mapping** in
+gateway PG (`vault_tenants`, migration 035 — seeds the pre-tenancy admin org f08f46b3→3ef6bab6 so
+today's setup keeps working). The vault MCP resolves the caller's org via GET `/vault/tenant`
+before EVERY bw query, REFUSES when unmapped ("vault not provisioned"), passes
+`organizationId`+`collectionId` filters on every bw list call, and asserts each returned item's
+org id — cross-tenant reads impossible by construction (`bw/client.ts`). Mapping writes
+(PUT `/vault/tenant`) need a `service`-role token only AUTH_SECRET holders can mint, so an agent
+can never remap itself onto another tenant's org. **Lifecycle = agent tools** (self-scoped, no
+credential material): `provision_vault({user_email})` (idempotent org+collection+Owner-invite
+email — SMTP is live), `confirm_vault_membership()` (owner-confirm after the user accepts),
+`vault_status()`. bootstrap.ts's client-side Bitwarden crypto became the `src/provision.ts`
+library (TenantProvisioner; needs new env BW_EMAIL + existing BW_PASSWORD — unset ⇒ provisioning
+disabled, logins unaffected); `src/tenancy.ts` is the one service behind the tools AND the vault
+MCP's internal routes (`src/admin.ts`: POST `/internal/tenant/provision|confirm`,
+GET `/internal/tenant/status` — token-authed, NOT MCP tools). **Gateway /me/vault/*** (chatAuth,
+dashboard's future contract; no UI page yet): POST `/me/vault/provision` (uses auth_users email,
+body override), POST `/me/vault/confirm`, GET `/me/vault/status` →
+`{status, org_id, sites_count, approved_sites}` — thin proxies over the internal routes
+(VAULT_MCP_URL, default http://vault:3000). Site approval stays user-authority (unchanged).
+Persona: vault section rewritten as an agent-led onboarding walkthrough (never ask for any
+password in chat, incl. the master password). Tests: vault 59 (tenant refusal when unmapped,
+org-mismatch/scoping assertions, provision idempotency at tool+service layers, internal-route
+auth), gateway 510 (59 files: /me/vault/* auth+shapes, service-role gate on PUT /vault/tenant,
+migration seed assertions); both tsc clean. NOT deployed (BW_EMAIL secret + deploy pending).
+
 ### Credential vault + server-side browser login (DECISION-022, 2026-07-04)
 NEW `packages/vault` MCP (`mcp-vault.noninoni.click`, `docker/Dockerfile.vault` = MCP base on
 node:20-slim + `@bitwarden/cli`): runs `bw serve` as a localhost sidecar (config → login --apikey →

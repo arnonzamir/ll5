@@ -552,6 +552,9 @@ services:
       BW_CLIENTID: ${BW_CLIENTID:-}
       BW_CLIENTSECRET: ${BW_CLIENTSECRET:-}
       BW_PASSWORD: ${BW_PASSWORD:-}
+      # Machine-account email — required (with BW_PASSWORD) for the client-side
+      # Bitwarden KDF in tenant provisioning (org create / invite / confirm).
+      BW_EMAIL: ${BW_EMAIL:-}
       # Shared browser CDP endpoint — internal Docker network only.
       BROWSER_CDP_URL: http://browser:9222
       GATEWAY_URL: http://gateway:3000

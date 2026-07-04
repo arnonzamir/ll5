@@ -39,6 +39,9 @@ function makeDeps(overrides: Partial<{
         return overrides.approvedSites ?? [];
       },
       requestApproval,
+      // Mapped tenant — these tests exercise the allowlist gate, not tenancy.
+      getTenant: async () => ({ org_id: 'org-1', collection_id: 'col-1', status: 'active' as const }),
+      putTenant: async () => undefined,
     },
     login: {
       performLogin,
@@ -47,6 +50,11 @@ function makeDeps(overrides: Partial<{
     sidecar: {
       status: async () => 'unlocked' as const,
       sync: async () => undefined,
+    },
+    tenancy: {
+      provision: vi.fn(async () => { throw new Error('not under test'); }),
+      confirm: vi.fn(async () => { throw new Error('not under test'); }),
+      status: vi.fn(async () => { throw new Error('not under test'); }),
     },
   };
   return { deps, performLogin, requestApproval };

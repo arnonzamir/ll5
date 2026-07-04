@@ -406,9 +406,11 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // Human-approval gate for conversation authority (permission). Phone/dashboard-only.
   app.use(createApprovalsRouter(pgPool, config.authSecret));
 
-  // Vault site-allowlist plane (DECISION-022): approved-sites GET/PUT +
-  // approval requests filed by the vault MCP (raiseAlert push to the user).
-  app.use(createVaultRouter(pgPool, config.authSecret));
+  // Vault plane (DECISION-022 + tenant addendum): approved-sites GET/PUT,
+  // approval requests filed by the vault MCP (raiseAlert push to the user),
+  // tenant mapping GET/PUT (vault_tenants), and /me/vault/* lifecycle wrappers
+  // proxying the vault MCP's internal tenant routes.
+  app.use(createVaultRouter(pgPool, config.authSecret, { vaultMcpUrl: config.vaultMcpUrl }));
 
   // Read-only narratives API (web + mobile) — proxies the personal-knowledge MCP
   // (relevance-sorted list, detail+connections+timeline) + an ephemeral summarize.

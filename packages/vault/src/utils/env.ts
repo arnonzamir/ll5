@@ -16,16 +16,22 @@ export interface EnvConfig {
    *  crash-looping. */
   bwClientId: string;
   bwClientSecret: string;
-  /** Machine-account master password (bw unlock). Never logged. */
+  /** Machine-account master password (bw unlock + tenant provisioning KDF).
+   *  Never logged. */
   bwPassword: string;
+  /** Machine-account email — needed (with bwPassword) for the client-side
+   *  Bitwarden KDF during tenant provisioning (org create / invite / confirm).
+   *  When empty, provisioning reports "not configured"; logins still work. */
+  bwEmail: string;
   /** Internal CDP endpoint of the shared browser container, e.g. http://browser:9222 */
   browserCdpUrl: string;
   /** Internal gateway URL, e.g. http://gateway:3000 */
   gatewayUrl: string;
   /** Localhost port for the bw serve sidecar. */
   bwServePort: number;
-  /** Organization / collection scoping (DECISION-022: only the LL5 org's
-   *  agent collection is ever visible to this service). */
+  /** Tenant org-name PREFIX ("LL5" → orgs are "LL5 <first-8-of-userId>") and
+   *  the per-org collection name (DECISION-022 tenant addendum: every bw
+   *  query is scoped to the caller's own tenant org). */
   vaultOrgName: string;
   vaultCollectionName: string;
 }
@@ -48,6 +54,7 @@ export function loadEnv(): EnvConfig {
     bwClientId: process.env.BW_CLIENTID || '',
     bwClientSecret: process.env.BW_CLIENTSECRET || '',
     bwPassword: process.env.BW_PASSWORD || '',
+    bwEmail: process.env.BW_EMAIL || '',
     browserCdpUrl: required('BROWSER_CDP_URL').replace(/\/+$/, ''),
     gatewayUrl: required('GATEWAY_URL').replace(/\/+$/, ''),
     bwServePort: parseInt(process.env.BW_SERVE_PORT || '8087', 10),

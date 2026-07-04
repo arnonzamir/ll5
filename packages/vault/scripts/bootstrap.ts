@@ -25,6 +25,15 @@
  * printed NOWHERE. The API key IS printed — that is the operator handoff.
  */
 import crypto from 'node:crypto';
+import {
+  masterKey,
+  masterPasswordHash,
+  stretchKey,
+  encryptType2,
+  decryptType2,
+  rsaEncryptType4,
+  rsaDecryptType4,
+} from '../src/provision.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -45,81 +54,8 @@ if (!VAULT_URL || !EMAIL || !PASSWORD || !USER_EMAIL) {
 const did: string[] = [];
 const todo: string[] = [];
 
-// ---------------------------------------------------------------------------
-// Bitwarden client-side crypto (node:crypto only)
-// ---------------------------------------------------------------------------
-
-/** Master key: PBKDF2-SHA256(password, lowercased email, iterations, 32B). */
-function masterKey(password: string, email: string, iterations: number): Buffer {
-  return crypto.pbkdf2Sync(password, email, iterations, 32, 'sha256');
-}
-
-/** Server-side auth hash: PBKDF2-SHA256(masterKey, password, 1, 32B) b64. */
-function masterPasswordHash(mk: Buffer, password: string): string {
-  return crypto.pbkdf2Sync(mk, password, 1, 32, 'sha256').toString('base64');
-}
-
-/** HKDF-EXPAND only (Bitwarden treats the master key as the PRK). */
-function hkdfExpand(prk: Buffer, info: string, length: number): Buffer {
-  const blocks: Buffer[] = [];
-  let prev = Buffer.alloc(0);
-  let counter = 1;
-  while (Buffer.concat(blocks).length < length) {
-    prev = crypto.createHmac('sha256', prk)
-      .update(Buffer.concat([prev, Buffer.from(info, 'utf8'), Buffer.from([counter])]))
-      .digest();
-    blocks.push(prev);
-    counter += 1;
-  }
-  return Buffer.concat(blocks).subarray(0, length);
-}
-
-/** Stretched master key: 32B enc + 32B mac. */
-function stretchKey(mk: Buffer): { enc: Buffer; mac: Buffer } {
-  return { enc: hkdfExpand(mk, 'enc', 32), mac: hkdfExpand(mk, 'mac', 32) };
-}
-
-/** EncString type 2 (AesCbc256_HmacSha256_B64): "2.iv|ct|mac". */
-function encryptType2(data: Buffer, encKey: Buffer, macKey: Buffer): string {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', encKey, iv);
-  const ct = Buffer.concat([cipher.update(data), cipher.final()]);
-  const mac = crypto.createHmac('sha256', macKey).update(Buffer.concat([iv, ct])).digest();
-  return `2.${iv.toString('base64')}|${ct.toString('base64')}|${mac.toString('base64')}`;
-}
-
-function decryptType2(encString: string, encKey: Buffer, macKey: Buffer): Buffer {
-  const [type, rest] = [encString.slice(0, encString.indexOf('.')), encString.slice(encString.indexOf('.') + 1)];
-  if (type !== '2') throw new Error(`unsupported enc string type ${type}`);
-  const [ivB64, ctB64, macB64] = rest.split('|');
-  const iv = Buffer.from(ivB64, 'base64');
-  const ct = Buffer.from(ctB64, 'base64');
-  const expectedMac = crypto.createHmac('sha256', macKey).update(Buffer.concat([iv, ct])).digest();
-  if (!crypto.timingSafeEqual(expectedMac, Buffer.from(macB64, 'base64'))) {
-    throw new Error('enc string MAC mismatch (wrong key?)');
-  }
-  const decipher = crypto.createDecipheriv('aes-256-cbc', encKey, iv);
-  return Buffer.concat([decipher.update(ct), decipher.final()]);
-}
-
-/** EncString type 4 (Rsa2048_OaepSha1_B64): "4.<b64>". */
-function rsaEncryptType4(data: Buffer, publicKeyDer: Buffer): string {
-  const key = crypto.createPublicKey({ key: publicKeyDer, format: 'der', type: 'spki' });
-  const ct = crypto.publicEncrypt(
-    { key, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha1' },
-    data,
-  );
-  return `4.${ct.toString('base64')}`;
-}
-
-function rsaDecryptType4(encString: string, privateKeyDer: Buffer): Buffer {
-  const b64 = encString.replace(/^4\./, '');
-  const key = crypto.createPrivateKey({ key: privateKeyDer, format: 'der', type: 'pkcs8' });
-  return crypto.privateDecrypt(
-    { key, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha1' },
-    Buffer.from(b64, 'base64'),
-  );
-}
+// Bitwarden client-side crypto lives in src/provision.ts (shared with the
+// runtime TenantProvisioner — self-service tenant orgs reuse this exact code).
 
 // ---------------------------------------------------------------------------
 // HTTP helpers

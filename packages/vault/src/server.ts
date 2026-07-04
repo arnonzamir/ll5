@@ -17,6 +17,9 @@ import { BwSidecar } from './bw/sidecar.js';
 import { BwClient } from './bw/client.js';
 import { createGatewayClient } from './gateway.js';
 import { createLoginRunner } from './browser/login.js';
+import { TenantProvisioner } from './provision.js';
+import { createTenancyService } from './tenancy.js';
+import { createInternalRouter } from './admin.js';
 import { registerAllTools, type ToolDependencies } from './tools/index.js';
 
 function getUserId(): string {
@@ -66,11 +69,32 @@ export async function startServer(): Promise<void> {
     logger.error('[startServer][sidecar] BW_CLIENTID/BW_CLIENTSECRET/BW_PASSWORD not set — vault UNCONFIGURED. Run packages/vault/scripts/bootstrap.ts and set the secrets (GitHub secrets → deploy inject).');
   }
 
+  // Tenant provisioning (DECISION-022 tenant addendum): the machine account
+  // creates one org PER TENANT ("LL5 <first8>", collection "agent") and owner-
+  // invites/confirms the tenant's human. Needs BW_EMAIL + BW_PASSWORD for the
+  // client-side Bitwarden KDF; when unset, lifecycle tools report unconfigured
+  // while login tools keep working.
+  const provisioner = new TenantProvisioner({
+    vaultUrl: env.vaultUrl,
+    machineEmail: env.bwEmail,
+    machinePassword: env.bwPassword,
+    orgNamePrefix: env.vaultOrgName,
+    collectionName: env.vaultCollectionName,
+  });
+  if (!provisioner.configured) {
+    logger.warn('[startServer][provisioner] BW_EMAIL/BW_PASSWORD not set — tenant provisioning disabled (logins unaffected)');
+  }
+
+  const bw = new BwClient(sidecar.baseUrl, env.vaultCollectionName);
+  const gateway = createGatewayClient(env.gatewayUrl, env.authSecret);
+  const tenancy = createTenancyService({ gateway, provisioner, bw, sidecar });
+
   const deps: ToolDependencies = {
-    bw: new BwClient(sidecar.baseUrl, env.vaultOrgName, env.vaultCollectionName),
-    gateway: createGatewayClient(env.gatewayUrl, env.authSecret),
+    bw,
+    gateway,
     login: createLoginRunner(env.browserCdpUrl),
     sidecar,
+    tenancy,
   };
 
   // ---------------------------------------------------------------------------
@@ -99,6 +123,16 @@ export async function startServer(): Promise<void> {
     }
     res.json({ status: 'ok', service: 'll5-vault', bw: bwStatus });
   });
+
+  // Internal tenant-lifecycle surface (/internal/tenant/*) — service-to-service
+  // routes for the gateway's /me/vault/* wrappers. Same auth as /mcp; strictly
+  // self-scoped (acting user = token claim). NOT MCP tools.
+  app.use(createInternalRouter({
+    authSecret: env.authSecret,
+    apiKey: env.apiKey,
+    userId: env.userId,
+    tenancy,
+  }));
 
   // MCP endpoint (stateless — new server+transport per request)
   app.all('/mcp', authMiddleware, async (req: Request, res: Response) => {

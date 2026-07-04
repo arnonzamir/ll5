@@ -72,12 +72,19 @@ describe('redaction discipline (DECISION-022 §5)', () => {
         gateway: {
           getApprovedSites: async () => ['example.com'],
           requestApproval: vi.fn(async () => undefined),
+          getTenant: async () => ({ org_id: 'org-1', collection_id: 'col-1', status: 'active' as const }),
+          putTenant: async () => undefined,
         },
         login: {
           performLogin: async () => loginResult as never,
           checkLoginStatus: async () => ({ authenticated: true, final_url: 'https://example.com/home' }),
         },
         sidecar: { status: async () => 'unlocked' as const, sync: async () => undefined },
+        tenancy: {
+          provision: async () => ({ status: 'invited' as const, org_id: 'org-1', already_provisioned: false, invite_email_sent: true, message: 'ok' }),
+          confirm: async () => ({ membership_status: 'confirmed' as const, message: 'ok' }),
+          status: async () => ({ provisioned: true, membership_status: 'active' as const, sites_count: 1, approved_sites: [] }),
+        },
       };
       registerAllTools(server, deps, () => 'u1');
       return tools;
