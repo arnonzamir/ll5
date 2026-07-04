@@ -252,6 +252,46 @@ describe('processWhatsAppWebhook', () => {
       expect(es.index).toHaveBeenCalledTimes(1);
     });
 
+    it('renders quoted-reply context so a reply to an [LL5] message is recognizable', async () => {
+      const { insertSystemMessage } = await import('../utils/system-message.js');
+      matcher = makeMatcher('immediate');
+      const payload = makePayload({ conversation: undefined, extendedText: 'כן, יום שלישי מתאים' });
+      (payload.data.message as Record<string, unknown>).extendedTextMessage = {
+        text: 'כן, יום שלישי מתאים',
+        contextInfo: {
+          stanzaId: 'orig-1',
+          participant: '972528836099@s.whatsapp.net',
+          quotedMessage: { conversation: '[LL5] האם שלישי או רביעי עדיף לכם לטיול?' },
+        },
+      };
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+
+      expect(insertSystemMessage).toHaveBeenCalledWith(
+        pool,
+        'user-1',
+        expect.stringContaining('replying to: «[LL5] האם שלישי או רביעי'),
+        undefined,
+        undefined,
+        expect.objectContaining({ platform: 'whatsapp' }),
+      );
+    });
+
+    it('truncates long quoted text and tolerates media-only quotes', async () => {
+      const { insertSystemMessage } = await import('../utils/system-message.js');
+      matcher = makeMatcher('immediate');
+      const payload = makePayload({ conversation: undefined, extendedText: 'ok' });
+      (payload.data.message as Record<string, unknown>).extendedTextMessage = {
+        text: 'ok',
+        contextInfo: { quotedMessage: { imageMessage: { caption: undefined } } },
+      };
+      await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
+      expect(insertSystemMessage).toHaveBeenCalledWith(
+        pool, 'user-1',
+        expect.stringContaining('replying to: «[media]»'),
+        undefined, undefined, expect.anything(),
+      );
+    });
+
     it('notifies agent for outbound messages when priority is immediate or agent', async () => {
       const { insertSystemMessage } = await import('../utils/system-message.js');
       matcher = makeMatcher('immediate');

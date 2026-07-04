@@ -39,6 +39,22 @@ async function enrichContactFromPushName(
   await enrichContact(pgPool, userId, 'whatsapp', platformId, pushName, { phoneNumber, isGroup: false });
 }
 
+/** Quoted-reply context (WhatsApp reply-to). quotedMessage carries the ORIGINAL
+ *  message being replied to; participant is the quoted author's JID. Without
+ *  extracting this, a contact replying to one of the agent's own [LL5] messages
+ *  looked like a free-floating message (2026-07-04 finding). */
+interface EvolutionContextInfo {
+  stanzaId?: string;
+  participant?: string;
+  quotedMessage?: {
+    conversation?: string;
+    extendedTextMessage?: { text?: string };
+    imageMessage?: { caption?: string };
+    videoMessage?: { caption?: string };
+    documentMessage?: { fileName?: string };
+  };
+}
+
 interface EvolutionMessageData {
   key: {
     remoteJid: string;
@@ -50,13 +66,14 @@ interface EvolutionMessageData {
   pushName?: string;
   message?: {
     conversation?: string;
-    extendedTextMessage?: { text?: string };
+    extendedTextMessage?: { text?: string; contextInfo?: EvolutionContextInfo };
     imageMessage?: {
       url?: string;
       directPath?: string;
       mimetype?: string;
       caption?: string;
       mediaKey?: string;
+      contextInfo?: EvolutionContextInfo;
     };
     audioMessage?: {
       url?: string;
@@ -120,6 +137,22 @@ export async function processWhatsAppWebhook(
   const hasVideo = !!videoMessage;
   const hasDocument = !!documentMessage;
   const hasMedia = hasImage || hasAudio || hasVideo || hasDocument;
+
+  // Quoted-reply context: when this message is a WhatsApp reply, surface WHAT it
+  // replies to — otherwise an answer to one of the agent's own [LL5] messages is
+  // indistinguishable from a new thought.
+  const contextInfo = data.message?.extendedTextMessage?.contextInfo
+    ?? data.message?.imageMessage?.contextInfo;
+  const quoted = contextInfo?.quotedMessage;
+  const quotedTextRaw = quoted?.conversation
+    ?? quoted?.extendedTextMessage?.text
+    ?? quoted?.imageMessage?.caption
+    ?? quoted?.videoMessage?.caption
+    ?? quoted?.documentMessage?.fileName
+    ?? (quoted ? '[media]' : null);
+  const quotedInfo = quotedTextRaw
+    ? ` [replying to: «${quotedTextRaw.length > 150 ? quotedTextRaw.slice(0, 150) + '...' : quotedTextRaw}»]`
+    : '';
 
   if (!text && !hasMedia) {
     logger.debug('[processWhatsAppWebhook][handle] Skipping message with no text or media content');
@@ -384,7 +417,7 @@ export async function processWhatsAppWebhook(
       await insertSystemMessage(
         pgPool,
         userId,
-        `[WhatsApp] You → ${dest}: "${truncBody}"${mediaInfo}`,
+        `[WhatsApp] You → ${dest}: "${truncBody}"${mediaInfo}${quotedInfo}`,
         undefined, // notify
         undefined, // schedulerEvent
         buildSourceRouting({
@@ -473,7 +506,7 @@ export async function processWhatsAppWebhook(
     await insertSystemMessage(
       pgPool,
       userId,
-      `[WhatsApp] ${header}: "${truncBody}"${mediaInfo}`,
+      `[WhatsApp] ${header}: "${truncBody}"${mediaInfo}${quotedInfo}`,
       undefined, // notify
       undefined, // schedulerEvent
       buildSourceRouting({
