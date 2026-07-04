@@ -1,0 +1,71 @@
+# Vault MCP (DECISION-022) — Dockerfile.mcp base + the Bitwarden CLI sidecar.
+#
+# Differences from Dockerfile.mcp:
+#   - PACKAGE_NAME is fixed to `vault`.
+#   - Runtime is node:20-slim (Debian/glibc) instead of alpine: the official
+#     @bitwarden/cli npm package is only exercised upstream on glibc; musl is
+#     where bw breakage reports cluster.
+#   - `npm i -g @bitwarden/cli` layer provides the `bw` binary the service
+#     spawns (config server -> login --apikey -> serve).
+#   - bw needs a writable state dir: BITWARDENCLI_APPDATA_DIR=/tmp/bw.
+
+# -- Build stage --
+FROM node:20-slim AS build
+
+ARG PACKAGE_NAME=vault
+ENV PACKAGE_NAME=${PACKAGE_NAME}
+
+WORKDIR /app
+
+# Copy workspace root files needed for dependency resolution
+COPY package.json package-lock.json tsconfig.json ./
+
+# Copy shared package (all MCPs depend on it)
+COPY packages/shared/ packages/shared/
+
+# Copy target package
+COPY packages/${PACKAGE_NAME}/ packages/${PACKAGE_NAME}/
+
+# Install all dependencies (workspace-aware)
+RUN npm ci --workspace=packages/shared --workspace=packages/${PACKAGE_NAME}
+
+# Build shared first, then target
+RUN npm run build --workspace=packages/shared
+RUN npm run build --workspace=packages/${PACKAGE_NAME}
+
+# -- Runtime stage --
+FROM node:20-slim AS runtime
+
+ARG PACKAGE_NAME=vault
+ENV PACKAGE_NAME=${PACKAGE_NAME}
+ENV NODE_ENV=production
+
+# Bitwarden CLI (the bw serve sidecar). Pinned major via dist-tag `latest` at
+# build time; the layer is cached until the base image changes.
+RUN npm install -g @bitwarden/cli && bw --version
+
+WORKDIR /app
+
+# Copy built artifacts and production dependencies
+COPY --from=build /app/packages/${PACKAGE_NAME}/dist ./dist
+COPY --from=build /app/packages/${PACKAGE_NAME}/package.json ./
+
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages/shared/dist ./node_modules/@ll5/shared/dist
+COPY --from=build /app/packages/shared/package.json ./node_modules/@ll5/shared/
+
+# Non-root user for security (Debian syntax; alpine's addgroup/adduser differ)
+RUN groupadd -r app && useradd -r -g app -d /home/app -m app \
+    && mkdir -p /tmp/bw && chown app:app /tmp/bw
+USER app
+
+# bw CLI state (server config + login state) — writable by the app user.
+ENV BITWARDENCLI_APPDATA_DIR=/tmp/bw
+
+EXPOSE 3000
+
+# node:20-slim has no wget/curl — probe with node's fetch.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "dist/index.js"]

@@ -8,6 +8,30 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Credential vault + server-side browser login (DECISION-022, 2026-07-04)
+NEW `packages/vault` MCP (`mcp-vault.noninoni.click`, `docker/Dockerfile.vault` = MCP base on
+node:20-slim + `@bitwarden/cli`): runs `bw serve` as a localhost sidecar (config → login --apikey →
+serve → POST /unlock; supervised restart on crash), scoped to the Vaultwarden org `LL5` / collection
+`agent`. Tools: `list_login_sites` (names+bound domains ONLY), `browser_login({site})` (server-side
+fill — the agent NEVER sees a secret), `login_status`. Two hard rules enforced in code:
+**domain binding** (tldts eTLD+1 of the LIVE page re-checked immediately before every fill vs the
+vault item's URL; item URL only, never caller input) and **approved-sites allowlist** (fails closed;
+unapproved → `approval_required` + gateway approval request). Redaction discipline: sanitized errors,
+`assertNoSecrets` on every tool result, name-only logs. **Browser container** switched to shared-CDP
+mode: entrypoint launches Chromium itself (`--remote-debugging-port=9222`, internal-only, supervise
+loop, same profile mount) and Playwright MCP attaches via `--cdp-endpoint` — DECISION-010 basicAuth/
+allowed-hosts/blocked-origins unchanged; vault fills land in the SAME live session the agent browses.
+**Gateway**: `src/vault.ts` — GET/PUT `/vault/approved-sites` (user_settings.vault.approved_sites,
+chatAuth = same authority model as approvals.ts) + POST `/vault/approval-request` → raiseAlert
+(warning, `vault.approval.<domain>`, push + [ALERT]); PUT auto-clears matching alerts. CI: `vault` in
+the build matrix + deploy pull loop; BW_* GitHub secrets injected into the on-host .env by the deploy
+job. Operator bootstrap: `packages/vault/scripts/bootstrap.ts` (Bitwarden client-side KDF register →
+org/collection create → user invite → prints BW_CLIENTID/BW_CLIENTSECRET). Persona (ll5-run/CLAUDE.md):
+vault-login flow section (never ask for passwords in chat; approval_required → tell user and wait;
+payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate incl. fail-closed,
+redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
+bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
+
 ### Incident: WhatsApp 10h outage — device link culled, wrong-instance re-pair, recovered (2026-07-04)
 Fri ~22:00 → Sat ~13:10. WhatsApp removed LL5's linked device (`device_removed` conflict) → Evolution
 DELETED the logged-out `ll5` instance → LL5 ingestion dead. Morning misstep: re-paired the only visible

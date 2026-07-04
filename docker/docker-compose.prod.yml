@@ -453,36 +453,55 @@ services:
   # http://elasticsearch:9200. Residual: a raw container IP isn't enumerable here;
   # full isolation would need ES auth or a dedicated browser network.
   #
-  # Persistence: --user-data-dir on a bind-mounted, pre-chowned (uid 1000) host
-  # dir so cookies/logins survive restarts. (Single shared profile — fine for the
-  # one-user system.)
+  # Persistence: chromium's --user-data-dir on a bind-mounted, pre-chowned
+  # (uid 1000) host dir so cookies/logins survive restarts. (Single shared
+  # profile — fine for the one-user system.)
+  #
+  # Shared CDP (DECISION-022): the stock image entrypoint can't run two
+  # processes, so a small sh -c entrypoint (1) launches headless Chromium
+  # itself with --remote-debugging-port=9222 (INTERNAL ONLY: no port publish,
+  # no Traefik route — reachable solely on the Docker network) under a
+  # supervise-loop, then (2) execs the Playwright MCP attached to it via
+  # --cdp-endpoint. The vault MCP connects to the SAME http://browser:9222, so
+  # a server-side credential fill lands in the same live session/profile the
+  # agent's browser tools use. Launch-only flags (--headless/--browser/
+  # --no-sandbox/--user-data-dir) moved to the chromium command; the MCP keeps
+  # the transport + data-plane flags (--allowed-hosts, --blocked-origins,
+  # --block-service-workers) — DECISION-010's basicAuth/allowed-hosts/
+  # blocked-origins/profile constraints are unchanged.
   browser:
     <<: *defaults
     image: mcr.microsoft.com/playwright/mcp:latest
     container_name: browser-xkkcc0g4o48kkcows8488so4
     init: true
     shm_size: "1gb"
-    entrypoint: ["node", "/app/cli.js"]
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - "--headless"
-      - "--browser"
-      - "chromium"
-      - "--no-sandbox"
-      - "--port"
-      - "8931"
-      - "--host"
-      - "0.0.0.0"
-      # Accept the public Host header (Traefik forwards it); the MCP transport's
-      # DNS-rebinding check otherwise 403s anything that isn't the bound host.
-      - "--allowed-hosts"
-      - "mcp-browser.noninoni.click"
-      # Persistent profile (logins survive restarts).
-      - "--user-data-dir"
-      - "/home/node/profile"
-      # SSRF hardening: block the browser from loading the metadata IP + internals.
-      - "--block-service-workers"
-      - "--blocked-origins"
-      - "http://169.254.169.254;https://169.254.169.254;http://elasticsearch:9200;http://gateway:3000;http://postgres:5432;http://dashboard:3000;http://awareness:3000;http://personal-knowledge:3000;http://gtd:3000;http://google:3000;http://messaging:3000;http://health:3000"
+      - |
+        set -u
+        CHROME="$$(find /ms-playwright -type f \( -name chrome -o -name headless_shell \) 2>/dev/null | head -n 1)"
+        if [ -z "$$CHROME" ]; then echo "FATAL: no chromium binary under /ms-playwright" >&2; exit 1; fi
+        echo "Launching shared Chromium (CDP :9222, internal-only): $$CHROME"
+        ( while true; do
+            "$$CHROME" --headless=new --no-sandbox --disable-gpu \
+              --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222 \
+              --user-data-dir=/home/node/profile about:blank
+            echo "chromium exited ($$?) — restarting in 2s" >&2
+            sleep 2
+          done ) &
+        i=0
+        until node -e "fetch('http://127.0.0.1:9222/json/version').then(()=>process.exit(0),()=>process.exit(1))" 2>/dev/null; do
+          i=$$((i+1))
+          if [ "$$i" -gt 30 ]; then echo "WARN: CDP not up after 30s — starting MCP anyway" >&2; break; fi
+          sleep 1
+        done
+        exec node /app/cli.js \
+          --port 8931 \
+          --host 0.0.0.0 \
+          --allowed-hosts mcp-browser.noninoni.click \
+          --cdp-endpoint http://127.0.0.1:9222 \
+          --block-service-workers \
+          --blocked-origins "http://169.254.169.254;https://169.254.169.254;http://elasticsearch:9200;http://gateway:3000;http://postgres:5432;http://dashboard:3000;http://awareness:3000;http://personal-knowledge:3000;http://gtd:3000;http://google:3000;http://messaging:3000;http://health:3000;http://vault:3000"
     volumes:
       - /opt/ll5/browser-profile:/home/node/profile
     deploy:
@@ -491,11 +510,12 @@ services:
           memory: 1536M
           cpus: "1.0"
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('net').connect(8931,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))\""]
+      # Both the MCP port and the CDP port must be up.
+      test: ["CMD-SHELL", "node -e \"const n=require('net');let ok=0;const chk=(p)=>new Promise((res,rej)=>n.connect(p,'127.0.0.1').on('connect',res).on('error',rej));chk(8931).then(()=>chk(9222)).then(()=>process.exit(0)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 25s
+      start_period: 40s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.ll5-browser.rule=Host(`mcp-browser.noninoni.click`)"
@@ -506,3 +526,52 @@ services:
       # basicAuth — apr1 hash (private repo; the password lives only in the agent's
       # BROWSER_MCP_BASIC env, never in git). Rotate by regenerating both.
       - "traefik.http.middlewares.ll5-browser-auth.basicauth.users=ll5:$$apr1$$DGhX.hYN$$bO7SH7IWVNvoKvwvKkDIx/"
+
+  # ---------- Vault MCP (DECISION-022) ----------
+  # Credential vault bridge: runs the Bitwarden CLI (`bw serve`) as a localhost
+  # sidecar unlocked with the machine account, and injects credentials into the
+  # SHARED browser over the internal CDP endpoint. The agent never sees a
+  # secret — tools return names/domains/status only. BW_* secrets are injected
+  # into the on-host .env by the CI deploy job (Coolify env does not reach this
+  # file — see the FINDHUB_*/ELASTIC_PASSWORD pattern in build-and-push.yml).
+  vault:
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-vault:latest
+    container_name: vault-xkkcc0g4o48kkcows8488so4
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      API_KEY: ${API_KEY}
+      USER_ID: ${USER_ID}
+      AUTH_SECRET: ${AUTH_SECRET}
+      # app_log/audit rows (name-only args by design — DECISION-022 §5).
+      ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
+      # Vaultwarden (separate Coolify service).
+      VAULT_URL: ${VAULT_URL:-https://vault.noninoni.click}
+      BW_CLIENTID: ${BW_CLIENTID:-}
+      BW_CLIENTSECRET: ${BW_CLIENTSECRET:-}
+      BW_PASSWORD: ${BW_PASSWORD:-}
+      # Shared browser CDP endpoint — internal Docker network only.
+      BROWSER_CDP_URL: http://browser:9222
+      GATEWAY_URL: http://gateway:3000
+    depends_on:
+      - browser
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.5"
+    healthcheck:
+      # Runtime image is node:20-slim (no wget) — probe with node's fetch.
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ll5-vault.rule=Host(`mcp-vault.noninoni.click`)"
+      - "traefik.http.routers.ll5-vault.tls=true"
+      - "traefik.http.routers.ll5-vault.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ll5-vault.loadbalancer.server.port=3000"

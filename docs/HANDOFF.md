@@ -370,6 +370,32 @@ git push  # triggers CI build + auto-deploy (~3-4 min total)
   persistent login via `--user-data-dir /home/node/profile` bind-mounted from the host dir
   `/opt/ll5/browser-profile` (pre-created `chown 1000:1000` — a named volume would mount
   root-owned and the `node` user couldn't write). If you move hosts, recreate that dir.
+  **CDP mode (DECISION-022, 2026-07-04):** the container entrypoint is now `sh -c`:
+  it launches Chromium itself (supervise-loop, `--remote-debugging-port=9222`,
+  `--user-data-dir=/home/node/profile`) and runs the MCP with `--cdp-endpoint
+  http://127.0.0.1:9222`. Port 9222 is INTERNAL-ONLY (no publish, no Traefik). The
+  launch flags moved to the chromium command; `--allowed-hosts`/`--blocked-origins`/
+  `--block-service-workers`/basicAuth are unchanged. The vault MCP fills credentials
+  into this same browser via `http://browser:9222`.
+
+- **Vault MCP (DECISION-022, 2026-07-04):** `vault` compose service
+  (`ghcr.io/arnonzamir/ll5-vault`, `docker/Dockerfile.vault` = Dockerfile.mcp on
+  node:20-slim + `npm i -g @bitwarden/cli`) at `mcp-vault.noninoni.click/mcp`.
+  Runs `bw serve` on localhost:8087 as the machine account against Vaultwarden
+  (`https://vault.noninoni.click`, separate Coolify service — its ADMIN_TOKEN is in
+  that service's Coolify env as VAULTWARDEN_ADMIN_TOKEN). Tools: `list_login_sites`
+  (names+domains only), `browser_login` (server-side fill in the shared browser;
+  domain-binding + approved-sites gate), `login_status`. Allowlist lives in
+  `user_settings.vault.approved_sites`; gateway endpoints GET/PUT
+  `/vault/approved-sites` + POST `/vault/approval-request` (raiseAlert
+  `vault.approval.<domain>`, warning). **Onboarding:** run
+  `packages/vault/scripts/bootstrap.ts` once (registers machine account, creates
+  org `LL5` + collection `agent`, invites the user, prints BW_CLIENTID/
+  BW_CLIENTSECRET); then set GitHub secrets `BW_CLIENTID`/`BW_CLIENTSECRET`/
+  `BW_PASSWORD` — the DEPLOY JOB injects them into the on-host `.env` (Coolify env
+  does NOT reach it). Until they land the service runs "unconfigured" (health 200,
+  loud log, tools report vault down). Agent `.mcp.json` needs a `vault` server
+  entry (mcp-vault.noninoni.click) in ll5-run to expose the tools.
 
 Deploy is fully automated: push to main triggers build, then SSH deploy with health check.
 

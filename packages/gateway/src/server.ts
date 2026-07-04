@@ -26,6 +26,7 @@ import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { createAgentRouter } from './agent.js';
 import { createApprovalsRouter } from './approvals.js';
+import { createVaultRouter } from './vault.js';
 import { createNarrativesRouter } from './narratives.js';
 import { processCalendar, phoneEventId } from './processors/calendar.js';
 import { processLocation, type StoredPoint } from './processors/location.js';
@@ -404,6 +405,10 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Human-approval gate for conversation authority (permission). Phone/dashboard-only.
   app.use(createApprovalsRouter(pgPool, config.authSecret));
+
+  // Vault site-allowlist plane (DECISION-022): approved-sites GET/PUT +
+  // approval requests filed by the vault MCP (raiseAlert push to the user).
+  app.use(createVaultRouter(pgPool, config.authSecret));
 
   // Read-only narratives API (web + mobile) — proxies the personal-knowledge MCP
   // (relevance-sorted list, detail+connections+timeline) + an ephemeral summarize.
