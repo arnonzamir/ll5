@@ -61,6 +61,15 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
+### Web chat cleanup: fold record_moment/instrumentation rows (parity, 2026-07-05)
+User picked "Chat cleanup" for web parity. Both dashboard chat surfaces now fold instrumentation rows
+(record_moment / ToolSearch / bracket-tagged tool rows) into the collapsible "N system events" band even
+when the backend didn't flag display_compact, AND a LONE instrumentation row folds into a "1 system
+event" band instead of rendering standalone (same gap the app had). New isInstrumentationRow in
+lib/chat/format.ts (full-screen /chat via buildRenderItems + CompactGroup) + a local twin in
+chat-widget.tsx (tile); the tile's isWaiting/thinking-indicator now also skips instrumentation rows so a
+record_moment no longer counts as "the answer arrived". tsc clean.
+
 ### Web dashboard: reaction picker → 👍/👎 only (parity with app, 2026-07-05)
 Same overlapping-reaction fix as Android, now on the dashboard: both chat surfaces (chat-widget.tsx tile
 + chat/message-bubble.tsx full-screen) narrowed their PICKER to agree/disagree; REACTION_ICONS/LABELS +

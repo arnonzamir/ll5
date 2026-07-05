@@ -207,9 +207,26 @@ function CompactRow({ m }: { m: Message }) {
   );
 }
 
+// Instrumentation traffic (record_moment / ToolSearch / bracket-tagged tool rows)
+// folds like display_compact even when the backend didn't flag it — otherwise it
+// renders as standalone clutter.
+const INSTRUMENTATION_TOOL_NAMES = ["record_moment", "toolsearch", "tool_search"];
+function isInstrumentationRow(m: Message): boolean {
+  if (m.role === "user") return false;
+  if (m.metadata?.kind === "thinking") return false;
+  const c = (m.content ?? "").trim();
+  if (c === "") return false;
+  if (c.startsWith("[")) {
+    const end = c.indexOf("]");
+    const tag = c.slice(1, end === -1 ? undefined : end).toLowerCase();
+    return tag.startsWith("tool") || INSTRUMENTATION_TOOL_NAMES.some((n) => tag.includes(n));
+  }
+  return INSTRUMENTATION_TOOL_NAMES.some((n) => c.slice(0, 40).toLowerCase().startsWith(n));
+}
+
 function CompactGroup({ items }: { items: Message[] }) {
   const [expanded, setExpanded] = useState(false);
-  if (items.length === 1) return <CompactRow m={items[0]} />;
+  if (items.length === 1 && !isInstrumentationRow(items[0])) return <CompactRow m={items[0]} />;
   return (
     <div className="text-xs">
       <button
@@ -217,7 +234,7 @@ function CompactGroup({ items }: { items: Message[] }) {
         className="flex items-center gap-1 text-gray-400 hover:text-gray-600 py-0.5"
       >
         {expanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-        <span>{items.length} system events</span>
+        <span>{items.length} system {items.length === 1 ? "event" : "events"}</span>
       </button>
       {expanded && (
         <div className="ml-3 border-l border-gray-100 pl-2">
@@ -876,7 +893,7 @@ export function ChatWidget() {
         items.push({ kind: "thinking", m });
         continue;
       }
-      if (m.display_compact) {
+      if (m.display_compact || isInstrumentationRow(m)) {
         const last = items[items.length - 1];
         if (last && last.kind === "compact" && closeInTime(last.items[last.items.length - 1], m)) {
           last.items.push(m);
@@ -1050,7 +1067,7 @@ export function ChatWidget() {
       if (m.role !== "assistant") continue;
       if (m.reaction) continue;
       if (m.metadata?.kind === "thinking") continue;
-      if (m.display_compact) continue;
+      if (m.display_compact || isInstrumentationRow(m)) continue;
       return false; // real answer arrived — stop waiting.
     }
 

@@ -17,7 +17,7 @@ import {
   ChevronRight,
 } from "@/lib/chat/constants";
 import type { Attachment, Message, Reaction } from "@/lib/chat/types";
-import { uploadsUrl } from "@/lib/chat/format";
+import { uploadsUrl, isInstrumentationRow } from "@/lib/chat/format";
 import { Markdown } from "./markdown";
 
 // ---------------------------------------------------------------------------
@@ -167,7 +167,10 @@ function CompactRow({ m }: { m: Message }) {
 
 export function CompactGroup({ items }: { items: Message[] }) {
   const [expanded, setExpanded] = useState(false);
-  if (items.length === 1) return <CompactRow m={items[0]} />;
+  // A lone non-instrumentation compact row keeps its bare render; a lone
+  // instrumentation row (record_moment / ToolSearch) still folds into a band,
+  // otherwise it's standalone clutter (same fix as the app).
+  if (items.length === 1 && !isInstrumentationRow(items[0])) return <CompactRow m={items[0]} />;
   const time = new Date(items[0].created_at).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -183,7 +186,7 @@ export function CompactGroup({ items }: { items: Message[] }) {
         ) : (
           <ChevronRight className="w-3.5 h-3.5" />
         )}
-        <span>{items.length} system events · {time}</span>
+        <span>{items.length} system {items.length === 1 ? "event" : "events"} · {time}</span>
         <span className="flex-1 border-t border-ink-300/40" />
       </button>
       {expanded && (

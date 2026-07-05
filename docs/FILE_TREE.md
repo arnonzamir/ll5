@@ -56,7 +56,7 @@ ll5/
 │   │   ├── mcp-gtd.md               # 14 tools, PG tables
 │   │   ├── mcp-awareness.md          # ES indices (IM, location, calendar, journal, user model, geo search, media, notification rules)
 │   │   ├── LOCATION_SERVICE.md       # GPS + wifi fusion design (awareness MCP)
-│   │   # dashboard chat: PICKER_REACTIONS (👍/👎 only) in lib/chat/constants.ts; full set kept for render/validate
+│   │   # dashboard chat: instrumentation folding (isInstrumentationRow, lib/chat/format.ts); PICKER_REACTIONS (👍/👎 only) in lib/chat/constants.ts; full set kept for render/validate
 │   ├── mcp-google.md             # 9 tools, OAuth (state DB-backed: google_oauth_states, migration 005, 60-min single-use — 2026-07-05)
 │   │   ├── mcp-messaging.md          # 8 tools, WhatsApp/Telegram
 │   │   ├── gateway.md                # Webhook receiver design

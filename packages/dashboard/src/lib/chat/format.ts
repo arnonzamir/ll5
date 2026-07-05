@@ -44,6 +44,25 @@ export type RenderItem =
   // Agent internal-voice (narrate). Stands alone — never folded into a tool-call group.
   | { kind: "thinking"; message: Message };
 
+/** Instrumentation traffic that should fold like display_compact rows even when
+ *  the backend didn't flag it: bracket-tagged tool rows (`[tool…] …`) and bare
+ *  rows whose head is a known instrumentation tool (record_moment, ToolSearch).
+ *  These otherwise render as standalone assistant bubbles — chat clutter. */
+const INSTRUMENTATION_TOOL_NAMES = ["record_moment", "toolsearch", "tool_search"];
+
+export function isInstrumentationRow(m: Message): boolean {
+  if (m.role === "user") return false;
+  if (m.metadata?.kind === "thinking") return false;
+  const c = (m.content ?? "").trim();
+  if (c === "") return false;
+  if (c.startsWith("[")) {
+    const tag = c.slice(1, c.indexOf("]") === -1 ? undefined : c.indexOf("]")).toLowerCase();
+    return tag.startsWith("tool") || INSTRUMENTATION_TOOL_NAMES.some((n) => tag.includes(n));
+  }
+  const head = c.slice(0, 40).toLowerCase();
+  return INSTRUMENTATION_TOOL_NAMES.some((n) => head.startsWith(n));
+}
+
 export function buildRenderItems(
   messages: Message[],
   reactionIds: Set<string>,
@@ -64,7 +83,7 @@ export function buildRenderItems(
       out.push({ kind: "thinking", message: m });
       continue;
     }
-    if (m.display_compact) {
+    if (m.display_compact || isInstrumentationRow(m)) {
       const last = out[out.length - 1];
       if (last && last.kind === "compact" && closeInTime(last.items[last.items.length - 1], m)) {
         last.items.push(m);
