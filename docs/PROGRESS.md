@@ -61,6 +61,19 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
+### Android: read-mostly Actions + Projects views (close the post-triage visibility gap, 2026-07-05)
+User approved "Option A" — after inbox triage, kept (undated) actions and projects were invisible on the
+phone (only Lists→Today's-actions showed dated-for-today items; projects nowhere). Gateway (gtd-surfaces.ts):
+GET /me/actions?scope=active|today[&project_id=] → {actions:[{id,title,context,due_date,project_id,
+project_title}]} (LEFT JOIN parent horizon-1 for project_title; scope=active uncapped-date LIMIT 200;
+project_id ownership-checked→404) + GET /me/projects → {projects:[{id,title,status,action_count,
+done_count}]} (single grouped count query, no N+1). /me/actions/today + complete/defer untouched. 645
+tests. Android: Lists segments now Shopping | Actions | Projects. Actions pane = Today/All toggle,
+GROUPED by project header (null-project bucket last), rows check→complete/swipe→defer + due badge
+(overdue amber). Projects pane = title + "N active · M done" → tap → ProjectActionsScreen (that project's
+actions, read-only + check/defer). Stays a VIEWPORT (no add/edit/reorder; Discuss→ into chat).
+assembleDebug green.
+
 ### Web chat cleanup: fold record_moment/instrumentation rows (parity, 2026-07-05)
 User picked "Chat cleanup" for web parity. Both dashboard chat surfaces now fold instrumentation rows
 (record_moment / ToolSearch / bracket-tagged tool rows) into the collapsible "N system events" band even

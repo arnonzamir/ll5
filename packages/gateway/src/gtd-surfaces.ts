@@ -64,6 +64,35 @@ export interface TodayActionItem {
   due_date: string;
 }
 
+/**
+ * Read-mostly Actions list row (mobile Actions+Projects view). Same context
+ * extraction as TodayActionItem, but due_date is nullable (scope=active has
+ * undated actions) and the row carries its parent project link.
+ */
+export interface ActionListItem {
+  id: string;
+  title: string;
+  /** First context tag — the row's single "context word". */
+  context: string | null;
+  /** YYYY-MM-DD, or null when the action has no due date. */
+  due_date: string | null;
+  /** Parent project id (horizon-1), or null for a standalone action. */
+  project_id: string | null;
+  /** Parent project title, or null (no project / project has no title). */
+  project_title: string | null;
+}
+
+/** Read-mostly Projects list row with live active/done action counts. */
+export interface ProjectListItem {
+  id: string;
+  title: string;
+  status: string;
+  /** Count of active (non-shopping) horizon-0 actions under this project. */
+  action_count: number;
+  /** Count of completed horizon-0 actions under this project. */
+  done_count: number;
+}
+
 const INBOX_PAGE = 10;
 const ACTIONS_LIMIT = 7;
 const TITLE_MAX = 200;
@@ -598,6 +627,147 @@ export function createGtdSurfacesRouter(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[gtd-surfaces][actionsToday] Failed', { userId, error: message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Actions + Projects — the read-mostly mobile browse view (separate from the
+  // ≤7-row "today" viewport above). Same gtd semantics: horizon-0 active
+  // non-shopping actions, each linked to its horizon-1 parent project.
+  // -------------------------------------------------------------------------
+
+  // GET /me/actions?scope=active|today&project_id=<uuid> — active horizon-0
+  // non-shopping actions with their parent project title. scope=today narrows
+  // to due-today-or-overdue (effective tz); project_id narrows to one project
+  // (must be the caller's horizon-1 project). Capped at 200. Ordered by
+  // project title (NULLS LAST), then soonest due, then oldest first.
+  router.get('/me/actions', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+
+    const rawScope = req.query.scope;
+    if (rawScope !== undefined && rawScope !== 'active' && rawScope !== 'today') {
+      return void res.status(400).json({ error: "scope must be 'active' or 'today'" });
+    }
+    const scope = rawScope === 'today' ? 'today' : 'active';
+
+    const rawProject = req.query.project_id;
+    if (rawProject !== undefined && (typeof rawProject !== 'string' || !UUID_RE.test(rawProject))) {
+      return void res.status(400).json({ error: 'project_id must be a UUID' });
+    }
+    const projectId = (rawProject as string | undefined) ?? null;
+
+    try {
+      let actions: ActionListItem[] = [];
+      try {
+        // project_id filter: validate it's the caller's own horizon-1 project
+        // (a foreign/unknown id is a 404, not a silently-empty list).
+        if (projectId) {
+          const owned = await pool.query<{ id: string }>(
+            `SELECT id FROM gtd_horizons
+             WHERE id = $1 AND user_id = $2 AND horizon = 1`,
+            [projectId, userId],
+          );
+          if (!owned.rows[0]) return void res.status(404).json({ error: 'Project not found' });
+        }
+
+        const params: unknown[] = [userId];
+        let dueClause = '';
+        if (scope === 'today') {
+          const today = localDateInTz(nowFn(), await getEffectiveTimezone(pool, userId));
+          params.push(today);
+          dueClause = `AND a.due_date IS NOT NULL AND a.due_date <= $${params.length}`;
+        }
+        let projectClause = '';
+        if (projectId) {
+          params.push(projectId);
+          projectClause = `AND a.project_id = $${params.length}`;
+        }
+
+        const result = await pool.query<{
+          id: string; title: string; context: unknown;
+          due_date: string | null; project_id: string | null; project_title: string | null;
+        }>(
+          `SELECT a.id, a.title, a.context,
+                  a.due_date::text AS due_date,
+                  a.project_id::text AS project_id,
+                  parent.title AS project_title
+           FROM gtd_horizons a
+           LEFT JOIN gtd_horizons parent
+             ON parent.id = a.project_id AND parent.horizon = 1 AND parent.user_id = a.user_id
+           WHERE a.user_id = $1 AND a.horizon = 0 AND a.status = 'active'
+             AND (a.list_type IS NULL OR a.list_type <> 'shopping')
+             ${dueClause}
+             ${projectClause}
+           ORDER BY parent.title NULLS LAST, a.due_date ASC NULLS LAST, a.created_at ASC
+           LIMIT 200`,
+          params,
+        );
+        actions = result.rows.map((r) => ({
+          id: r.id,
+          title: r.title,
+          context: Array.isArray(r.context) && typeof r.context[0] === 'string' ? r.context[0] : null,
+          due_date: r.due_date ?? null,
+          project_id: r.project_id ?? null,
+          project_title: r.project_title ?? null,
+        }));
+      } catch (err) {
+        if (!isMissingTable(err)) throw err;
+        logger.warn('[gtd-surfaces][actions] gtd_horizons missing (pre-migration) — empty list');
+      }
+      res.json({ actions });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[gtd-surfaces][actions] Failed', { userId, error: message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /me/projects — active horizon-1 projects (most-recently-updated first),
+  // each with a live count of its active vs completed horizon-0 actions. Counts
+  // come from a single grouped subquery (no N+1).
+  router.get('/me/projects', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    try {
+      let projects: ProjectListItem[] = [];
+      try {
+        const result = await pool.query<{
+          id: string; title: string; status: string;
+          action_count: number; done_count: number;
+        }>(
+          `SELECT p.id, p.title, p.status,
+                  COALESCE(c.action_count, 0)::int AS action_count,
+                  COALESCE(c.done_count, 0)::int AS done_count
+           FROM gtd_horizons p
+           LEFT JOIN (
+             SELECT project_id,
+                    COUNT(*) FILTER (WHERE status = 'active') AS action_count,
+                    COUNT(*) FILTER (WHERE status = 'completed') AS done_count
+             FROM gtd_horizons
+             WHERE user_id = $1 AND horizon = 0
+               AND (list_type IS NULL OR list_type <> 'shopping')
+               AND project_id IS NOT NULL
+             GROUP BY project_id
+           ) c ON c.project_id = p.id
+           WHERE p.user_id = $1 AND p.horizon = 1 AND p.status = 'active'
+           ORDER BY p.updated_at DESC`,
+          [userId],
+        );
+        projects = result.rows.map((r) => ({
+          id: r.id,
+          title: r.title,
+          status: r.status,
+          action_count: Number(r.action_count),
+          done_count: Number(r.done_count),
+        }));
+      } catch (err) {
+        if (!isMissingTable(err)) throw err;
+        logger.warn('[gtd-surfaces][projects] gtd_horizons missing (pre-migration) — empty list');
+      }
+      res.json({ projects });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[gtd-surfaces][projects] Failed', { userId, error: message });
       res.status(500).json({ error: 'Internal server error' });
     }
   });

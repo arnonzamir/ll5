@@ -91,6 +91,8 @@ never learned from (±10 min window). NEARBY_WIFI_DEVICES in the Android manifes
 `neverForLocation` — it silently strips scan data (was present, removed 2026-07-03). Android repo has
 no CI: build `./gradlew assembleDebug`, install manually.
 
+**Android Actions/Projects [2026-07-05]:** GET /me/actions?scope=active|today[&project_id=] + GET /me/projects (read-mostly; complete/defer reused). A 'keep' triage creates an UNDATED action → shows in Actions→All (grouped by project), not Today. Phone stays a viewport — no add/edit/reorder by design.
+
 **Web chat fold [2026-07-05]:** dashboard chat folds record_moment/ToolSearch into the system-events band (isInstrumentationRow in lib/chat/format.ts + chat-widget.tsx twin); lone instrumentation rows fold too.
 
 **Web reaction picker [2026-07-05]:** dashboard chat pickers show only 👍/👎 (PICKER_REACTIONS in lib/chat/constants.ts); full set retained for render+validation. 

@@ -82,8 +82,8 @@ async function run(
   pool: Pool,
   method: string,
   path: string,
-  { params = {}, body = {}, token = userToken('u1') }: {
-    params?: Record<string, string>; body?: unknown; token?: string | null;
+  { params = {}, body = {}, query = {}, token = userToken('u1') }: {
+    params?: Record<string, string>; body?: unknown; query?: Record<string, unknown>; token?: string | null;
   } = {},
 ) {
   const router = createGtdSurfacesRouter(pool, AUTH_SECRET, { now: NOW });
@@ -91,6 +91,7 @@ async function run(
   const req = makeReq({
     headers: token ? authHeader(token) : {},
     params: params as any,
+    query: query as any,
     body: body as Record<string, unknown>,
   });
   const res = makeRes();
@@ -654,6 +655,190 @@ describe("GET /me/actions/today — the agent's ≤7-row plan viewport", () => {
     const res = await run(pool, 'get', '/me/actions/today');
     expect(res._status).toBe(200);
     expect(res._json).toEqual({ items: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /me/actions — read-mostly Actions list (scope + project filter)
+// ---------------------------------------------------------------------------
+
+const actionsListMatcher = (rows: unknown[]): Matcher => (sql) =>
+  /parent\.title AS project_title/.test(sql) ? { rows } : undefined;
+
+const projectOwnedMatcher = (owned: boolean): Matcher => (sql) =>
+  /SELECT id FROM gtd_horizons\s+WHERE id = \$1 AND user_id = \$2 AND horizon = 1/.test(sql)
+    ? { rows: owned ? [{ id: 'p1' }] : [] }
+    : undefined;
+
+const PROJECT_ID = 'dddddddd-1111-2222-3333-444444444444';
+
+describe('GET /me/actions — active horizon-0 actions with parent project', () => {
+  it('401s without a token', async () => {
+    const { pool } = makePool([]);
+    expect((await run(pool, 'get', '/me/actions', { token: null }))._status).toBe(401);
+  });
+
+  it('scope=active (default): all active non-shopping actions, first context tag, project title join, no date filter', async () => {
+    const { pool, calls } = makePool([
+      actionsListMatcher([
+        {
+          id: 'a1', title: 'Draft the deck', context: ['computer', 'office'],
+          due_date: '2026-07-04', project_id: PROJECT_ID, project_title: 'Board meeting',
+        },
+        {
+          id: 'a2', title: 'Buy stamps', context: [],
+          due_date: null, project_id: null, project_title: null,
+        },
+      ]),
+    ]);
+
+    const res = await run(pool, 'get', '/me/actions');
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({
+      actions: [
+        {
+          id: 'a1', title: 'Draft the deck', context: 'computer',
+          due_date: '2026-07-04', project_id: PROJECT_ID, project_title: 'Board meeting',
+        },
+        {
+          id: 'a2', title: 'Buy stamps', context: null,
+          due_date: null, project_id: null, project_title: null,
+        },
+      ],
+    });
+
+    const [sql, params] = calls.find((c) => /parent\.title AS project_title/.test(c[0]))!;
+    expect(sql).toMatch(/a\.horizon = 0 AND a\.status = 'active'/);
+    expect(sql).toMatch(/a\.list_type IS NULL OR a\.list_type <> 'shopping'/);
+    expect(sql).toMatch(/LEFT JOIN gtd_horizons parent\s+ON parent\.id = a\.project_id AND parent\.horizon = 1/);
+    expect(sql).toMatch(/ORDER BY parent\.title NULLS LAST, a\.due_date ASC NULLS LAST, a\.created_at ASC/);
+    expect(sql).toMatch(/LIMIT 200/);
+    // scope=active adds NO due-date filter and does NOT resolve the timezone.
+    expect(sql).not.toMatch(/a\.due_date <= /);
+    expect(params).toEqual(['u1']);
+    expect(calls.some((c) => /current_timezone/.test(c[0]))).toBe(false);
+  });
+
+  it('scope=today: narrows to due-today-or-overdue in the effective tz', async () => {
+    const { pool, calls } = makePool([tzMatcher('Asia/Jerusalem'), actionsListMatcher([])]);
+    const router = createGtdSurfacesRouter(pool, AUTH_SECRET, { now: () => new Date('2026-07-05T22:30:00Z') });
+    const handler = getChain(router, 'get', '/me/actions');
+    const res = makeRes();
+    await handler(makeReq({ headers: authHeader(userToken('u1')), query: { scope: 'today' } as any }), res);
+
+    expect(res._status).toBe(200);
+    const [sql, params] = calls.find((c) => /parent\.title AS project_title/.test(c[0]))!;
+    expect(sql).toMatch(/a\.due_date IS NOT NULL AND a\.due_date <= \$2/);
+    expect(params).toEqual(['u1', '2026-07-06']); // 01:30 local July 6
+  });
+
+  it('project_id filter: validates ownership then scopes to that project', async () => {
+    const { pool, calls } = makePool([
+      projectOwnedMatcher(true),
+      actionsListMatcher([
+        {
+          id: 'a3', title: 'Book the room', context: ['calls'],
+          due_date: '2026-07-10', project_id: PROJECT_ID, project_title: 'Board meeting',
+        },
+      ]),
+    ]);
+    const res = await run(pool, 'get', '/me/actions', { query: { project_id: PROJECT_ID } } as any);
+
+    expect(res._status).toBe(200);
+    expect((res._json as any).actions).toEqual([
+      {
+        id: 'a3', title: 'Book the room', context: 'calls',
+        due_date: '2026-07-10', project_id: PROJECT_ID, project_title: 'Board meeting',
+      },
+    ]);
+
+    // Ownership check is user-scoped to a horizon-1 row.
+    const [ownSql, ownParams] = calls.find((c) => /SELECT id FROM gtd_horizons/.test(c[0]))!;
+    expect(ownSql).toMatch(/horizon = 1/);
+    expect(ownParams).toEqual([PROJECT_ID, 'u1']);
+    // The list query carries the project filter.
+    const [sql, params] = calls.find((c) => /parent\.title AS project_title/.test(c[0]))!;
+    expect(sql).toMatch(/AND a\.project_id = \$2/);
+    expect(params).toEqual(['u1', PROJECT_ID]);
+  });
+
+  it('404s when project_id is not the caller’s project', async () => {
+    const { pool, calls } = makePool([projectOwnedMatcher(false)]);
+    const res = await run(pool, 'get', '/me/actions', { query: { project_id: PROJECT_ID } } as any);
+    expect(res._status).toBe(404);
+    // Never runs the list query for a foreign project.
+    expect(calls.some((c) => /parent\.title AS project_title/.test(c[0]))).toBe(false);
+  });
+
+  it('400s on a bad scope or a non-UUID project_id', async () => {
+    const { pool } = makePool([]);
+    expect((await run(pool, 'get', '/me/actions', { query: { scope: 'all' } } as any))._status).toBe(400);
+    expect((await run(pool, 'get', '/me/actions', { query: { project_id: 'nope' } } as any))._status).toBe(400);
+  });
+
+  it('degrades to empty when gtd_horizons is missing (42P01)', async () => {
+    const { pool } = makePool([
+      (sql) => /parent\.title AS project_title/.test(sql)
+        ? (() => { throw Object.assign(new Error('missing'), { code: '42P01' }); })()
+        : undefined,
+    ]);
+    const res = await run(pool, 'get', '/me/actions');
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ actions: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /me/projects — active projects with live action/done counts
+// ---------------------------------------------------------------------------
+
+describe('GET /me/projects — active horizon-1 projects with counts', () => {
+  it('401s without a token', async () => {
+    const { pool } = makePool([]);
+    expect((await run(pool, 'get', '/me/projects', { token: null }))._status).toBe(401);
+  });
+
+  it('returns active projects with action_count/done_count, including a zero-action project', async () => {
+    const { pool, calls } = makePool([
+      (sql) => /FROM gtd_horizons p/.test(sql) && /horizon = 1 AND p\.status = 'active'/.test(sql)
+        ? {
+            rows: [
+              { id: 'p1', title: 'Board meeting', status: 'active', action_count: 3, done_count: 5 },
+              { id: 'p2', title: 'Kitchen remodel', status: 'active', action_count: 0, done_count: 0 },
+            ],
+          }
+        : undefined,
+    ]);
+
+    const res = await run(pool, 'get', '/me/projects');
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({
+      projects: [
+        { id: 'p1', title: 'Board meeting', status: 'active', action_count: 3, done_count: 5 },
+        { id: 'p2', title: 'Kitchen remodel', status: 'active', action_count: 0, done_count: 0 },
+      ],
+    });
+
+    const [sql, params] = calls.find((c) => /FROM gtd_horizons p/.test(c[0]))!;
+    // Single grouped subquery, not N+1.
+    expect(sql).toMatch(/COUNT\(\*\) FILTER \(WHERE status = 'active'\) AS action_count/);
+    expect(sql).toMatch(/COUNT\(\*\) FILTER \(WHERE status = 'completed'\) AS done_count/);
+    expect(sql).toMatch(/list_type IS NULL OR list_type <> 'shopping'/);
+    expect(sql).toMatch(/ORDER BY p\.updated_at DESC/);
+    expect(params).toEqual(['u1']);
+    // Exactly one query — no per-project count fan-out.
+    expect(calls.filter((c) => /gtd_horizons/.test(c[0]))).toHaveLength(1);
+  });
+
+  it('degrades to empty when gtd_horizons is missing (42P01)', async () => {
+    const { pool } = makePool([
+      (sql) => /FROM gtd_horizons p/.test(sql)
+        ? (() => { throw Object.assign(new Error('missing'), { code: '42P01' }); })()
+        : undefined,
+    ]);
+    const res = await run(pool, 'get', '/me/projects');
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ projects: [] });
   });
 });
 
