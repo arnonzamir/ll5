@@ -61,6 +61,15 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
+### Android Phase 4 polish — OSM map + triage freshness/legend (2026-07-05)
+Map switched Google Maps Compose → **osmdroid + CARTO dark raster tiles** (keyless; matches the
+dashboard's OSM choice; all Google plumbing/key-gating removed; attribution + User-Agent set). Inbox
+triage: card age first-class ("captured Apr 13 · 3 months ago", relative-age tinted warning #D9A05B
+past 30 days), persistent monospace gesture legend (→keep ←trash ↑someday ↓done, active dir lifts to
+onSurface), one-time intro overlay (DataStore triage_intro_seen). BUG fixed at integration: InboxItemDto
+mapped captured_at but the gateway serves created_at — the age would have been permanently null.
+assembleDebug green.
+
 ### Android Phase 4 SHIPPED — topics rank, lists, triage, decision cards, map (2026-07-05)
 Gateway: /narratives?sort=now (gateway re-rank: 0.35 open_loop [open_threads] + 0.30 calendar proximity
 [≤48h token match vs calendar_events, closeness-scaled] + 0.25 recency [3d half-life] + 0.10 status;

@@ -192,7 +192,9 @@ not a manager.
 
 ## 7. Map
 
-**Engine: Google Maps Compose** (GMS Xiaomi; Play Services location/geofencing
+**Engine: osmdroid over CARTO dark tiles (REVISED 2026-07-05 — was Google Maps Compose)**. Keyless (no API key ceremony, consistent with the dashboard's Leaflet/OSM), better dark tiles for the palette; the map's modest snapshot scope doesn't need Google's SDK. Trade: one AndroidView bridge + public tile-server dependence (fine at one user). Original rationale kept below for context:
+
+**(superseded) Google Maps Compose** (GMS Xiaomi; Play Services location/geofencing
 already a dependency; Compose-native markers — no new AndroidView; MapLibre would
 add ~5MB native libs + style upkeep for one user. Tile parity with dashboard's
 Leaflet is a non-goal; data parity is).
