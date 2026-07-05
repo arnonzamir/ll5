@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-token.repository.js';
+import type { OAuthStateRepository } from '../repositories/interfaces/oauth-state.repository.js';
 import type { CalendarConfigRepository } from '../repositories/interfaces/calendar-config.repository.js';
 import type { UserSettingsRepository } from '../repositories/interfaces/user-settings.repository.js';
 import type { ESCalendarEventRepository } from '../repositories/elasticsearch/calendar-event.repository.js';
@@ -11,6 +12,7 @@ import { registerTicklerTools } from './tickler.js';
 
 export interface ToolDependencies {
   tokenRepo: OAuthTokenRepository;
+  stateRepo: OAuthStateRepository;
   calendarConfigRepo: CalendarConfigRepository;
   userSettingsRepo: UserSettingsRepository;
   esCalendarRepo: ESCalendarEventRepository | null;
@@ -22,7 +24,7 @@ export function registerAllTools(
   deps: ToolDependencies,
   getUserId: () => string,
 ): void {
-  registerAuthTools(server, deps.tokenRepo, deps.calendarConfigRepo, deps.googleConfig, getUserId);
+  registerAuthTools(server, deps.tokenRepo, deps.calendarConfigRepo, deps.stateRepo, deps.googleConfig, getUserId);
   registerCalendarTools(server, deps.tokenRepo, deps.calendarConfigRepo, deps.userSettingsRepo, deps.esCalendarRepo, deps.googleConfig, getUserId);
   registerGmailTools(server, deps.tokenRepo, deps.googleConfig, getUserId);
   registerTicklerTools(server, deps.tokenRepo, deps.calendarConfigRepo, deps.userSettingsRepo, deps.esCalendarRepo, deps.googleConfig, getUserId);

@@ -61,6 +61,17 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
+### Fix: Google OAuth state DB-backed + triage hold-mode reliability (2026-07-05)
+Google reconnect from CHAT failed "invalid or expired state token" — OAuth state was an in-memory Map
+(10-min setTimeout), wiped by any google-service restart or a delayed chat-link click (dashboard worked
+only because it opens consent instantly). Fix (packages/google): migration 005 google_oauth_states,
+DB-backed 60-min single-use store (putState/takeState atomic DELETE-RETURNING/sweepExpired), both call
+sites + callback rewired; 45 tests. ll5-run persona: fresh link each reconnect + declare ~1h validity +
+regenerate if expired. Verified Google reconnected (live events read, 0 invalid_grant post). Also fixed
+(Android): triage HOLD → hotspot mode was nearly unreachable — the hold/flick race used the ~8dp system
+touch slop, so held-finger jitter always misclassified as flick; now classify by decisive early travel
+(>28dp fast = flick, else long-press timeout → hotspot). assembleDebug green.
+
 ### Android triage expanded to 7 verbs + hotspot drag + map tile selector (2026-07-05)
 Triage gained 3 verbs (frozen contract keep|trash|someday|done|reference|project|followup). Gateway
 gtd-surfaces.ts: `reference` = instant, inbox processed/outcome_type reference + `[Inbox → Reference]`

@@ -26,6 +26,14 @@ pairingCode — QR only (self-refresh loop on the Mac screen, or dashboard /sett
 Vaultwarden ops gotchas 2026-07-04: bw CLI must stay pinned 2024.4.1 (userDecryptionOptions incompat with newer CLIs on --apikey login); Traefik router/service names must be GLOBALLY unique across all compose stacks (an ll5-vault name collision between the Vaultwarden service and the vault MCP merged their backends — mcp-vault round-robined into Vaultwarden); multi-network containers need traefik.docker.network=coolify or Traefik picks an unreachable network IP. The proper re-provision path is the messaging MCP `provision_whatsapp_account` tool (does
 create+webhook+encrypt+persist in one shot) — prefer it over manual curl when the MCP is reachable.
 
+**Google OAuth state now DB-backed [2026-07-05]:** the OAuth CSRF `state` moved from an in-memory
+Map (10-min setTimeout) to `google_oauth_states` (migration 005; 60-min TTL, single-use atomic
+DELETE-RETURNING). Fixes "invalid or expired state token" on chat-initiated reconnects (a stale link or
+a google-service restart between get_auth_url and the callback used to wipe the in-memory state). Both
+call sites (agent get_auth_url + dashboard /api/auth-url) putState; callback takeState. Persona also
+tells the agent to generate a FRESH link each reconnect, declare its ~1h validity, regenerate if
+expired. (Known-cosmetic: the callback still logs email="" — userinfo fetch fails, non-fatal, untouched.)
+
 **Android triage 7 verbs [2026-07-05]:** POST /me/inbox/:id/triage action ∈ keep|trash|someday|done|
 reference|project|followup. reference = instant (processed/reference + [Inbox → Reference] msg);
 project/followup = DEFERRED (inbox→reviewed, agent proposes via add_tray_item → user approves as a tray

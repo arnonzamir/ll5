@@ -13,11 +13,12 @@ import type { LogLevel } from './utils/logger.js';
 import { runMigrations } from './utils/migration-runner.js';
 import { initAudit, initAppLog, withToolLogging } from '@ll5/shared';
 import { PostgresOAuthTokenRepository } from './repositories/postgres/oauth-token.repository.js';
+import { PostgresOAuthStateRepository } from './repositories/postgres/oauth-state.repository.js';
 import { PostgresCalendarConfigRepository } from './repositories/postgres/calendar-config.repository.js';
 import { PostgresUserSettingsRepository } from './repositories/postgres/user-settings.repository.js';
 import { ESCalendarEventRepository } from './repositories/elasticsearch/calendar-event.repository.js';
+import { OAUTH_STATE_TTL_MS } from './repositories/interfaces/oauth-state.repository.js';
 import { registerAllTools } from './tools/index.js';
-import { pendingStates } from './tools/auth.js';
 import { createOAuth2Client, getAuthenticatedClient, expandScopes } from './utils/google-client.js';
 
 const { Pool } = pg;
@@ -86,6 +87,7 @@ export async function startServer(): Promise<void> {
   // Repositories
   // ---------------------------------------------------------------------------
   const tokenRepo = new PostgresOAuthTokenRepository(pool, env.encryptionKey);
+  const stateRepo = new PostgresOAuthStateRepository(pool);
   const calendarConfigRepo = new PostgresCalendarConfigRepository(pool);
   const userSettingsRepo = new PostgresUserSettingsRepository(pool);
 
@@ -105,7 +107,7 @@ export async function startServer(): Promise<void> {
     redirectUri: env.googleRedirectUri,
   };
 
-  const deps = { tokenRepo, calendarConfigRepo, userSettingsRepo, esCalendarRepo, googleConfig };
+  const deps = { tokenRepo, stateRepo, calendarConfigRepo, userSettingsRepo, esCalendarRepo, googleConfig };
 
   // ---------------------------------------------------------------------------
   // Express app with auth middleware
@@ -194,13 +196,12 @@ export async function startServer(): Promise<void> {
       return;
     }
 
-    // Validate CSRF state
-    const pending = pendingStates.get(state);
+    // Validate + consume CSRF state (single-use; durable across restarts).
+    const pending = await stateRepo.takeState(state);
     if (!pending) {
       res.status(400).send('<html><body><h2>Invalid or expired state token</h2><p>Please try the OAuth flow again.</p></body></html>');
       return;
     }
-    pendingStates.delete(state);
 
     try {
       const oauth2Client = createOAuth2Client(googleConfig);
@@ -280,8 +281,7 @@ export async function startServer(): Promise<void> {
     try {
       const state = crypto.randomBytes(32).toString('hex');
       const scopes = expandScopes(undefined);
-      pendingStates.set(state, { userId, scopes });
-      setTimeout(() => pendingStates.delete(state), 10 * 60 * 1000);
+      await stateRepo.putState(state, userId, scopes, OAUTH_STATE_TTL_MS);
 
       const oauth2Client = createOAuth2Client(googleConfig);
       const authUrl = oauth2Client.generateAuthUrl({

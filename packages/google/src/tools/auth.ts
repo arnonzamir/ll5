@@ -4,20 +4,21 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { OAuthTokenRepository } from '../repositories/interfaces/oauth-token.repository.js';
 import type { CalendarConfigRepository } from '../repositories/interfaces/calendar-config.repository.js';
 import {
+  OAUTH_STATE_TTL_MS,
+  type OAuthStateRepository,
+} from '../repositories/interfaces/oauth-state.repository.js';
+import {
   createOAuth2Client,
   expandScopes,
   type GoogleClientConfig,
 } from '../utils/google-client.js';
 import { logger } from '../utils/logger.js';
 
-// In-memory CSRF state store (keyed by state token -> userId)
-// In production with multiple instances, use Redis or DB.
-export const pendingStates = new Map<string, { userId: string; scopes: string[] }>();
-
 export function registerAuthTools(
   server: McpServer,
   tokenRepo: OAuthTokenRepository,
   calendarConfigRepo: CalendarConfigRepository,
+  stateRepo: OAuthStateRepository,
   config: GoogleClientConfig,
   getUserId: () => string,
 ): void {
@@ -38,12 +39,9 @@ export function registerAuthTools(
       const expandedScopes = expandScopes(scopes);
       const state = randomBytes(32).toString('hex');
 
-      pendingStates.set(state, { userId, scopes: expandedScopes });
-
-      // Clean up old states after 10 minutes
-      setTimeout(() => {
-        pendingStates.delete(state);
-      }, 10 * 60 * 1000);
+      // Durable, single-use CSRF state (survives a service restart or a
+      // delayed link click between here and the /oauth/callback redirect).
+      await stateRepo.putState(state, userId, expandedScopes, OAUTH_STATE_TTL_MS);
 
       const oauth2Client = createOAuth2Client(config);
       const authUrl = oauth2Client.generateAuthUrl({
@@ -79,8 +77,8 @@ export function registerAuthTools(
     async ({ code, state }) => {
       const userId = getUserId();
 
-      // Validate CSRF state
-      const pendingState = pendingStates.get(state);
+      // Validate + consume CSRF state (single-use).
+      const pendingState = await stateRepo.takeState(state);
       if (!pendingState || pendingState.userId !== userId) {
         return {
           content: [{
@@ -89,7 +87,6 @@ export function registerAuthTools(
           }],
         };
       }
-      pendingStates.delete(state);
 
       try {
         const oauth2Client = createOAuth2Client(config);
