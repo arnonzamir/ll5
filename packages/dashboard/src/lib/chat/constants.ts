@@ -48,6 +48,12 @@ export const REACTION_ORDER: Reaction[] = [
 
 export const VALID_REACTIONS: Reaction[] = [...REACTION_ORDER];
 
+/** What the USER can pick — one positive + one negative only. The old picker
+ *  showed two of each (👍/✓ and 👎/✗), which overlapped and read as confusing.
+ *  REACTION_ORDER/VALID_REACTIONS stay full so existing and agent-sent reactions
+ *  still render and validate. */
+export const PICKER_REACTIONS: Reaction[] = ["agree", "disagree"];
+
 /** Compact-row grouping window. Consecutive `display_compact=true` messages
  *  within this distance collapse under a single "N system events" band. */
 export const COMPACT_GROUP_WINDOW_MS = 60_000;

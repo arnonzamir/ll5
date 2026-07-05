@@ -11,7 +11,7 @@ import {
 import {
   REACTION_ICONS,
   REACTION_LABELS,
-  REACTION_ORDER,
+  PICKER_REACTIONS,
   compactIcon as pickCompactIcon,
   ChevronDown,
   ChevronRight,
@@ -363,7 +363,7 @@ function HoverBar({
         " flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
       }
     >
-      {onReact && REACTION_ORDER.map((r) => {
+      {onReact && PICKER_REACTIONS.map((r) => {
         const Icon = REACTION_ICONS[r];
         return (
           <button

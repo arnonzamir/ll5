@@ -61,6 +61,12 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
+### Web dashboard: reaction picker → 👍/👎 only (parity with app, 2026-07-05)
+Same overlapping-reaction fix as Android, now on the dashboard: both chat surfaces (chat-widget.tsx tile
++ chat/message-bubble.tsx full-screen) narrowed their PICKER to agree/disagree; REACTION_ICONS/LABELS +
+VALID_REACTIONS kept full so existing/agent-sent reactions still render+validate (new PICKER_REACTIONS
+in lib/chat/constants.ts). More web/app parity items pending user scoping.
+
 ### Fix: Google OAuth state DB-backed + triage hold-mode reliability (2026-07-05)
 Google reconnect from CHAT failed "invalid or expired state token" — OAuth state was an in-memory Map
 (10-min setTimeout), wiped by any google-service restart or a delayed chat-link click (dashboard worked

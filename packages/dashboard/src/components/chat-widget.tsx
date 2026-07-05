@@ -71,13 +71,13 @@ const REACTION_LABELS: Record<Reaction, string> = {
   thinking: "Thinking",
 };
 
+// What the user can PICK: one positive + one negative only. The old set had two
+// of each (👍/✓ and 👎/✗) which overlapped in meaning and read as confusing.
+// REACTION_ICONS/LABELS keep the full set so any existing or agent-sent reaction
+// still renders.
 const REACTION_ORDER: Reaction[] = [
   "agree",
   "disagree",
-  "acknowledge",
-  "reject",
-  "confused",
-  "thinking",
 ];
 
 // ---------------------------------------------------------------------------

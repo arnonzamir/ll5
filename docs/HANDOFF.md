@@ -91,6 +91,8 @@ never learned from (±10 min window). NEARBY_WIFI_DEVICES in the Android manifes
 `neverForLocation` — it silently strips scan data (was present, removed 2026-07-03). Android repo has
 no CI: build `./gradlew assembleDebug`, install manually.
 
+**Web reaction picker [2026-07-05]:** dashboard chat pickers show only 👍/👎 (PICKER_REACTIONS in lib/chat/constants.ts); full set retained for render+validation. 
+
 **Lost-NOTIFY delivery race — FIXED at the sweep [2026-07-03]:** StuckMessageSweep now re-notifies
 never-delivered `pending` system rows (re-emits the migration-018 `new_message` pg_notify, 3 attempts
 from 3 min of age, counter in `metadata.re_notify_count`; knobs `stuck_message_renotify_minutes` /
