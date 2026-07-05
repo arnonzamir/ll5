@@ -170,6 +170,9 @@ const inboxProcessMatcher: Matcher = (sql) =>
 const actionInsertMatcher: Matcher = (sql) =>
   /INSERT INTO gtd_horizons/.test(sql) ? { rows: [{ id: ACTION_ID }] } : undefined;
 
+const sysMsgMatcher: Matcher = (sql) =>
+  /INSERT INTO chat_messages/.test(sql) ? { rows: [{ id: 'msg-1' }] } : undefined;
+
 describe('POST /me/inbox/:id/triage — mirrors gtd process_inbox_item', () => {
   it('trash → processed / outcome_type trash, no action created, no system message', async () => {
     const { pool, calls } = makePool([inboxItemMatcher('old flyer'), inboxProcessMatcher]);
@@ -256,6 +259,107 @@ describe('POST /me/inbox/:id/triage — mirrors gtd process_inbox_item', () => {
     const [, processParams] = calls.find((c) => /UPDATE gtd_inbox/.test(c[0]))!;
     expect(processParams[2]).toBe('action');
     expect(processParams[3]).toBe(ACTION_ID);
+  });
+
+  it('reference → processed / outcome_type reference, NO action, one [Inbox → Reference] message', async () => {
+    const { pool, calls } = makePool([
+      inboxItemMatcher('  the wifi   password is hunter2 '),
+      inboxProcessMatcher,
+      sysMsgMatcher,
+    ]);
+    const res = await run(pool, 'post', '/me/inbox/:id/triage', {
+      params: { id: INBOX_ID }, body: { action: 'reference' },
+    });
+
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ status: 'filed', action: 'reference', inbox_id: INBOX_ID });
+
+    const [sql, params] = calls.find((c) => /UPDATE gtd_inbox/.test(c[0]))!;
+    expect(sql).toMatch(/status = 'processed'/);
+    expect(sql).toMatch(/outcome_type = 'reference'/);
+    expect(sql).toMatch(/processed_at = now\(\)/);
+    expect(params).toEqual([INBOX_ID, 'u1']);
+
+    // No gtd action is created for a reference.
+    expect(calls.some((c) => /INSERT INTO gtd_horizons/.test(c[0]))).toBe(false);
+
+    // Exactly one self-announcing system message, with the frozen prefix + content.
+    const msgs = calls.filter((c) => /INSERT INTO chat_messages/.test(c[0]));
+    expect(msgs).toHaveLength(1);
+    const content = msgs[0][1][1] as string;
+    expect(content).toContain('[Inbox → Reference] The user filed this as reference (not actionable, not trash): ');
+    expect(content).toContain('the wifi password is hunter2'); // whitespace-flattened
+    expect(content).toContain('personal-knowledge');
+  });
+
+  it('project → reviewed (NOT processed), notes triage:project, one [Inbox → Project] message', async () => {
+    const { pool, calls } = makePool([
+      inboxItemMatcher('build a greenhouse in the yard'),
+      inboxProcessMatcher,
+      sysMsgMatcher,
+    ]);
+    const res = await run(pool, 'post', '/me/inbox/:id/triage', {
+      params: { id: INBOX_ID }, body: { action: 'project' },
+    });
+
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ status: 'pending_agent', action: 'project', inbox_id: INBOX_ID });
+
+    const [sql, params] = calls.find((c) => /UPDATE gtd_inbox/.test(c[0]))!;
+    expect(sql).toMatch(/status = 'reviewed'/);
+    expect(sql).not.toMatch(/status = 'processed'/);
+    expect(sql).toMatch(/notes = COALESCE/);
+    expect(params).toEqual([INBOX_ID, 'u1', 'triage:project']);
+
+    // Deferred: nothing is created synchronously.
+    expect(calls.some((c) => /INSERT INTO gtd_horizons/.test(c[0]))).toBe(false);
+
+    const msgs = calls.filter((c) => /INSERT INTO chat_messages/.test(c[0]));
+    expect(msgs).toHaveLength(1);
+    const content = msgs[0][1][1] as string;
+    expect(content).toContain('[Inbox → Project] The user wants this handled as a PROJECT: ');
+    expect(content).toContain('build a greenhouse in the yard');
+    expect(content).toContain(`(inbox id ${INBOX_ID})`);
+    expect(content).toContain('add_tray_item');
+  });
+
+  it('followup → reviewed (NOT processed), notes triage:followup, one [Inbox → Follow-up] message', async () => {
+    const { pool, calls } = makePool([
+      inboxItemMatcher('chase the landlord about the deposit'),
+      inboxProcessMatcher,
+      sysMsgMatcher,
+    ]);
+    const res = await run(pool, 'post', '/me/inbox/:id/triage', {
+      params: { id: INBOX_ID }, body: { action: 'followup' },
+    });
+
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ status: 'pending_agent', action: 'followup', inbox_id: INBOX_ID });
+
+    const [sql, params] = calls.find((c) => /UPDATE gtd_inbox/.test(c[0]))!;
+    expect(sql).toMatch(/status = 'reviewed'/);
+    expect(sql).not.toMatch(/status = 'processed'/);
+    expect(params).toEqual([INBOX_ID, 'u1', 'triage:followup']);
+
+    expect(calls.some((c) => /INSERT INTO gtd_horizons/.test(c[0]))).toBe(false);
+
+    const msgs = calls.filter((c) => /INSERT INTO chat_messages/.test(c[0]));
+    expect(msgs).toHaveLength(1);
+    const content = msgs[0][1][1] as string;
+    expect(content).toContain('[Inbox → Follow-up] The user wants a follow-up on: ');
+    expect(content).toContain('chase the landlord about the deposit');
+    expect(content).toContain(`(inbox id ${INBOX_ID})`);
+    expect(content).toContain('Waiting for');
+  });
+
+  it('rejects an unknown action (enum) — reference/project/followup are the only new adds', async () => {
+    const { pool } = makePool([]);
+    expect((await run(pool, 'post', '/me/inbox/:id/triage', {
+      params: { id: INBOX_ID }, body: { action: 'file' },
+    }))._status).toBe(400);
+    expect((await run(pool, 'post', '/me/inbox/:id/triage', {
+      params: { id: INBOX_ID }, body: { action: 'delegate' },
+    }))._status).toBe(400);
   });
 
   it('404s for an unknown item, 409s for an already-processed one', async () => {

@@ -26,6 +26,12 @@ pairingCode — QR only (self-refresh loop on the Mac screen, or dashboard /sett
 Vaultwarden ops gotchas 2026-07-04: bw CLI must stay pinned 2024.4.1 (userDecryptionOptions incompat with newer CLIs on --apikey login); Traefik router/service names must be GLOBALLY unique across all compose stacks (an ll5-vault name collision between the Vaultwarden service and the vault MCP merged their backends — mcp-vault round-robined into Vaultwarden); multi-network containers need traefik.docker.network=coolify or Traefik picks an unreachable network IP. The proper re-provision path is the messaging MCP `provision_whatsapp_account` tool (does
 create+webhook+encrypt+persist in one shot) — prefer it over manual curl when the MCP is reachable.
 
+**Android triage 7 verbs [2026-07-05]:** POST /me/inbox/:id/triage action ∈ keep|trash|someday|done|
+reference|project|followup. reference = instant (processed/reference + [Inbox → Reference] msg);
+project/followup = DEFERRED (inbox→reviewed, agent proposes via add_tray_item → user approves as a tray
+decision card, or chat) — the agent MUST finish the inbox item (processed) after the choice, never leave
+it dangling in 'reviewed'. App: hold-a-card reveals 7 hotspots; quick-flick still does the 4.
+
 **Android map = osmdroid/CARTO keyless [2026-07-05]:** the Google Maps path was REMOVED (no MAPS_API_KEY, no Play Services maps dep) — osmdroid over CARTO dark tiles, matching the dashboard's OSM choice; attribution + User-Agent required by the tile server. Also: InboxItemDto maps the gateway's `created_at` (NOT captured_at — that mapping was dead) for the triage freshness display.
 
 **Android Phase 4 [2026-07-05]:** /narratives?sort=now re-ranks IN THE GATEWAY (knowledge MCP untouched;

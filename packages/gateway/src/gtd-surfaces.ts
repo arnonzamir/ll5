@@ -68,7 +68,15 @@ const INBOX_PAGE = 10;
 const ACTIONS_LIMIT = 7;
 const TITLE_MAX = 200;
 const STORE_MAX = 100;
-const TRIAGE_ACTIONS = ['keep', 'trash', 'someday', 'done'] as const;
+// Longest inbox content we echo into an agent system message (project/followup
+// need enough of the capture to reason about it, without dumping a whole note).
+const CONTENT_MAX = 400;
+// Frozen action contract (the Android app is built against this exact set).
+//   keep|trash|someday|done  — instant, processed synchronously (existing).
+//   reference                — instant, processed/reference; agent files it.
+//   project|followup         — DEFERRED: item goes to 'reviewed', the agent
+//                              decides & finishes it (card → processed).
+const TRIAGE_ACTIONS = ['keep', 'trash', 'someday', 'done', 'reference', 'project', 'followup'] as const;
 type TriageAction = (typeof TRIAGE_ACTIONS)[number];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -155,17 +163,30 @@ export function createGtdSurfacesRouter(
     }
   });
 
-  // POST /me/inbox/:id/triage { action: keep|trash|someday|done } — one swipe.
+  // POST /me/inbox/:id/triage { action } — one swipe.
+  // action ∈ keep|trash|someday|done|reference|project|followup.
   //
-  // Mirrors the gtd MCP's process_inbox_item semantics exactly:
+  // The first four mirror the gtd MCP's process_inbox_item semantics exactly
+  // (instant, processed synchronously, NO per-swipe message — the batch
+  // triage-summary handles the kept ones):
   //   trash   → processed / trash
   //   someday → processed / someday
   //   keep    → processed / action + create an ACTIVE horizon-0 todo action
   //             (title = content trimmed ≤200, category null) as outcome_id —
   //             deliberately bare; the agent refines context/energy after the
-  //             session (see /me/inbox/triage-summary). No per-swipe messages.
+  //             session (see /me/inbox/triage-summary).
   //   done    → processed / action + the same action pre-completed
   //             (do-now ≤2min — it happened, log it honestly).
+  //
+  // The three new verbs each SELF-ANNOUNCE with one system message (they are
+  // NOT in the batch summary) and are deliberately NOT synchronous writes:
+  //   reference → processed / reference (NO gtd action) + a message telling the
+  //               agent to file it in personal-knowledge. INSTANT.
+  //   project   → DEFERRED. status='reviewed' (off the triage stack, not yet
+  //               processed), notes 'triage:project'; the agent decides
+  //               existing-vs-new via add_tray_item and finishes the item.
+  //   followup  → DEFERRED. status='reviewed', notes 'triage:followup'; the
+  //               agent proposes a next action / waiting-for via add_tray_item.
   router.post('/me/inbox/:id/triage', authMw, async (req: Request, res: Response) => {
     const userId = (req as Request & { userId: string }).userId;
     const inboxId = String(req.params.id ?? '');
@@ -188,6 +209,91 @@ export function createGtdSurfacesRouter(
       if (!item) return void res.status(404).json({ error: 'Inbox item not found' });
       if (item.status !== 'captured') {
         return void res.status(409).json({ error: 'Inbox item already processed' });
+      }
+
+      // reference — INSTANT. Mirror the gtd 'reference' outcome: processed with
+      // outcome_type='reference' and NO gtd action; the agent stores it as a
+      // fact/note in personal-knowledge (told via one system message).
+      if (triage === 'reference') {
+        const filed = await pool.query<{ id: string }>(
+          `UPDATE gtd_inbox
+           SET status = 'processed',
+               outcome_type = 'reference',
+               outcome_id = NULL,
+               processed_at = now(),
+               updated_at = now()
+           WHERE id = $1 AND user_id = $2 AND status = 'captured'
+           RETURNING id`,
+          [inboxId, userId],
+        );
+        if (!filed.rows[0]) return void res.status(409).json({ error: 'Inbox item already processed' });
+
+        await insertSystemMessage(
+          pool,
+          userId,
+          `[Inbox → Reference] The user filed this as reference (not actionable, not trash): `
+          + `"${oneLine(item.content, CONTENT_MAX)}". Store it where it belongs — a fact/note in `
+          + `personal-knowledge — so it's findable later. Nothing else needed.`,
+        );
+
+        logAudit({
+          user_id: userId,
+          source: 'gateway',
+          action: 'update',
+          entity_type: 'inbox_item',
+          entity_id: inboxId,
+          summary: `Inbox triage (phone): reference — "${oneLine(item.content, 80)}"`,
+          metadata: { triage, outcome_type: 'reference' },
+        });
+
+        return void res.json({ status: 'filed', action: 'reference', inbox_id: inboxId });
+      }
+
+      // project / followup — DEFERRED to an agent decision. We do NOT create
+      // anything synchronously: the item leaves the triage stack (status
+      // 'reviewed', notes marker) but is NOT processed, and the agent gets a
+      // self-contained instruction to finish it (add_tray_item card, or a
+      // push_to_user question if genuinely ambiguous). Never left dangling.
+      if (triage === 'project' || triage === 'followup') {
+        const marker = `triage:${triage}`;
+        const reviewed = await pool.query<{ id: string }>(
+          `UPDATE gtd_inbox
+           SET status = 'reviewed',
+               notes = COALESCE(notes || E'\\n', '') || $3,
+               updated_at = now()
+           WHERE id = $1 AND user_id = $2 AND status = 'captured'
+           RETURNING id`,
+          [inboxId, userId, marker],
+        );
+        if (!reviewed.rows[0]) return void res.status(409).json({ error: 'Inbox item already processed' });
+
+        const content = oneLine(item.content, CONTENT_MAX);
+        const message = triage === 'project'
+          ? `[Inbox → Project] The user wants this handled as a PROJECT: "${content}" (inbox id ${inboxId}). `
+            + `Decide: does it fit an EXISTING project (check list_projects) or a NEW one? Propose a title + `
+            + `one-line definition. File a decision the user answers on their phone via add_tray_item — options `
+            + `like {an existing project match}, {"New: <title>"}, maybe a 2nd existing — recommended = your pick. `
+            + `On their choice: create/attach and mark the inbox item processed (outcome_type project, link `
+            + `outcome_id). If it's genuinely ambiguous or needs real input, push_to_user a short question INSTEAD `
+            + `of a card. Never leave the inbox item dangling — processed or a pending card+plan.`
+          : `[Inbox → Follow-up] The user wants a follow-up on: "${content}" (inbox id ${inboxId}). Propose EITHER `
+            + `a concrete next action OR parking it as waiting-for (and WHO it waits on). File it as an add_tray_item `
+            + `decision for one-tap approval — options like {"Next action: <x>"}, {"Waiting for <who>"} — `
+            + `recommended = your pick. On approval, create the action (waiting_for set if delegated) + mark the `
+            + `inbox item processed. Ambiguous / needs input → push_to_user a short question instead.`;
+        await insertSystemMessage(pool, userId, message);
+
+        logAudit({
+          user_id: userId,
+          source: 'gateway',
+          action: 'update',
+          entity_type: 'inbox_item',
+          entity_id: inboxId,
+          summary: `Inbox triage (phone): ${triage} → reviewed — "${oneLine(item.content, 80)}"`,
+          metadata: { triage, status: 'reviewed', marker },
+        });
+
+        return void res.json({ status: 'pending_agent', action: triage, inbox_id: inboxId });
       }
 
       // keep/done create the outcome action FIRST (we need its id for

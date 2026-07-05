@@ -61,6 +61,21 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
+### Android triage expanded to 7 verbs + hotspot drag + map tile selector (2026-07-05)
+Triage gained 3 verbs (frozen contract keep|trash|someday|done|reference|project|followup). Gateway
+gtd-surfaces.ts: `reference` = instant, inbox processed/outcome_type reference + `[Inbox → Reference]`
+agent msg (file in knowledge, no action created); `project`/`followup` = DEFERRED (inbox status→reviewed,
+notes marker, NO synchronous create) + `[Inbox → Project]`/`[Inbox → Follow-up]` agent msgs instructing
+it to propose via add_tray_item (existing-project-vs-new + title/def for project; next-action-vs-waiting-
+for-+who for followup) → the user approves as a TRAY DECISION CARD, or chat if too complex; agent then
+finishes the inbox item. 635 gateway tests. ll5-run: 3 dispatch entries + add_tray_item description note.
+Android: hold-a-card → hotspot mode (55% scrim, 7 labeled drop-targets: 4 primaries at edges reinforcing
+the flicks, reference/project/followup at corners; nearest-within-100dp highlights, release commits;
+quick-flick still works for the 4 via awaitEachGesture racing longPress-vs-touchSlop); deferred actions
+show "LL5 will sort this out →"; intro overlay v2 (triage_intro_v2_seen). Map: user-selectable tile
+style (Voyager default / Dark / Light-Positron) via a Layers button, persisted (map_tile_style),
+live-swapped without losing camera. assembleDebug green.
+
 ### Android Phase 4 polish — OSM map + triage freshness/legend (2026-07-05)
 Map switched Google Maps Compose → **osmdroid + CARTO dark raster tiles** (keyless; matches the
 dashboard's OSM choice; all Google plumbing/key-gating removed; attribution + User-Agent set). Inbox
