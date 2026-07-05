@@ -1,6 +1,6 @@
 # Android Companion UI — Redesign Review (2026-07-05)
 
-Status: DESIGN REVIEW — awaiting user approval before implementation.
+Status: APPROVED with amendments (2026-07-05) — decisions 2-6 approved; §5a balance directive binding; decision 1 (IA) explained, pending final nod.
 Inputs: codebase inventory (Explore pass), interaction model (UX-research pass with
 personal-productivity + behavioral-psychology lenses), concrete UI spec (UI-design pass).
 Grounded throughout in the Jun 25 – Jul 2 audit and the companion program
@@ -107,6 +107,23 @@ gateway routes where the app can't speak MCP); topics ranking change
 (personal-knowledge `narrativeRelevance` v2 + open-loop/calendar inputs); shopping/
 actions read endpoints already exist. Phase 5 of DECISION-018 (Today card) is
 delivered by Phase 2 here — the beat-engagement data gate is satisfied by the probe.
+
+## 5a. Balance directive (user, 2026-07-05) — BINDING
+
+"Careful not to make the app into a habit reminder; it is an AI life companion /
+mind extension / coach / self-goal-helper. Not a to-do list." Amendments:
+
+1. **Today leads with the agent's voice** — a 1-2 sentence first-person companion
+   read (what today is about, what I'm holding, what I'm watching) rendered ABOVE
+   all mechanics; habit dots + needs-you row are subordinate furniture below it.
+2. **The tray speaks as the agent** — questions framed first-person with the
+   agent's one-line reasoning; capped to true mandates; never "you have N tasks."
+3. **Coach in language, never metrics** — no productivity numbers on home;
+   smaller-doorway/two-skips observations arrive as occasional coach's notes in
+   words; streak dots stay (honest memory: no counts, no flames); todos remain a
+   read-only viewport with "Discuss →" as the primary exit.
+Litmus for every element: would it make sense coming from a thoughtful person who
+manages your outer world — or only from a productivity app?
 
 ## 5. Decisions needing the user
 
