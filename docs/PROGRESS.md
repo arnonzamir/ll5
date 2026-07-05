@@ -61,6 +61,32 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
+### Android Phase 4 SHIPPED — topics rank, lists, triage, decision cards, map (2026-07-05)
+Gateway: /narratives?sort=now (gateway re-rank: 0.35 open_loop [open_threads] + 0.30 calendar proximity
+[≤48h token match vs calendar_events, closeness-scaled] + 0.25 recency [3d half-life] + 0.10 status;
+VOLUME DROPPED; why_now {kind: open_loop|calendar|null, detail} — open_loop wins); NEW gtd-surfaces.ts
+(GET /me/inbox limit10+remaining; POST triage keep|trash|someday|done mirroring process_inbox_item —
+keep/done create the horizon-0 action, done pre-completed; POST triage-summary → ONE [Inbox Triage] msg,
+kept = ACTION ids; shopping GET/add/check [store=category, uncheck reopens]; actions today ≤7/complete
+[idempotent]/defer [tomorrow + note + agent msg]); NEW map.ts GET /me/map (devices latest-per, places
+w/ coords, today trail suspect-excluded ≤200 downsampled). Decision cards: migration 037 tray_items +
+POST /tray-items (agent, strict validation) + tray kind:decision projection + POST /me/tray/decision
+(race-guarded vs expiry) + TrayItemExpiry scheduler (10min; expired → default applied WITH disclosure
+msg). 631 gateway tests. ll5-run: add_tray_item channel tool; review skill solo mode files ≤3 decisions
+as tray cards (Thu expiry default); persona: "a decision that needs the user goes on the tray, not into
+the scroll"; [Decision] dispatch entry (apply choice/default NOW). Android: Topics rail (cap 5, ONE
+why-now signal/row — Canvas open-loop arc or mono calendar chip; All topics → old list); Lists screen
+(shopping w/ optimistic checks + per-store add; today's-actions viewport ≤7 check/defer only + Discuss→;
+triage entry); inbox swipe triage (physical gestures RTL-safe, 104dp threshold, glyph hints, 10-cap end
+card, batch summary w/ action_ids survives VM pop); tray decision cards (FlowRow A/B/C, recommended
+filled); Map on maps-compose KEY-GATED (blank key → calm note, SDK never inits; dark style JSON;
+initialed device dots + seen/stale provenance; trail toggle off-default; OSM/osmdroid swap OFFERED to
+user — pending choice). USER-FEEDBACK ADDITIONS: record_moment/ToolSearch rows fold into chat activity
+bands + expanded rows show one-line args summary (decision/category/gist); Today long-press → contextual
+react sheet (event: Canceled/Not mine/Needs prep; voice: Spot on/Off the mark; habit: Pause) sending
+bracketed-context chat msgs via existing send path + "Say more →" prefilled chat draft. assembleDebug
+green. Map DTO trail_today mismatch caught+fixed at integration.
+
 ### Android Phase 2 SHIPPED — Today card + agent voice + widget (2026-07-05)
 Gateway: migration 036 day_cards; POST /today-card (agent writes voice ≤400 + one_thing ≤200,
 full-replace, today in effective tz); GET /me/today (voice/one_thing/next_event [ES calendar, excludes

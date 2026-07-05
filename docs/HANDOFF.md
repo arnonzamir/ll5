@@ -26,6 +26,16 @@ pairingCode — QR only (self-refresh loop on the Mac screen, or dashboard /sett
 Vaultwarden ops gotchas 2026-07-04: bw CLI must stay pinned 2024.4.1 (userDecryptionOptions incompat with newer CLIs on --apikey login); Traefik router/service names must be GLOBALLY unique across all compose stacks (an ll5-vault name collision between the Vaultwarden service and the vault MCP merged their backends — mcp-vault round-robined into Vaultwarden); multi-network containers need traefik.docker.network=coolify or Traefik picks an unreachable network IP. The proper re-provision path is the messaging MCP `provision_whatsapp_account` tool (does
 create+webhook+encrypt+persist in one shot) — prefer it over manual curl when the MCP is reachable.
 
+**Android Phase 4 [2026-07-05]:** /narratives?sort=now re-ranks IN THE GATEWAY (knowledge MCP untouched;
+why_now computed vs calendar_events). Inbox triage: keep/done RETURN action_id — triage-summary's kept
+takes ACTION ids, not inbox ids; 409 = already processed (client treats as success). Shopping store ==
+gtd category. Map: GET /me/map serves trail_today (suspect fixes excluded); Android is KEY-GATED on
+MAPS_API_KEY manifest placeholder (blank = calm note, no crash) — Google-vs-osmdroid swap offered to
+user, pending. tray_items (migration 037): agent files decisions via add_tray_item; TrayItemExpiry
+(10min) applies defaults WITH disclosure; answers race-guarded. Chat folds record_moment/ToolSearch
+into activity bands. Today long-press react sheet sends bracketed-context user msgs ("[re: today 17:45
+X] canceled") — the AGENT acts on them; no direct mutations from the phone.
+
 **Android Phase 2 Today [2026-07-05]:** GET /me/today + POST /today-card (day_cards, migration 036).
 The agent OWNS the card via set_today_card (channel tool) at both beats + material mid-day changes —
 if the card looks stale on the phone, check ll5_app_log tool_call set_today_card first. next_event

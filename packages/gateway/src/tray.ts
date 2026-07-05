@@ -5,20 +5,27 @@ import { logAudit } from '@ll5/shared';
 import { chatAuthMiddleware } from './chat.js';
 import { listPendingApprovals } from './approvals.js';
 import { getEffectiveTimezone, startOfDayInTz } from './utils/timezone.js';
+import { insertSystemMessage } from './utils/system-message.js';
 import { logger } from './utils/logger.js';
 
 /**
  * "Needs You" tray plane (android-companion-ui Phase 1).
  *
  * GET /me/tray aggregates every open mandate into one list the phone renders
- * as cards; the two POST routes here + /me/vault/approve-site (vault.ts) are
- * the one-tap answers. Three sources, one shape:
+ * as cards; the POST routes here + /me/vault/approve-site (vault.ts) are
+ * the one-tap answers. Four sources, one shape:
  *
  *   habit            — today's open gtd_habit_log occurrences (shared schema
  *                      with the gtd MCP + HabitScheduler; DECISION-019)
  *   approval_contact — pending permission_change_requests (same helper as
  *                      GET /approvals/pending)
  *   approval_vault   — firing system_alerts with key vault.approval.<domain>
+ *   decision         — open tray_items rows the AGENT filed via
+ *                      POST /tray-items (weekly-review decisions, plan
+ *                      choices — spec §3/§6b A/B/C cards, recommendation
+ *                      pre-highlighted). Answered via POST /me/tray/decision;
+ *                      expired by the TrayItemExpiry sweep (default applied
+ *                      by the AGENT, disclosed to the user — model §3).
  *
  * VOICE (binding — android-companion-ui.md §5a): items speak AS the agent,
  * first person ("should I mark it taken?", "Allow me to sign in…"), never
@@ -31,10 +38,17 @@ import { logger } from './utils/logger.js';
 // Frozen API contract — the Android app is built against these shapes.
 // ---------------------------------------------------------------------------
 
+export interface TrayDecisionOption {
+  key: string;
+  label: string;
+  /** The AGENT's pick — the one pre-highlighted (filled) chip. */
+  recommended: boolean;
+}
+
 export interface TrayItem {
-  /** Stable: "habit:<habit_id>:<due_date>:<due_time>" | "approval_contact:<request_id>" | "approval_vault:<domain>" */
+  /** Stable: "habit:<habit_id>:<due_date>:<due_time>" | "approval_contact:<request_id>" | "approval_vault:<domain>" | "decision:<uuid>" */
   id: string;
-  kind: 'habit' | 'approval_contact' | 'approval_vault';
+  kind: 'habit' | 'approval_contact' | 'approval_vault' | 'decision';
   /** FIRST-PERSON agent voice — one question, never a paragraph. */
   question: string;
   /** One line max. */
@@ -51,6 +65,8 @@ export interface TrayItem {
     requested_permission: string;
   };
   approval_vault?: { domain: string };
+  /** item_id is the raw tray_items uuid — what POST /me/tray/decision takes. */
+  decision?: { item_id: string; options: TrayDecisionOption[] };
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -60,6 +76,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // what the HabitScheduler's end-of-day sweep records when the user DIDN'T
 // answer — never a button.
 const TRAY_OUTCOMES = ['done', 'skipped_deliberate', 'excused'] as const;
+
+// Agent-filed decision limits (frozen contract with the ll5-run add_tray_item
+// tool): one-line question, one-line context, 2-3 options, deadline ≤14d out.
+const DECISION_QUESTION_MAX = 200;
+const DECISION_CONTEXT_MAX = 300;
+const DECISION_EXPIRES_MAX_DAYS = 14;
+const DECISION_OPTIONS_MIN = 2;
+const DECISION_OPTIONS_MAX = 3;
 
 interface HabitRow {
   id: string;
@@ -262,6 +286,92 @@ async function collectVaultApprovalItems(pool: Pool, userId: string): Promise<Tr
   });
 }
 
+// ---------------------------------------------------------------------------
+// Decision items (agent-filed tray_items — migration 037)
+// ---------------------------------------------------------------------------
+
+interface TrayItemRow {
+  id: string;
+  question: string;
+  context: string | null;
+  options: TrayDecisionOption[] | null;
+  default_key: string | null;
+  expires_at: Date | string | null;
+  created_at: Date | string;
+}
+
+/** Normalise a stored options array to the frozen wire shape (recommended
+ *  always a boolean — the phone keys the filled chip off it). */
+function normalizeOptions(options: TrayItemRow['options']): TrayDecisionOption[] {
+  return (options ?? []).map((o) => ({
+    key: String(o.key),
+    label: String(o.label),
+    recommended: o.recommended === true,
+  }));
+}
+
+/**
+ * The option the expiry default applies: the default_key match, else the
+ * agent's recommended pick, else the first option. POST /tray-items validates
+ * options is 2-3 entries, so this never comes up empty for a stored row.
+ */
+export function defaultOptionOf(
+  options: TrayDecisionOption[],
+  defaultKey: string | null,
+): TrayDecisionOption {
+  return options.find((o) => o.key === defaultKey)
+    ?? options.find((o) => o.recommended)
+    ?? options[0];
+}
+
+/** Short weekday name ("Thu") of an instant in a zone — the expiry-disclosure
+ *  line matches the spec §3 mock: "Thu default: A · disclosed". */
+function weekdayInTz(date: Date, tz: string): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(date);
+}
+
+/** Open agent-filed tray_items rows → decision cards. Escalation honesty:
+ *  a deadline discloses its own default ("Thu default: Park it · disclosed"
+ *  — model §3: expiry applies the agent's default AND is disclosed); no
+ *  deadline says so plainly. */
+async function collectDecisionItems(pool: Pool, userId: string): Promise<TrayItem[]> {
+  let rows: TrayItemRow[];
+  try {
+    const res = await pool.query<TrayItemRow>(
+      `SELECT id, question, context, options, default_key, expires_at, created_at
+       FROM tray_items
+       WHERE user_id = $1 AND status = 'open'
+       ORDER BY created_at DESC`,
+      [userId],
+    );
+    rows = res.rows;
+  } catch (err) {
+    if (isMissingTable(err)) {
+      logger.warn('[tray][decisions] tray_items missing (pre-migration) — no decision items');
+      return [];
+    }
+    throw err;
+  }
+  if (rows.length === 0) return [];
+
+  const tz = await getEffectiveTimezone(pool, userId);
+  return rows.map((r) => {
+    const options = normalizeOptions(r.options);
+    const futureText = r.expires_at
+      ? `${weekdayInTz(new Date(r.expires_at), tz)} default: ${defaultOptionOf(options, r.default_key).label} · disclosed`
+      : 'waiting — no deadline';
+    return {
+      id: `decision:${r.id}`,
+      kind: 'decision' as const,
+      question: r.question,
+      context: r.context ? oneLine(r.context) : null,
+      created_at: new Date(r.created_at).toISOString(),
+      escalation: { future_text: futureText },
+      decision: { item_id: r.id, options },
+    };
+  });
+}
+
 /**
  * Every open mandate for a user, one list, newest first — the single source
  * of truth behind GET /me/tray AND the Today card's needs_you_count
@@ -269,12 +379,13 @@ async function collectVaultApprovalItems(pool: Pool, userId: string): Promise<Tr
  * "needs you" means.
  */
 export async function collectTrayItems(pool: Pool, userId: string, now: Date): Promise<TrayItem[]> {
-  const [habitItems, contactItems, vaultItems] = await Promise.all([
+  const [habitItems, contactItems, vaultItems, decisionItems] = await Promise.all([
     collectHabitItems(pool, userId, now),
     collectContactApprovalItems(pool, userId),
     collectVaultApprovalItems(pool, userId),
+    collectDecisionItems(pool, userId),
   ]);
-  return [...habitItems, ...contactItems, ...vaultItems]
+  return [...habitItems, ...contactItems, ...vaultItems, ...decisionItems]
     .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
 }
 
@@ -392,6 +503,190 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[tray][habitOutcome] Failed', { userId, habitId, error: message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /tray-items — the AGENT files a decision card (chatAuth: its channel
+  // holds a user token, same pattern as POST /today-card). Strict validation:
+  // the row IS the frozen card contract, so nothing malformed gets stored.
+  router.post('/tray-items', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const {
+      question, context, options, default_key: defaultKey, expires_at: expiresAt, source,
+    } = (req.body ?? {}) as {
+      question?: unknown; context?: unknown; options?: unknown;
+      default_key?: unknown; expires_at?: unknown; source?: unknown;
+    };
+
+    if (typeof question !== 'string' || question.trim().length === 0) {
+      res.status(400).json({ error: 'question must be a non-empty string' });
+      return;
+    }
+    if (question.length > DECISION_QUESTION_MAX) {
+      res.status(400).json({ error: `question must be at most ${DECISION_QUESTION_MAX} characters` });
+      return;
+    }
+    if (context != null && typeof context !== 'string') {
+      res.status(400).json({ error: 'context must be a string' });
+      return;
+    }
+    if (typeof context === 'string' && context.length > DECISION_CONTEXT_MAX) {
+      res.status(400).json({ error: `context must be at most ${DECISION_CONTEXT_MAX} characters` });
+      return;
+    }
+    if (!Array.isArray(options) || options.length < DECISION_OPTIONS_MIN || options.length > DECISION_OPTIONS_MAX) {
+      res.status(400).json({ error: `options must be an array of ${DECISION_OPTIONS_MIN}-${DECISION_OPTIONS_MAX} entries` });
+      return;
+    }
+    const parsed: TrayDecisionOption[] = [];
+    for (const opt of options as unknown[]) {
+      const o = opt as { key?: unknown; label?: unknown; recommended?: unknown } | null;
+      if (o == null || typeof o !== 'object'
+        || typeof o.key !== 'string' || o.key.trim().length === 0
+        || typeof o.label !== 'string' || o.label.trim().length === 0
+        || (o.recommended !== undefined && typeof o.recommended !== 'boolean')) {
+        res.status(400).json({ error: 'each option must be {key, label, recommended?} with non-empty strings' });
+        return;
+      }
+      parsed.push({ key: o.key, label: o.label, recommended: o.recommended === true });
+    }
+    if (new Set(parsed.map((o) => o.key)).size !== parsed.length) {
+      res.status(400).json({ error: 'option keys must be unique' });
+      return;
+    }
+    if (defaultKey != null && (typeof defaultKey !== 'string' || !parsed.some((o) => o.key === defaultKey))) {
+      res.status(400).json({ error: 'default_key must match one of the option keys' });
+      return;
+    }
+    let expiresDate: Date | null = null;
+    if (expiresAt != null) {
+      if (typeof expiresAt !== 'string' || Number.isNaN(Date.parse(expiresAt))) {
+        res.status(400).json({ error: 'expires_at must be an ISO timestamp' });
+        return;
+      }
+      expiresDate = new Date(expiresAt);
+      const now = nowFn();
+      if (expiresDate.getTime() <= now.getTime()) {
+        res.status(400).json({ error: 'expires_at must be in the future' });
+        return;
+      }
+      if (expiresDate.getTime() > now.getTime() + DECISION_EXPIRES_MAX_DAYS * 86_400_000) {
+        res.status(400).json({ error: `expires_at must be at most ${DECISION_EXPIRES_MAX_DAYS} days out` });
+        return;
+      }
+    }
+    if (source != null && typeof source !== 'string') {
+      res.status(400).json({ error: 'source must be a string' });
+      return;
+    }
+
+    try {
+      const insert = await pool.query<{ id: string }>(
+        `INSERT INTO tray_items (user_id, question, context, options, default_key, expires_at, source)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id`,
+        [
+          userId, question, context ?? null, JSON.stringify(parsed),
+          defaultKey ?? null, expiresDate?.toISOString() ?? null, source ?? null,
+        ],
+      );
+      const id = insert.rows[0].id;
+
+      logAudit({
+        user_id: userId,
+        source: 'gateway',
+        action: 'create',
+        entity_type: 'tray_item',
+        entity_id: id,
+        summary: `Decision card filed: ${oneLine(question, 100)}`,
+        metadata: {
+          option_keys: parsed.map((o) => o.key),
+          default_key: defaultKey ?? null,
+          expires_at: expiresDate?.toISOString() ?? null,
+          source: source ?? null,
+        },
+      });
+
+      res.json({ id });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[tray][postItem] Failed', { userId, error: message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /me/tray/decision — the one-tap answer to an agent-filed card.
+  // Flips the row to answered and tells the AGENT via a system message —
+  // the agent applies the chosen action; the tray only records the choice.
+  router.post('/me/tray/decision', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const { item_id: itemId, answer_key: answerKey } = (req.body ?? {}) as {
+      item_id?: unknown; answer_key?: unknown;
+    };
+
+    if (typeof itemId !== 'string' || !UUID_RE.test(itemId)) {
+      res.status(400).json({ error: 'item_id must be a UUID (TrayItem.decision.item_id)' });
+      return;
+    }
+    if (typeof answerKey !== 'string' || answerKey.length === 0) {
+      res.status(400).json({ error: 'answer_key must be a non-empty string' });
+      return;
+    }
+
+    try {
+      // User-scoped read first so a wrong answer_key 400s instead of 404ing.
+      const itemRes = await pool.query<TrayItemRow & { status: string }>(
+        `SELECT id, question, context, options, default_key, expires_at, created_at, status
+         FROM tray_items
+         WHERE id = $1 AND user_id = $2`,
+        [itemId, userId],
+      );
+      const item = itemRes.rows[0];
+      if (!item || item.status !== 'open') {
+        res.status(404).json({ error: 'Open tray item not found' });
+        return;
+      }
+      const options = normalizeOptions(item.options);
+      const chosen = options.find((o) => o.key === answerKey);
+      if (!chosen) {
+        res.status(400).json({ error: `answer_key must be one of: ${options.map((o) => o.key).join(', ')}` });
+        return;
+      }
+
+      const update = await pool.query(
+        `UPDATE tray_items
+         SET status = 'answered', answer_key = $3, answered_at = now()
+         WHERE id = $1 AND user_id = $2 AND status = 'open'`,
+        [itemId, userId, answerKey],
+      );
+      if (update.rowCount === 0) {
+        // Lost a race with the expiry sweep or a concurrent answer.
+        res.status(404).json({ error: 'Open tray item not found' });
+        return;
+      }
+
+      // Hand the choice to the agent — it owns applying the decision.
+      await insertSystemMessage(
+        pool,
+        userId,
+        `[Decision] user chose '${chosen.label}' for: ${item.question}`,
+      );
+
+      logAudit({
+        user_id: userId,
+        source: 'gateway',
+        action: 'update',
+        entity_type: 'tray_item',
+        entity_id: itemId,
+        summary: `Decision answered '${chosen.key}' (${oneLine(chosen.label, 60)}): ${oneLine(item.question, 100)}`,
+        metadata: { answer_key: chosen.key },
+      });
+
+      res.json({ status: 'answered' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[tray][decision] Failed', { userId, itemId, error: message });
       res.status(500).json({ error: 'Internal server error' });
     }
   });

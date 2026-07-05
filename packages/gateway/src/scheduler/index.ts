@@ -19,6 +19,7 @@ import { JournalHealthScheduler } from './journal-health.js';
 import { JournalConsolidationScheduler } from './journal-consolidation.js';
 import { NarrativeConsolidationScheduler } from './narrative-consolidation.js';
 import { StuckMessageSweep } from './stuck-message-sweep.js';
+import { TrayItemExpiry } from './tray-item-expiry.js';
 import { HealthPollingScheduler } from './health-polling.js';
 import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
@@ -244,6 +245,17 @@ async function startSchedulersForUser(
   });
   stuckMessageSweep.start();
   schedulers.push(stuckMessageSweep);
+
+  // Agent-filed decision cards (tray_items) past their deadline: flip to
+  // 'expired' + tell the agent which default now applies. The AGENT performs
+  // the default action — this sweep only flips + notifies (model §3:
+  // "expires with the agent's default applied AND disclosed").
+  const trayItemExpiry = new TrayItemExpiry(pgPool, {
+    intervalMinutes: s('tray_item_expiry_minutes', 10),
+    userId,
+  });
+  trayItemExpiry.start();
+  schedulers.push(trayItemExpiry);
 
   // MCP health + tool-error-rate monitor — cluster-wide, not user-specific,
   // but tied to a user for FCM routing. Probes both /health (HTTP) and

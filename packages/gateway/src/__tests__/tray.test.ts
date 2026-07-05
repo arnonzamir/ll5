@@ -93,6 +93,13 @@ const logMatcher = (rows: unknown[]): Matcher =>
 const pendingApprovalsMatcher = (rows: unknown[]): Matcher =>
   (sql) => /FROM permission_change_requests/.test(sql) ? { rows } : undefined;
 
+// The collector's read (user-scoped open rows) — distinct from the answer
+// route's by-id select.
+const trayItemsMatcher = (rows: unknown[]): Matcher =>
+  (sql) => /FROM tray_items\s+WHERE user_id = \$1 AND status = 'open'/.test(sql)
+    ? { rows }
+    : undefined;
+
 const vaultAlertsMatcher = (rows: unknown[]): Matcher =>
   (sql) => /FROM system_alerts/.test(sql) ? { rows } : undefined;
 
@@ -397,6 +404,268 @@ describe('POST /me/habits/outcome — one-tap habit answer', () => {
     const run = getChain(trayRouter(pool), 'post', '/me/habits/outcome');
     const res = makeRes();
     await run(makeReq({ body: { habit_id: HABIT_ID, due_date: '2026-07-05', due_time: '08:00', outcome: 'done' } }), res);
+    expect(res._status).toBe(401);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Agent-filed decision cards (tray_items — migration 037)
+// ---------------------------------------------------------------------------
+
+const ITEM_ID = '22222222-2222-2222-2222-222222222222';
+
+function trayItemRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: ITEM_ID,
+    question: 'Park the ROI ingest project?',
+    context: 'untouched 34 days, no next action',
+    options: [
+      { key: 'a', label: 'Park it', recommended: true },
+      { key: 'b', label: 'Keep active' },
+      { key: 'c', label: 'Kill it' },
+    ],
+    default_key: 'a',
+    // 2026-07-09 is a Thursday; home tz pinned to UTC by tzMatcher.
+    expires_at: '2026-07-09T12:00:00.000Z',
+    created_at: '2026-07-05T07:30:00.000Z',
+    status: 'open',
+    ...overrides,
+  };
+}
+
+describe('GET /me/tray — decision items (4th source)', () => {
+  it('projects an open tray_items row to the frozen decision-card shape', async () => {
+    const { pool } = makePool([tzMatcher, trayItemsMatcher([trayItemRow()])]);
+    const res = await runTray(pool);
+
+    expect(res._status).toBe(200);
+    const items = (res._json as any).items;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toEqual({
+      id: `decision:${ITEM_ID}`,
+      kind: 'decision',
+      question: 'Park the ROI ingest project?',
+      context: 'untouched 34 days, no next action',
+      created_at: '2026-07-05T07:30:00.000Z',
+      // Deadline discloses its own default — weekday + the DEFAULT's label.
+      escalation: { future_text: 'Thu default: Park it · disclosed' },
+      decision: {
+        item_id: ITEM_ID,
+        options: [
+          { key: 'a', label: 'Park it', recommended: true },
+          // recommended is normalised to a real boolean for the phone.
+          { key: 'b', label: 'Keep active', recommended: false },
+          { key: 'c', label: 'Kill it', recommended: false },
+        ],
+      },
+    });
+  });
+
+  it("shows 'waiting — no deadline' when expires_at is null", async () => {
+    const { pool } = makePool([
+      tzMatcher,
+      trayItemsMatcher([trayItemRow({ expires_at: null, default_key: null })]),
+    ]);
+    const res = await runTray(pool);
+    expect((res._json as any).items[0].escalation.future_text).toBe('waiting — no deadline');
+  });
+
+  it('falls back to the recommended option when default_key is unset but a deadline exists', async () => {
+    const { pool } = makePool([tzMatcher, trayItemsMatcher([trayItemRow({ default_key: null })])]);
+    const res = await runTray(pool);
+    expect((res._json as any).items[0].escalation.future_text).toBe('Thu default: Park it · disclosed');
+  });
+
+  it('sorts decision items into the merged list, newest first', async () => {
+    const { pool } = makePool([
+      tzMatcher,
+      habitsMatcher([habitRow()]),
+      logMatcher([{ due_time: '08:00', outcome: null, steps_fired: [0] }]),
+      trayItemsMatcher([trayItemRow({ created_at: '2026-07-05T08:15:00.000Z' })]),
+    ]);
+    const res = await runTray(pool);
+    // decision (08:15) between habit (08:00)? No — habit created_at is 08:00,
+    // decision 08:15 → decision first.
+    expect((res._json as any).items.map((i: any) => i.kind)).toEqual(['decision', 'habit']);
+  });
+});
+
+describe('POST /tray-items — agent files a decision card', () => {
+  const validBody = () => ({
+    question: 'Park the ROI ingest project?',
+    context: 'untouched 34 days',
+    options: [
+      { key: 'a', label: 'Park it', recommended: true },
+      { key: 'b', label: 'Keep active' },
+    ],
+    default_key: 'a',
+    expires_at: '2026-07-09T12:00:00.000Z', // nowFn = 2026-07-05T08:30Z → 4d out
+    source: 'weekly-review',
+  });
+
+  const insertMatcher: Matcher = (sql) =>
+    /INSERT INTO tray_items/.test(sql) ? { rows: [{ id: ITEM_ID }] } : undefined;
+
+  const runPost = async (pool: Pool, body: unknown) => {
+    const run = getChain(trayRouter(pool), 'post', '/tray-items');
+    const req = makeReq({ headers: authHeader(userToken('u1')), body: body as Record<string, unknown> });
+    const res = makeRes();
+    await run(req, res);
+    return res;
+  };
+
+  it('inserts a valid card and returns its id', async () => {
+    const { pool, calls } = makePool([insertMatcher]);
+    const res = await runPost(pool, validBody());
+
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ id: ITEM_ID });
+
+    const [sql, params] = calls.find((c) => /INSERT INTO tray_items/.test(c[0]))!;
+    expect(sql).toMatch(/\(user_id, question, context, options, default_key, expires_at, source\)/);
+    expect(params[0]).toBe('u1');
+    expect(params[1]).toBe('Park the ROI ingest project?');
+    expect(params[2]).toBe('untouched 34 days');
+    // Options stored normalised — recommended always a boolean.
+    expect(JSON.parse(params[3] as string)).toEqual([
+      { key: 'a', label: 'Park it', recommended: true },
+      { key: 'b', label: 'Keep active', recommended: false },
+    ]);
+    expect(params[4]).toBe('a');
+    expect(params[5]).toBe('2026-07-09T12:00:00.000Z');
+    expect(params[6]).toBe('weekly-review');
+  });
+
+  it('accepts the minimal body (question + options only)', async () => {
+    const { pool, calls } = makePool([insertMatcher]);
+    const res = await runPost(pool, {
+      question: 'Go with plan A or B?',
+      options: [{ key: 'a', label: 'Plan A' }, { key: 'b', label: 'Plan B' }],
+    });
+    expect(res._status).toBe(200);
+    const [, params] = calls.find((c) => /INSERT INTO tray_items/.test(c[0]))!;
+    expect(params.slice(2)).toEqual([
+      null,
+      JSON.stringify([
+        { key: 'a', label: 'Plan A', recommended: false },
+        { key: 'b', label: 'Plan B', recommended: false },
+      ]),
+      null, null, null,
+    ]);
+  });
+
+  it('400s strictly on every malformed field', async () => {
+    const { pool, calls } = makePool([insertMatcher]);
+    const cases: Array<Record<string, unknown>> = [
+      { ...validBody(), question: '' },
+      { ...validBody(), question: 'x'.repeat(201) },
+      { ...validBody(), context: 'x'.repeat(301) },
+      { ...validBody(), options: [{ key: 'a', label: 'Only one' }] },          // < 2
+      { ...validBody(), options: Array.from({ length: 4 }, (_, i) => ({ key: `k${i}`, label: `L${i}` })) }, // > 3
+      { ...validBody(), options: [{ key: 'a', label: 'A' }, { key: 'a', label: 'Dup' }] }, // dup keys
+      { ...validBody(), options: [{ key: 'a', label: 'A' }, { key: 'b' }] },   // missing label
+      { ...validBody(), options: [{ key: 'a', label: 'A' }, { key: 'b', label: 'B', recommended: 'yes' }] },
+      { ...validBody(), default_key: 'z' },                                     // not an option key
+      { ...validBody(), expires_at: 'not-a-date' },
+      { ...validBody(), expires_at: '2026-07-01T00:00:00Z' },                   // in the past
+      { ...validBody(), expires_at: '2026-07-25T00:00:00Z' },                   // > 14 days out
+      { ...validBody(), source: 42 },
+    ];
+    for (const body of cases) {
+      const res = await runPost(pool, body);
+      expect(res._status, JSON.stringify(body).slice(0, 80)).toBe(400);
+    }
+    expect(calls.some((c) => /INSERT INTO tray_items/.test(c[0]))).toBe(false);
+  });
+
+  it('401s without a token', async () => {
+    const { pool } = makePool([insertMatcher]);
+    const run = getChain(trayRouter(pool), 'post', '/tray-items');
+    const res = makeRes();
+    await run(makeReq({ body: validBody() }), res);
+    expect(res._status).toBe(401);
+  });
+});
+
+describe('POST /me/tray/decision — one-tap decision answer', () => {
+  const itemSelectMatcher = (rows: unknown[]): Matcher =>
+    (sql) => /FROM tray_items\s+WHERE id = \$1 AND user_id = \$2/.test(sql) ? { rows } : undefined;
+
+  const answerUpdateMatcher: Matcher = (sql) =>
+    /UPDATE tray_items\s+SET status = 'answered'/.test(sql) ? { rows: [], rowCount: 1 } : undefined;
+
+  const chatInsertMatcher: Matcher = (sql) =>
+    /INSERT INTO chat_messages/.test(sql) ? { rows: [{ id: 'msg-1' }] } : undefined;
+
+  const runDecision = async (pool: Pool, body: unknown) => {
+    const run = getChain(trayRouter(pool), 'post', '/me/tray/decision');
+    const req = makeReq({ headers: authHeader(userToken('u1')), body: body as Record<string, unknown> });
+    const res = makeRes();
+    await run(req, res);
+    return res;
+  };
+
+  it('flips the row to answered and hands the choice to the agent as a system message', async () => {
+    const { pool, calls } = makePool([
+      itemSelectMatcher([trayItemRow()]),
+      answerUpdateMatcher,
+      chatInsertMatcher,
+    ]);
+    const res = await runDecision(pool, { item_id: ITEM_ID, answer_key: 'b' });
+
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ status: 'answered' });
+
+    const [updateSql, updateParams] = calls.find((c) => /UPDATE tray_items/.test(c[0]))!;
+    expect(updateSql).toMatch(/SET status = 'answered', answer_key = \$3, answered_at = now\(\)/);
+    // Guarded: only an OPEN row of THIS user flips (race with expiry sweep).
+    expect(updateSql).toMatch(/WHERE id = \$1 AND user_id = \$2 AND status = 'open'/);
+    expect(updateParams).toEqual([ITEM_ID, 'u1', 'b']);
+
+    // The agent applies the decision — the system message carries the LABEL.
+    const [, msgParams] = calls.find((c) => /INSERT INTO chat_messages/.test(c[0]))!;
+    expect(msgParams[1]).toBe("[Decision] user chose 'Keep active' for: Park the ROI ingest project?");
+  });
+
+  it("400s when answer_key is not one of the card's options", async () => {
+    const { pool, calls } = makePool([itemSelectMatcher([trayItemRow()]), answerUpdateMatcher, chatInsertMatcher]);
+    const res = await runDecision(pool, { item_id: ITEM_ID, answer_key: 'z' });
+    expect(res._status).toBe(400);
+    expect(calls.some((c) => /UPDATE tray_items/.test(c[0]))).toBe(false);
+  });
+
+  it('404s when the item is missing, foreign, or no longer open', async () => {
+    const missing = makePool([itemSelectMatcher([])]);
+    expect((await runDecision(missing.pool, { item_id: ITEM_ID, answer_key: 'a' }))._status).toBe(404);
+
+    const answered = makePool([itemSelectMatcher([trayItemRow({ status: 'answered' })])]);
+    expect((await runDecision(answered.pool, { item_id: ITEM_ID, answer_key: 'a' }))._status).toBe(404);
+    expect(answered.calls.some((c) => /UPDATE tray_items/.test(c[0]))).toBe(false);
+  });
+
+  it('404s when the guarded update matches nothing (expiry-sweep race) and sends no message', async () => {
+    const { pool, calls } = makePool([
+      itemSelectMatcher([trayItemRow()]),
+      (sql) => (/UPDATE tray_items/.test(sql) ? { rows: [], rowCount: 0 } : undefined),
+      chatInsertMatcher,
+    ]);
+    const res = await runDecision(pool, { item_id: ITEM_ID, answer_key: 'a' });
+    expect(res._status).toBe(404);
+    expect(calls.some((c) => /INSERT INTO chat_messages/.test(c[0]))).toBe(false);
+  });
+
+  it('400s on malformed item_id / answer_key', async () => {
+    const { pool } = makePool([itemSelectMatcher([trayItemRow()])]);
+    expect((await runDecision(pool, { item_id: 'not-a-uuid', answer_key: 'a' }))._status).toBe(400);
+    expect((await runDecision(pool, { item_id: ITEM_ID, answer_key: '' }))._status).toBe(400);
+    expect((await runDecision(pool, { item_id: ITEM_ID }))._status).toBe(400);
+  });
+
+  it('401s without a token', async () => {
+    const { pool } = makePool([]);
+    const run = getChain(trayRouter(pool), 'post', '/me/tray/decision');
+    const res = makeRes();
+    await run(makeReq({ body: { item_id: ITEM_ID, answer_key: 'a' } }), res);
     expect(res._status).toBe(401);
   });
 });

@@ -30,6 +30,8 @@ import { createVaultRouter } from './vault.js';
 import { createTrayRouter } from './tray.js';
 import { createTodayRouter } from './today.js';
 import { createNarrativesRouter } from './narratives.js';
+import { createGtdSurfacesRouter } from './gtd-surfaces.js';
+import { createMapRouter } from './map.js';
 import { processCalendar, phoneEventId } from './processors/calendar.js';
 import { processLocation, type StoredPoint } from './processors/location.js';
 import { processMessage } from './processors/message.js';
@@ -429,7 +431,16 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
   // Read-only narratives API (web + mobile) — proxies the personal-knowledge MCP
   // (relevance-sorted list, detail+connections+timeline) + an ephemeral summarize.
-  app.use(createNarrativesRouter(pgPool, config.authSecret, config.mcpHealthUrls.knowledge));
+  // sort=now re-ranks in the gateway (open-loop / calendar-proximity blend) for
+  // the mobile Topics rail; the ES client feeds the calendar-proximity signal.
+  app.use(createNarrativesRouter(pgPool, esClient, config.authSecret, config.mcpHealthUrls.knowledge));
+
+  // Mobile GTD surfaces (Phase 4): inbox swipe-triage, shopping checklist,
+  // Today's-actions pane. Shares the gtd MCP's tables with mirrored semantics.
+  app.use(createGtdSurfacesRouter(pgPool, config.authSecret));
+
+  // GET /me/map — devices + saved places + today's own trail, one call.
+  app.use(createMapRouter(pgPool, esClient, config.authSecret));
 
   // Resolves message routing/media from contact_settings (the unified source of truth).
   const notificationMatcher = new ContactRoutingResolver(pgPool);
