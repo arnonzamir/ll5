@@ -61,7 +61,24 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
-### Android companion UI — deep review complete, AWAITING USER DECISIONS (2026-07-05)
+### Android Phase 1 SHIPPED — foundation + Needs You tray (2026-07-05)
+User approved (decisions 2-6 + IA + demo). Gateway: NEW src/tray.ts — GET /me/tray aggregates habit
+occurrences (open log rows OR due-but-rowless, per-habit tz; escalation.future_text computed from the
+habit's OWN escalation config: "escalates to <level> <HH:MM> · your rule" / "auto-logs missed at
+midnight"), pending contact approvals (shared listPendingApprovals helper), vault.approval.* firing
+alerts; POST /me/habits/outcome (byte-identical upsert to gtd log_habit_outcome, rejects outcome=missed
+— midnight sweep owns that; ownership-validated); POST /me/vault/approve-site (shared
+writeApprovedSites + clearAlert; deny = clear + agent notice, no persistent block). 534 gateway tests.
+Android (ll5-android): theme retokenized to the spec palette (dynamicColor REMOVED, dark forced,
+LL5Mono style, extended success/warning colors), 4-tab nav Today(start)/Needs You/Chat/Topics +
+LL5NavItem with NO badge slot (only NeedsYouNavItem badges; absent at 0), System screen (Status/Data/
+Sensors/Settings/Approvals history) behind Today's gear, NEW ui/tray/ NeedsYouScreen (card anatomy per
+spec §3 + approved demo: in-place Skip→Deliberate|Excused morph, 150ms fade-collapse, inline errors
+only, "quiet since HH:MM" empty state, resume+60s refresh), TrayRepository StateFlows feed badge +
+Today row, contact-approval Approve keeps the EXACT BiometricGate flow, FCM "approvals" deep link →
+tray. CriticalAlertService/wifi/workers untouched. assembleDebug green.
+
+### Android companion UI — deep review complete, user decisions in (2026-07-05)
 Three-pass design review (codebase inventory / interaction model with productivity+psychology lenses /
 concrete UI spec) synthesized in docs/design/android-companion-ui.md (+ -interaction-model.md, -spec.md).
 Core: 4 attention tiers (Interrupt/Needs-You/Ambient/Archive); NEW Needs You tray = the app's ONLY badge,

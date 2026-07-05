@@ -27,6 +27,7 @@ import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { createAgentRouter } from './agent.js';
 import { createApprovalsRouter } from './approvals.js';
 import { createVaultRouter } from './vault.js';
+import { createTrayRouter } from './tray.js';
 import { createNarrativesRouter } from './narratives.js';
 import { processCalendar, phoneEventId } from './processors/calendar.js';
 import { processLocation, type StoredPoint } from './processors/location.js';
@@ -411,6 +412,12 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // tenant mapping GET/PUT (vault_tenants), and /me/vault/* lifecycle wrappers
   // proxying the vault MCP's internal tenant routes.
   app.use(createVaultRouter(pgPool, config.authSecret, { vaultMcpUrl: config.vaultMcpUrl }));
+
+  // "Needs You" tray (android-companion-ui Phase 1): GET /me/tray aggregates
+  // open habit occurrences + pending contact/vault approvals; POST
+  // /me/habits/outcome is the one-tap habit answer (vault answers live on
+  // /me/vault/approve-site in the vault plane above).
+  app.use(createTrayRouter(pgPool, config.authSecret));
 
   // Read-only narratives API (web + mobile) — proxies the personal-knowledge MCP
   // (relevance-sorted list, detail+connections+timeline) + an ephemeral summarize.

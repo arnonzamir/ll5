@@ -13,6 +13,33 @@ import { logger } from './utils/logger.js';
  * are PHONE/dashboard-authed (Bearer ll5 token → caller's user_id) and are the
  * ONLY path that applies a deferred permission change to contact_settings.
  */
+
+export interface PendingApprovalRow {
+  id: string;
+  platform: string | null;
+  conversation_id: string | null;
+  display_name: string | null;
+  current_permission: string | null;
+  requested_permission: string;
+  created_at: string;
+}
+
+/**
+ * The caller's pending, non-expired authority requests — shared by
+ * GET /approvals/pending and the Needs You tray (GET /me/tray), so both
+ * surfaces always agree on what counts as "pending".
+ */
+export async function listPendingApprovals(pool: Pool, userId: string): Promise<PendingApprovalRow[]> {
+  const result = await pool.query<PendingApprovalRow>(
+    `SELECT id, platform, conversation_id, display_name, current_permission, requested_permission, created_at
+     FROM permission_change_requests
+     WHERE user_id = $1 AND status = 'pending' AND expires_at > now()
+     ORDER BY created_at DESC`,
+    [userId],
+  );
+  return result.rows;
+}
+
 export function createApprovalsRouter(pool: Pool, authSecret: string): Router {
   const router = Router();
   const authMw = chatAuthMiddleware(authSecret);
@@ -21,14 +48,7 @@ export function createApprovalsRouter(pool: Pool, authSecret: string): Router {
   router.get('/approvals/pending', authMw, async (req: Request, res: Response) => {
     const userId = (req as Request & { userId: string }).userId;
     try {
-      const result = await pool.query(
-        `SELECT id, platform, conversation_id, display_name, current_permission, requested_permission, created_at
-         FROM permission_change_requests
-         WHERE user_id = $1 AND status = 'pending' AND expires_at > now()
-         ORDER BY created_at DESC`,
-        [userId],
-      );
-      res.json({ pending: result.rows });
+      res.json({ pending: await listPendingApprovals(pool, userId) });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[approvals][pending] Failed', { userId, error: message });

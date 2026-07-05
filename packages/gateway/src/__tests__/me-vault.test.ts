@@ -16,7 +16,16 @@ vi.mock('../utils/alerting.js', () => ({
   clearAlert: vi.fn(async () => undefined),
 }));
 
+vi.mock('../utils/system-message.js', () => ({
+  insertSystemMessage: vi.fn(async () => 'msg-1'),
+  createSchedulerEvent: vi.fn((scheduler: string) => ({
+    scheduler, event_id: 'evt_test', fired_at: new Date().toISOString(),
+  })),
+}));
+
 import { createVaultRouter } from '../vault.js';
+import { clearAlert } from '../utils/alerting.js';
+import { insertSystemMessage } from '../utils/system-message.js';
 
 /**
  * Vault tenant plane (DECISION-022 tenant addendum): vault_tenants mapping
@@ -319,6 +328,82 @@ describe('/me/vault/* self-service wrappers', () => {
       expect((res._json as any).status).toBe('invited');
       expect((res._json as any).sites_count).toBeNull();
     });
+  });
+});
+
+describe('POST /me/vault/approve-site — tray one-tap answer', () => {
+  const settingsMatcher = (sites: unknown): Matcher =>
+    (sql) => /SELECT settings->'vault' AS vault FROM user_settings/.test(sql)
+      ? { rows: [{ vault: { approved_sites: sites } }] }
+      : undefined;
+
+  const runApproveSite = async (pool: Pool, body: unknown, token = userToken('u1')) => {
+    vi.mocked(clearAlert).mockClear();
+    vi.mocked(insertSystemMessage).mockClear();
+    const router = createVaultRouter(pool, AUTH_SECRET);
+    const run = getChain(router, 'post', '/me/vault/approve-site');
+    const req = makeReq({ headers: authHeader(token), body: body as Record<string, unknown> });
+    const res = makeRes();
+    await run(req, res);
+    return res;
+  };
+
+  it('approve: adds the domain to the allowlist (shared write path) and clears the alert', async () => {
+    const { pool, calls } = makePool([settingsMatcher(['example.com'])]);
+    const res = await runApproveSite(pool, { domain: ' NewBank.co.il ', decision: 'approve' });
+
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ status: 'approved', domain: 'newbank.co.il' });
+
+    // Same user_settings upsert as PUT /vault/approved-sites — existing
+    // entries preserved, new domain appended (normalized).
+    const write = calls.find((c) => /INSERT INTO user_settings/.test(c[0]))!;
+    expect(write[1][0]).toBe('u1');
+    expect(JSON.parse(write[1][1] as string)).toEqual(['example.com', 'newbank.co.il']);
+
+    expect(clearAlert).toHaveBeenCalledWith(expect.anything(), 'u1', 'vault.approval.newbank.co.il');
+    expect(insertSystemMessage).not.toHaveBeenCalled();
+  });
+
+  it('approve is idempotent when the domain is already on the list', async () => {
+    const { pool, calls } = makePool([settingsMatcher(['example.com'])]);
+    const res = await runApproveSite(pool, { domain: 'example.com', decision: 'approve' });
+
+    expect(res._status).toBe(200);
+    const write = calls.find((c) => /INSERT INTO user_settings/.test(c[0]))!;
+    expect(JSON.parse(write[1][1] as string)).toEqual(['example.com']);
+  });
+
+  it('deny: clears the alert, leaves the allowlist untouched, files the agent notice', async () => {
+    const { pool, calls } = makePool([settingsMatcher(['example.com'])]);
+    const res = await runApproveSite(pool, { domain: 'evil.com', decision: 'deny' });
+
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ status: 'denied', domain: 'evil.com' });
+
+    expect(clearAlert).toHaveBeenCalledWith(expect.anything(), 'u1', 'vault.approval.evil.com');
+    // Allowlist untouched — the site simply stays blocked.
+    expect(calls.some((c) => /INSERT INTO user_settings/.test(c[0]))).toBe(false);
+    // Agent notice so it doesn't re-request today.
+    expect(insertSystemMessage).toHaveBeenCalledTimes(1);
+    const noticeArgs = vi.mocked(insertSystemMessage).mock.calls[0];
+    expect(noticeArgs[1]).toBe('u1');
+    expect(noticeArgs[2]).toMatch(/\[Vault\] user denied site evil\.com — do not re-request today/);
+  });
+
+  it('400s on a missing domain or an unknown decision', async () => {
+    const { pool } = makePool([]);
+    expect((await runApproveSite(pool, { decision: 'approve' }))._status).toBe(400);
+    expect((await runApproveSite(pool, { domain: 'x.com', decision: 'maybe' }))._status).toBe(400);
+  });
+
+  it('401s without a token', async () => {
+    const { pool } = makePool([]);
+    const router = createVaultRouter(pool, AUTH_SECRET);
+    const run = getChain(router, 'post', '/me/vault/approve-site');
+    const res = makeRes();
+    await run(makeReq({ body: { domain: 'x.com', decision: 'approve' } }), res);
+    expect(res._status).toBe(401);
   });
 });
 

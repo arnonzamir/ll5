@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { logAudit, generateToken } from '@ll5/shared';
 import { chatAuthMiddleware } from './chat.js';
 import { raiseAlert, clearAlert } from './utils/alerting.js';
+import { insertSystemMessage, createSchedulerEvent } from './utils/system-message.js';
 import { logger } from './utils/logger.js';
 
 /**
@@ -96,6 +97,34 @@ async function readApprovedSites(pool: Pool, userId: string): Promise<string[]> 
   return Array.isArray(sites) ? sites.filter((s): s is string => typeof s === 'string') : [];
 }
 
+/**
+ * Persist the caller's approved-sites allowlist (normalized, deduped) and
+ * auto-resolve any firing vault.approval.<domain> alert now covered by it.
+ * Shared by PUT /vault/approved-sites (full replace) and
+ * POST /me/vault/approve-site (single-domain approve from the tray) — one
+ * implementation so the two surfaces can never drift.
+ */
+async function writeApprovedSites(pool: Pool, userId: string, normalized: string[]): Promise<void> {
+  await pool.query(
+    `INSERT INTO user_settings (user_id, settings, updated_at)
+     VALUES ($1, jsonb_build_object('vault', jsonb_build_object('approved_sites', $2::jsonb)), now())
+     ON CONFLICT (user_id) DO UPDATE SET
+       settings = jsonb_set(
+         user_settings.settings,
+         '{vault,approved_sites}',
+         $2::jsonb,
+         true
+       ),
+       updated_at = now()`,
+    [userId, JSON.stringify(normalized)],
+  );
+
+  // Auto-resolve pending approval alerts for domains that are now approved.
+  for (const domain of normalized) {
+    await clearAlert(pool, userId, `vault.approval.${domain}`);
+  }
+}
+
 export function createVaultRouter(pool: Pool, authSecret: string, options: VaultRouterOptions = {}): Router {
   const router = Router();
   const authMw = chatAuthMiddleware(authSecret);
@@ -154,24 +183,7 @@ export function createVaultRouter(pool: Pool, authSecret: string, options: Vault
     const normalized = [...new Set((approvedSites as string[]).map((s) => s.trim().toLowerCase()))];
 
     try {
-      await pool.query(
-        `INSERT INTO user_settings (user_id, settings, updated_at)
-         VALUES ($1, jsonb_build_object('vault', jsonb_build_object('approved_sites', $2::jsonb)), now())
-         ON CONFLICT (user_id) DO UPDATE SET
-           settings = jsonb_set(
-             user_settings.settings,
-             '{vault,approved_sites}',
-             $2::jsonb,
-             true
-           ),
-           updated_at = now()`,
-        [userId, JSON.stringify(normalized)],
-      );
-
-      // Auto-resolve pending approval alerts for domains that are now approved.
-      for (const domain of normalized) {
-        await clearAlert(pool, userId, `vault.approval.${domain}`);
-      }
+      await writeApprovedSites(pool, userId, normalized);
 
       logAudit({
         user_id: userId,
@@ -369,6 +381,74 @@ export function createVaultRouter(pool: Pool, authSecret: string, options: Vault
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[vault][meConfirm] Failed', { userId, error: message });
       res.status(502).json({ error: 'vault MCP unreachable' });
+    }
+  });
+
+  // POST /me/vault/approve-site — one-tap tray answer to a pending
+  // vault.approval.<domain> request (Needs You tray, android-companion-ui
+  // Phase 1). Approve = add the domain to the allowlist (same shared write
+  // path as PUT /vault/approved-sites, which also resolves the alert);
+  // deny = resolve the alert and leave the allowlist untouched — the site
+  // simply stays blocked — plus an agent notice so it doesn't re-request.
+  router.post('/me/vault/approve-site', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const { domain, decision } = (req.body ?? {}) as { domain?: unknown; decision?: unknown };
+
+    if (typeof domain !== 'string' || domain.trim() === '') {
+      res.status(400).json({ error: 'domain is required' });
+      return;
+    }
+    if (decision !== 'approve' && decision !== 'deny') {
+      res.status(400).json({ error: "decision must be 'approve' or 'deny'" });
+      return;
+    }
+    const normalizedDomain = domain.trim().toLowerCase();
+    const alertKey = `vault.approval.${normalizedDomain}`;
+
+    try {
+      if (decision === 'approve') {
+        const current = await readApprovedSites(pool, userId);
+        const normalized = [...new Set([...current.map((s) => s.trim().toLowerCase()), normalizedDomain])];
+        await writeApprovedSites(pool, userId, normalized);
+
+        logAudit({
+          user_id: userId,
+          source: 'gateway',
+          action: 'vault_site_approved',
+          entity_type: 'vault_allowlist',
+          entity_id: normalizedDomain,
+          summary: `Vault site approved from tray: ${normalizedDomain}`,
+          metadata: { domain: normalizedDomain, approved_sites: normalized },
+        });
+
+        res.json({ status: 'approved', domain: normalizedDomain });
+        return;
+      }
+
+      // deny — resolve the alert (stops re-notify churn); the allowlist is
+      // unchanged so the vault MCP keeps refusing the domain.
+      await clearAlert(pool, userId, alertKey);
+      await insertSystemMessage(
+        pool, userId,
+        `[Vault] user denied site ${normalizedDomain} — do not re-request today.`,
+        undefined, createSchedulerEvent('vault_approval'),
+      );
+
+      logAudit({
+        user_id: userId,
+        source: 'gateway',
+        action: 'vault_site_denied',
+        entity_type: 'vault_allowlist',
+        entity_id: normalizedDomain,
+        summary: `Vault site denied from tray: ${normalizedDomain}`,
+        metadata: { domain: normalizedDomain },
+      });
+
+      res.json({ status: 'denied', domain: normalizedDomain });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[vault][approveSite] Failed', { userId, domain: normalizedDomain, error: message });
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
