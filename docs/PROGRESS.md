@@ -61,6 +61,17 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
+### Android companion UI — deep review complete, AWAITING USER DECISIONS (2026-07-05)
+Three-pass design review (codebase inventory / interaction model with productivity+psychology lenses /
+concrete UI spec) synthesized in docs/design/android-companion-ui.md (+ -interaction-model.md, -spec.md).
+Core: 4 attention tiers (Interrupt/Needs-You/Ambient/Archive); NEW Needs You tray = the app's ONLY badge,
+one-tap answers as direct MCP writes (habit Done → log_habit_outcome — closes the dose-taken-unlogged
+gap) + escalation-honesty lines; Today card + Glance widget (delivers DECISION-018 Phase 5); CC-feel
+no-bubble chat (Markwon→Compose markdown is the prereq); topics rank v1 = 0.35 open-loop + 0.30 calendar
+proximity + 0.25 recency + 0 volume, cap 5; GTD on mobile = capture/swipe-triage/decide ONLY; Google Maps
+Compose; dark-first single-accent palette, Material You dropped. 4-phase build (tray first). 6 decisions
+listed for the user in §5 of the synthesis doc. NO implementation started.
+
 ### Incident: WhatsApp 10h outage — device link culled, wrong-instance re-pair, recovered (2026-07-04)
 Fri ~22:00 → Sat ~13:10. WhatsApp removed LL5's linked device (`device_removed` conflict) → Evolution
 DELETED the logged-out `ll5` instance → LL5 ingestion dead. Morning misstep: re-paired the only visible

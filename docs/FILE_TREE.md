@@ -66,7 +66,10 @@ ll5/
 │   │   ├── health-polling-scheduler.md  # Health event detection scheduler
 │   │   ├── data-source-config.md   # Per-source enable/disable toggles
 │   │   ├── skill-gtd-review.md     # GTD daily + weekly review workflows
-│   │   └── agent-routing-rename.md # Rename notification rules → routing rules
+│   │   ├── agent-routing-rename.md # Rename notification rules → routing rules
+│   │   ├── android-companion-ui.md # 2026-07-05 Android redesign REVIEW (synthesis + 6 user decisions) — attention tiers, Needs You tray, CC-feel chat
+│   │   ├── android-companion-ui-interaction-model.md # behavioral layer (tiers, escalation honesty, topics rank v1, companion principles)
+│   │   └── android-companion-ui-spec.md # concrete UI spec (IA, chat anatomy, tray cards, Today/widget, map, palette, 4-phase build)
 │   ├── decisions/                    # DECISION-001..021 (see also HANDOFF "WhatsApp topology + re-pair traps" 2026-07-04) (architectural choices; 018 planning beats/weekly session, 019 habit contracts, 020 grounded action, 021 wifi-scan fingerprinting)
 │   └── implementation/
 │       ├── mcp-implementation.md     # Phased build plan for all MCPs

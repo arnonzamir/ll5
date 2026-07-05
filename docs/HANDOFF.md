@@ -26,6 +26,12 @@ pairingCode — QR only (self-refresh loop on the Mac screen, or dashboard /sett
 Vaultwarden ops gotchas 2026-07-04: bw CLI must stay pinned 2024.4.1 (userDecryptionOptions incompat with newer CLIs on --apikey login); Traefik router/service names must be GLOBALLY unique across all compose stacks (an ll5-vault name collision between the Vaultwarden service and the vault MCP merged their backends — mcp-vault round-robined into Vaultwarden); multi-network containers need traefik.docker.network=coolify or Traefik picks an unreachable network IP. The proper re-provision path is the messaging MCP `provision_whatsapp_account` tool (does
 create+webhook+encrypt+persist in one shot) — prefer it over manual curl when the MCP is reachable.
 
+**Android redesign review [2026-07-05, docs/design/android-companion-ui*.md]:** design-only, awaiting
+the user's 6 approvals (§5 of the synthesis). If approved, Phase 1 = theme retokenize + 4-tab nav +
+Needs You tray (requires gateway `requires_response` contract on system events + thin answer routes).
+Do NOT regress: biometric approvals gate, CriticalAlertService/MIUI alarm path, existing chat SSE
+reconciliation. Markdown migration precedes any chat restyle.
+
 **Reply/reaction anchoring [2026-07-04]:** WhatsApp quoted replies now carry the quoted snippet into
 the [WhatsApp] system message (contextInfo.quotedMessage — replies to the agent's own [LL5] messages
 are finally recognizable); app replies deliver meta.reply_to_snippet+reply_to_role (not just a UUID);
