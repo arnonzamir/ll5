@@ -28,6 +28,7 @@ import { createAgentRouter } from './agent.js';
 import { createApprovalsRouter } from './approvals.js';
 import { createVaultRouter } from './vault.js';
 import { createTrayRouter } from './tray.js';
+import { createTodayRouter } from './today.js';
 import { createNarrativesRouter } from './narratives.js';
 import { processCalendar, phoneEventId } from './processors/calendar.js';
 import { processLocation, type StoredPoint } from './processors/location.js';
@@ -418,6 +419,13 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // /me/habits/outcome is the one-tap habit answer (vault answers live on
   // /me/vault/approve-site in the vault plane above).
   app.use(createTrayRouter(pgPool, config.authSecret));
+
+  // Today card (android-companion-ui Phase 2): POST /today-card lets the
+  // agent write today's first-person voice line + one thing (day_cards);
+  // GET /me/today is the phone's single aggregation call (voice, next event
+  // from ES, habit day-dots, needs-you count via the shared tray collectors,
+  // quiet-since).
+  app.use(createTodayRouter(pgPool, esClient, config.authSecret));
 
   // Read-only narratives API (web + mobile) — proxies the personal-knowledge MCP
   // (relevance-sorted list, detail+connections+timeline) + an ephemeral summarize.

@@ -61,6 +61,22 @@ payments/banking stay human). Tests: vault 27 (domain binding, allowlist gate in
 redaction), gateway 492 (58 files, +11 vault routes), both tsc clean. NOT yet deployed: needs
 bootstrap run + BW_* secrets + agent `.mcp.json` vault entry.
 
+### Android Phase 2 SHIPPED — Today card + agent voice + widget (2026-07-05)
+Gateway: migration 036 day_cards; POST /today-card (agent writes voice ≤400 + one_thing ≤200,
+full-replace, today in effective tz); GET /me/today (voice/one_thing/next_event [ES calendar, excludes
+instruction ticklers AND all_day docs, as_of provenance]/habit 14-day dot states [never invents missed
+— the sweep owns that; today-unlogged=open]/needs_you_count via the SHARED tray collectors [badge and
+count can't disagree]/quiet_since v1 proxy). tray.ts refactored to collectTrayItems/countTrayItems.
+551 tests. ll5-run: NEW channel tool set_today_card (POST /today-card, telemetry-covered); daily +
+evening-close skills end by updating the card; persona: "Today card is the phone's ambient anchor —
+keep it current; a thoughtful person holding the user's day, not a task app." Android: Today screen per
+§5a (voice above mechanics, LL5Mono times, provenance-when-stale, shared HabitDots component with
+accent today-ring, quiet-state lead, doors as Phase-4 placeholders); Glance widget (one_thing over
+today's habit dots, SharedPrefs snapshot render — no network in render, 30-min periodic + on-resume
+worker, tap→Today); TodayRepository refreshes on resume + tray-count change + 15-min tick.
+assembleDebug green. First real tray answer landed 08:52 (user tapped Done — log_habit_outcome via
+phone, escalation silenced pre-09:00).
+
 ### Android Phase 1 SHIPPED — foundation + Needs You tray (2026-07-05)
 User approved (decisions 2-6 + IA + demo). Gateway: NEW src/tray.ts — GET /me/tray aggregates habit
 occurrences (open log rows OR due-but-rowless, per-habit tz; escalation.future_text computed from the

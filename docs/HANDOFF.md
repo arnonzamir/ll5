@@ -26,6 +26,12 @@ pairingCode — QR only (self-refresh loop on the Mac screen, or dashboard /sett
 Vaultwarden ops gotchas 2026-07-04: bw CLI must stay pinned 2024.4.1 (userDecryptionOptions incompat with newer CLIs on --apikey login); Traefik router/service names must be GLOBALLY unique across all compose stacks (an ll5-vault name collision between the Vaultwarden service and the vault MCP merged their backends — mcp-vault round-robined into Vaultwarden); multi-network containers need traefik.docker.network=coolify or Traefik picks an unreachable network IP. The proper re-provision path is the messaging MCP `provision_whatsapp_account` tool (does
 create+webhook+encrypt+persist in one shot) — prefer it over manual curl when the MCP is reachable.
 
+**Android Phase 2 Today [2026-07-05]:** GET /me/today + POST /today-card (day_cards, migration 036).
+The agent OWNS the card via set_today_card (channel tool) at both beats + material mid-day changes —
+if the card looks stale on the phone, check ll5_app_log tool_call set_today_card first. next_event
+excludes all_day docs (judgment call) — reminder-kind timed ticklers DO appear. Widget renders from a
+SharedPrefs snapshot only; stale-beats-blank by design.
+
 **Android Phase 1 tray [2026-07-05]:** GET /me/tray + POST /me/habits/outcome + POST /me/vault/
 approve-site (all chatAuth; contract in docs/design/android-companion-ui.md §4 + tray.ts header). Tray
 habit items appear only once DUE (first escalation step passed); denying a vault site clears the alert

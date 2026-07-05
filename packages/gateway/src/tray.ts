@@ -262,6 +262,27 @@ async function collectVaultApprovalItems(pool: Pool, userId: string): Promise<Tr
   });
 }
 
+/**
+ * Every open mandate for a user, one list, newest first — the single source
+ * of truth behind GET /me/tray AND the Today card's needs_you_count
+ * (today.ts). Extracted so the two surfaces can never disagree on what
+ * "needs you" means.
+ */
+export async function collectTrayItems(pool: Pool, userId: string, now: Date): Promise<TrayItem[]> {
+  const [habitItems, contactItems, vaultItems] = await Promise.all([
+    collectHabitItems(pool, userId, now),
+    collectContactApprovalItems(pool, userId),
+    collectVaultApprovalItems(pool, userId),
+  ]);
+  return [...habitItems, ...contactItems, ...vaultItems]
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+}
+
+/** Count of open mandates — the tray badge / Today "needs you" number. */
+export async function countTrayItems(pool: Pool, userId: string, now: Date): Promise<number> {
+  return (await collectTrayItems(pool, userId, now)).length;
+}
+
 export interface TrayRouterOptions {
   /** Injectable clock for tests. */
   now?: () => Date;
@@ -278,13 +299,7 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
   router.get('/me/tray', authMw, async (req: Request, res: Response) => {
     const userId = (req as Request & { userId: string }).userId;
     try {
-      const [habitItems, contactItems, vaultItems] = await Promise.all([
-        collectHabitItems(pool, userId, nowFn()),
-        collectContactApprovalItems(pool, userId),
-        collectVaultApprovalItems(pool, userId),
-      ]);
-      const items = [...habitItems, ...contactItems, ...vaultItems]
-        .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+      const items = await collectTrayItems(pool, userId, nowFn());
       res.json({ items });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
