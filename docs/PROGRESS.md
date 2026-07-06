@@ -34,6 +34,14 @@ Enforcement moved to the domain owner: `messaging/clients/evolution.client.ts` `
 sets `webhook.base64:false` + lifecycle events at `/instance/create` (publicly reachable). Since a
 re-pair = logout(delete)+reconnect(create), this is the path that must not revert to base64:true —
 and now can't (+1 messaging test).
+**Dedicated in-stack Evolution (evening):** diagnosing the dead dashboard buttons found the number
+was linked across TWO Evolutions (ll4's public `evolution.noninoni.click`=as4wows + ll5's internal
+wa-search i0okcoo) → 3-4 device links on one number = the real cause of the flapping/decrypt
+failures; and messaging's `EVOLUTION_API_URL` pointed at ll4's Evolution (no ll5 instance → all
+dashboard buttons 404). Fix: NEW `evolution` service in the ll5 stack (`evoapicloud/evolution-api:v2.3.7`,
+`evolution` DB on ll5 pg, local cache), reached INTERNALLY at `http://evolution:8080` by messaging +
+gateway (dashboard works, reconciler works, no public URL). Fresh `ll5` instance provisioned here
+(base64:false); old ghost deleted. New env `EVOLUTION_GLOBAL_KEY` (GH secret).
 
 ### Vault multi-tenancy + agent-driven self-service provisioning (DECISION-022 addendum, 2026-07-04)
 The vault is now TENANT-SCOPED with an agent-driven onboarding lifecycle (was single-tenant,

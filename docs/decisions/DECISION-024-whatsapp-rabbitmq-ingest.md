@@ -93,6 +93,28 @@ WhatsApp-specific outage caught in ~45m instead of the flat 2h window.
 - The DLQ is a new operational surface — the flow monitor's suggestion now points
   at `whatsapp.dlq` for poison-message triage.
 
+## Addendum 2 (2026-07-06, evening) — dedicated in-stack Evolution
+
+Diagnosing why the dashboard's WhatsApp buttons all failed uncovered the real
+mess: the number `972528836099` was linked as a WhatsApp device across **two
+separate Evolution deployments** — ll4's (`evolution.noninoni.click` →
+`api-as4wows…`, instance `ll4_account_20`) and ll5's (the internal wa-search
+`evolution-i0okcoo…`, instance `ll5` + several `was_*` archive links). That's
+3–4 active linked devices on one number, at/over WhatsApp's cap — the real cause
+of the flapping and `No session found to decrypt` (sessions evicted/rotated).
+And ll5's messaging MCP pointed `EVOLUTION_API_URL` at `evolution.noninoni.click`
+= **ll4's** Evolution, which has no `ll5` instance → every dashboard call 404'd.
+
+**Fix (chosen by the user): a dedicated Evolution for ll5, in the ll5 stack.**
+New `evolution` service (`evoapicloud/evolution-api:v2.3.7`) on the ll5 network,
+DB = the `evolution` database on ll5 postgres, local cache (no redis). Reached
+**internally** at `http://evolution:8080` by BOTH the messaging MCP and the
+gateway — so the dashboard works AND the gateway reconciler works (internal, no
+public-URL 404). No public domain, no cross-stack coupling. One clean device
+link. Global key = `EVOLUTION_GLOBAL_KEY` (GH secret, injected to `.env`). The
+fresh `ll5` instance is provisioned here with `base64:false`; the old ghost `ll5`
+on the wa-search Evolution is deleted to free the device slot.
+
 ## Addendum (2026-07-06, verified on deploy)
 
 - **RabbitMQ pipeline verified live:** broker healthy, gateway connected as a

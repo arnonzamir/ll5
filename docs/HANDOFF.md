@@ -6,12 +6,21 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
-**WhatsApp topology + re-pair traps [2026-07-04 incident]:** ONE Evolution server
-(evolution.noninoni.click, container in the wa-search Coolify stack i0okcoo8…) hosts TWO separate
-WhatsApp device links on the user's number: instance **`ll5`** (webhook →
-https://gateway.noninoni.click/webhook/whatsapp + X-Webhook-Secret — feeds LL5) and instance
-**`was_*`** (webhook → wa-api.noninoni.click — feeds the wa-search archive). LL5's registered instance
-name lives in `messaging_whatsapp_accounts.instance_name` — CHECK IT FIRST in any WhatsApp outage.
+**WhatsApp topology [UPDATED 2026-07-06 — DECISION-024]:** ll5 now has its OWN Evolution, the
+`evolution` service IN the ll5 stack (`evolution-xkkcc…`, `evoapicloud/evolution-api:v2.3.7`, `evolution`
+DB on ll5 postgres, local cache, NO public domain). Reached INTERNALLY at `http://evolution:8080` by
+the messaging MCP (`EVOLUTION_API_URL`) AND the gateway (reconciler). Global key = `EVOLUTION_GLOBAL_KEY`
+(.env, from GH secret). LL5's instance name lives in `messaging_whatsapp_accounts.instance_name` — CHECK
+FIRST in any outage. **History (why this changed):** the number `972528836099` had been linked across
+TWO Evolutions — ll4's public `evolution.noninoni.click` (=Coolify `api-as4wows…`, instance
+`ll4_account_20`) and ll5's old internal wa-search `evolution-i0okcoo…` (instances `ll5` + `was_*`
+archives). 3-4 device links on one number = over WhatsApp's cap = the flapping + `No session found to
+decrypt`. And messaging's EVOLUTION_API_URL pointed at ll4's Evolution (no ll5 instance → dashboard
+buttons 404). The dedicated in-stack Evolution consolidates ll5 to ONE device link and makes the
+dashboard/reconciler work internally. The old wa-search Evolution + `evolution.noninoni.click` (ll4) are
+NOT ll5's — don't point ll5 at them. **Re-pair traps still apply:** logout DELETES the instance;
+recovery = recreate + re-encrypt new apikey into `messaging_whatsapp_accounts.api_key`; `state:open` is
+NOT proof of recovery — only sustained gateway `processWhatsAppWebhook` hits are.
 Traps learned 2026-07-04 (10h outage + a wrong fix): (1) Evolution DELETES an instance entirely on
 logout/device_removed — a missing instance ≠ never existed; (2) re-pairing the only VISIBLE instance
 may be the OTHER system's (this restored the archive, not LL5 — and adding a new linked device may be
