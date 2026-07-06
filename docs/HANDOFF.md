@@ -20,7 +20,14 @@ buttons 404). The dedicated in-stack Evolution consolidates ll5 to ONE device li
 dashboard/reconciler work internally. The old wa-search Evolution + `evolution.noninoni.click` (ll4) are
 NOT ll5's — don't point ll5 at them. **Re-pair traps still apply:** logout DELETES the instance;
 recovery = recreate + re-encrypt new apikey into `messaging_whatsapp_accounts.api_key`; `state:open` is
-NOT proof of recovery — only sustained gateway `processWhatsAppWebhook` hits are.
+NOT proof of recovery — only sustained gateway `processWhatsAppWebhook` hits are. **Live re-pair 2026-07-06:**
+done via the dashboard **Re-pair** button (works now that messaging→`http://evolution:8080`); the fresh
+`ll5` instance on the dedicated Evolution paired, messages flow through the RabbitMQ pipeline. To
+recreate an instance by hand on the ll5 Evolution: `POST http://<evo-ip>:8080/instance/create` (global
+key `EVOLUTION_GLOBAL_KEY`) with `webhook.base64:false` + secret; if "name already in use" after a delete,
+clear the stale row: `psql -d evolution -c 'DELETE FROM "Instance" WHERE name=''ll5'';'` + restart the
+evolution container (local cache); then encrypt the new apikey (`messaging` container's
+`encrypt(key, ENCRYPTION_KEY)`) into `messaging_whatsapp_accounts.api_key` + set `api_url=http://evolution:8080`.
 Traps learned 2026-07-04 (10h outage + a wrong fix): (1) Evolution DELETES an instance entirely on
 logout/device_removed — a missing instance ≠ never existed; (2) re-pairing the only VISIBLE instance
 may be the OTHER system's (this restored the archive, not LL5 — and adding a new linked device may be

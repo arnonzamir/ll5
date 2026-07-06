@@ -24,8 +24,6 @@ const ALERT_KEY = 'whatsapp_disconnected';
 /** Normalised account status we persist. */
 type WaStatus = 'open' | 'connecting' | 'close' | 'qr' | 'logged_out';
 
-const DOWN: ReadonlySet<WaStatus> = new Set<WaStatus>(['close', 'qr', 'logged_out']);
-
 function mapEventToStatus(event: string, data: unknown): WaStatus | null {
   if (event === 'qrcode.updated') return 'qr';
   if (event === 'logout.instance' || event === 'remove.instance') return 'logged_out';
@@ -104,16 +102,16 @@ export async function handleWhatsAppLifecycle(
     return;
   }
 
-  // Persist the new status.
+  // Persist the new status. ($3::text cast — without it Postgres deduces
+  // inconsistent types for $3 across the CASE comparison and the column assign.)
   if (instance) {
-    const lastError =
-      newStatus === 'logged_out' ? 'logged out — needs re-pairing' : newStatus === 'qr' ? 'awaiting QR scan' : null;
+    const lastError = newStatus === 'logged_out' ? 'logged out — needs re-pairing' : null;
     await pool
       .query(
         `UPDATE messaging_whatsapp_accounts
             SET status = $3,
                 last_error = $4,
-                last_seen_at = CASE WHEN $3 = 'open' THEN now() ELSE last_seen_at END,
+                last_seen_at = CASE WHEN $3::text = 'open' THEN now() ELSE last_seen_at END,
                 updated_at = now()
           WHERE user_id = $1 AND instance_name = $2`,
         [userId, instance, newStatus, lastError],
@@ -121,46 +119,45 @@ export async function handleWhatsAppLifecycle(
       .catch((err) => logger.warn('[whatsappLifecycle] status update failed', { error: String(err) }));
   }
 
-  const wasDown = prevStatus ? DOWN.has(prevStatus) : false;
-  const isDown = DOWN.has(newStatus);
+  // Paging is intentionally narrow: only `logged_out`/`remove` genuinely needs a
+  // re-pair. `qr` is a normal pairing step and `close`/`connecting` flap during
+  // reconnects — paging on those spams the user (the 2026-07-06 false "waiting
+  // for QR" alert during a live re-pair). Real, sustained, cross-channel outage
+  // detection is owned by WhatsAppFlowMonitor.
+  const needsRepair = newStatus === 'logged_out';
+  const wasNeedsRepair = prevStatus === 'logged_out';
 
-  // Transition into a down state → alert + proactively engage the agent.
-  if (isDown && !wasDown) {
-    const needsUser = newStatus === 'logged_out' || newStatus === 'qr';
-    const summary =
-      newStatus === 'logged_out'
-        ? 'WhatsApp is logged out and needs re-pairing (scan a QR to reconnect).'
-        : newStatus === 'qr'
-          ? 'WhatsApp is waiting for a QR scan to reconnect.'
-          : 'WhatsApp connection dropped.';
+  if (newStatus === 'open') {
+    // Always clear a firing disconnect alert on a confirmed open (defensive).
+    await clearAlert(pool, userId, ALERT_KEY).catch(() => undefined);
+    if (wasNeedsRepair) {
+      await insertSystemMessage(
+        pool,
+        userId,
+        'WhatsApp reconnected — message flow has resumed.',
+        undefined,
+        createSchedulerEvent('whatsapp_connection'),
+      ).catch(() => undefined);
+      logger.info('[whatsappLifecycle] WhatsApp reconnected', { instance, prevStatus });
+    }
+    return;
+  }
+
+  if (needsRepair && !wasNeedsRepair) {
     await raiseAlert(pool, {
       userId,
       key: ALERT_KEY,
-      severity: needsUser ? 'critical' : 'warning',
-      summary,
-      suggestion: needsUser ? 'Re-pair the WhatsApp instance (scan the QR).' : 'Usually auto-recovers; watch for flow to resume.',
+      severity: 'critical',
+      summary: 'WhatsApp is logged out and needs re-pairing (scan a QR to reconnect).',
+      suggestion: 'Re-pair the WhatsApp instance (scan the QR).',
     }).catch(() => undefined);
     await insertSystemMessage(
       pool,
       userId,
-      `WhatsApp connection changed: ${summary}${needsUser ? ' Let the user know they need to re-pair, and stop assuming WhatsApp is reaching you until it recovers.' : ' Flow may pause briefly; no action needed unless it stays down.'}`,
-      needsUser ? { title: 'WhatsApp needs re-pairing', type: 'whatsapp_connection', priority: 'high' } : undefined,
+      'WhatsApp is logged out and needs re-pairing. Let the user know, and stop assuming WhatsApp is reaching you until it recovers.',
+      { title: 'WhatsApp needs re-pairing', type: 'whatsapp_connection', priority: 'high' },
       createSchedulerEvent('whatsapp_connection'),
     ).catch(() => undefined);
-    logger.warn('[whatsappLifecycle] WhatsApp down', { instance, newStatus, prevStatus });
-    return;
-  }
-
-  // Transition back up → clear the alert + a low-key heads-up.
-  if (!isDown && wasDown) {
-    await clearAlert(pool, userId, ALERT_KEY).catch(() => undefined);
-    await insertSystemMessage(
-      pool,
-      userId,
-      'WhatsApp reconnected — message flow has resumed.',
-      undefined,
-      createSchedulerEvent('whatsapp_connection'),
-    ).catch(() => undefined);
-    logger.info('[whatsappLifecycle] WhatsApp reconnected', { instance, prevStatus });
+    logger.warn('[whatsappLifecycle] WhatsApp logged out', { instance, prevStatus });
   }
 }

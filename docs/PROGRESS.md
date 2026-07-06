@@ -42,6 +42,11 @@ dashboard buttons 404). Fix: NEW `evolution` service in the ll5 stack (`evoapicl
 `evolution` DB on ll5 pg, local cache), reached INTERNALLY at `http://evolution:8080` by messaging +
 gateway (dashboard works, reconciler works, no public URL). Fresh `ll5` instance provisioned here
 (base64:false); old ghost deleted. New env `EVOLUTION_GLOBAL_KEY` (GH secret).
+**Live-verified 2026-07-06:** re-paired via dashboard Re-pair (now works — messaging reaches
+`http://evolution:8080`); instance open, messages flow Evolution→gateway→`whatsapp.ingest`→worker→ES.
+Two lifecycle fixes from the live run: (1) status-UPDATE `$3::text` cast (was throwing "inconsistent
+types deduced"); (2) paging narrowed to `logged_out` only — `qr`/`close`/`connecting` no longer page
+(a live re-pair falsely fired "waiting for QR"); WhatsAppFlowMonitor owns real outage detection.
 
 ### Vault multi-tenancy + agent-driven self-service provisioning (DECISION-022 addendum, 2026-07-04)
 The vault is now TENANT-SCOPED with an agent-driven onboarding lifecycle (was single-tenant,
