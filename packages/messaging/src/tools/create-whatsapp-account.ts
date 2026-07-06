@@ -67,6 +67,20 @@ export function registerCreateWhatsAppAccountTool(
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        // 23505 = unique_violation on messaging_wa_instance_name_unique (migration
+        // 006): the instance_name is already registered — refuse rather than let
+        // it become an ambiguous cross-tenant mapping (DECISION-024 tenant GAP 1).
+        const code = (err as { code?: string } | null)?.code;
+        if (code === '23505') {
+          logger.warn('[createWhatsAppAccount] instance_name already in use', {
+            userId,
+            instanceName: params.instance_name,
+          });
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({ error: 'INSTANCE_NAME_TAKEN', instance_name: params.instance_name }) }],
+            isError: true,
+          };
+        }
         logger.error('[createWhatsAppAccount] Failed to create WhatsApp account', {
           userId,
           error: message,

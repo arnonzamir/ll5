@@ -12,6 +12,7 @@ import {
 } from './utils/orchestrator.js';
 import { getHealthSnapshot } from './scheduler/mcp-health-monitor.js';
 import { getAllWhatsAppFlowSnapshots } from './scheduler/whatsapp-flow-monitor.js';
+import { getRabbitMqStats } from './rabbitmq-stats.js';
 import { getAllPhoneLivenessSnapshots } from './scheduler/phone-liveness-monitor.js';
 import { getAllAgentOutputSnapshots } from './scheduler/agent-output-monitor.js';
 import { getSystemMessageFailureStats } from './utils/system-message.js';
@@ -174,6 +175,13 @@ export function createAdminRouter(
 ): Router {
   const router = Router();
   const admin = requireAdmin(authSecret);
+
+  // GET /admin/rabbitmq — WhatsApp ingest queue health (DECISION-024): per-queue
+  // depth/consumers/rates + a non-destructive peek at the dead-letter queue.
+  router.get('/rabbitmq', admin, async (_req: Request, res: Response) => {
+    const stats = await getRabbitMqStats(process.env.RABBITMQ_URL);
+    res.json(stats);
+  });
 
   /**
    * P5 lifecycle: when a user is disabled, best-effort stop their agent

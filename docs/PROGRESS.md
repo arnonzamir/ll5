@@ -47,6 +47,14 @@ gateway (dashboard works, reconciler works, no public URL). Fresh `ll5` instance
 Two lifecycle fixes from the live run: (1) status-UPDATE `$3::text` cast (was throwing "inconsistent
 types deduced"); (2) paging narrowed to `logged_out` only — `qr`/`close`/`connecting` no longer page
 (a live re-pair falsely fired "waiting for QR"); WhatsAppFlowMonitor owns real outage detection.
+**RabbitMQ monitoring UI:** gateway `GET /admin/rabbitmq` (`rabbitmq-stats.ts`, queries the broker
+management API :15672) → per-queue depth/consumers/rates + non-destructive DLQ peek; dashboard admin
+`QueueMonitor` panel (`(admin)/admin/queue-monitor.tsx` + `rabbitmq-actions.ts`) on the System Health
+page, 15s poll, flags broker-down / DLQ>0 / no-consumer. **Tenant-scoping audit (DECISION-024):** the
+WhatsApp integration is correctly tenant-scoped on all runtime paths (attribution is server-side from
+instance→user, never the payload). Fixed GAP 1: added `UNIQUE(instance_name)` (messaging migration 006)
++ `create_whatsapp_account` now returns `INSTANCE_NAME_TAKEN` on 23505 — makes the instance→user
+mapping the whole pipeline trusts authoritative at the DB (was assumed, not enforced).
 
 ### Vault multi-tenancy + agent-driven self-service provisioning (DECISION-022 addendum, 2026-07-04)
 The vault is now TENANT-SCOPED with an agent-driven onboarding lifecycle (was single-tenant,
