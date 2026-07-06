@@ -52,6 +52,8 @@ import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, t
 import { queueDeviceCommand } from './utils/device-commands.js';
 import { isSourceEnabled } from './utils/data-source-config.js';
 import { createWhatsappWebhookRouter } from './whatsapp-webhook-route.js';
+import { WhatsAppQueue } from './utils/whatsapp-queue.js';
+import { dispatchEvolutionEvent, type DispatchDeps } from './processors/whatsapp-dispatch.js';
 import { createUploadsRouter, resolveUploadsDir, createPublicUploadsRouter, resolvePublicUploadsDir } from './uploads-route.js';
 import type { EnvConfig } from './utils/env.js';
 import { getFiringAlerts } from './utils/alerting.js';
@@ -1378,12 +1380,34 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // Authenticated via shared X-Webhook-Secret header (see whatsapp-webhook-route.ts).
   // Mounted at both /webhook/whatsapp and /webhook/whatsapp/* so existing Evolution
   // API configs with sub-paths continue to work.
+  // WhatsApp ingest queue (DECISION-024): Evolution fast-acks into RabbitMQ and
+  // a worker dispatches at its own pace. Falls back to inline processing when
+  // the broker is absent/down, so it is never a hard dependency.
+  const whatsappDispatchDeps: DispatchDeps = {
+    pgPool,
+    esClient,
+    notificationMatcher,
+    encryptionKey: config.encryptionKey,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    webhookPublicUrl: config.whatsappWebhookPublicUrl,
+    webhookSecret: config.whatsappWebhookSecret,
+  };
+  const whatsappQueue = new WhatsAppQueue(config.rabbitmqUrl);
+  void whatsappQueue.start(async (evt) => {
+    await dispatchEvolutionEvent(whatsappDispatchDeps, evt.userId, evt.payload as Record<string, unknown>);
+  });
+
   const whatsappRouter = createWhatsappWebhookRouter({
     pgPool,
     esClient,
     notificationMatcher,
     webhookSecret: config.whatsappWebhookSecret,
     encryptionKey: config.encryptionKey,
+    queue: whatsappQueue,
+    evolutionApiUrl: config.evolutionApiUrl,
+    evolutionApiKey: config.evolutionApiKey,
+    webhookPublicUrl: config.whatsappWebhookPublicUrl,
   });
   app.use('/webhook/whatsapp', whatsappRouter);
   app.use('/webhook/whatsapp/*', whatsappRouter);

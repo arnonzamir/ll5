@@ -26,6 +26,7 @@ import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
 import { AgentOutputMonitor } from './agent-output-monitor.js';
 import { CharacterRefreshScheduler } from './character-refresh.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
+import { WhatsAppWebhookReconciler } from './whatsapp-webhook-reconciler.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MetricsMonitor } from './metrics-monitor.js';
 import { ToolFailureMonitor } from './tool-failure-monitor.js';
@@ -310,10 +311,30 @@ async function startSchedulersForUser(
     // already a strong outage signal — catch it fast. Alerts now reach the
     // agent + repeat + show in the apps via the alert spine.
     stalenessHours: s('whatsapp_flow_stale_hours', 2),
+    // Cross-channel early trigger: WhatsApp silent >45m while another channel
+    // was seen <20m ago = a WhatsApp-specific outage, alert now (not in 2h).
+    fastStaleMinutes: s('whatsapp_flow_fast_stale_minutes', 45),
+    otherChannelFreshMinutes: s('whatsapp_flow_other_fresh_minutes', 20),
     startHour, endHour, timezone, userId,
   });
   whatsappFlowMonitor.start();
   schedulers.push(whatsappFlowMonitor);
+
+  // Self-healing WhatsApp webhook config (DECISION-024): keeps every mapped
+  // instance's Evolution webhook at base64:false + the full event list, so a
+  // re-paired instance's default config can never re-create the 413 jam.
+  if (config.evolutionApiUrl && config.evolutionApiKey) {
+    const whatsappWebhookReconciler = new WhatsAppWebhookReconciler(pgPool, {
+      intervalMinutes: s('whatsapp_webhook_reconcile_minutes', 5),
+      userId,
+      evolutionApiUrl: config.evolutionApiUrl,
+      evolutionApiKey: config.evolutionApiKey,
+      webhookUrl: config.whatsappWebhookPublicUrl,
+      webhookSecret: config.whatsappWebhookSecret,
+    });
+    whatsappWebhookReconciler.start();
+    schedulers.push(whatsappWebhookReconciler);
+  }
 
   // Metrics watchdog — declarative companion: the remaining input channels
   // (slack/gmail/sms freshness, baseline-gated) + Elasticsearch cluster health,

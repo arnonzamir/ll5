@@ -65,7 +65,7 @@ function makeRes() {
   return res as unknown as Response & { _status: number; _json: unknown };
 }
 
-function buildRouter(): { router: Router; pgPool: Pool } {
+function buildRouter(opts?: { publishResult?: boolean }): { router: Router; pgPool: Pool; queue: import('../utils/whatsapp-queue.js').WhatsAppQueue } {
   const pgPool = { query: vi.fn() } as unknown as Pool;
   const esClient = { index: vi.fn(), update: vi.fn() } as unknown as Client;
   const matcher = {
@@ -74,14 +74,19 @@ function buildRouter(): { router: Router; pgPool: Pool } {
     shouldDownloadImages: vi.fn().mockResolvedValue(false),
   } as unknown as ContactRoutingResolver;
 
+  // Broker disabled in tests → publish() returns false so the ingress takes the
+  // inline dispatch path these tests assert on.
+  const queue = { publish: vi.fn().mockResolvedValue(opts?.publishResult ?? false) } as unknown as import('../utils/whatsapp-queue.js').WhatsAppQueue;
+
   const router = createWhatsappWebhookRouter({
     pgPool,
     esClient,
     notificationMatcher: matcher,
     webhookSecret: SECRET,
     encryptionKey: undefined,
+    queue,
   });
-  return { router, pgPool };
+  return { router, pgPool, queue };
 }
 
 /** Drive the express Router through its full middleware chain. The router is
@@ -299,5 +304,22 @@ describe('createWhatsappWebhookRouter — source-gating and event routing', () =
 
     expect(res._status).toBe(200);
     expect(processWhatsAppWebhook).toHaveBeenCalledTimes(1);
+  });
+
+  it('fast-acks to the queue and skips inline processing when the broker is up', async () => {
+    vi.mocked(isSourceEnabled).mockResolvedValue(true);
+    const { router, queue } = buildRouter({ publishResult: true });
+    const req = makeReq({
+      headers: { 'x-webhook-secret': SECRET },
+      body: { instance: KNOWN_INSTANCE, event: 'messages.upsert', data: { key: { remoteJid: '1@s.whatsapp.net' } } },
+    });
+    const res = makeRes();
+    await invoke(router, req, res);
+
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ status: 'queued' });
+    expect(queue.publish).toHaveBeenCalledTimes(1);
+    // Enqueued → the worker will process it, not the request thread.
+    expect(processWhatsAppWebhook).not.toHaveBeenCalled();
   });
 });

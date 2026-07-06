@@ -24,6 +24,9 @@ volumes:
   pg-data:
     name: xkkcc0g4o48kkcows8488so4_pg-data
     external: true
+  # Created by compose on first up (not pre-provisioned like es/pg).
+  rabbitmq-data:
+    name: xkkcc0g4o48kkcows8488so4_rabbitmq-data
 
 x-defaults: &defaults
   restart: unless-stopped
@@ -88,6 +91,31 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # RabbitMQ — WhatsApp ingest queue (DECISION-024). Decouples Evolution's serial
+  # webhook delivery from the gateway's processing so a poison/slow message can't
+  # head-of-line-block the whole feed (the 2026-07-06 outage).
+  rabbitmq:
+    <<: *defaults
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq-xkkcc0g4o48kkcows8488so4
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ll5}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      TZ: ${TZ:-Asia/Jerusalem}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
   # ---------- MCPs ----------
 
@@ -330,6 +358,11 @@ services:
       ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET}
+      # WhatsApp ingest queue + self-healing webhook reconciler (DECISION-024).
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-ll5}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      EVOLUTION_API_URL: ${EVOLUTION_API_URL:-https://evolution.noninoni.click}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      WHATSAPP_WEBHOOK_PUBLIC_URL: ${WHATSAPP_WEBHOOK_PUBLIC_URL:-https://gateway.noninoni.click/webhook/whatsapp}
       # Base domain for mcp-*.<domain> endpoints baked into the agent .mcp.json.
       MCP_BASE_DOMAIN: ${MCP_BASE_DOMAIN:-noninoni.click}
       # Agent-orchestrator service (separate). Optional — empty disables the
@@ -357,6 +390,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      rabbitmq:
+        condition: service_started
     deploy:
       resources:
         limits:

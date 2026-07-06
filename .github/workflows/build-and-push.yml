@@ -254,11 +254,15 @@ jobs:
           BW_CLIENTID: ${{ secrets.BW_CLIENTID }}
           BW_CLIENTSECRET: ${{ secrets.BW_CLIENTSECRET }}
           BW_PASSWORD: ${{ secrets.BW_PASSWORD }}
+          # WhatsApp ingest queue + self-healing webhook (DECISION-024). Same
+          # story as above: Coolify env doesn't reach the on-host .env.
+          RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
+          EVOLUTION_API_KEY: ${{ secrets.EVOLUTION_API_KEY }}
         with:
           host: ${{ vars.SERVER_HOST }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES,ELASTIC_PASSWORD,BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD
+          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES,ELASTIC_PASSWORD,BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD,RABBITMQ_PASSWORD,EVOLUTION_API_KEY
           command_timeout: 15m
           script: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u arnonzamir --password-stdin
@@ -311,6 +315,22 @@ jobs:
               echo "Injected ELASTIC_PASSWORD into .env"
             else
               echo "WARN: ELASTIC_PASSWORD secret empty — leaving .env untouched"
+            fi
+            # Inject WhatsApp ingest queue + Evolution reconciler secrets
+            # (DECISION-024, idempotent). Guard on non-empty so a missing secret
+            # never blanks a working .env — both degrade safely when absent
+            # (queue → inline fallback; reconciler → event-triggered only).
+            if [ -n "$RABBITMQ_PASSWORD" ]; then
+              touch .env
+              grep -v -E '^(RABBITMQ_PASSWORD|EVOLUTION_API_KEY)=' .env > .env.wa.tmp 2>/dev/null || true
+              mv .env.wa.tmp .env
+              {
+                printf 'RABBITMQ_PASSWORD=%s\n' "$RABBITMQ_PASSWORD"
+                printf 'EVOLUTION_API_KEY=%s\n' "$EVOLUTION_API_KEY"
+              } >> .env
+              echo "Injected RABBITMQ_PASSWORD + EVOLUTION_API_KEY into .env"
+            else
+              echo "WARN: RABBITMQ_PASSWORD secret empty — WhatsApp queue will run without a broker (inline fallback)"
             fi
             # Only pull our GHCR-built images — never databases (postgres, ES) or
             # third-party images (evolution). A new patch of postgres:16-alpine

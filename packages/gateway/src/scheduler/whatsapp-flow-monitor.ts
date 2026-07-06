@@ -9,6 +9,13 @@ interface WhatsAppFlowMonitorConfig {
   intervalMinutes: number;
   /** Alert if no inbound WhatsApp messages for this many hours during active hours. */
   stalenessHours: number;
+  /** Cross-channel early trigger: if WhatsApp has been silent longer than this
+   *  (minutes) WHILE another channel is actively flowing, it's a WhatsApp-specific
+   *  outage now — don't wait for the flat stalenessHours window. */
+  fastStaleMinutes: number;
+  /** A non-WhatsApp channel seen within this many minutes counts as "the pipeline
+   *  is alive", making a silent WhatsApp a divergence signal. */
+  otherChannelFreshMinutes: number;
   startHour: number;
   endHour: number;
   timezone: string;
@@ -125,7 +132,42 @@ export class WhatsAppFlowMonitor {
       const lastTs = hits[0]?._source?.timestamp ?? null;
       const lastMs = lastTs ? new Date(lastTs).getTime() : null;
       const ageHours = lastMs !== null ? (Date.now() - lastMs) / (3600 * 1000) : null;
-      const stale = ageHours === null || ageHours > this.config.stalenessHours;
+      const ageMinutes = lastMs !== null ? (Date.now() - lastMs) / 60_000 : null;
+
+      // Cross-channel divergence: is ANOTHER inbound channel flowing right now?
+      // If so, a silent WhatsApp is a WhatsApp-specific fault we can catch in
+      // ~45 min instead of waiting out the flat 2h window (2026-07-06: the
+      // webhook jammed at 09:07, other channels kept flowing, but the flat
+      // threshold hadn't tripped when the user noticed).
+      let otherFreshMinutes: number | null = null;
+      try {
+        const otherRes = await this.es.search<{ timestamp: string }>({
+          index: 'll5_awareness_messages',
+          size: 1,
+          sort: [{ timestamp: { order: 'desc' } }],
+          query: {
+            bool: {
+              filter: [
+                { term: { user_id: this.config.userId } },
+                { term: { from_me: false } },
+              ],
+              must_not: [{ term: { app: 'whatsapp' } }],
+            },
+          },
+        });
+        const otherTs = otherRes.hits?.hits?.[0]?._source?.timestamp ?? null;
+        if (otherTs) otherFreshMinutes = (Date.now() - new Date(otherTs).getTime()) / 60_000;
+      } catch {
+        /* other-channel probe is best-effort; fall back to the flat threshold */
+      }
+
+      const flatStale = ageHours === null || ageHours > this.config.stalenessHours;
+      const divergenceStale =
+        ageMinutes !== null &&
+        ageMinutes > this.config.fastStaleMinutes &&
+        otherFreshMinutes !== null &&
+        otherFreshMinutes <= this.config.otherChannelFreshMinutes;
+      const stale = flatStale || divergenceStale;
 
       const snapshot: WhatsAppFlowSnapshot = {
         userId: this.config.userId,
@@ -153,16 +195,31 @@ export class WhatsAppFlowMonitor {
 
       const bodyAge = ageHours === null
         ? 'no messages on record'
-        : `last inbound ${Math.round(ageHours)}h ago`;
-      logger.error('[WhatsAppFlowMonitor][alert] WhatsApp flow stalled', snapshot as unknown as Record<string, unknown>);
+        : ageMinutes !== null && ageMinutes < 90
+          ? `last inbound ${Math.round(ageMinutes)}m ago`
+          : `last inbound ${Math.round(ageHours ?? 0)}h ago`;
+      const divergenceNote =
+        divergenceStale && !flatStale
+          ? ` (other channels flowing ${Math.round(otherFreshMinutes ?? 0)}m ago — WhatsApp-specific)`
+          : '';
+      logger.error('[WhatsAppFlowMonitor][alert] WhatsApp flow stalled', {
+        ...(snapshot as unknown as Record<string, unknown>),
+        divergenceStale,
+        otherFreshMinutes,
+      });
       await raiseAlert(this.pool, {
         userId: this.config.userId,
         key: 'channel.whatsapp',
         severity: 'critical',
-        summary: 'WhatsApp ingestion stalled',
+        summary: `WhatsApp ingestion stalled${divergenceNote}`,
         value: bodyAge,
-        expected: `< ${Math.round(this.config.stalenessHours)}h`,
-        suggestion: 'Evolution likely ghost-connected — call restart_whatsapp_account or restart the evolution-api container.',
+        expected:
+          divergenceStale && !flatStale
+            ? `< ${Math.round(this.config.fastStaleMinutes)}m while other channels flow`
+            : `< ${Math.round(this.config.stalenessHours)}h`,
+        suggestion:
+          'Check the gateway whatsapp.dlq for poison messages and Evolution webhook delivery; ' +
+          'if ghost-connected, call restart_whatsapp_account or restart the evolution container.',
       });
     }); } catch {
       // withSchedulerHealth already recorded the failure + logged at error.

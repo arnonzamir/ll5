@@ -41,6 +41,16 @@ export interface EnvConfig {
   /** Shared secret required in X-Webhook-Secret on POST /webhook/whatsapp.
    *  Required — fail-closed on misconfiguration. */
   whatsappWebhookSecret: string;
+  /** AMQP URL for the WhatsApp ingest queue (DECISION-024). Optional — when
+   *  empty the ingress processes inline (no broker, no durability layer). */
+  rabbitmqUrl?: string;
+  /** Evolution API base URL + apikey (global key) for the self-healing webhook
+   *  reconciler. Optional — when empty the reconciler is skipped. */
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
+  /** Public URL Evolution should POST WhatsApp events to. Defaults to
+   *  https://gateway.<mcpBaseDomain>/webhook/whatsapp. */
+  whatsappWebhookPublicUrl: string;
   /** Public dashboard origin used to build emailed links (reset/invite/accept).
    *  Defaults to the live dashboard. */
   dashboardUrl: string;
@@ -164,6 +174,12 @@ export function loadEnv(): EnvConfig {
     fcmServerKey: process.env.FCM_SERVER_KEY,
     encryptionKey: process.env.ENCRYPTION_KEY,
     whatsappWebhookSecret,
+    rabbitmqUrl: process.env.RABBITMQ_URL,
+    evolutionApiUrl: process.env.EVOLUTION_API_URL,
+    evolutionApiKey: process.env.EVOLUTION_API_KEY,
+    whatsappWebhookPublicUrl:
+      process.env.WHATSAPP_WEBHOOK_PUBLIC_URL ??
+      `https://gateway.${process.env.MCP_BASE_DOMAIN ?? 'noninoni.click'}/webhook/whatsapp`,
     dashboardUrl: process.env.DASHBOARD_URL ?? 'https://ll5.noninoni.click',
     mcpBaseDomain: process.env.MCP_BASE_DOMAIN ?? 'noninoni.click',
     vaultMcpUrl: process.env.VAULT_MCP_URL ?? 'http://vault:3000',

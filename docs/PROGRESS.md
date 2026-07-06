@@ -8,6 +8,26 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### WhatsApp ingest via RabbitMQ + self-healing webhook (DECISION-024, 2026-07-06)
+Response to a ~2h WhatsApp outage: Evolution had `webhookBase64:true` (re-applied on the Jul-4
+re-pair) → media inlined base64 → gateway 413 (`express.json({limit:'1mb'})`) → Evolution retried
+the poison payload 10× **serially**, head-of-line-blocking every text message behind it. The inlined
+base64 was unused (gateway fetches media via `getBase64FromMediaMessage`). Fixes shipped:
+**(1)** new `rabbitmq` service in the ll5 stack; the WhatsApp ingress now verifies+resolves then
+**publishes to RabbitMQ and 200s immediately** (`utils/whatsapp-queue.ts`: exchange `whatsapp` →
+`whatsapp.ingest`, `whatsapp.retry` TTL 15s, `whatsapp.dlq`; prefetch 20; publisher confirms; a
+worker calls the shared `processors/whatsapp-dispatch.ts`). Broker down/unset ⇒ ingress processes
+**inline** (no loss — never a hard dep). **(2)** self-healing webhook: `processors/whatsapp-webhook-config.ts`
+`ensureWhatsAppWebhook` reconciles each instance's Evolution webhook to `base64:false` + secret +
+full event list; triggered on `connection.update→open`/`application.startup` and by a periodic
+scheduler (`scheduler/whatsapp-webhook-reconciler.ts`, 5min, Evolution GLOBAL key — closes the
+cold-start gap). **(3)** connection lifecycle (`processors/whatsapp-lifecycle.ts`):
+`connection.update`/`application.startup`/`logout.instance`/`qrcode.updated` update the account
+`status`/`last_seen`/`last_error` + proactively engage the agent on down/up transitions. **(4)**
+`WhatsAppFlowMonitor` cross-channel early trigger: alerts when WhatsApp silent >45m while another
+channel was seen <20m ago (was flat 2h). New env: `RABBITMQ_URL`, `EVOLUTION_API_URL`,
+`EVOLUTION_API_KEY` (global), `WHATSAPP_WEBHOOK_PUBLIC_URL`. +5 gateway tests (650 total).
+
 ### Vault multi-tenancy + agent-driven self-service provisioning (DECISION-022 addendum, 2026-07-04)
 The vault is now TENANT-SCOPED with an agent-driven onboarding lifecycle (was single-tenant,
 operator-provisioned — violated principle #3). **Model:** one Vaultwarden org per tenant

@@ -4,10 +4,10 @@ import type { Request, Response, NextFunction } from 'express';
 import type { Pool } from 'pg';
 import type { Client } from '@elastic/elasticsearch';
 import type { ContactRoutingResolver } from './processors/contact-routing.js';
-import { processWhatsAppWebhook } from './processors/whatsapp-webhook.js';
-import { processWhatsAppContactWebhook } from './processors/whatsapp-contact-webhook.js';
+import { dispatchEvolutionEvent, type DispatchDeps } from './processors/whatsapp-dispatch.js';
 import { resolveWhatsAppUserId } from './utils/whatsapp-user-resolver.js';
 import { isSourceEnabled } from './utils/data-source-config.js';
+import type { WhatsAppQueue } from './utils/whatsapp-queue.js';
 import { logger } from './utils/logger.js';
 
 export interface WhatsappWebhookDeps {
@@ -17,6 +17,13 @@ export interface WhatsappWebhookDeps {
   /** Required shared secret. Evolution API must send this in `X-Webhook-Secret`. */
   webhookSecret: string;
   encryptionKey: string | undefined;
+  /** RabbitMQ ingest queue. When up, events are enqueued and processed by a
+   *  worker; when down (or disabled) the ingress processes inline (no loss). */
+  queue: WhatsAppQueue;
+  /** Evolution creds + public webhook URL for the self-healing reconciler. */
+  evolutionApiUrl?: string;
+  evolutionApiKey?: string;
+  webhookPublicUrl?: string;
 }
 
 /** Constant-time compare for fixed-length secrets. Returns false on length mismatch
@@ -28,6 +35,17 @@ function safeEqual(a: string, b: string): boolean {
 
 export function createWhatsappWebhookRouter(deps: WhatsappWebhookDeps): Router {
   const router = Router();
+
+  const dispatchDeps: DispatchDeps = {
+    pgPool: deps.pgPool,
+    esClient: deps.esClient,
+    notificationMatcher: deps.notificationMatcher,
+    encryptionKey: deps.encryptionKey,
+    evolutionApiUrl: deps.evolutionApiUrl,
+    evolutionApiKey: deps.evolutionApiKey,
+    webhookPublicUrl: deps.webhookPublicUrl,
+    webhookSecret: deps.webhookSecret,
+  };
 
   const authMiddleware = (req: Request, res: Response, next: NextFunction): void => {
     const provided = req.headers['x-webhook-secret'];
@@ -58,67 +76,26 @@ export function createWhatsappWebhookRouter(deps: WhatsappWebhookDeps): Router {
       }
 
       if (!(await isSourceEnabled(deps.pgPool, userId, 'whatsapp'))) {
-        // Acknowledge to Evolution API but do not process
+        // Acknowledge to Evolution but do not process.
         res.json({ status: 'ok' });
         return;
       }
 
-      const event = payload?.event as string | undefined;
-      if (event === 'contacts.upsert' || event === 'contacts.update') {
-        const contacts = (Array.isArray(payload?.data) ? payload.data : []) as Parameters<
-          typeof processWhatsAppContactWebhook
-        >[2];
-        await processWhatsAppContactWebhook(deps.pgPool, userId, contacts);
-        res.json({ status: 'ok' });
-        return;
-      }
-
-      if (event === 'chats.upsert' || event === 'chats.update') {
-        const chats = Array.isArray(payload?.data) ? (payload.data as Record<string, unknown>[]) : [];
-        for (const chat of chats) {
-          const jid = (chat.remoteJid ?? chat.id) as string | undefined;
-          if (!jid) continue;
-          const archived = (chat.archive ?? chat.archived ?? null) as boolean | null;
-          const unreadCount = (chat.unreadCount ?? null) as number | null;
-          if (archived !== null || unreadCount !== null) {
-            const updates: string[] = [];
-            const values: unknown[] = [];
-            let pi = 1;
-            if (archived !== null) {
-              updates.push(`is_archived = $${pi++}`);
-              values.push(archived);
-            }
-            if (unreadCount !== null) {
-              updates.push(`unread_count = $${pi++}`);
-              values.push(unreadCount);
-            }
-            updates.push('updated_at = now()');
-            values.push(userId, jid);
-            await deps.pgPool
-              .query(
-                `UPDATE messaging_conversations SET ${updates.join(', ')} WHERE user_id = $${pi++} AND conversation_id = $${pi}`,
-                values,
-              )
-              .catch((err) => {
-                logger.warn('[whatsappWebhook] Failed to update conversation', {
-                  error: err instanceof Error ? err.message : String(err),
-                  jid,
-                });
-              });
-          }
-        }
-        res.json({ status: 'ok' });
-        return;
-      }
-
-      await processWhatsAppWebhook(
-        deps.esClient,
-        deps.pgPool,
-        deps.notificationMatcher,
+      // Fast path: enqueue and ack immediately so Evolution's serial delivery is
+      // never blocked by our processing (the 2026-07-06 head-of-line-block).
+      const enqueued = await deps.queue.publish({
         userId,
-        payload as unknown as Parameters<typeof processWhatsAppWebhook>[4],
-        deps.encryptionKey,
-      );
+        payload,
+        receivedAt: new Date().toISOString(),
+      });
+      if (enqueued) {
+        res.json({ status: 'queued' });
+        return;
+      }
+
+      // Broker down / disabled → process inline so nothing is lost.
+      // `payload` is defined here — `instanceName` was read from it above.
+      await dispatchEvolutionEvent(dispatchDeps, userId, payload as Record<string, unknown>);
       res.json({ status: 'ok' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
