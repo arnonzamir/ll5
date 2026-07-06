@@ -23,8 +23,10 @@ vi.mock('../utils/escalation.js', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeEsClient(): Client {
+function makeEsClient(exists = false): Client {
   return {
+    // Idempotency dedup (DECISION-024): default false = not yet indexed.
+    exists: vi.fn().mockResolvedValue(exists),
     index: vi.fn().mockResolvedValue({ _id: 'doc-1', result: 'created' }),
     update: vi.fn().mockResolvedValue({ result: 'updated' }),
   } as unknown as Client;
@@ -140,6 +142,16 @@ describe('processWhatsAppWebhook', () => {
       await processWhatsAppWebhook(es, pool, matcher, 'user-1', payload);
 
       expect(es.index).not.toHaveBeenCalled();
+    });
+
+    it('skips a duplicate delivery (idempotency, DECISION-024 H1) — no re-index', async () => {
+      // exists → the message id was already indexed (a retry / redelivery).
+      const dupEs = makeEsClient(true);
+      const payload = makePayload({ event: 'messages.upsert', id: 'dup-key-1' });
+      await processWhatsAppWebhook(dupEs, pool, matcher, 'user-1', payload);
+
+      expect(dupEs.exists).toHaveBeenCalled();
+      expect(dupEs.index).not.toHaveBeenCalled();
     });
 
     it('processes messages.upsert events', async () => {

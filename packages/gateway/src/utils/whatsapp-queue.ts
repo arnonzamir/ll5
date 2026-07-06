@@ -58,6 +58,7 @@ export class WhatsAppQueue {
   private closed = false;
   private handler: EventHandler | null = null;
   private reconnectDelay = 1000;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly url: string | undefined) {}
 
@@ -114,13 +115,38 @@ export class WhatsAppQueue {
         const ch = await conn.createChannel();
         await ch.prefetch(PREFETCH);
         this.conChannel = ch;
-        await ch.consume(MAIN_QUEUE, (msg) => void this.onMessage(msg), { noAck: false });
+        await ch.consume(
+          MAIN_QUEUE,
+          (msg) =>
+            void this.onMessage(msg).catch((err: unknown) =>
+              // A channel that drops mid-message can make ack/sendToQueue throw;
+              // the unacked message just redelivers. Log, never crash the process.
+              logger.error('[whatsappQueue] onMessage failed', {
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            ),
+          { noAck: false },
+        );
       }
 
       this.reconnectDelay = 1000;
       logger.info('[whatsappQueue] connected', { consumer: !!this.handler, prefetch: PREFETCH });
     } catch (err) {
-      logger.error('[whatsappQueue] connect failed', { error: err instanceof Error ? err.message : String(err) });
+      const msg = err instanceof Error ? err.message : String(err);
+      // 406 PRECONDITION_FAILED = a durable queue already exists with different
+      // args than we assert (e.g. RETRY_TTL_MS changed). connect() then loops
+      // forever and publish() silently falls back to inline processing — the
+      // exact serial behaviour the queue removes. Make it LOUD, not silent.
+      const code = (err as { code?: number } | null)?.code;
+      if (code === 406 || /PRECONDITION_FAILED/i.test(msg)) {
+        logger.error(
+          '[whatsappQueue] TOPOLOGY CONFLICT (406) — queue args differ from a pre-existing durable queue. ' +
+            'The queue is DISABLED (inline fallback active). Version the queue name or delete the stale queue.',
+          { error: msg },
+        );
+      } else {
+        logger.error('[whatsappQueue] connect failed', { error: msg });
+      }
       this.scheduleReconnect('connect failed');
     } finally {
       this.connecting = false;
@@ -131,10 +157,11 @@ export class WhatsAppQueue {
     this.pubChannel = null;
     this.conChannel = null;
     this.conn = null;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     const delay = this.reconnectDelay;
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30_000);
     logger.warn('[whatsappQueue] reconnecting', { reason, delayMs: delay });
-    setTimeout(() => void this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => void this.connect(), delay);
   }
 
   /**
@@ -188,6 +215,10 @@ export class WhatsAppQueue {
 
   async close(): Promise<void> {
     this.closed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     try {
       await this.conn?.close();
     } catch {

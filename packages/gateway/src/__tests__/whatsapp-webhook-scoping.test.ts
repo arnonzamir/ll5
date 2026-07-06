@@ -16,6 +16,7 @@ const USER_ID = 'user-wa-1';
 
 function makeEsClient(): Client {
   return {
+    exists: vi.fn().mockResolvedValue(false),
     index: vi.fn().mockResolvedValue({ _id: 'doc-1', result: 'created' }),
     update: vi.fn().mockResolvedValue({ result: 'updated' }),
   } as unknown as Client;

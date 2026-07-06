@@ -122,6 +122,28 @@ export async function processWhatsAppWebhook(
   const data = payload.data;
   const fromMe = data.key.fromMe;
 
+  // Idempotency (DECISION-024): the RabbitMQ ingest is at-least-once — a retry or
+  // a redelivery-after-ack-loss re-runs this ENTIRE handler. Derive a STABLE doc
+  // id from the WhatsApp message id and skip if we've already indexed it, so a
+  // reprocess can't duplicate the message, re-download its media, or double-ping
+  // the agent. (Previously docId was a random UUID → every reprocess duplicated.)
+  const messageKeyId = data.key.id;
+  const docId = messageKeyId
+    ? crypto.createHash('sha1').update(`${userId}:${messageKeyId}`).digest('hex')
+    : crypto.randomUUID();
+  if (messageKeyId) {
+    const alreadyIndexed = await es
+      .exists({ index: 'll5_awareness_messages', id: docId })
+      .catch(() => false);
+    if (alreadyIndexed) {
+      logger.info('[processWhatsAppWebhook][handle] duplicate delivery — skipping', {
+        messageKeyId,
+        fromMe,
+      });
+      return;
+    }
+  }
+
   // Extract message text + detect media
   const text = data.message?.conversation
     ?? data.message?.extendedTextMessage?.text
@@ -340,8 +362,8 @@ export async function processWhatsAppWebhook(
     ? (conversationName ?? groupName)
     : (contactDisplayName || conversationName || (!fromMe ? sender : null));
 
-  // Write to ES — same index as phone-pushed messages
-  const docId = crypto.randomUUID();
+  // Write to ES — same index as phone-pushed messages. docId is the STABLE id
+  // computed above (idempotent upsert-by-id on redelivery).
   const messageDoc: Record<string, unknown> = {
     user_id: userId,
     sender,

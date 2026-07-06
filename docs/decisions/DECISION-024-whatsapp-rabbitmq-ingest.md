@@ -86,8 +86,11 @@ WhatsApp-specific outage caught in ~45m instead of the flat 2h window.
   `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `WHATSAPP_WEBHOOK_PUBLIC_URL`.
 - Media handling is unchanged (already fetched separately), so `base64:false` is
   safe.
-- Ingestion is now at-least-once; `processWhatsAppWebhook` was already idempotent
-  on message id, so duplicates on redelivery are harmless.
+- Ingestion is now at-least-once. `processWhatsAppWebhook` is made idempotent by
+  a stable ES doc id derived from `userId + key.id` plus an early existence check
+  that skips a redelivery entirely (no duplicate message, media, or agent ping).
+  (Corrected 2026-07-06 after review: the processor was NOT previously idempotent
+  — it used a random doc id, so a retry would have duplicated. See Addendum 3.)
 - `EVOLUTION_API_KEY` (global) must be injected via the deploy pipeline (Coolify
   API env does not sync to the on-host `.env` for CI-deployed services).
 - The DLQ is a new operational surface — the flow monitor's suggestion now points
@@ -114,6 +117,25 @@ public-URL 404). No public domain, no cross-stack coupling. One clean device
 link. Global key = `EVOLUTION_GLOBAL_KEY` (GH secret, injected to `.env`). The
 fresh `ll5` instance is provisioned here with `base64:false`; the old ghost `ll5`
 on the wa-search Evolution is deleted to free the device slot.
+
+## Addendum 3 (2026-07-06) — fixes from an independent review
+
+An adversarial review of the whole change surfaced real issues; fixed:
+- **Idempotency (was the biggest hole):** the message ES doc id was a random
+  UUID → an at-least-once retry/redelivery would duplicate the message, re-download
+  media, and double-ping the agent. Now a stable id from `userId + key.id` + an
+  early `es.exists` skip (`whatsapp-webhook.ts`). +tests.
+- **Residual 413:** the global 1MB body cap 413s *before* the queue runs, so a
+  large non-media event (big CONTACTS/CHATS sync) could still HOL-block. The
+  `/webhook/whatsapp` route now parses at 10MB (`server.ts`).
+- **Queue arg-drift lockout:** a 406 PRECONDITION_FAILED (durable queue exists
+  with different args) used to loop silently → permanent inline fallback. Now
+  logged LOUD as a topology conflict (`whatsapp-queue.ts`).
+- **Robustness:** consumer-channel rejections caught (no unhandledRejection);
+  reconnect timer cleared on close; migration 006 pre-cleans duplicate
+  `instance_name` rows before ADD CONSTRAINT.
+- **Coverage:** added `whatsapp-queue.test.ts` (retry→DLQ, max-attempts, undecodable
+  →DLQ, publish-false fallback) + an idempotency case. 657 gateway tests.
 
 ## Addendum (2026-07-06, verified on deploy)
 

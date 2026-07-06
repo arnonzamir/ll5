@@ -55,6 +55,14 @@ WhatsApp integration is correctly tenant-scoped on all runtime paths (attributio
 instance→user, never the payload). Fixed GAP 1: added `UNIQUE(instance_name)` (messaging migration 006)
 + `create_whatsapp_account` now returns `INSTANCE_NAME_TAKEN` on 23505 — makes the instance→user
 mapping the whole pipeline trusts authoritative at the DB (was assumed, not enforced).
+**Independent review fixes (DECISION-024 Addendum 3):** biggest — reprocessing was NOT idempotent
+(random ES doc id → retry duplicated message/media/agent-ping); fixed with a stable id from
+`userId+key.id` + early `es.exists` skip. Also: `/webhook/whatsapp` parses at 10MB (a big non-media
+event 413s before the queue → residual HOL); 406 topology-conflict now logs LOUD (was silent inline
+fallback); consumer-channel rejections caught; reconnect timer cleared on close; migration 006 pre-cleans
+dupes. +`whatsapp-queue.test.ts` (retry→DLQ/max-attempts/undecodable/publish-fallback) + idempotency test
+(657 gateway tests). Review confirmed the rest sound: publisher-confirms-before-200, inline fallback,
+admin-gated PII-free DLQ peek, tenant scoping.
 
 ### Vault multi-tenancy + agent-driven self-service provisioning (DECISION-022 addendum, 2026-07-04)
 The vault is now TENANT-SCOPED with an agent-driven onboarding lifecycle (was single-tenant,

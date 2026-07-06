@@ -16,6 +16,14 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'messaging_wa_instance_name_unique'
   ) THEN
+    -- Pre-clean any pre-existing duplicate instance_name rows so ADD CONSTRAINT
+    -- can't hard-fail (and block the MCP's boot migrations). Keep the most-recent
+    -- row per instance_name; a real duplicate here means an orphaned/ghost row.
+    DELETE FROM messaging_whatsapp_accounts a
+     USING messaging_whatsapp_accounts b
+     WHERE a.instance_name = b.instance_name
+       AND a.created_at < b.created_at;
+
     ALTER TABLE messaging_whatsapp_accounts
       ADD CONSTRAINT messaging_wa_instance_name_unique UNIQUE (instance_name);
   END IF;

@@ -342,7 +342,14 @@ async function processItem(
 export function createApp(config: EnvConfig): { app: express.Application; esClient: Client; pgPool: pg.Pool } {
   const app = express();
 
-  // Parse JSON bodies
+  // WhatsApp webhook bodies can be large even with base64:false (a full
+  // CONTACTS_UPSERT/CHATS_UPSERT sync on a big account), and Evolution retries a
+  // 413 serially → head-of-line block (the class DECISION-024 removes). Parse
+  // this route with a higher limit BEFORE the global 1MB parser runs. express.json
+  // marks the body read, so the global parser below is a no-op for this path.
+  app.use('/webhook/whatsapp', express.json({ limit: '10mb' }));
+
+  // Parse JSON bodies (global default; 1MB DoS guard for everything else)
   app.use(express.json({ limit: '1mb' }));
 
   // Per-request correlation context (DECISION-012): every request gets a
