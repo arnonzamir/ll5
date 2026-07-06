@@ -27,6 +27,13 @@ cold-start gap). **(3)** connection lifecycle (`processors/whatsapp-lifecycle.ts
 `WhatsAppFlowMonitor` cross-channel early trigger: alerts when WhatsApp silent >45m while another
 channel was seen <20m ago (was flat 2h). New env: `RABBITMQ_URL`, `EVOLUTION_API_URL`,
 `EVOLUTION_API_KEY` (global), `WHATSAPP_WEBHOOK_PUBLIC_URL`. +5 gateway tests (650 total).
+**Verified on deploy:** broker healthy, gateway consumer connected, reconnect-backoff proven.
+**Reconciler caveat + real fix:** the gateway reaches Evolution only via the public URL, which
+404s the webhook-admin API (`/webhook/find|set`) — so the gateway reconciler is a no-op safety net.
+Enforcement moved to the domain owner: `messaging/clients/evolution.client.ts` `createInstance` now
+sets `webhook.base64:false` + lifecycle events at `/instance/create` (publicly reachable). Since a
+re-pair = logout(delete)+reconnect(create), this is the path that must not revert to base64:true —
+and now can't (+1 messaging test).
 
 ### Vault multi-tenancy + agent-driven self-service provisioning (DECISION-022 addendum, 2026-07-04)
 The vault is now TENANT-SCOPED with an agent-driven onboarding lifecycle (was single-tenant,

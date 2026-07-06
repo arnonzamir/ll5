@@ -92,3 +92,22 @@ WhatsApp-specific outage caught in ~45m instead of the flat 2h window.
   API env does not sync to the on-host `.env` for CI-deployed services).
 - The DLQ is a new operational surface — the flow monitor's suggestion now points
   at `whatsapp.dlq` for poison-message triage.
+
+## Addendum (2026-07-06, verified on deploy)
+
+- **RabbitMQ pipeline verified live:** broker healthy, gateway connected as a
+  consumer (`whatsapp.ingest` 1 consumer; `whatsapp.retry`/`whatsapp.dlq`
+  present), reconnect-backoff proven (gateway started before the broker, retried,
+  connected), env injected. The head-of-line-block outage class is eliminated.
+- **The gateway-side reconciler can't reach Evolution's admin API.** The gateway
+  is on an isolated network and reaches Evolution only via the **public** URL,
+  which does NOT expose `/webhook/find` or `/webhook/set` (both 404; only the
+  internal container IP works — 201). So the periodic/event-triggered reconcile
+  from the gateway is a **no-op safety net**, not the enforcement point.
+- **Enforcement moved to instance-create (messaging MCP, the domain owner).**
+  `EvolutionClient.createInstance` now sets `webhook.base64:false` + the full
+  event list (incl `APPLICATION_STARTUP`/`LOGOUT_INSTANCE`) at provision time.
+  Since a re-pair = logout (deletes the instance) + reconnect (`/instance/create`,
+  which IS publicly reachable), this is exactly the path that must not revert to
+  base64:true — and it no longer can. Regression test in
+  `messaging/__tests__/evolution-client.test.ts`.

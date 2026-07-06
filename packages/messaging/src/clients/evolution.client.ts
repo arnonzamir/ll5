@@ -262,6 +262,11 @@ export class EvolutionClient {
       'MESSAGES_UPDATE',
       'CONNECTION_UPDATE',
       'QRCODE_UPDATED',
+      // Connection-lifecycle events so the gateway sees login/start/logout and
+      // the agent can proactively surface a WhatsApp drop / QR-scan need (DECISION-024).
+      'APPLICATION_STARTUP',
+      'LOGOUT_INSTANCE',
+      'REMOVE_INSTANCE',
       'CONTACTS_UPSERT',
       'CHATS_UPSERT',
       'CHATS_UPDATE',
@@ -280,7 +285,11 @@ export class EvolutionClient {
       webhook: {
         url: config.webhookUrl,
         byEvents: false,
-        base64: true,
+        // base64:false — the gateway fetches media separately via
+        // getBase64FromMediaMessage; inlining base64 media blew past the
+        // gateway's 1MB body limit and 413-jammed the whole feed (DECISION-024,
+        // the 2026-07-06 outage). This is the config a re-pair must NOT revert.
+        base64: false,
         headers: { 'X-Webhook-Secret': config.webhookSecret },
         events,
       },
