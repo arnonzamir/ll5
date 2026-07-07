@@ -1,19 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Pool } from 'pg';
-import { applyReconcile, confirmReconcileClose, withinCloseCap, MAX_CLOSES_PER_TICK } from '../reconcile-gate.js';
+import { applyReconcile, confirmReconcileClose, withinCloseCap, MAX_CLOSES_PER_TICK } from '../tools/reconcile.js';
 
 vi.mock('../utils/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 /** Mock a pooled client. `stakes` null → loop not found. Records the SQL verbs. */
-function makePool(stakes: string | null, opts: { failOnUpdate?: boolean } = {}) {
+function makePool(stakes: string | null, opts: { failOnUpdate?: boolean; expectUser?: string } = {}) {
+  const expectUser = opts.expectUser ?? 'u1';
   const calls: string[] = [];
   const client = {
     query: vi.fn(async (sql: string, params?: unknown[]) => {
       const verb = sql.trim().split(/\s+/)[0].toUpperCase();
       calls.push(sql.includes('SELECT stakes') ? 'SELECT' : sql.includes("status = 'completed'") ? 'CLOSE' : sql.includes('SET reviewed_at = now()') && !sql.includes('completed') ? 'STAMP' : verb);
-      if (params && params[1] !== undefined) expect(params[1]).toBe('u1'); // user-scoped
+      if (params && params[1] !== undefined) expect(params[1]).toBe(expectUser); // user-scoped
       if (sql.includes('SELECT stakes')) {
         return stakes === null ? { rowCount: 0, rows: [] } : { rowCount: 1, rows: [{ stakes }] };
       }
@@ -98,9 +99,32 @@ describe('confirmReconcileClose', () => {
   });
 });
 
+describe('cross-tenant scoping (security)', () => {
+  it('applyReconcile scopes every mutation to the passed userId (user B cannot touch user A rows)', async () => {
+    // The SELECT ... FOR UPDATE is `user_id = $2`-scoped; with userB scope a row
+    // owned by userA is invisible → not_found, and no CLOSE/STAMP is issued.
+    const { pool, client, calls } = makePool(null, { expectUser: 'userB' });
+    const r = await applyReconcile(pool, 'userB', 'loop-owned-by-userA', 'close');
+    expect(r).toBe('not_found');
+    expect(calls).not.toContain('CLOSE');
+    expect(calls).not.toContain('STAMP');
+    expect(client.query).toHaveBeenCalledWith('ROLLBACK');
+  });
+
+  it('confirmReconcileClose passes the caller userId into the WHERE clause', async () => {
+    const query = vi.fn(async (_sql: string, params: unknown[]) => {
+      expect(params[1]).toBe('userB'); // scoped to the confirming user, not the row owner
+      return { rowCount: 0 };
+    });
+    const pool = { query } as unknown as Pool;
+    expect(await confirmReconcileClose(pool, 'userB', 'loop-owned-by-userA')).toBe('not_found');
+  });
+});
+
 describe('withinCloseCap — circuit-breaker', () => {
   it('permits up to the cap, halts beyond it', () => {
     expect(withinCloseCap(MAX_CLOSES_PER_TICK)).toBe(true);
     expect(withinCloseCap(MAX_CLOSES_PER_TICK + 1)).toBe(false);
+    expect(withinCloseCap(0)).toBe(true);
   });
 });

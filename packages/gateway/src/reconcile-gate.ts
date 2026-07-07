@@ -53,11 +53,17 @@ export async function applyReconcile(
       await client.query('ROLLBACK');
       return 'not_found';
     }
-    const consequential = cur.rows[0].stakes === 'consequential';
+    // FAIL-SAFE: only the explicit `low` value auto-closes. Any other value
+    // (unexpected tier, casing, whitespace, or a future stakes level) is treated
+    // as consequential → human-confirm, never an autonomous close on a possibly
+    // forged signal. (The column also DEFAULTs + CHECKs to {low,consequential},
+    // but the gate must not depend on that to fail safe.)
+    const lowStakes = cur.rows[0].stakes === 'low';
 
-    // A consequential loop is never autonomously closed: downgrade close→advance,
-    // stamp reviewed, and flag for confirm. Low-stakes close proceeds.
-    if (action === 'close' && !consequential) {
+    // A consequential (or any non-`low`) loop is never autonomously closed:
+    // downgrade close→advance, stamp reviewed, and flag for confirm. Only a
+    // low-stakes close proceeds.
+    if (action === 'close' && lowStakes) {
       await client.query(
         `UPDATE gtd_horizons
             SET status = 'completed', completed_at = now(), reviewed_at = now(), updated_at = now()
