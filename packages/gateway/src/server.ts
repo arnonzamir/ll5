@@ -124,6 +124,10 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         // Lookup-class tool calls made this turn (DECISION-020 §5). The
         // behavior.ungrounded_pings anomaly check reads ping_now + grounding_calls:0.
         grounding_calls: { type: 'integer' },
+        // Loop CLOSES made this turn (DECISION-025 D5/D6). Tool-call-backed, like
+        // grounding_calls: a close landing with grounding_calls:0 is the
+        // ungrounded-close ("wrong_close") signal on the eval spine.
+        close_count: { type: 'integer' },
         session_id: { type: 'keyword' },
       },
     },
@@ -684,6 +688,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
           message_sent: bool(b.message_sent),
           cold_start: bool(b.cold_start),
           grounding_calls: int(b.grounding_calls),
+          close_count: int(b.close_count),
           session_id: str(b.session_id),
         },
       });
