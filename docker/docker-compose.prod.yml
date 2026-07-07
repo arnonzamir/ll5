@@ -214,6 +214,13 @@ services:
       # gateway over the internal network. Without this, env.ts falls back to
       # localhost:3006 and every chat fetch fails with "fetch failed".
       GATEWAY_URL: http://gateway:3000
+      # DECISION-025: the reconcile selector (list_reconcile_work) reads awareness
+      # ES for the "inbound newer than reviewed_at" check; without this the tool
+      # null-degrades to an empty candidate list and the reconcile worker is a
+      # no-op. Client is lazy + fully try/caught, so gtd stays up if ES is down
+      # (no depends_on: elasticsearch — gtd must not couple its availability to
+      # the under-provisioned ES). Same inline-cred URL every other service uses.
+      ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
     depends_on:
       postgres:
         condition: service_healthy
