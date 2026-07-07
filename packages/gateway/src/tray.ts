@@ -6,6 +6,7 @@ import { chatAuthMiddleware } from './chat.js';
 import { listPendingApprovals } from './approvals.js';
 import { getEffectiveTimezone, startOfDayInTz } from './utils/timezone.js';
 import { insertSystemMessage } from './utils/system-message.js';
+import { confirmReconcileClose } from './reconcile-gate.js';
 import { logger } from './utils/logger.js';
 
 /**
@@ -46,9 +47,9 @@ export interface TrayDecisionOption {
 }
 
 export interface TrayItem {
-  /** Stable: "habit:<habit_id>:<due_date>:<due_time>" | "approval_contact:<request_id>" | "approval_vault:<domain>" | "decision:<uuid>" */
+  /** Stable: "habit:<habit_id>:<due_date>:<due_time>" | "approval_contact:<request_id>" | "approval_vault:<domain>" | "decision:<uuid>" | "reconcile_confirm:<loop_id>" */
   id: string;
-  kind: 'habit' | 'approval_contact' | 'approval_vault' | 'decision';
+  kind: 'habit' | 'approval_contact' | 'approval_vault' | 'decision' | 'reconcile_confirm';
   /** FIRST-PERSON agent voice — one question, never a paragraph. */
   question: string;
   /** One line max. */
@@ -67,6 +68,10 @@ export interface TrayItem {
   approval_vault?: { domain: string };
   /** item_id is the raw tray_items uuid — what POST /me/tray/decision takes. */
   decision?: { item_id: string; options: TrayDecisionOption[] };
+  /** A consequential loop the gate advanced + stamped, awaiting the user's
+   *  one-tap close-confirm. loop_id is what POST /me/reconcile/confirm takes;
+   *  item_id is the tray_items uuid the confirm resolves. */
+  reconcile_confirm?: { loop_id: string; item_id: string };
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -131,6 +136,12 @@ function oneLine(text: string, max = 140): string {
 /** True when the table is missing (pre-migration deploy) — log and skip. */
 function isMissingTable(err: unknown): boolean {
   return (err as { code?: string } | null)?.code === '42P01';
+}
+
+/** True when the table exists but a column doesn't yet (migration 038 pending
+ *  on a live deploy) — log and skip, same fail-open posture as isMissingTable. */
+function isMissingColumn(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === '42703';
 }
 
 /**
@@ -340,7 +351,7 @@ async function collectDecisionItems(pool: Pool, userId: string): Promise<TrayIte
     const res = await pool.query<TrayItemRow>(
       `SELECT id, question, context, options, default_key, expires_at, created_at
        FROM tray_items
-       WHERE user_id = $1 AND status = 'open'
+       WHERE user_id = $1 AND status = 'open' AND kind = 'decision'
        ORDER BY created_at DESC`,
       [userId],
     );
@@ -372,6 +383,87 @@ async function collectDecisionItems(pool: Pool, userId: string): Promise<TrayIte
   });
 }
 
+// ---------------------------------------------------------------------------
+// Reconcile-confirm items (DECISION-025 A3 — the human-confirm UX)
+// ---------------------------------------------------------------------------
+
+interface ReconcileConfirmRow {
+  id: string;
+  loop_id: string;
+  question: string;
+  context: string | null;
+  created_at: Date | string;
+}
+
+export interface EnqueueReconcileConfirm {
+  /** The gtd_horizons (horizon-0) loop the gate advanced + stamped. */
+  loopId: string;
+  /** Human loop title, rendered into the first-person confirm question. */
+  title: string;
+  /** Optional one-line grounding ("Dana replied 'all sorted, thanks'"). */
+  context?: string | null;
+}
+
+/**
+ * File a one-tap close-confirm card for a consequential loop the reconcile gate
+ * advanced but refused to auto-close (applyReconcile → 'needs_confirm'). Stored
+ * as a tray_items row (kind='reconcile_confirm') so it rides the SAME GET
+ * /me/tray contract as every other mandate; `options` stays '[]' (this card is
+ * answered by POST /me/reconcile/confirm, not the decision chips). Strictly
+ * `user_id`-scoped and idempotent per open loop — re-running the reconcile
+ * worker never stacks duplicate confirm cards. Returns the row id, or null when
+ * an open confirm card for this loop already exists.
+ */
+export async function enqueueReconcileConfirm(
+  pool: Pool,
+  userId: string,
+  { loopId, title, context }: EnqueueReconcileConfirm,
+): Promise<string | null> {
+  const question = `Shall I close out "${oneLine(title, 120)}"?`;
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO tray_items (user_id, kind, question, context, options, loop_id)
+     SELECT $1, 'reconcile_confirm', $2, $3, '[]'::jsonb, $4
+     WHERE NOT EXISTS (
+       SELECT 1 FROM tray_items
+       WHERE user_id = $1 AND loop_id = $4 AND kind = 'reconcile_confirm' AND status = 'open'
+     )
+     RETURNING id`,
+    [userId, question, context ? oneLine(context) : null, loopId],
+  );
+  return res.rows[0]?.id ?? null;
+}
+
+/** Open reconcile-confirm cards for the caller → tray items. Fail-open on a
+ *  pre-migration deploy (missing table OR loop_id column). */
+async function collectReconcileConfirmItems(pool: Pool, userId: string): Promise<TrayItem[]> {
+  let rows: ReconcileConfirmRow[];
+  try {
+    const res = await pool.query<ReconcileConfirmRow>(
+      `SELECT id, loop_id, question, context, created_at
+       FROM tray_items
+       WHERE user_id = $1 AND status = 'open' AND kind = 'reconcile_confirm'
+       ORDER BY created_at DESC`,
+      [userId],
+    );
+    rows = res.rows;
+  } catch (err) {
+    if (isMissingTable(err) || isMissingColumn(err)) {
+      logger.warn('[tray][reconcile_confirm] tray_items/loop_id missing (pre-migration) — no confirm items');
+      return [];
+    }
+    throw err;
+  }
+  return rows.map((r) => ({
+    id: `reconcile_confirm:${r.loop_id}`,
+    kind: 'reconcile_confirm' as const,
+    question: r.question,
+    context: r.context ? oneLine(r.context) : null,
+    created_at: new Date(r.created_at).toISOString(),
+    escalation: { future_text: 'stays open until you confirm — I never close it on my own' },
+    reconcile_confirm: { loop_id: r.loop_id, item_id: r.id },
+  }));
+}
+
 /**
  * Every open mandate for a user, one list, newest first — the single source
  * of truth behind GET /me/tray AND the Today card's needs_you_count
@@ -379,13 +471,14 @@ async function collectDecisionItems(pool: Pool, userId: string): Promise<TrayIte
  * "needs you" means.
  */
 export async function collectTrayItems(pool: Pool, userId: string, now: Date): Promise<TrayItem[]> {
-  const [habitItems, contactItems, vaultItems, decisionItems] = await Promise.all([
+  const [habitItems, contactItems, vaultItems, decisionItems, reconcileItems] = await Promise.all([
     collectHabitItems(pool, userId, now),
     collectContactApprovalItems(pool, userId),
     collectVaultApprovalItems(pool, userId),
     collectDecisionItems(pool, userId),
+    collectReconcileConfirmItems(pool, userId),
   ]);
-  return [...habitItems, ...contactItems, ...vaultItems, ...decisionItems]
+  return [...habitItems, ...contactItems, ...vaultItems, ...decisionItems, ...reconcileItems]
     .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
 }
 
@@ -687,6 +780,59 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[tray][decision] Failed', { userId, itemId, error: message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /me/reconcile/confirm — the one-tap answer to a reconcile_confirm card.
+  // A consequential loop is NEVER closed autonomously (forgery defense); the
+  // gate only advances + stamps it and returns 'needs_confirm'. The confirmed
+  // close is committed HERE — but through confirmReconcileClose, the gate's sole
+  // writer. This route runs NO close SQL of its own against gtd_horizons; the
+  // only write it owns is resolving the tray bookkeeping row after the gate
+  // reports the loop closed. userId comes from the verified token, never the
+  // body, so a caller can only ever close their OWN loop.
+  router.post('/me/reconcile/confirm', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const { loop_id: loopId } = (req.body ?? {}) as { loop_id?: unknown };
+
+    if (typeof loopId !== 'string' || !UUID_RE.test(loopId)) {
+      res.status(400).json({ error: 'loop_id must be a UUID (TrayItem.reconcile_confirm.loop_id)' });
+      return;
+    }
+
+    try {
+      // Single writer: the gate commits the close (user-scoped inside), so a
+      // foreign/closed/absent loop returns not_found without mutating anything.
+      const result = await confirmReconcileClose(pool, userId, loopId);
+      if (result !== 'closed') {
+        res.status(404).json({ error: 'No confirmable loop found' });
+        return;
+      }
+
+      // Loop closed → resolve the confirm card (tray bookkeeping only). Guarded
+      // to this user + loop + still-open reconcile_confirm row.
+      await pool.query(
+        `UPDATE tray_items
+         SET status = 'answered', answer_key = 'confirmed', answered_at = now()
+         WHERE user_id = $1 AND loop_id = $2 AND kind = 'reconcile_confirm' AND status = 'open'`,
+        [userId, loopId],
+      );
+
+      logAudit({
+        user_id: userId,
+        source: 'gateway',
+        action: 'update',
+        entity_type: 'loop',
+        entity_id: loopId,
+        summary: 'Reconcile close confirmed (one-tap) — consequential loop closed',
+        metadata: { loop_id: loopId },
+      });
+
+      res.json({ status: 'closed', loop_id: loopId });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[tray][reconcileConfirm] Failed', { userId, loopId, error: message });
       res.status(500).json({ error: 'Internal server error' });
     }
   });

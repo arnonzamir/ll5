@@ -96,7 +96,7 @@ const pendingApprovalsMatcher = (rows: unknown[]): Matcher =>
 // The collector's read (user-scoped open rows) — distinct from the answer
 // route's by-id select.
 const trayItemsMatcher = (rows: unknown[]): Matcher =>
-  (sql) => /FROM tray_items\s+WHERE user_id = \$1 AND status = 'open'/.test(sql)
+  (sql) => /FROM tray_items\s+WHERE user_id = \$1 AND status = 'open' AND kind = 'decision'/.test(sql)
     ? { rows }
     : undefined;
 
