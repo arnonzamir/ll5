@@ -49,7 +49,13 @@ export class ElasticsearchMessageRepository
     }
 
     if (params.conversation_id) {
-      filters.push({ term: { conversation_id: params.conversation_id } });
+      // conversation_id is mapped `text` + `.keyword`; a `term` on the analyzed
+      // base field never matches a real id (WhatsApp JIDs / hyphenated ids get
+      // tokenized on @ . -), so filter on the exact `.keyword` subfield — same as
+      // the visibility aggs. (Without this, query_im_messages({conversation_id})
+      // returns zero for every real thread — silently breaking the reconcile
+      // worker's grounding read; found by the DECISION-025 live replay.)
+      filters.push({ term: { 'conversation_id.keyword': params.conversation_id } });
     }
 
     if (params.is_group !== undefined) {
