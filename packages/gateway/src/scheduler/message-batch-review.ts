@@ -2,6 +2,56 @@ import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
+import { getOpenLoops, type OpenLoops } from '../open-loops.js';
+
+// Caps for the embedded open-loops context block (DECISION-025 D2/D3). This is
+// read-only reconciliation context, not a full dump — keep it terse and bounded.
+const WAITING_CAP = 5;
+const NEXT_CAP = 3;
+const PROJECT_CAP = 3;
+
+/**
+ * Render a compact, CAPPED open-loops section for the batch-review summary.
+ * Prioritizes waiting-fors (the primary in-batch reconciliation targets), then
+ * a small tail of next-actions / projects for context. Returns [] when there
+ * are no loops at all (caller omits the section — no empty header).
+ */
+function renderOpenLoops(loops: OpenLoops): string[] {
+  const { waiting_fors, next_actions, projects } = loops;
+  if (waiting_fors.length === 0 && next_actions.length === 0 && projects.length === 0) {
+    return [];
+  }
+
+  const out: string[] = [
+    '[Open loops] Reconcile the inbound batch against what you are already waiting on (read-only — decide, do not auto-close):',
+  ];
+
+  if (waiting_fors.length > 0) {
+    out.push('  Waiting for:');
+    for (const w of waiting_fors.slice(0, WAITING_CAP)) {
+      const who = w.waiting_for ? ` — waiting on ${w.waiting_for}` : '';
+      const due = w.due_date ? ` (due ${w.due_date})` : '';
+      out.push(`  - ${w.title}${who}${due}`);
+    }
+    if (waiting_fors.length > WAITING_CAP) {
+      out.push(`  - …+${waiting_fors.length - WAITING_CAP} more waiting-fors`);
+    }
+  }
+
+  if (next_actions.length > 0) {
+    const shown = next_actions.slice(0, NEXT_CAP).map((n) => n.title).join('; ');
+    const overflow = next_actions.length > NEXT_CAP ? ` (+${next_actions.length - NEXT_CAP} more)` : '';
+    out.push(`  Next actions: ${shown}${overflow}`);
+  }
+
+  if (projects.length > 0) {
+    const shown = projects.slice(0, PROJECT_CAP).map((p) => p.title).join('; ');
+    const overflow = projects.length > PROJECT_CAP ? ` (+${projects.length - PROJECT_CAP} more)` : '';
+    out.push(`  Projects: ${shown}${overflow}`);
+  }
+
+  return out;
+}
 
 interface MessageBatchConfig {
   intervalMinutes: number;
@@ -168,6 +218,23 @@ export class MessageBatchReviewScheduler {
       }
       lines.push('');
       lines.push('Use read_messages with the platform + conversation_id to pull the full thread when something looks worth engaging.');
+
+      // Embed the user's current open loops (DECISION-025 D2/D3) so the agent
+      // can reconcile this inbound batch against what it is already waiting on.
+      // BEST-EFFORT + CAPPED + read-only: any failure or empty result simply
+      // omits the section — it must never break or delay the batch review.
+      try {
+        const loops = await getOpenLoops(this.pool, this.config.userId);
+        const loopLines = renderOpenLoops(loops);
+        if (loopLines.length > 0) {
+          lines.push('');
+          lines.push(...loopLines);
+        }
+      } catch (err) {
+        logger.warn('[MessageBatchReviewScheduler][tick] open-loops embed failed (omitted)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
 
       const evt = createSchedulerEvent('message_batch');
       await insertSystemMessage(this.pool, this.config.userId, lines.join('\n'), undefined, evt);
