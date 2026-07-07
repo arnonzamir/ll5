@@ -22,8 +22,10 @@ read-model first, then the worker + governor, then the close-gate; sandbox self-
 DECISION-023 + the D7 egress amendment. Provisional FR-9 scope (a); 1-week checkpoint 2026-07-14.
 **Build progress (local, tested, NOT pushed):** Phase 1a done — D1 Rule 15 rewrite + `WebFetch`/`WebSearch`
 in `GROUNDING_TOOLS` (ll5-run, commit b1587ac; frozen-rule + eval tests green) and D2 `getOpenLoops`
-read-model (gateway `open-loops.ts`, 3 tests). Next: the D4 columns migration (`conversation_id`/`stakes`/
-`reviewed_at` on `gtd_horizons`) + the reconcile worker + governor + close-gate.
+read-model (gateway `open-loops.ts`, 3 tests). Phase-1b: D4 migration 003
+(`conversation_id`/`stakes` DEFAULT consequential/`reviewed_at` on `gtd_horizons`) + `reconcile.ts`
+`listReconcileWork` deterministic selector (6 tests; 666 gateway total). Next: close-gate + stamping-at-
+creation + the reconcile worker.
 
 ### WhatsApp ingest via RabbitMQ + self-healing webhook (DECISION-024, 2026-07-06)
 Response to a ~2h WhatsApp outage: Evolution had `webhookBase64:true` (re-applied on the Jul-4
