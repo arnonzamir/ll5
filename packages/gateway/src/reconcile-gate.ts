@@ -75,14 +75,20 @@ export async function applyReconcile(
     }
 
     // advance / keep_open, OR a consequential "close" that becomes advance+confirm:
-    // stamp reviewed_at (the grounded review happened), leave the loop active.
+    // stamp reviewed_at (the grounded review happened), leave the loop active. A
+    // consequential close ALSO raises `pending_confirm` in the SAME statement — the
+    // gateway governor scans that flag and enqueues the one-tap confirm card (the
+    // surfacing half of D5), so the advance + the "needs confirm" marker are atomic
+    // (a crash can't advance without flagging). advance/keep_open never flag.
+    const needsConfirm = action === 'close';
     await client.query(
-      `UPDATE gtd_horizons SET reviewed_at = now(), updated_at = now()
+      `UPDATE gtd_horizons
+          SET reviewed_at = now(), updated_at = now()${needsConfirm ? ', pending_confirm = true' : ''}
         WHERE id = $1 AND user_id = $2`,
       [loopId, userId],
     );
     await client.query('COMMIT');
-    return action === 'close' ? 'needs_confirm' : 'reviewed';
+    return needsConfirm ? 'needs_confirm' : 'reviewed';
   } catch (err) {
     await client.query('ROLLBACK').catch(() => undefined);
     logger.error('[applyReconcile] failed — rolled back', { loopId, action, error: String(err) });

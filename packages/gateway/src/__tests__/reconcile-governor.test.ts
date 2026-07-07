@@ -28,13 +28,26 @@ type Loop = {
 function makePool(opts: {
   activeLoops?: Loop[];
   closedLoops?: Array<{ id: string; conversation_id: string }>;
+  pendingConfirm?: Array<{ id: string; title: string; waiting_for: string | null }>;
+  enqueueSkips?: boolean; // INSERT returns [] (a card already open) instead of a new id
+  failEnqueue?: boolean;
   failClosed?: boolean;
   userId?: string;
 }): Pool {
   const userId = opts.userId ?? 'u1';
   return {
     query: vi.fn(async (sql: string, params: unknown[]) => {
-      expect(params[0]).toBe(userId); // tenant scope on EVERY pg query
+      expect(params).toContain(userId); // tenant scope: userId is a bound param on EVERY query
+      if (/pending_confirm = true/.test(sql)) {
+        return { rows: opts.pendingConfirm ?? [] };
+      }
+      if (/INSERT INTO tray_items/.test(sql)) {
+        if (opts.failEnqueue) throw new Error('enqueue boom');
+        return { rows: opts.enqueueSkips ? [] : [{ id: 'card1' }] };
+      }
+      if (/pending_confirm = false/.test(sql)) {
+        return { rows: [] };
+      }
       if (/status = 'completed'/.test(sql)) {
         if (opts.failClosed) throw new Error('pg boom');
         return { rows: opts.closedLoops ?? [] };
@@ -224,5 +237,42 @@ describe('ReconcileGovernorScheduler', () => {
     // Confirm the queries actually ran (so the scope checks executed).
     expect((pool.query as any)).toHaveBeenCalled();
     expect((es.search as any)).toHaveBeenCalled();
+  });
+
+  // --- surfaceConfirmCards: the D5 human-confirm wiring ---------------------
+  const sqlsOf = (pool: Pool) => (pool.query as any).mock.calls.map((c: any[]) => c[0] as string);
+
+  it('enqueues a confirm card for a pending_confirm loop and clears the flag', async () => {
+    const pool = makePool({ pendingConfirm: [{ id: 'loopMoti', title: 'Pay Moti', waiting_for: 'Moti' }] });
+    const { es } = makeEs({});
+    await tick(new ReconcileGovernorScheduler(pool, es, { intervalMinutes: 15, userId: 'u1' }));
+    const sqls = sqlsOf(pool);
+    expect(sqls.some((s: string) => /INSERT INTO tray_items/.test(s))).toBe(true); // card enqueued
+    expect(sqls.some((s: string) => /pending_confirm = false/.test(s))).toBe(true); // flag cleared
+  });
+
+  it('no pending_confirm loops → no card enqueued, no flag write', async () => {
+    const pool = makePool({ pendingConfirm: [] });
+    const { es } = makeEs({});
+    await tick(new ReconcileGovernorScheduler(pool, es, { intervalMinutes: 15, userId: 'u1' }));
+    const sqls = sqlsOf(pool);
+    expect(sqls.some((s: string) => /INSERT INTO tray_items/.test(s))).toBe(false);
+    expect(sqls.some((s: string) => /pending_confirm = false/.test(s))).toBe(false);
+  });
+
+  it('idempotent skip (card already open) still clears the flag', async () => {
+    const pool = makePool({ pendingConfirm: [{ id: 'loopMoti', title: 'Pay Moti', waiting_for: null }], enqueueSkips: true });
+    const { es } = makeEs({});
+    await tick(new ReconcileGovernorScheduler(pool, es, { intervalMinutes: 15, userId: 'u1' }));
+    const sqls = sqlsOf(pool);
+    expect(sqls.some((s: string) => /pending_confirm = false/.test(s))).toBe(true);
+  });
+
+  it('best-effort: an enqueue failure leaves the flag set (retry) and never throws out of the tick', async () => {
+    const pool = makePool({ pendingConfirm: [{ id: 'loopMoti', title: 'Pay Moti', waiting_for: null }], failEnqueue: true });
+    const { es } = makeEs({});
+    await expect(tick(new ReconcileGovernorScheduler(pool, es, { intervalMinutes: 15, userId: 'u1' }))).resolves.toBeUndefined();
+    const sqls = sqlsOf(pool);
+    expect(sqls.some((s: string) => /pending_confirm = false/.test(s))).toBe(false); // NOT cleared → retried next tick
   });
 });

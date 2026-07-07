@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
 import { listReconcileWork } from '../reconcile.js';
+import { enqueueReconcileConfirm } from '../tray.js';
 
 /**
  * Reconciliation governor / observability tick (DECISION-025 B1/B2).
@@ -204,10 +205,55 @@ export class ReconcileGovernorScheduler {
     }
   }
 
+  /**
+   * Surfacing half of D5's human-confirm (DECISION-025). A consequential loop the
+   * gate advanced-but-refused-to-close carries `pending_confirm=true` (set by GTD's
+   * applyReconcile on its OWN table, atomic with the advance). The governor — the
+   * gateway layer that already reads gtd_horizons and OWNS tray_items — files the
+   * one-tap confirm card here, then clears the flag. No cross-MCP write, no second
+   * writer in the mutation path. Best-effort + `user_id`-scoped; a card that fails
+   * to enqueue leaves the flag set and is retried next tick (at-least-once). The
+   * enqueue is idempotent (NOT EXISTS an open card), so this never stacks dupes.
+   */
+  private async surfaceConfirmCards(): Promise<void> {
+    const userId = this.config.userId;
+    let loops: Array<{ id: string; title: string; waiting_for: string | null }>;
+    try {
+      const r = await this.pool.query<{ id: string; title: string; waiting_for: string | null }>(
+        `SELECT id, title, waiting_for FROM gtd_horizons
+          WHERE user_id = $1 AND horizon = 0 AND status = 'active' AND pending_confirm = true`,
+        [userId],
+      );
+      loops = r.rows;
+    } catch (err) {
+      logger.warn('[ReconcileGovernor] pending_confirm scan failed', { error: String(err) });
+      return;
+    }
+    for (const loop of loops) {
+      try {
+        // Idempotent: creates the card, or returns null if one is already open —
+        // either way a card now exists, so it's safe to clear the flag.
+        await enqueueReconcileConfirm(this.pool, userId, {
+          loopId: loop.id,
+          title: loop.title,
+          context: loop.waiting_for ?? undefined,
+        });
+        await this.pool.query(
+          `UPDATE gtd_horizons SET pending_confirm = false WHERE id = $1 AND user_id = $2`,
+          [loop.id, userId],
+        );
+      } catch (err) {
+        // Leave the flag set → retried next tick (at-least-once-until-surfaced).
+        logger.warn('[ReconcileGovernor] confirm-card enqueue failed', { loopId: loop.id, error: String(err) });
+      }
+    }
+  }
+
   private async tick(): Promise<void> {
     try {
       await withSchedulerHealth('reconcile_governor', async () => {
         await this.compute();
+        await this.surfaceConfirmCards();
       });
     } catch {
       // withSchedulerHealth already recorded + logged the failure; never throw out of tick.

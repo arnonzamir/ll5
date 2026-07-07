@@ -46,6 +46,41 @@ describe('applyReconcile — stakes routing + atomicity', () => {
     expect(calls[calls.length - 1]).toBe('COMMIT');
   });
 
+  it('consequential close raises pending_confirm in the SAME stamp UPDATE (atomic surface flag)', async () => {
+    const sqls: string[] = [];
+    const client = {
+      query: vi.fn(async (sql: string) => {
+        sqls.push(sql);
+        if (sql.includes('SELECT stakes')) return { rowCount: 1, rows: [{ stakes: 'consequential' }] };
+        return { rowCount: 1, rows: [] };
+      }),
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+    const r = await applyReconcile(pool, 'u1', 'l1', 'close');
+    expect(r).toBe('needs_confirm');
+    const stamp = sqls.find((s) => s.includes('reviewed_at = now()') && !s.includes("'completed'"));
+    expect(stamp).toContain('pending_confirm = true'); // set atomically with reviewed_at
+  });
+
+  it('advance/keep_open never raise pending_confirm', async () => {
+    for (const action of ['advance', 'keep_open'] as const) {
+      const sqls: string[] = [];
+      const client = {
+        query: vi.fn(async (sql: string) => {
+          sqls.push(sql);
+          if (sql.includes('SELECT stakes')) return { rowCount: 1, rows: [{ stakes: 'low' }] };
+          return { rowCount: 1, rows: [] };
+        }),
+        release: vi.fn(),
+      };
+      const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+      expect(await applyReconcile(pool, 'u1', 'l1', action)).toBe('reviewed');
+      const stamp = sqls.find((s) => s.includes('reviewed_at = now()') && !s.includes("'completed'"));
+      expect(stamp).not.toContain('pending_confirm');
+    }
+  });
+
   it('FAIL-SAFE: any non-`low` stakes value on close → needs_confirm, never CLOSE', async () => {
     // The gate auto-closes ONLY on the exact value 'low'. An unexpected tier,
     // wrong casing, or stray whitespace must be treated as consequential — never
