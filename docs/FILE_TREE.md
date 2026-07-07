@@ -248,6 +248,7 @@ ll5/
 │   Standard documented in docs/testing.md.
 │
 ├── docs/testing.md                     # Testing standard (May 18): one rule — tests must import + invoke real code. Boundary rules for repo / tool / route / state-machine tests, mandatory user_id assertion, references to gold-standard examples in gateway/.
+├── docs/requirements/                 # Business-requirements artifacts. BRD-active-context-integration.md: the BRD for DECISION-025 (FR-1..FR-9 + §7 acceptance/verification; the "understand→fulfill→verify" contract, resourcefulness/self-tooling, agentic verification turn). Written before the decision, per the "define verification up front" discipline.
 ├── docs/runbooks/                      # Operational runbooks. whatsapp-webhook-secret.md: full rollout + rotation procedure for WHATSAPP_WEBHOOK_SECRET. ghcr-shared-credential.md: the recurring GHCR pull `denied` bug — shared host /root/.docker/config.json clobbered by ephemeral GITHUB_TOKEN (`ghs_`) logins; root cause, durable fix (GHCR_READ_PAT), emergency recovery, diagnostics.
 │
 └── packages/ll5-auth/                 # @ll5/auth-cli — login/status/logout CLI

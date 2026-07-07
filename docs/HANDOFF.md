@@ -6,6 +6,8 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## Architecture
 
+**In-progress build [2026-07-07]:** DECISION-025 (active context integration) is design-complete and implementation is starting — reactive grounding (ll5-run Rule 15 rewrite + external-web class), then an off-agent reconciliation `claude -p` worker (locked-down tool surface; `pgrep`-defer so the narrative loop is untouched; deterministic `stakes`-stamp gate → human-confirm on consequential closes) + a governor on the eval spine. Built + tested LOCALLY before any push. See `docs/decisions/DECISION-025-*.md` + `docs/requirements/BRD-active-context-integration.md`.
+
 **WhatsApp topology [UPDATED 2026-07-06 — DECISION-024]:** ll5 now has its OWN Evolution, the
 `evolution` service IN the ll5 stack (`evolution-xkkcc…`, `evoapicloud/evolution-api:v2.3.7`, `evolution`
 DB on ll5 postgres, local cache, NO public domain). Reached INTERNALLY at `http://evolution:8080` by

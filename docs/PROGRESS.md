@@ -8,6 +8,19 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Active context integration — DECISION-025 (design-complete 2026-07-07, implementation starting)
+`docs/decisions/DECISION-025-active-context-integration.md` (accepted, v6) + `docs/requirements/BRD-active-context-integration.md`.
+The agent's "understand → fulfill → verify" contract + active reconciliation of every signal against open loops.
+Vetted by 8 review agents (2 triple-reviews + 2 confirmations). Key shape: reactive grounding = Rule 15 rewrite
+(+ external-web claim class); active reconciliation = an **off-agent `claude -p` worker** on the narrative-loop
+pattern with a **deterministic-coverage** control plane (LLM judges close/keep; coverage — not correctness — is
+guaranteed; blind spot stated), a **locked-down** tool surface (read+close only — NOT the narrative worker's
+bypassPermissions), **human-confirm on consequential closes** (deterministic `stakes`-stamp gate, fail-safe
+`consequential`), `pgrep`-only coordination so the narrative loop is untouched, and a governor
+(`missed_close`/`wrong_close`/`reconciliation_coverage`) on the eval spine. Phased rollout: D1 contract + D2
+read-model first, then the worker + governor, then the close-gate; sandbox self-tooling (FR-8) gated on
+DECISION-023 + the D7 egress amendment. Provisional FR-9 scope (a); 1-week checkpoint 2026-07-14.
+
 ### WhatsApp ingest via RabbitMQ + self-healing webhook (DECISION-024, 2026-07-06)
 Response to a ~2h WhatsApp outage: Evolution had `webhookBase64:true` (re-applied on the Jul-4
 re-pair) → media inlined base64 → gateway 413 (`express.json({limit:'1mb'})`) → Evolution retried
