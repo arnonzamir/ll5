@@ -152,6 +152,30 @@ describe('AnomalyMonitor — behavior checks (DECISION-018/020)', () => {
     expect(raiseAlert).not.toHaveBeenCalled();
   });
 
+  it('pencil_reflex_stalled: 72h staleness filtered on pencil_count>0; stale → alert, fresh/never → no alert', async () => {
+    // registration
+    const reg = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    const check = checkByKey(reg, 'behavior.pencil_reflex_stalled');
+    expect(check.kind).toBe('staleness');
+    expect(check.maxMinutes).toBe(4320);
+
+    // stale (>72h) → alert, and the query filters pencil_count > 0 (self-arming: a
+    // range gt:0 filter never matches docs written before the field shipped)
+    const staleTs = new Date(Date.now() - 100 * 3_600_000).toISOString();
+    const search = vi.fn(async () => ({ hits: { hits: [{ _source: { timestamp: staleTs } }] } }));
+    const stale = mk({ search } as unknown as Client);
+    expect(await priv(stale).runStaleness(checkByKey(stale, 'behavior.pencil_reflex_stalled'))).toBe(true);
+    const q = search.mock.calls[0][0] as { query: { bool: { filter: unknown[] } } };
+    expect(q.query.bool.filter).toContainEqual({ range: { pencil_count: { gt: 0 } } });
+
+    // fresh pencil → no alert; never penciled (null age) → no alert
+    const freshTs = new Date(Date.now() - 60 * 60_000).toISOString();
+    const fresh = mk({ search: vi.fn(async () => ({ hits: { hits: [{ _source: { timestamp: freshTs } }] } })) } as unknown as Client);
+    expect(await priv(fresh).runStaleness(checkByKey(fresh, 'behavior.pencil_reflex_stalled'))).toBe(false);
+    const empty = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    expect(await priv(empty).runStaleness(checkByKey(empty, 'behavior.pencil_reflex_stalled'))).toBe(false);
+  });
+
   it('ungrounded_pings: alerts when zero-grounding pings double vs the same-weekday median', async () => {
     // count call order: current, then 3 baseline samples (1/2/3 weeks back).
     const es = esCount([20, 9, 8, 8]); // current=20 >= median(8,8,9)=8 * 2

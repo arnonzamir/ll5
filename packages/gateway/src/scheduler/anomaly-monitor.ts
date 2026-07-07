@@ -525,6 +525,22 @@ function buildChecks(): Check[] {
       suggestion: 'No ping_later eval moment in 48h — the daily loop isn\'t booking prep. Re-read the calendar-review prep obligation: for each prep-needing event in the next 48h, BOOK the prep THIS TURN (create_wake/tickler); naming it is not enough.',
       ageMinutes: (m) => m.lastDocAgeMinutes('ll5_eval_moments', 'timestamp', [{ term: { decision: 'ping_later' } }]),
     },
+    // Pencil-the-timeline reflex went dormant: no calendar write (create_tickler /
+    // create_event → pencil_count>0) in 72h. Any time-anchored thought/plan/deadline
+    // should land on the LL5 System calendar the same turn; a multi-day silence for
+    // an active user means the capture reflex regressed. Same null-age convention:
+    // docs written before pencil_count shipped lack the field, a `range gt:0` filter
+    // doesn't match absent fields, and no matching doc → null age → NO alert until
+    // the first pencil ever lands (self-arming).
+    {
+      kind: 'staleness',
+      key: 'behavior.pencil_reflex_stalled',
+      label: 'Pencil-the-timeline reflex',
+      maxMinutes: 4320, // 72h
+      severity: 'warning',
+      suggestion: 'No calendar pencil (create_tickler / create_event) in 72h — the pencil-the-timeline reflex may be dormant. Every time-anchored thought/plan/expectation/deadline should be penciled onto the LL5 System calendar the same turn (create_tickler kind:instruction). Check the persona rule fired and that create_tickler is working.',
+      ageMinutes: (m) => m.lastDocAgeMinutes('ll5_eval_moments', 'timestamp', [{ range: { pencil_count: { gt: 0 } } }]),
+    },
     // Ungrounded pings rising (DECISION-020 §5): ping_now turns with ZERO
     // lookup-class tool calls — asserting/acting without consulting the sensors
     // and stores. Defensive by construction: `grounding_calls` is absent on docs

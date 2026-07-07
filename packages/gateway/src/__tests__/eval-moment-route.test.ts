@@ -122,6 +122,7 @@ describe('POST /telemetry/eval-moment — close_count + F5 whitelist', () => {
       source: 'gtd',
       grounding_calls: 2,
       close_count: 3,
+      pencil_count: 4,
       session_id: 'sess-1',
     }), res);
 
@@ -129,6 +130,7 @@ describe('POST /telemetry/eval-moment — close_count + F5 whitelist', () => {
     const arg = esMock.index.mock.calls[0][0] as any;
     expect(arg.index).toBe('ll5_eval_moments');
     expect(arg.document.close_count).toBe(3);
+    expect(arg.document.pencil_count).toBe(4);
     expect(arg.document.grounding_calls).toBe(2);
     expect(arg.document.user_id).toBe('owner-1');
     expect(res._json).toEqual({ ok: true });
@@ -173,7 +175,7 @@ describe('POST /telemetry/eval-moment — close_count + F5 whitelist', () => {
     expect(new Set(Object.keys(doc))).toEqual(new Set([
       'timestamp', 'user_id', 'decision', 'decision_claimed', 'decision_mismatch',
       'trigger_class', 'source', 'message_sent', 'cold_start', 'grounding_calls',
-      'close_count', 'session_id',
+      'close_count', 'pencil_count', 'session_id',
     ]));
 
     // The unexpected free-text fields did not survive.

@@ -128,6 +128,10 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         // grounding_calls: a close landing with grounding_calls:0 is the
         // ungrounded-close ("wrong_close") signal on the eval spine.
         close_count: { type: 'integer' },
+        // Calendar writes ("pencils": create_tickler + create_event) made this turn
+        // — the pencil-the-timeline capture reflex. anomaly-monitor watches this
+        // going ~0 over an active window (the reflex went dormant).
+        pencil_count: { type: 'integer' },
         session_id: { type: 'keyword' },
       },
     },
@@ -689,6 +693,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
           cold_start: bool(b.cold_start),
           grounding_calls: int(b.grounding_calls),
           close_count: int(b.close_count),
+          pencil_count: int(b.pencil_count),
           session_id: str(b.session_id),
         },
       });
