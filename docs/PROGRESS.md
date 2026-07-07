@@ -20,6 +20,10 @@ bypassPermissions), **human-confirm on consequential closes** (deterministic `st
 (`missed_close`/`wrong_close`/`reconciliation_coverage`) on the eval spine. Phased rollout: D1 contract + D2
 read-model first, then the worker + governor, then the close-gate; sandbox self-tooling (FR-8) gated on
 DECISION-023 + the D7 egress amendment. Provisional FR-9 scope (a); 1-week checkpoint 2026-07-14.
+**Build progress (local, tested, NOT pushed):** Phase 1a done — D1 Rule 15 rewrite + `WebFetch`/`WebSearch`
+in `GROUNDING_TOOLS` (ll5-run, commit b1587ac; frozen-rule + eval tests green) and D2 `getOpenLoops`
+read-model (gateway `open-loops.ts`, 3 tests). Next: the D4 columns migration (`conversation_id`/`stakes`/
+`reviewed_at` on `gtd_horizons`) + the reconcile worker + governor + close-gate.
 
 ### WhatsApp ingest via RabbitMQ + self-healing webhook (DECISION-024, 2026-07-06)
 Response to a ~2h WhatsApp outage: Evolution had `webhookBase64:true` (re-applied on the Jul-4
