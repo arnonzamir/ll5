@@ -16,6 +16,51 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
 }
 
+/** Nearest-rank percentile (p in [0,100]) of a non-empty numeric list. */
+function percentile(xs: number[], p: number): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const rank = Math.ceil((p / 100) * s.length);
+  return s[Math.min(s.length - 1, Math.max(0, rank - 1))];
+}
+
+/** Compare a numeric value against a bound with a small op set (for gauge gates). */
+function cmp(v: number, op: '>' | '<' | '>=' | '<=', bound: number): boolean {
+  switch (op) {
+    case '>': return v > bound;
+    case '<': return v < bound;
+    case '>=': return v >= bound;
+    case '<=': return v <= bound;
+  }
+}
+
+// --- DECISION-025 B3 reconcile-gauge thresholds (named + defensible) ----------
+/** missed_close is designed to settle to 0 each ~15-min cycle, so a single LATEST doc
+ *  > 0 is an acceptable trip (no multi-cycle sustain needed given the cadence): it means
+ *  the worker isn't keeping up / a loop's inbound isn't being reviewed. */
+const MISSED_CLOSE_MAX = 0;
+/** Any wrong_close (a close with ZERO grounding on its thread) is a real problem. */
+const WRONG_CLOSE_MAX = 0;
+/** Coverage target: below this, too many candidate closes went ungrounded. */
+const MIN_COVERAGE = 0.8;
+/** Don't judge coverage on a tiny denominator (null coverage / few candidates = noise). */
+const MIN_CANDIDATES_FOR_COVERAGE = 3;
+
+// --- DECISION-025 B3 narrative non-degradation (ALIVE but SLOW) ---------------
+// The ~20-min narrative loop's healthy p95 inter-arrival gap is ~20–25m. We trip when the
+// RECENT p95 gap materially exceeds the trailing BASELINE p95 — a regression the plain
+// liveness (dead-at-45m) check can't see. Conservative on both axes: an absolute floor
+// (above healthy cadence, below the 45m liveness line) AND a relative factor vs baseline.
+const NARR_CADENCE_RECENT_MIN = 180;    // 3h recent window
+const NARR_CADENCE_BASELINE_MIN = 1440; // 24h trailing baseline
+const NARR_CADENCE_FACTOR = 1.75;       // recent p95 must exceed 1.75× baseline p95
+const NARR_CADENCE_FLOOR_MIN = 35;      // …and exceed 35m absolute (>healthy ~20m, <45m dead-line)
+const NARR_CADENCE_MIN_SAMPLES = 5;     // need a real distribution in each window
+// Per-tick COST companion: ll5_app_log tool_call rows carry `duration_ms` (server.ts),
+// so a cost-regression IS available (not deferred). A list_narrative_work call whose recent
+// p95 duration blows out vs baseline signals the loop getting expensive/slow under load.
+const NARR_COST_FLOOR_MS = 5000;        // 5s: only fire on a genuinely slow p95 call
+const CADENCE_PCT = 95;
+
 /**
  * A "did it stop?" check: a metric that should keep moving is stale if its newest
  * data point is older than `maxMinutes`. The most robust simple anomaly — no
@@ -57,7 +102,55 @@ interface RateShiftCheck {
   filter?: Record<string, unknown>[];
 }
 
-type Check = StalenessCheck | RateShiftCheck;
+/**
+ * A GAUGE on the newest doc of an index (user-scoped, sorted by `timestampField` desc,
+ * size 1): read one numeric `field` and alert when it breaches `bound` under `op`. An
+ * optional `gate` (a second numeric field/op/bound) must hold for the alert to fire (e.g.
+ * "coverage < 0.8 AND candidate_count >= 3" — never judge a tiny denominator). Self-arming:
+ * absent doc / absent-or-non-numeric field (incl. `null` coverage) / unmet gate → NO alert.
+ */
+interface LatestGaugeCheck {
+  kind: 'latestGauge';
+  key: string;
+  label: string;
+  severity: AlertSeverity;
+  suggestion: string;
+  index: string;
+  timestampField: string;
+  field: string;
+  op: '>' | '<';
+  bound: number;
+  gate?: { field: string; op: '>' | '<' | '>=' | '<='; bound: number };
+}
+
+/**
+ * A NON-DEGRADATION regression: the loop is ALIVE but SLOWER. Over a RECENT window and a
+ * longer BASELINE window, take a percentile of a per-call signal — either the inter-arrival
+ * GAP (minutes between consecutive tool_call rows) or a numeric FIELD on each row (e.g.
+ * duration_ms cost). Trip when the recent pXX exceeds the baseline pXX by `regressionFactor`
+ * AND clears an absolute `floor` (avoids flapping when both windows are tiny/fast). Best-
+ * effort: <`minSamples` in either window, or any query failure → NO alert.
+ */
+interface PercentileRegressionCheck {
+  kind: 'percentileRegression';
+  key: string;
+  label: string;
+  severity: AlertSeverity;
+  suggestion: string;
+  toolName: string;
+  /** 'gap' → inter-arrival minutes between calls; 'field' → a numeric field on each call row. */
+  signal: 'gap' | 'field';
+  field?: string; // required when signal === 'field'
+  recentWindowMinutes: number;
+  baselineWindowMinutes: number;
+  percentile: number;
+  regressionFactor: number;
+  /** Absolute floor the recent pXX must exceed to trip (units match the signal). */
+  floor: number;
+  minSamples: number;
+}
+
+type Check = StalenessCheck | RateShiftCheck | LatestGaugeCheck | PercentileRegressionCheck;
 
 export class AnomalyMonitor {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -112,6 +205,83 @@ export class AnomalyMonitor {
       return (Date.now() - new Date(ts).getTime()) / 60_000;
     } catch (err) {
       logger.debug('[AnomalyMonitor] lastDocAge query failed', { index, error: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  }
+
+  /** Newest doc's _source (user-scoped, sorted by tsField desc), or null if none / on failure. */
+  async latestDoc(index: string, tsField: string, fields: string[]): Promise<Record<string, unknown> | null> {
+    try {
+      const res = await this.es.search<Record<string, unknown>>({
+        index,
+        size: 1,
+        _source: fields,
+        sort: [{ [tsField]: { order: 'desc' } }],
+        query: { bool: { filter: [{ term: { user_id: this.config.userId } }] } },
+      });
+      return (res.hits.hits?.[0]?._source as Record<string, unknown> | undefined) ?? null;
+    } catch (err) {
+      logger.debug('[AnomalyMonitor] latestDoc query failed', { index, error: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  }
+
+  /** Ascending timestamps (ms) of a tool's tool_call rows in the last window (user-scoped),
+   *  or null on query failure. Empty array when there are simply no calls. */
+  private async toolCallTimestamps(toolName: string, windowMinutes: number): Promise<number[] | null> {
+    try {
+      const gte = new Date(Date.now() - windowMinutes * 60_000).toISOString();
+      const res = await this.es.search<Record<string, unknown>>({
+        index: 'll5_app_log',
+        size: 2000,
+        _source: ['timestamp'],
+        sort: [{ timestamp: { order: 'asc' } }],
+        query: { bool: { filter: [
+          { term: { user_id: this.config.userId } },
+          { term: { action: 'tool_call' } },
+          { term: { tool_name: toolName } },
+          { range: { timestamp: { gte } } },
+        ] } },
+      });
+      return (res.hits.hits ?? [])
+        .map((h) => new Date((h._source as Record<string, unknown> | undefined)?.timestamp as string).getTime())
+        .filter((t) => !Number.isNaN(t));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Consecutive inter-arrival GAPS (minutes) between a tool's tool_call rows over the window,
+   *  or null when the query fails or there are < 2 calls (insufficient data → no alert). */
+  async toolCallGapsMinutes(toolName: string, windowMinutes: number): Promise<number[] | null> {
+    const ts = await this.toolCallTimestamps(toolName, windowMinutes);
+    if (!ts || ts.length < 2) return null;
+    const gaps: number[] = [];
+    for (let i = 1; i < ts.length; i++) gaps.push((ts[i] - ts[i - 1]) / 60_000);
+    return gaps;
+  }
+
+  /** Numeric FIELD values (e.g. duration_ms) across a tool's tool_call rows over the window
+   *  (user-scoped), or null on query failure. Rows missing/with a non-numeric field are skipped. */
+  async toolCallFieldValues(toolName: string, field: string, windowMinutes: number): Promise<number[] | null> {
+    try {
+      const gte = new Date(Date.now() - windowMinutes * 60_000).toISOString();
+      const res = await this.es.search<Record<string, unknown>>({
+        index: 'll5_app_log',
+        size: 2000,
+        _source: [field],
+        sort: [{ timestamp: { order: 'asc' } }],
+        query: { bool: { filter: [
+          { term: { user_id: this.config.userId } },
+          { term: { action: 'tool_call' } },
+          { term: { tool_name: toolName } },
+          { range: { timestamp: { gte } } },
+        ] } },
+      });
+      return (res.hits.hits ?? [])
+        .map((h) => (h._source as Record<string, unknown> | undefined)?.[field])
+        .filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
+    } catch {
       return null;
     }
   }
@@ -185,10 +355,65 @@ export class AnomalyMonitor {
     return true;
   }
 
+  /** Gauge on the newest doc: absent doc / non-numeric (incl. null) field / unmet gate → no alert. */
+  private async runLatestGauge(c: LatestGaugeCheck): Promise<boolean> {
+    const fields = c.gate ? [c.field, c.gate.field] : [c.field];
+    const doc = await this.latestDoc(c.index, c.timestampField, fields);
+    if (!doc) return false; // no baseline doc yet (index empty / not created) → never alert
+    const v = doc[c.field];
+    if (typeof v !== 'number' || Number.isNaN(v)) return false; // absent / null coverage → never alert
+    if (c.gate) {
+      const g = doc[c.gate.field];
+      if (typeof g !== 'number' || Number.isNaN(g)) return false; // gate field absent → never alert
+      if (!cmp(g, c.gate.op, c.gate.bound)) return false;         // gate not satisfied (tiny denominator)
+    }
+    if (!cmp(v, c.op, c.bound)) return false;
+    await raiseAlert(this.pool, {
+      userId: this.config.userId, key: c.key, severity: c.severity,
+      summary: `${c.label} out of bounds`,
+      value: `${c.field}=${v}`,
+      expected: `${c.op === '>' ? `<= ${c.bound}` : `>= ${c.bound}`}`,
+      suggestion: c.suggestion,
+    });
+    return true;
+  }
+
+  /** Non-degradation regression: recent pXX of the signal (gap|field) materially exceeds baseline. */
+  private async runPercentileRegression(c: PercentileRegressionCheck): Promise<boolean> {
+    const load = (win: number): Promise<number[] | null> => c.signal === 'gap'
+      ? this.toolCallGapsMinutes(c.toolName, win)
+      : this.toolCallFieldValues(c.toolName, c.field as string, win);
+    const recent = await load(c.recentWindowMinutes);
+    const baseline = await load(c.baselineWindowMinutes);
+    if (!recent || !baseline) return false;                                    // query failed / no data → no alert
+    if (recent.length < c.minSamples || baseline.length < c.minSamples) return false; // too few samples → no alert
+    const rP = percentile(recent, c.percentile);
+    const bP = percentile(baseline, c.percentile);
+    if (rP < c.floor) return false;                                            // recent still within healthy absolute bound
+    if (rP < bP * c.regressionFactor) return false;                            // not materially worse than baseline
+    await raiseAlert(this.pool, {
+      userId: this.config.userId, key: c.key, severity: c.severity,
+      summary: `${c.label} degraded`,
+      value: `recent p${c.percentile} ${Math.round(rP)} vs baseline p${c.percentile} ${Math.round(bP)}`,
+      expected: `< ${Math.round(bP * c.regressionFactor)}`,
+      suggestion: c.suggestion,
+    });
+    return true;
+  }
+
+  private async runCheck(c: Check): Promise<boolean> {
+    switch (c.kind) {
+      case 'staleness': return this.runStaleness(c);
+      case 'rateShift': return this.runRateShift(c);
+      case 'latestGauge': return this.runLatestGauge(c);
+      case 'percentileRegression': return this.runPercentileRegression(c);
+    }
+  }
+
   private async check(): Promise<void> {
     const firing = new Set<string>();
     for (const c of this.checks) {
-      const tripped = c.kind === 'staleness' ? await this.runStaleness(c) : await this.runRateShift(c);
+      const tripped = await this.runCheck(c);
       if (tripped) { firing.add(c.key); this.active.add(c.key); }
     }
     for (const key of [...this.active]) {
@@ -319,6 +544,118 @@ function buildChecks(): Check[] {
       index: 'll5_eval_moments',
       timestampField: 'timestamp',
       filter: [{ term: { decision: 'ping_now' } }, { term: { grounding_calls: 0 } }],
+    },
+    // ---- RECONCILIATION (DECISION-025 B3) --------------------------------------
+    // Observe the reconcile subsystem via the governor's ll5_reconcile_metrics docs and
+    // the worker's list_reconcile_work tool calls. EVERY check here is self-arming: null/
+    // absent → NO alert, so nothing fires before the (not-yet-deployed) worker/governor live.
+
+    // Reconcile-worker liveness: the worker calls list_reconcile_work each tick; >45m with
+    // no call → the loop (or agent) is dead. Same null-age convention as forward_work_stalled:
+    // the tool was NEVER called yet (worker not deployed) → toolCallAgeMinutes returns null →
+    // runStaleness returns false → NO alert. Arms itself once the worker first runs.
+    {
+      kind: 'staleness',
+      key: 'loop.reconcile_worker',
+      label: 'Reconciliation worker loop',
+      maxMinutes: 45,
+      severity: 'warning',
+      suggestion: 'The reconcile worker stopped calling list_reconcile_work — check the reconcile loop / the agent container.',
+      ageMinutes: (m) => m.toolCallAgeMinutes('list_reconcile_work'),
+    },
+    // Governor freshness: the governor writes one ll5_reconcile_metrics doc every ~15m;
+    // >45m stale → the governor scheduler died. No docs yet (index empty / not created) →
+    // null age → NO alert.
+    {
+      kind: 'staleness',
+      key: 'loop.reconcile_governor',
+      label: 'Reconciliation governor',
+      maxMinutes: 45,
+      severity: 'warning',
+      suggestion: 'No new ll5_reconcile_metrics doc in 45m — the reconcile governor scheduler stopped writing metrics.',
+      ageMinutes: (m) => m.lastDocAgeMinutes('ll5_reconcile_metrics', 'timestamp', []),
+    },
+    // GAUGES on the LATEST ll5_reconcile_metrics doc. Absent doc / null field → never alert.
+    // missed_close is designed to settle to 0 each ~15-min cycle → a single latest doc > 0
+    // is an acceptable trip (the 15-min cadence makes a one-cycle read non-flappy).
+    {
+      kind: 'latestGauge',
+      key: 'reconcile.missed_close_elevated',
+      label: 'Missed-close backlog',
+      severity: 'warning',
+      suggestion: 'missed_close is not settling to 0 — the reconcile worker isn\'t keeping up, or a loop\'s inbound isn\'t being reviewed. Check the worker loop.',
+      index: 'll5_reconcile_metrics',
+      timestampField: 'timestamp',
+      field: 'missed_close_count',
+      op: '>',
+      bound: MISSED_CLOSE_MAX,
+    },
+    // Any wrong_close is a real problem: a message-linked loop CLOSED with zero grounding
+    // on its thread (a close nobody actually checked the conversation for).
+    {
+      kind: 'latestGauge',
+      key: 'reconcile.wrong_close',
+      label: 'Ungrounded closes',
+      severity: 'warning',
+      suggestion: 'A loop was closed with ZERO grounding on its thread this cycle — a close with no evidence it was actually reviewed. Inspect recent completions.',
+      index: 'll5_reconcile_metrics',
+      timestampField: 'timestamp',
+      field: 'wrong_close_count',
+      op: '>',
+      bound: WRONG_CLOSE_MAX,
+    },
+    // Low coverage: too many candidate loops went ungrounded — but ONLY when there are
+    // enough candidates to judge (gate: candidate_count >= 3; null coverage is non-numeric
+    // → skipped by the gauge; a tiny denominator is skipped by the gate).
+    {
+      kind: 'latestGauge',
+      key: 'reconcile.low_coverage',
+      label: 'Reconciliation coverage',
+      severity: 'warning',
+      suggestion: 'Reconciliation coverage is low with enough candidates to judge — many candidate loops are going ungrounded. Check that the worker is grounding (query_im_messages) before closing.',
+      index: 'll5_reconcile_metrics',
+      timestampField: 'timestamp',
+      field: 'reconciliation_coverage',
+      op: '<',
+      bound: MIN_COVERAGE,
+      gate: { field: 'candidate_count', op: '>=', bound: MIN_CANDIDATES_FOR_COVERAGE },
+    },
+    // NARRATIVE NON-DEGRADATION (DECISION-025 B3): the loop is ALIVE but SLOW — the plain
+    // liveness check (dead-at-45m) can't see this. CADENCE: recent p95 inter-arrival gap of
+    // list_narrative_work materially exceeds its trailing baseline p95.
+    {
+      kind: 'percentileRegression',
+      key: 'loop.narrative_cadence_regressed',
+      label: 'Narrative-loop cadence',
+      severity: 'warning',
+      suggestion: 'The narrative loop is still alive but its tick cadence has degraded (recent p95 gap blew out vs baseline) — check for agent slowdown / contention before it goes fully stale.',
+      toolName: 'list_narrative_work',
+      signal: 'gap',
+      recentWindowMinutes: NARR_CADENCE_RECENT_MIN,
+      baselineWindowMinutes: NARR_CADENCE_BASELINE_MIN,
+      percentile: CADENCE_PCT,
+      regressionFactor: NARR_CADENCE_FACTOR,
+      floor: NARR_CADENCE_FLOOR_MIN,
+      minSamples: NARR_CADENCE_MIN_SAMPLES,
+    },
+    // …and the per-tick COST companion (available because ll5_app_log tool_call rows carry
+    // duration_ms): recent p95 call duration blows out vs baseline → the loop is getting
+    // expensive/slow under load.
+    {
+      kind: 'percentileRegression',
+      key: 'loop.narrative_cost_regressed',
+      label: 'Narrative-loop call cost',
+      severity: 'warning',
+      suggestion: 'list_narrative_work call duration (p95) has blown out vs baseline — the narrative loop is getting expensive/slow. Check ES / agent load.',
+      toolName: 'list_narrative_work',
+      signal: 'field',
+      field: 'duration_ms',
+      recentWindowMinutes: NARR_CADENCE_RECENT_MIN,
+      baselineWindowMinutes: NARR_CADENCE_BASELINE_MIN,
+      percentile: CADENCE_PCT,
+      regressionFactor: NARR_CADENCE_FACTOR,
+      floor: NARR_COST_FLOOR_MS,
+      minSamples: NARR_CADENCE_MIN_SAMPLES,
     },
   ];
 }
