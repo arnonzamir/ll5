@@ -312,6 +312,37 @@ describe('create_action tool handler', () => {
     expect(payload.timeEstimate).toBe(30);
   });
 
+  it('threads conversation_id and stakes to the repo (reconciliation stamping)', async () => {
+    const createAction = vi.fn(async () => fakeAction({ id: 'a-conv' }));
+    const repo = makeHorizonRepo({ createAction });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+
+    await tools.get('create_action')!({
+      title: 'Waiting on Bob',
+      list_type: 'waiting',
+      waiting_for: 'Bob',
+      conversation_id: 'wa:conv-42',
+      stakes: 'low',
+    });
+
+    const payload = createAction.mock.calls[0][1] as Record<string, unknown>;
+    expect(createAction.mock.calls[0][0]).toBe(USER_ID);
+    expect(payload.conversationId).toBe('wa:conv-42');
+    expect(payload.stakes).toBe('low');
+  });
+
+  it('passes stakes/conversationId as undefined when omitted (repo lets DB default apply)', async () => {
+    const createAction = vi.fn(async () => fakeAction());
+    const repo = makeHorizonRepo({ createAction });
+    const tools = captureTools((s) => registerActionTools(s, repo, getUserId));
+
+    await tools.get('create_action')!({ title: 'Plain' });
+
+    const payload = createAction.mock.calls[0][1] as Record<string, unknown>;
+    expect(payload.conversationId).toBeUndefined();
+    expect(payload.stakes).toBeUndefined();
+  });
+
   it('emits an audit log with action=create after success', async () => {
     const repo = makeHorizonRepo({
       createAction: vi.fn(async () => fakeAction({ id: 'a-99', title: 'Audited' })),

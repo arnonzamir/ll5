@@ -34,19 +34,20 @@ export class PostgresHorizonRepository extends BasePostgresRepository implements
   // ---------------------------------------------------------------------------
 
   async createAction(userId: string, data: CreateActionInput): Promise<Horizon> {
-    const sql = `
-      INSERT INTO gtd_horizons (
-        user_id, horizon, title, description, status, energy, list_type,
-        context, due_date, start_date, project_id, waiting_for,
-        time_estimate, category
-      ) VALUES (
-        $1, 0, $2, $3, 'active', $4, $5,
-        $6::jsonb, $7, $8, $9, $10,
-        $11, $12
-      )
-      RETURNING *
-    `;
-    const params = [
+    // Fixed leading columns. `conversation_id` is nullable (omit -> NULL).
+    // `stakes` is appended ONLY when provided, so an omitted value falls through
+    // to the DB DEFAULT ('consequential', fail-safe) rather than a code default.
+    const columns = [
+      'user_id', 'horizon', 'title', 'description', 'status', 'energy', 'list_type',
+      'context', 'due_date', 'start_date', 'project_id', 'waiting_for',
+      'time_estimate', 'category', 'conversation_id',
+    ];
+    const values = [
+      '$1', '0', '$2', '$3', `'active'`, '$4', '$5',
+      '$6::jsonb', '$7', '$8', '$9', '$10',
+      '$11', '$12', '$13',
+    ];
+    const params: unknown[] = [
       userId,
       data.title,
       data.description ?? null,
@@ -59,7 +60,22 @@ export class PostgresHorizonRepository extends BasePostgresRepository implements
       data.waitingFor ?? null,
       data.timeEstimate ?? null,
       data.category ?? null,
+      data.conversationId ?? null,
     ];
+
+    // Only stamp stakes when the caller classified it; otherwise let the DB
+    // DEFAULT apply (do NOT force a code-side default).
+    if (data.stakes !== undefined) {
+      columns.push('stakes');
+      values.push(`$${params.length + 1}`);
+      params.push(data.stakes);
+    }
+
+    const sql = `
+      INSERT INTO gtd_horizons (${columns.join(', ')})
+      VALUES (${values.join(', ')})
+      RETURNING *
+    `;
     const row = await this.queryOne<Record<string, unknown>>(sql, params);
     return mapHorizonRow(row!) as unknown as Horizon;
   }

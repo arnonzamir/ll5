@@ -23,6 +23,8 @@ export function registerActionTools(server: McpServer, repo: HorizonRepository, 
       waiting_for: z.string().optional().describe('Who/what we are waiting on (when list_type=waiting)'),
       time_estimate: z.number().optional().describe('Estimated minutes to complete'),
       category: z.string().optional().describe('Free-text category'),
+      conversation_id: z.string().optional().describe('Linked conversation/thread id when this loop was created from a message; enables exact-match reconciliation.'),
+      stakes: z.enum(['low', 'consequential']).optional().describe("How costly a wrong autonomous close would be. Omit to default to 'consequential' (fail-safe: consequential loops are never autonomously closed)."),
     },
     async (params) => {
       const userId = getUserId();
@@ -38,6 +40,8 @@ export function registerActionTools(server: McpServer, repo: HorizonRepository, 
         waitingFor: params.waiting_for,
         timeEstimate: params.time_estimate,
         category: params.category,
+        conversationId: params.conversation_id,
+        stakes: params.stakes,
       });
       logAudit({ user_id: userId, source: 'gtd', action: 'create', entity_type: 'action', entity_id: action.id, summary: `Created action: ${params.title}` });
       return {

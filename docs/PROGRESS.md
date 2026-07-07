@@ -25,6 +25,7 @@ in `GROUNDING_TOOLS` (ll5-run, commit b1587ac; frozen-rule + eval tests green) a
 read-model (gateway `open-loops.ts`, 3 tests). Phase-1b: D4 migration 003
 (`conversation_id`/`stakes` DEFAULT consequential/`reviewed_at` on `gtd_horizons`) + `reconcile.ts`
 `listReconcileWork` deterministic selector (6 tests; 666 gateway total). Phase-1c: `reconcile-gate.ts` — the deterministic close-gate (stakes-routing + atomic close + circuit-breaker; 8 tests). **The entire deterministic reconciliation spine is now built + tested locally** (read-model, selector, gate, migration). Remaining work + a fanout orchestration brief for a fresh session: docs/implementation/DECISION-025-continuation.md (Phase A: GTD MCP tools + stamping + confirm UX; B: governor/metrics; C: tests + gated deploy).
+**Phase A progress (local, tested, NOT pushed):** A2 done — `create_action` now accepts + stamps `conversation_id` + `stakes` (enum `low|consequential`) at loop creation, threaded into the postgres `createAction` INSERT (dynamic columns, fully parametrized; `stakes` omitted ⇒ DB DEFAULT 'consequential' fail-safe; `conversation_id` omitted ⇒ NULL). Inbox-triage + shopping paths correctly fall through to NULL/default (they never create message-linked loops). GTD tests 103 green, tsc clean.
 
 ### WhatsApp ingest via RabbitMQ + self-healing webhook (DECISION-024, 2026-07-06)
 Response to a ~2h WhatsApp outage: Evolution had `webhookBase64:true` (re-applied on the Jul-4

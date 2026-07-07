@@ -46,6 +46,8 @@ export interface HorizonItemWithCounts extends Horizon {
   activeProjectCount?: number;
 }
 
+export type Stakes = 'low' | 'consequential';
+
 export interface CreateActionInput {
   title: string;
   description?: string;
@@ -58,6 +60,18 @@ export interface CreateActionInput {
   waitingFor?: string;
   timeEstimate?: number;
   category?: string;
+  /**
+   * Linked conversation/thread id when this loop was created from a message.
+   * Enables EXACT-match reconciliation (DECISION-025). Omit -> NULL (loop is
+   * outside the message-linked reconcile selector).
+   */
+  conversationId?: string;
+  /**
+   * How costly a wrong autonomous close would be. Omit -> DB DEFAULT
+   * ('consequential', fail-safe: consequential loops are never autonomously
+   * closed). Never hardcode a code-side default here.
+   */
+  stakes?: Stakes;
 }
 
 export interface UpdateActionInput {

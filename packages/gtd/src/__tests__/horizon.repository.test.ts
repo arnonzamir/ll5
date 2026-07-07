@@ -61,6 +61,86 @@ describe('PostgresHorizonRepository.deleteAction', () => {
   });
 });
 
+describe('PostgresHorizonRepository.createAction reconciliation stamping (DECISION-025 A2)', () => {
+  const returnedRow = () => [
+    { id: 'act-new', user_id: USER_A, horizon: 0, title: 'Waiting on Bob', status: 'active' },
+  ];
+
+  it('stamps conversation_id AND stakes into the INSERT when both are provided', async () => {
+    const { pool, query } = makeMockPool([returnedRow()]);
+    const repo = new PostgresHorizonRepository(pool);
+
+    await repo.createAction(USER_A, {
+      title: 'Waiting on Bob',
+      listType: 'waiting',
+      waitingFor: 'Bob',
+      conversationId: 'wa:conv-42',
+      stakes: 'low',
+    });
+
+    const { sql, params } = call(query, 0);
+    // Both columns present in the column list.
+    expect(sql).toMatch(/conversation_id/);
+    expect(sql).toMatch(/\bstakes\b/);
+    // Both values bound (order-independent).
+    expect(params).toContain('wa:conv-42');
+    expect(params).toContain('low');
+    // user_id scoping: userId is the first bound param, never a caller-supplied arg.
+    expect(params[0]).toBe(USER_A);
+  });
+
+  it('OMITS the stakes column when stakes is not provided (DB DEFAULT applies)', async () => {
+    const { pool, query } = makeMockPool([returnedRow()]);
+    const repo = new PostgresHorizonRepository(pool);
+
+    await repo.createAction(USER_A, {
+      title: 'Waiting on Bob',
+      conversationId: 'wa:conv-42',
+    });
+
+    const { sql, params } = call(query, 0);
+    // conversation_id still stamped...
+    expect(sql).toMatch(/conversation_id/);
+    expect(params).toContain('wa:conv-42');
+    // ...but stakes is NOT force-set in code — the column is absent so the
+    // DB DEFAULT ('consequential') applies. No 'consequential' / 'low' bound.
+    expect(sql).not.toMatch(/\bstakes\b/);
+    expect(params).not.toContain('consequential');
+    expect(params).not.toContain('low');
+  });
+
+  it('binds conversation_id = NULL when omitted (column always present, value null)', async () => {
+    const { pool, query } = makeMockPool([returnedRow()]);
+    const repo = new PostgresHorizonRepository(pool);
+
+    await repo.createAction(USER_A, { title: 'Plain action' });
+
+    const { sql, params } = call(query, 0);
+    // conversation_id column is always in the INSERT; its bound value is null.
+    expect(sql).toMatch(/conversation_id/);
+    // stakes omitted (default applies).
+    expect(sql).not.toMatch(/\bstakes\b/);
+    // The conversation_id slot resolves to null (it is the last fixed param).
+    expect(params).toContain(null);
+    expect(params[0]).toBe(USER_A);
+  });
+
+  it('keeps userId as the bound owner regardless of caller (cross-tenant scoping)', async () => {
+    const { pool, query } = makeMockPool([
+      [{ id: 'act-b', user_id: USER_B, horizon: 0, title: 'For B', status: 'active' }],
+    ]);
+    const repo = new PostgresHorizonRepository(pool);
+
+    // Created under USER_B's context — no caller arg can redirect ownership.
+    await repo.createAction(USER_B, { title: 'For B', conversationId: 'c-1', stakes: 'low' });
+
+    const { sql, params } = call(query, 0);
+    expect(sql).toMatch(/user_id/);
+    expect(params[0]).toBe(USER_B);
+    expect(params).not.toContain(USER_A);
+  });
+});
+
 describe('PostgresHorizonRepository.updateAction completed_at semantics', () => {
   const row = (over: Record<string, unknown> = {}) => [
     { id: 'act-1', user_id: USER_A, horizon: 0, status: 'completed', ...over },
