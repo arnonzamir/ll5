@@ -193,7 +193,7 @@ jobs:
         if: startsWith(matrix.package, 'run-')
         uses: actions/checkout@v4
         with:
-          repository: arnonzamir/ll5-${{ matrix.package }}-code
+          repository: ${{ matrix.package == 'run-opencode' && 'arnonzamir/ll5-run-opencode' || format('arnonzamir/ll5-{0}-code', matrix.package) }}
           path: variant-content
           token: ${{ secrets.VARIANT_REPO_READ_PAT }}
 

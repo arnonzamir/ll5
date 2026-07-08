@@ -53,15 +53,13 @@ COPY variant-content/.opencode/ /workspace/.opencode/
 COPY variant-content/scripts/ /workspace/scripts/
 COPY variant-content/docker-entrypoint.sh /workspace/docker-entrypoint.sh
 
-# ---------- Render MCP config from shared source-of-truth ----------
-# Reads mcp-endpoints.json, emits an MCP-only fragment (NOT the full
-# opencode.json — the variant repo's opencode.json has model/agent/plugin
-# config that must NOT be overwritten). The entrypoint merges this fragment
-# into the variant repo's opencode.json at startup.
+# MCP endpoints config baked into opencode.json (from variant repo, points at
+# correlation-id proxy 127.0.0.1:4097). Render the shared source-of-truth for
+# reference only — NOT merged (the variant repo's opencode.json is authoritative).
 RUN npx tsx /workspace/scripts/render-mcp-config.ts \
       --format opencode \
       --config /workspace/mcp-endpoints.json \
-      --output /workspace/opencode-mcp-fragment.json
+      --output /workspace/opencode-mcp-fragment.json || echo "[warn] mcp fragment render skipped"
 
 # ---------- Install plugin dependencies ----------
 # .opencode/package.json lists the opencode SDK + any plugin deps.

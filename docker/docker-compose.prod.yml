@@ -30,11 +30,6 @@ volumes:
   # WhatsApp session/auth state for the dedicated ll5 Evolution.
   evolution-instances:
     name: xkkcc0g4o48kkcows8488so4_evolution-instances
-  # Agent variant-specific workspace (Phase 4/5)
-  agent-workspace-claude:
-    name: xkkcc0g4o48kkcows8488so4_agent-workspace-claude
-  agent-workspace-opencode:
-    name: xkkcc0g4o48kkcows8488so4_agent-workspace-opencode
   # Agent persistent $HOME (shared across variants — onboarding bypass,
   # token, turn-context, posted-ledger are variant-agnostic)
   agent-home:
@@ -704,6 +699,7 @@ services:
       NODE_ENV: production
       TZ: ${TZ:-Asia/Jerusalem}
       API_KEY: ${API_KEY}
+      AUTH_SECRET: ${AUTH_SECRET}
       USER_ID: ${USER_ID}
       GATEWAY_URL: http://gateway:3000
       MCP_BASE_DOMAIN: ${MCP_BASE_DOMAIN:-noninoni.click}
@@ -711,7 +707,6 @@ services:
       OPENCODE_ZEN_API_KEY: ${OPENCODE_ZEN_API_KEY:-}
       LL5_TOKEN: ${LL5_TOKEN:-}
     volumes:
-      - agent-workspace-${AGENT_VARIANT:-claude}:/workspace
       - agent-home:/data/home
     depends_on:
       gateway:
