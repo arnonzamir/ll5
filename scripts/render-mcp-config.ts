@@ -100,7 +100,7 @@ function renderOpencode(
     const ep = config.endpoints[key];
     if (!ep) throw new Error(`Endpoint "${key}" referenced by worker but not defined in endpoints`);
     mcp[key] = {
-      type: 'streamable-http',
+      type: 'remote',
       url: buildUrl(ep, baseDomain),
       headers: {
         Authorization: 'Bearer ${MCP_API_KEY}',
