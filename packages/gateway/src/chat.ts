@@ -407,6 +407,39 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       if (rerouted) body.rerouted_from = rerouted.from;
       res.status(201).json(body);
 
+      // Dual run-variant Phase 6: trigger opencode immediately for inbound user messages.
+      // (Legacy Claude Code variant relied purely on the pg_notify trigger which
+      // the channel bridge listened to).
+      if (
+        msgDirection === 'inbound' &&
+        msgRole === 'user' &&
+        !isReaction &&
+        process.env.OPENCODE_SERVER_URL
+      ) {
+        // Fire-and-forget: if it fails, stuck-message-sweep retries it.
+        import('./utils/agent-trigger.js')
+          .then(({ getAgentSessionId, triggerAgent }) => {
+            return getAgentSessionId(pool, userId).then((sessionId) => {
+              if (sessionId) {
+                return triggerAgent(sessionId, {
+                  content: content!,
+                  metadata: {
+                    source: {
+                      platform: channel as any,
+                      ...(metadata?.remote_jid ? { remote_jid: metadata.remote_jid as string } : {}),
+                    },
+                  },
+                });
+              }
+            });
+          })
+          .catch((err) =>
+            logger.warn('[chat][trigger] Failed to trigger opencode for inbound message', {
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+      }
+
       if (notification_level && msgDirection === 'outbound' && !isReaction) {
         const bodyText = content ?? '';
         const truncBody = bodyText.length > 200 ? bodyText.slice(0, 200) + '...' : bodyText;
