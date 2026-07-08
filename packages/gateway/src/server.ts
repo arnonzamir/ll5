@@ -2068,6 +2068,10 @@ export async function startServer(config: EnvConfig): Promise<void> {
   const { startPermissionApprovalListener } = await import('./utils/permission-approval-listener.js');
   startPermissionApprovalListener(pgPool);
 
+  // Start opencode trigger listener: chat_messages inserts → opencode prompt_async.
+  const { startAgentTriggerListener } = await import('./utils/agent-trigger-listener.js');
+  startAgentTriggerListener(pgPool);
+
   app.listen(config.port, () => {
     logger.info(`[startServer][listen] Gateway listening on port ${config.port}`, {
       env: config.nodeEnv,
