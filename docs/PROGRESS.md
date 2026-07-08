@@ -6,7 +6,7 @@ Current state of the LL5 personal assistant system.
 
 ## Current Status
 
-**Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client. Dual run-variant migration in progress (Phases 0-4 complete, 2.5 validation pending).
+**Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client. **opencode variant validating on host:** new `agent` container (image `ll5-agent:dev`, port 2222/4096) running; gateway has `OPENCODE_SERVER_URL=http://10.0.9.17:4096`; old Claude Code container stopped. `agent-trigger.ts` now passes `model:{providerID, modelID}` so a fresh session uses `opencode/minimax-m3` (Zen) instead of falling back to Anthropic default. `sessions/ll5.sh`+AGENTS.md document the `ll5 new|logs|restart|stop|exec|shell` commands and Termius wiring.
 
 ### Dual run-variant migration — Phases 0-4 complete (2026-07-08)
 Restructured ll5 to support two interchangeable agent runtime variants (Claude Code + opencode). See `docs/implementation/dual-run-variant-plan.md` + `dual-run-MASTER-INDEX.md`.
