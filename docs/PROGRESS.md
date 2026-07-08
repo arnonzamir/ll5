@@ -8,6 +8,9 @@ Current state of the LL5 personal assistant system.
 
 **Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
 
+### Contact sync issue fixed (2026-07-08 hotfix)
+**Problem:** Phone contact sync was failing with "value too long for type character varying(255)" when syncing contacts with names longer than 255 chars. **Fix:** altered `messaging_contacts.display_name` from VARCHAR(255) to TEXT; gateway restarted; migration 039 added to codebase.
+
 ### Pencil-the-timeline reflex + liveness governor (2026-07-07)
 Persona (ll5-run) gained: (1) Rule 15 schedule-claim grounding now reads the FULL local day across ALL calendars (`list_events` no-filter unions every readable calendar incl. LL5 System, + `list_ticklers`), OOO/day-off is the FRAME not a footnote, and ground-the-day-before-penciling-a-time — from the tomorrow-planning review (agent answered "where will I be" off the WORK calendar 3×); (2) a capture reflex — every time-anchored thought/option/decision/expectation is penciled onto the LL5 System calendar the same turn via `create_tickler(kind:instruction)` (the only tool that reliably writes there; LL5 System is access_mode='read' so create_event can't). **Liveness governor** for that reflex: `eval_record.py` ships `pencil_count` (create_tickler+create_event occurrences/turn) → gateway `/telemetry/eval-moment` whitelist + `ll5_eval_moments` mapping → anomaly-monitor `behavior.pencil_reflex_stalled` (staleness on last `pencil_count>0` moment, 72h, self-arming via `range gt:0` so it never fires before the first pencil). Gateway 735 tests green, ll5-run eval_record green, tsc clean.
 
