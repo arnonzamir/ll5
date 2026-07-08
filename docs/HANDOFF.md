@@ -707,3 +707,5 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 (2026-07-07) DECISION-025 human-confirm loop verified live end-to-end + test data cleaned.
 
 (2026-07-07) Pencil-the-timeline reflex + liveness governor: anomaly-monitor behavior.pencil_reflex_stalled watches pencil_count on ll5_eval_moments (72h, self-arming). Persona rules for full-calendar-union grounding + OOO precedence + pencil-on-LL5-System live. -->
+
+**Variant wiring on host (2026-07-08)**: gateway.env now also includes OPENCODE_MODEL_ID=minimax-m3 (composed into prompt_async body to avoid Anthropic fallback).
