@@ -6,9 +6,18 @@ Current state of the LL5 personal assistant system.
 
 ## Current Status
 
-**Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client
+**Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client. Dual run-variant migration in progress (Phases 0-4 complete, 2.5 validation pending).
 
-### Phone-contact junk-name guard + revert of a bad hotfix (2026-07-08)
+### Dual run-variant migration — Phases 0-4 complete (2026-07-08)
+Restructured ll5 to support two interchangeable agent runtime variants (Claude Code + opencode). See `docs/implementation/dual-run-variant-plan.md` + `dual-run-MASTER-INDEX.md`.
+- **Phase 0:** `ll5-run` renamed to `ll5-run-claude-code` on GitHub.
+- **Phase 1:** Shared content (CLAUDE.md, 17 skills, prompts, mcp-endpoints.json) extracted to `packages/ll5-run-shared/`. `scripts/render-mcp-config.ts` renders MCP config for both variants. 21 files created.
+- **Phase 2:** Gateway `agent-trigger.ts` (env-driven no-op/HTTP trigger), migration 039 (`agent_session_id` + `agent_sessions` JSONB), 7 new `/internal/*` endpoints (agent-session, ingest-memory, regrounding, activity, continuity-probe, memory-intercept-log, recall-lessons). `system-message.ts` + `stuck-message-sweep.ts` modified. Tests: 758 passed. Typecheck: clean.
+- **Phase 4:** `Dockerfile.ll5-run-claude` + `Dockerfile.ll5-run-opencode` created. `build-and-push.yml` extended with variant packages (`run-claude`, `run-opencode`), variant repo checkout, repository_dispatch handler. `docker-compose.prod.yml` agent service added (parameterized, no published ports, persistent $HOME, variant-specific volumes, traefik.enable=false).
+- **Phase 3:** `ll5-run-opencode` repo created (35 files: 18 plugins, 3 agent definitions, 7 SDK worker scripts, opencode.json, docker-entrypoint.sh, healthcheck.sh, CI workflow).
+- **Remaining:** Phase 2.5 (1-hour fail-fast validation on host), Phase 4.5 (standalone→compose transition), Phase 5 (deploy opencode), Phase 6 (switch and use).
+
+### Phone-contact junk-name guard
 Correction of an earlier same-day change. **What actually happened:** `processPhoneContacts` logged `warn`-level "value too long for type character varying(255)" lines when a phone address-book entry had a corrupt 2KB "name" (spam/fraud SMS text saved as a contact name). These were **non-fatal** — caught in try/catch, the webhook still returned `accepted:N, failed:0`; nothing was broken. An earlier hotfix mis-read this as an outage and widened `messaging_contacts.display_name` to TEXT, which is **worse** — it lets that junk *overwrite* real contacts' display names (the UPDATE enriches existing rows). **Correct fix (this change):** skip address-book entries whose name is > 200 chars in `processors/phone-contacts.ts` (`MAX_DISPLAY_NAME_LENGTH`) — no real name/group name is that long — so junk is dropped, not stored, and the column overflow can't happen. Reverted the live column back to VARCHAR(255), deleted the bogus migration 039 + its schema_migrations row. Gateway tests green.
 
 ### Pencil-the-timeline reflex + liveness governor (2026-07-07)

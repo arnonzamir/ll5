@@ -9,6 +9,19 @@ on:
         description: 'Comma-separated packages to build (empty = all)'
         required: false
         default: ''
+      agent_variant:
+        description: 'Agent variant to build (claude or opencode). Overrides packages list.'
+        required: false
+        default: ''
+  # Variant repo pushes trigger this via repository_dispatch.
+  # The variant repo's CI sends: gh api -X POST /repos/arnonzamir/ll5/dispatches \
+  #   -f event_type=rebuild-agent -f client_payload[package]=run-claude
+  repository_dispatch:
+    types: [rebuild-agent]
+  # Weekly fallback rebuild — catches failed dispatches or stale images.
+  # Monday 06:00 UTC.
+  schedule:
+    - cron: '0 6 * * 1'
 
 env:
   REGISTRY: ghcr.io
@@ -27,35 +40,67 @@ jobs:
       - id: set-matrix
         run: |
           # findhub-poller disabled 2026-06-03 (Find Hub locate requests were ringing devices)
-          PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "gateway" "dashboard" "vault")
+          # run-claude / run-opencode: agent variants (Phase 4)
+          PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "gateway" "dashboard" "vault" "run-claude" "run-opencode")
 
           # On manual dispatch with specific packages, use those
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.packages }}" ]]; then
             IFS=',' read -ra PACKAGES <<< "${{ inputs.packages }}"
           fi
 
+          # On manual dispatch with agent_variant, build only that variant
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.agent_variant }}" ]]; then
+            PACKAGES=("run-${{ inputs.agent_variant }}")
+          fi
+
+          # On repository_dispatch (variant repo pushed), build that package
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            PKG="${{ github.event.client_payload.package }}"
+            PACKAGES=("$PKG")
+          fi
+
+          # On schedule (weekly fallback), rebuild both variants
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            PACKAGES=("run-claude" "run-opencode")
+          fi
+
           # On push, check which packages changed (shared changes trigger all)
           if [[ "${{ github.event_name }}" == "push" ]]; then
             CHANGED=$(git diff --name-only HEAD~1 HEAD)
-            SHARED_CHANGED=$(echo "$CHANGED" | grep -c "packages/shared/" || true)
+            # packages/shared/ OR packages/ll5-run-shared/ OR docker/ OR
+            # scripts/render-mcp-config.ts → rebuild everything
+            SHARED_CHANGED=$(echo "$CHANGED" | grep -cE "packages/(shared|ll5-run-shared)/" || true)
             DOCKER_CHANGED=$(echo "$CHANGED" | grep -c "docker/" || true)
+            RENDER_CHANGED=$(echo "$CHANGED" | grep -c "scripts/render-mcp-config.ts" || true)
 
-            if [[ "$SHARED_CHANGED" -eq 0 && "$DOCKER_CHANGED" -eq 0 ]]; then
+            if [[ "$SHARED_CHANGED" -eq 0 && "$DOCKER_CHANGED" -eq 0 && "$RENDER_CHANGED" -eq 0 ]]; then
               FILTERED=()
               for pkg in "${PACKAGES[@]}"; do
-                if echo "$CHANGED" | grep -q "packages/$pkg/"; then
-                  FILTERED+=("$pkg")
+                # Infra packages: check packages/$pkg/ directory
+                if [[ "$pkg" != "run-claude" && "$pkg" != "run-opencode" ]]; then
+                  if echo "$CHANGED" | grep -q "packages/$pkg/"; then
+                    FILTERED+=("$pkg")
+                  fi
                 fi
               done
               if [[ ${#FILTERED[@]} -gt 0 ]]; then
                 PACKAGES=("${FILTERED[@]}")
+              else
+                # No infra packages changed and no shared/docker/render changes
+                # → nothing to build (variant packages have no in-repo source
+                # to diff against; they're triggered by repository_dispatch)
+                PACKAGES=()
               fi
             fi
           fi
 
-          # Build JSON matrix
-          JSON=$(printf '%s\n' "${PACKAGES[@]}" | jq -R . | jq -sc '{package: .}')
-          echo "matrix=$JSON" >> "$GITHUB_OUTPUT"
+          # Build JSON matrix (empty array if no packages to build)
+          if [[ ${#PACKAGES[@]} -eq 0 ]]; then
+            echo "matrix={\"package\":[]}" >> "$GITHUB_OUTPUT"
+          else
+            JSON=$(printf '%s\n' "${PACKAGES[@]}" | jq -R . | jq -sc '{package: .}')
+            echo "matrix=$JSON" >> "$GITHUB_OUTPUT"
+          fi
 
   compose-drift-check:
     # Detects manual edits to the on-host docker-compose.yml so we catch drift
@@ -131,36 +176,51 @@ jobs:
   build:
     needs: detect-changes
     runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.matrix != ''
     permissions:
       contents: read
       packages: write
     strategy:
       matrix: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
     steps:
+      # Always checkout ll5 repo first (build context for all packages)
       - uses: actions/checkout@v4
 
-      # findhub-poller is Python — skip all Node build steps for it.
+      # For variant packages (run-*), checkout the variant repo into
+      # variant-content/ — this is the COPY source in the Dockerfile.
+      # Uses VARIANT_REPO_READ_PAT (repo scope), NOT GHCR_READ_PAT (packages scope).
+      - name: Checkout variant repo
+        if: startsWith(matrix.package, 'run-')
+        uses: actions/checkout@v4
+        with:
+          repository: arnonzamir/ll5-${{ matrix.package }}-code
+          path: variant-content
+          token: ${{ secrets.VARIANT_REPO_READ_PAT }}
+
+      # findhub-poller is Python; run-* packages are variant content (no Node
+      # build needed — Dockerfile COPYs scripts/configs, render-mcp-config.ts
+      # runs inside the Docker build with tsx).
       - name: Set up Node.js
-        if: matrix.package != 'findhub-poller'
+        if: matrix.package != 'findhub-poller' && !startsWith(matrix.package, 'run-')
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
 
       - name: Install dependencies
-        if: matrix.package != 'findhub-poller'
+        if: matrix.package != 'findhub-poller' && !startsWith(matrix.package, 'run-')
         run: npm ci
 
       - name: Build shared package
-        if: matrix.package != 'findhub-poller'
+        if: matrix.package != 'findhub-poller' && !startsWith(matrix.package, 'run-')
         run: npm run build --workspace=packages/shared
 
       - name: Typecheck target package
-        if: matrix.package != 'findhub-poller'
+        if: matrix.package != 'findhub-poller' && !startsWith(matrix.package, 'run-')
         run: npx tsc --noEmit --project packages/${{ matrix.package }}/tsconfig.json
 
       - name: Build target package
-        if: matrix.package != 'findhub-poller'
+        if: matrix.package != 'findhub-poller' && !startsWith(matrix.package, 'run-')
         run: npm run build --workspace=packages/${{ matrix.package }}
 
       - name: Log in to GHCR
@@ -176,23 +236,30 @@ jobs:
       - name: Determine Dockerfile
         id: dockerfile
         run: |
-          if [[ "${{ matrix.package }}" == "gateway" ]]; then
-            echo "file=docker/Dockerfile.gateway" >> "$GITHUB_OUTPUT"
-            echo "build_args=" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ matrix.package }}" == "findhub-poller" ]]; then
-            echo "file=packages/findhub-poller/Dockerfile" >> "$GITHUB_OUTPUT"
-            echo "build_args=" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ matrix.package }}" == "dashboard" ]]; then
-            echo "file=docker/Dockerfile.dashboard" >> "$GITHUB_OUTPUT"
-            echo "build_args=BUILD_ID=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ matrix.package }}" == "vault" ]]; then
-            # Own Dockerfile: Dockerfile.mcp base + the Bitwarden CLI layer (DECISION-022).
-            echo "file=docker/Dockerfile.vault" >> "$GITHUB_OUTPUT"
-            echo "build_args=" >> "$GITHUB_OUTPUT"
-          else
-            echo "file=docker/Dockerfile.mcp" >> "$GITHUB_OUTPUT"
-            echo "build_args=PACKAGE_NAME=${{ matrix.package }}" >> "$GITHUB_OUTPUT"
-          fi
+          case "${{ matrix.package }}" in
+            gateway)
+              echo "file=docker/Dockerfile.gateway" >> "$GITHUB_OUTPUT"
+              echo "build_args=" >> "$GITHUB_OUTPUT" ;;
+            findhub-poller)
+              echo "file=packages/findhub-poller/Dockerfile" >> "$GITHUB_OUTPUT"
+              echo "build_args=" >> "$GITHUB_OUTPUT" ;;
+            dashboard)
+              echo "file=docker/Dockerfile.dashboard" >> "$GITHUB_OUTPUT"
+              echo "build_args=BUILD_ID=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT" ;;
+            vault)
+              # Own Dockerfile: Dockerfile.mcp base + the Bitwarden CLI layer (DECISION-022).
+              echo "file=docker/Dockerfile.vault" >> "$GITHUB_OUTPUT"
+              echo "build_args=" >> "$GITHUB_OUTPUT" ;;
+            run-claude)
+              echo "file=docker/Dockerfile.ll5-run-claude" >> "$GITHUB_OUTPUT"
+              echo "build_args=" >> "$GITHUB_OUTPUT" ;;
+            run-opencode)
+              echo "file=docker/Dockerfile.ll5-run-opencode" >> "$GITHUB_OUTPUT"
+              echo "build_args=OPENCODE_VERSION=${{ secrets.OPENCODE_VERSION || '1.17.15' }}" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "file=docker/Dockerfile.mcp" >> "$GITHUB_OUTPUT"
+              echo "build_args=PACKAGE_NAME=${{ matrix.package }}" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -210,7 +277,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'repository_dispatch'
     steps:
       - uses: actions/checkout@v4
 
@@ -258,11 +325,19 @@ jobs:
           # Same story as above: Coolify env doesn't reach the on-host .env.
           RABBITMQ_PASSWORD: ${{ secrets.RABBITMQ_PASSWORD }}
           EVOLUTION_GLOBAL_KEY: ${{ secrets.EVOLUTION_GLOBAL_KEY }}
+          # ---- Agent variant (Phase 4/5) ----
+          # Claude Code variant: subscription OAuth token (NOT ANTHROPIC_API_KEY).
+          # The agent's entrypoint writes this to ~/.ll5/token.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # opencode variant: Zen API key for model access.
+          OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+          # Variant selection: "claude" or "opencode". Default: claude.
+          AGENT_VARIANT: ${{ secrets.AGENT_VARIANT || 'claude' }}
         with:
           host: ${{ vars.SERVER_HOST }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES,ELASTIC_PASSWORD,BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD,RABBITMQ_PASSWORD,EVOLUTION_GLOBAL_KEY
+          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES,ELASTIC_PASSWORD,BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD,RABBITMQ_PASSWORD,EVOLUTION_GLOBAL_KEY,CLAUDE_CODE_OAUTH_TOKEN,OPENCODE_ZEN_API_KEY,AGENT_VARIANT
           command_timeout: 15m
           script: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u arnonzamir --password-stdin
@@ -332,6 +407,30 @@ jobs:
             else
               echo "WARN: RABBITMQ_PASSWORD secret empty — WhatsApp queue will run without a broker (inline fallback)"
             fi
+
+            # ===== Inject agent variant env (idempotent) — Phase 4/5 =====
+            # AGENT_VARIANT: selects which agent image to run ("claude" or "opencode").
+            # OPENCODE_SERVER_URL: derived from AGENT_VARIANT — NOT set independently.
+            #   This makes rollback truly single-var: change AGENT_VARIANT, deploy.
+            #   opencode → http://agent:4096 (gateway triggers agent via HTTP)
+            #   claude   → empty (gateway uses PG NOTIFY → channel bridge flow)
+            AGENT_VARIANT="${AGENT_VARIANT:-claude}"
+            if [ "$AGENT_VARIANT" = "opencode" ]; then
+              OPC_URL="http://agent:4096"
+            else
+              OPC_URL=""
+            fi
+            touch .env
+            grep -v -E '^(AGENT_VARIANT|OPENCODE_SERVER_URL|CLAUDE_CODE_OAUTH_TOKEN|OPENCODE_ZEN_API_KEY)=' .env > .env.agent.tmp 2>/dev/null || true
+            mv .env.agent.tmp .env
+            {
+              printf 'AGENT_VARIANT=%s\n' "$AGENT_VARIANT"
+              printf 'OPENCODE_SERVER_URL=%s\n' "$OPC_URL"
+              printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$CLAUDE_CODE_OAUTH_TOKEN"
+              printf 'OPENCODE_ZEN_API_KEY=%s\n' "$OPENCODE_ZEN_API_KEY"
+            } >> .env
+            echo "Injected AGENT_VARIANT=$AGENT_VARIANT OPENCODE_SERVER_URL=$OPC_URL into .env"
+
             # Ensure the dedicated Evolution's database exists (idempotent) before
             # its container runs prisma migrate on boot.
             docker exec postgres-${{ secrets.COOLIFY_SERVICE_UUID }} psql -U "${POSTGRES_USER:-ll5}" -d "${POSTGRES_DB:-ll5}" -tc "SELECT 1 FROM pg_database WHERE datname='evolution'" 2>/dev/null | grep -q 1 \
@@ -342,12 +441,24 @@ jobs:
             for img in gateway dashboard personal-knowledge gtd awareness google messaging health vault; do
               docker pull ghcr.io/arnonzamir/ll5-$img:latest 2>/dev/null || true
             done
+            # Pull the selected agent variant image
+            docker pull ghcr.io/arnonzamir/ll5-run-${AGENT_VARIANT}:latest 2>/dev/null || true
             # NEVER use --remove-orphans here. On 2026-05-18 a --remove-orphans run
             # destroyed 7 manually-started containers that weren't in the compose.
             # The fix was to put every service in the compose so orphans are impossible.
             # If you genuinely need to remove an unwanted container, do it explicitly
             # by name (docker rm <name>) — not via this flag.
             docker compose up -d
+
+            # ===== Agent health check =====
+            sleep 10
+            AGENT_STATUS=$(docker compose ps agent --format json 2>/dev/null | jq -r '.State' 2>/dev/null || echo "unknown")
+            if [ "$AGENT_STATUS" = "running" ]; then
+              echo "Agent container running (variant: $AGENT_VARIANT)"
+            else
+              echo "::error::Agent container not running (status: $AGENT_STATUS, variant: $AGENT_VARIANT)"
+              docker compose logs agent --tail 50 2>/dev/null || true
+            fi
 
       - name: Health check
         run: |

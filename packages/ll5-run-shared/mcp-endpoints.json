@@ -1,0 +1,50 @@
+{
+  "$schema": "https://ll5.dev/mcp-endpoints.schema.json",
+  "baseDomainEnv": "MCP_BASE_DOMAIN",
+  "endpoints": {
+    "personal-knowledge": {
+      "subdomain": "mcp-knowledge",
+      "path": "/mcp",
+      "auth": "agent-token",
+      "correlationIds": true
+    },
+    "gtd": {
+      "subdomain": "mcp-gtd",
+      "path": "/mcp",
+      "auth": "agent-token",
+      "correlationIds": true
+    },
+    "awareness": {
+      "subdomain": "mcp-awareness",
+      "path": "/mcp",
+      "auth": "agent-token",
+      "correlationIds": true
+    },
+    "google": {
+      "subdomain": "mcp-google",
+      "path": "/mcp",
+      "auth": "agent-token",
+      "correlationIds": true
+    },
+    "health": {
+      "subdomain": "mcp-health",
+      "path": "/mcp",
+      "auth": "agent-token",
+      "correlationIds": true
+    },
+    "messaging": {
+      "subdomain": "mcp-messaging",
+      "path": "/mcp",
+      "auth": "agent-token",
+      "correlationIds": true
+    }
+  },
+  "workers": {
+    "reconcile": {
+      "allow": ["gtd", "personal-knowledge", "google", "messaging"]
+    },
+    "narrate": {
+      "allow": ["personal-knowledge", "awareness", "gtd", "google"]
+    }
+  }
+}

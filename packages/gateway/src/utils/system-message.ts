@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { Pool } from 'pg';
+import { triggerAgent, getAgentSessionId } from './agent-trigger.js';
 import { sendFCMNotification } from './fcm-sender.js';
 import { logger } from './logger.js';
 import { recordTickOk, recordTickError } from './scheduler-health.js';
@@ -154,6 +155,43 @@ export async function insertSystemMessage(
       type: notify.type,
       priority: notify.priority,
     });
+  }
+
+  // Agent trigger (dual-run-variant Phase 2): when OPENCODE_SERVER_URL is set
+  // (opencode variant), deliver the prompt to the agent's opencode session via
+  // HTTP. When empty (Claude Code variant), this is a no-op — the existing PG
+  // NOTIFY -> channel bridge flow handles delivery. The trigger is fire-and-
+  // forget: if it fails, the stuck-message-sweep pass A retries it on the next
+  // tick (alongside re-emitting pg_notify for the Claude Code variant).
+  if (messageId && process.env.OPENCODE_SERVER_URL) {
+    void (async () => {
+      try {
+        const sessionId = await getAgentSessionId(pool, userId);
+        if (!sessionId) {
+          logger.warn('[SystemMessage][trigger] No agent session registered — sweep will retry', {
+            userId,
+            messageId,
+          });
+          return;
+        }
+        await triggerAgent(sessionId, {
+          content: fullContent,
+          metadata: {
+            ...(sourceRouting ? { source: sourceRouting } : {}),
+            ...(schedulerEvent ? { scheduler: schedulerEvent } : {}),
+          },
+        });
+      } catch (err) {
+        // Do NOT swallow — log loudly. The row stays pending; the
+        // stuck-message-sweep will re-notify it (triggerAgent + pg_notify)
+        // on the next tick, up to maxRenotifies attempts.
+        logger.warn('[SystemMessage][trigger] Agent trigger failed — sweep will retry', {
+          messageId,
+          userId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
   }
 
   return messageId;

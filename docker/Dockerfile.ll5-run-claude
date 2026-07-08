@@ -1,0 +1,81 @@
+# LL5 Claude Code variant agent image.
+#
+# Build context: ll5 repo root. CI checks out ll5-run-claude-code to
+# variant-content/ before docker build. Shared content (CLAUDE.md, skills,
+# prompts, mcp-endpoints.json) comes from packages/ll5-run-shared/ in ll5.
+#
+# Image tag: ghcr.io/arnonzamir/ll5-run-claude:latest
+#
+# Key design points:
+#   - node:20-slim (Debian/glibc) — Claude Code CLI is exercised on glibc
+#   - tmux: Claude Code requires a PTY for its TUI
+#   - wget: healthcheck probes + render script HTTP checks
+#   - HOME=/data/home: persisted via volume — stores onboarding bypass,
+#     OAuth token, turn-context, posted-ledger
+#   - ll5-server (NOT ll5 launcher): supervisor loop that pre-warms MCPs,
+#     gathers opening context, relaunches claude --continue on autoheal kill
+#   - No EXPOSE: Claude Code has no HTTP server (process-based healthcheck)
+#   - MCP config rendered at build time from shared mcp-endpoints.json
+
+FROM node:20-slim
+
+# Claude Code requires a PTY (tmux) + wget for healthchecks/render script
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      tmux wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI (subscription OAuth, not API key)
+RUN npm install -g @anthropic-ai/claude-code
+
+# tsx for render-mcp-config.ts build step
+RUN npm install -g tsx
+
+WORKDIR /workspace
+
+# ---------- Shared content (from ll5 repo) ----------
+COPY packages/ll5-run-shared/CLAUDE.md /workspace/CLAUDE.md
+COPY packages/ll5-run-shared/skills/ /workspace/.claude/skills/
+COPY packages/ll5-run-shared/prompts/ /workspace/prompts/
+COPY packages/ll5-run-shared/mcp-endpoints.json /workspace/mcp-endpoints.json
+
+# render-mcp-config.ts (from ll5 repo scripts/)
+COPY scripts/render-mcp-config.ts /workspace/scripts/render-mcp-config.ts
+
+# ---------- Variant-specific content (from ll5-run-claude-code repo) ----------
+COPY variant-content/hooks/ /workspace/.claude/hooks/
+COPY variant-content/channel/ /workspace/channel/
+COPY variant-content/scripts/ /workspace/scripts/
+COPY variant-content/ll5-server /workspace/ll5-server
+COPY variant-content/tmux.conf /workspace/tmux.conf
+COPY variant-content/.claude/agents/ /workspace/.claude/agents/
+COPY variant-content/.mcp.reconcile.json /workspace/.mcp.reconcile.json
+COPY variant-content/.mcp.narrate.json /workspace/.mcp.narrate.json
+COPY variant-content/docker-entrypoint.sh /workspace/docker-entrypoint.sh
+COPY variant-content/scripts/get-mcp-auth.sh /workspace/scripts/get-mcp-auth.sh
+
+# ---------- Render MCP config from shared source-of-truth ----------
+# Reads mcp-endpoints.json, emits .claude/settings.json with headersHelper
+# pointing to get-mcp-auth.sh (emits Bearer + correlation-id headers).
+RUN npx tsx /workspace/scripts/render-mcp-config.ts \
+      --config /workspace/mcp-endpoints.json \
+      --format claude \
+      --output /workspace/.claude/settings.json
+
+# ---------- Persistent $HOME ----------
+# Stored on a volume: onboarding bypass (.claude.json), OAuth token
+# (~/.ll5/token), turn-context, posted-ledger, claude.log
+ENV HOME=/data/home
+RUN mkdir -p /data/home/.ll5 /data/home/.claude
+
+# ---------- Permissions ----------
+RUN chmod +x /workspace/ll5-server \
+             /workspace/docker-entrypoint.sh \
+             /workspace/scripts/*.sh \
+             /workspace/scripts/get-mcp-auth.sh
+
+# ---------- Healthcheck: process-based (no HTTP server) ----------
+# The entrypoint writes /workspace/healthcheck.sh on startup with the
+# variant-specific probe. Compose's healthcheck calls it.
+# Claude Code: pgrep claude + pgrep ll5-channel (both must be alive)
+
+ENTRYPOINT ["/workspace/docker-entrypoint.sh"]

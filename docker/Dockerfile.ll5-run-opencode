@@ -1,0 +1,90 @@
+# LL5 opencode variant agent image.
+#
+# Build context: ll5 repo root. CI checks out ll5-run-opencode to
+# variant-content/ before docker build. Shared content comes from
+# packages/ll5-run-shared/ in ll5.
+#
+# Image tag: ghcr.io/arnonzamir/ll5-run-opencode:latest
+#
+# Key design points:
+#   - node:20-slim (Debian/glibc)
+#   - opencode CLI pinned (OPENCODE_VERSION build arg — pinned in Phase 2.5)
+#   - No tmux: opencode runs as an HTTP server, not a TUI
+#   - wget: healthcheck probes
+#   - HOME=/data/home: persisted via volume — opencode state, session data
+#   - EXPOSE 4096: opencode serve port (INTERNAL ONLY — not published in compose)
+#   - MCP config rendered at build time from shared mcp-endpoints.json
+#   - Plugin dependencies installed at build time
+
+# Pinned in Phase 2.5 (P2.5-T1). Update after validating the vertical slice.
+# Do NOT use `latest` — plugin API breaks between minor versions.
+ARG OPENCODE_VERSION=1.17.15
+FROM node:20-slim
+
+ARG OPENCODE_VERSION
+ENV OPENCODE_VERSION=${OPENCODE_VERSION}
+
+# wget for healthchecks + ca-certificates for HTTPS to remote MCPs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# opencode CLI — PINNED VERSION (not latest)
+# Phase 2.5 validates event names + plugin API against this exact version.
+# Bumping requires re-running all Phase 2.5 validations.
+RUN npm install -g opencode-ai@${OPENCODE_VERSION}
+
+# tsx for render-mcp-config.ts + worker scripts
+RUN npm install -g tsx
+
+WORKDIR /workspace
+
+# ---------- Shared content (from ll5 repo) ----------
+COPY packages/ll5-run-shared/CLAUDE.md /workspace/CLAUDE.md
+COPY packages/ll5-run-shared/skills/ /workspace/.claude/skills/
+COPY packages/ll5-run-shared/prompts/ /workspace/prompts/
+COPY packages/ll5-run-shared/mcp-endpoints.json /workspace/mcp-endpoints.json
+
+# render-mcp-config.ts (from ll5 repo scripts/)
+COPY scripts/render-mcp-config.ts /workspace/scripts/render-mcp-config.ts
+
+# ---------- Variant-specific content (from ll5-run-opencode repo) ----------
+COPY variant-content/.opencode/ /workspace/.opencode/
+COPY variant-content/scripts/ /workspace/scripts/
+COPY variant-content/docker-entrypoint.sh /workspace/docker-entrypoint.sh
+
+# ---------- Render MCP config from shared source-of-truth ----------
+# Reads mcp-endpoints.json, emits an MCP-only fragment (NOT the full
+# opencode.json — the variant repo's opencode.json has model/agent/plugin
+# config that must NOT be overwritten). The entrypoint merges this fragment
+# into the variant repo's opencode.json at startup.
+RUN npx tsx /workspace/scripts/render-mcp-config.ts \
+      --format opencode \
+      --config /workspace/mcp-endpoints.json \
+      --output /workspace/opencode-mcp-fragment.json
+
+# ---------- Install plugin dependencies ----------
+# .opencode/package.json lists the opencode SDK + any plugin deps.
+COPY variant-content/.opencode/package.json /workspace/.opencode/package.json
+RUN cd /workspace/.opencode && npm install --production
+
+# ---------- Persistent $HOME ----------
+# Stored on a volume: opencode state, session data, plugin state files
+# (turn-context.json, posted-this-turn.jsonl, channel-health.json)
+ENV HOME=/data/home
+RUN mkdir -p /data/home
+
+# ---------- Permissions ----------
+RUN chmod +x /workspace/docker-entrypoint.sh \
+             /workspace/scripts/*.ts
+
+# ---------- Healthcheck: HTTP-based ----------
+# The entrypoint writes /workspace/healthcheck.sh on startup.
+# opencode: wget /health on port 4096.
+
+# INTERNAL ONLY — compose does NOT publish this port.
+# Gateway reaches the agent via http://agent:4096 on the Docker network.
+EXPOSE 4096
+
+ENTRYPOINT ["/workspace/docker-entrypoint.sh"]
+CMD ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "4096"]

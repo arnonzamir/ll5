@@ -59,6 +59,8 @@ import type { EnvConfig } from './utils/env.js';
 import { getFiringAlerts } from './utils/alerting.js';
 import { logger } from './utils/logger.js';
 import { recordWebhookFailure } from './utils/webhook-stats.js';
+import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 // --- Elasticsearch indices owned by the gateway (infra-level) ---
 // The 7 ll5_awareness_* indices and ll5_knowledge_networks live in @ll5/shared
@@ -636,6 +638,238 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[server][putUserSettings] Failed', { error: message });
       res.status(500).json({ error: message });
+    }
+  });
+
+  // --- Internal endpoints for opencode plugins (dual-run-variant Phase 2) ---
+  //
+  // These thin proxy/helper endpoints are called by the opencode variant's
+  // plugins (session-start, compaction, activity-marker, continuity-probe,
+  // memory-intercept, memory-recall). They forward to existing MCP tools or
+  // aggregate data the plugins can't get via MCP directly. All are
+  // chatAuthMiddleware-gated. Only exercised when OPENCODE_SERVER_URL is set
+  // (opencode variant); harmless no-ops otherwise.
+
+  const INTERNAL_MCP_TIMEOUT_MS = 8000;
+
+  /**
+   * Call an MCP tool server-side, forwarding the caller's bearer token so the
+   * MCP scopes to the right user. Connects per request (cheap; mirrors the
+   * narratives router + MCP health probe). Returns the parsed JSON of the
+   * first text content, or null.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function callMcpTool(
+    baseUrl: string,
+    authHeader: string,
+    tool: string,
+    args: Record<string, unknown>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<any> {
+    const mcpUrl = `${baseUrl.replace(/\/$/, '')}/mcp`;
+    let client: McpClient | null = null;
+    try {
+      const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), {
+        requestInit: { headers: { Authorization: authHeader } },
+      });
+      client = new McpClient({ name: 'll5-gateway-internal', version: '0.1.0' }, { capabilities: {} });
+      await Promise.race([
+        client.connect(transport),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`mcp_timeout_${INTERNAL_MCP_TIMEOUT_MS}ms`)), INTERNAL_MCP_TIMEOUT_MS)),
+      ]);
+      const res = await Promise.race([
+        client.callTool({ name: tool, arguments: args }),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`mcp_timeout_${INTERNAL_MCP_TIMEOUT_MS}ms`)), INTERNAL_MCP_TIMEOUT_MS)),
+      ]);
+      const content = res.content as Array<{ type: string; text?: string }> | undefined;
+      const text = content?.find((c) => c.type === 'text')?.text;
+      return text ? JSON.parse(text) : null;
+    } finally {
+      if (client) await client.close().catch(() => {});
+    }
+  }
+
+  // POST /internal/agent-session — session registration.
+  // The agent container calls this on startup after creating its opencode
+  // session. The gateway stores the session ID so triggerAgent() can route
+  // prompts without a static env var. Workers register with sessionType.
+  app.post('/internal/agent-session', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { sessionId, sessionType = 'main' } = req.body ?? {};
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      res.status(400).json({ error: 'sessionId is required' });
+      return;
+    }
+
+    const validTypes = ['main', 'narrative-loop', 'reconcile-loop'];
+    if (!validTypes.includes(sessionType)) {
+      res.status(400).json({
+        error: `sessionType must be one of: ${validTypes.join(', ')}`,
+      });
+      return;
+    }
+
+    try {
+      if (sessionType === 'main') {
+        // Set both the fast-lookup column AND the JSONB map entry
+        await pgPool.query(
+          `INSERT INTO user_settings (user_id, agent_session_id, agent_sessions, settings, updated_at)
+           VALUES ($1, $2, jsonb_build_object('main', $2), '{}'::jsonb, now())
+           ON CONFLICT (user_id) DO UPDATE SET
+             agent_session_id = EXCLUDED.agent_session_id,
+             agent_sessions = user_settings.agent_sessions
+               || jsonb_build_object('main', EXCLUDED.agent_session_id),
+             updated_at = now()`,
+          [userId, sessionId],
+        );
+      } else {
+        // Only update the JSONB map for worker sessions
+        await pgPool.query(
+          `INSERT INTO user_settings (user_id, agent_sessions, settings, updated_at)
+           VALUES ($1, jsonb_build_object($2::text, $3::text), '{}'::jsonb, now())
+           ON CONFLICT (user_id) DO UPDATE SET
+             agent_sessions = user_settings.agent_sessions
+               || jsonb_build_object($2::text, $3::text),
+             updated_at = now()`,
+          [userId, sessionType, sessionId],
+        );
+      }
+
+      logger.info('[server][agentSession] Registered agent session', {
+        userId,
+        sessionType,
+        sessionId,
+      });
+      res.json({ ok: true, sessionType, sessionId });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][agentSession] Failed to register session', {
+        error: message,
+        userId,
+        sessionType,
+      });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // POST /internal/ingest-memory — forward intercepted write content to the
+  // awareness MCP ingest_memory tool. The memory-intercept plugin can't call
+  // MCP tools directly (it can only call HTTP endpoints), so it calls this.
+  app.post('/internal/ingest-memory', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const auth = req.headers.authorization;
+    if (!auth) { res.status(401).json({ error: 'missing authorization' }); return; }
+    const { raw_content, file_path } = req.body ?? {};
+    if (!raw_content || typeof raw_content !== 'string') {
+      res.status(400).json({ error: 'raw_content is required' });
+      return;
+    }
+    try {
+      const out = await callMcpTool(config.mcpHealthUrls.awareness, auth, 'ingest_memory', {
+        raw_content,
+        file_path: typeof file_path === 'string' ? file_path : undefined,
+      });
+      res.json({ ok: true, result: out });
+    } catch (err) {
+      logger.warn('[server][ingestMemory] Failed', { userId, error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ error: 'ingest_memory failed' });
+    }
+  });
+
+  // GET /internal/regrounding — aggregate re-grounding context for
+  // session-start/compaction plugins: recent_sessions + list_narratives +
+  // recall_lessons. Returns a text block the plugin injects as context.
+  app.get('/internal/regrounding', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const auth = req.headers.authorization;
+    if (!auth) { res.status(401).json({ error: 'missing authorization' }); return; }
+    const query = typeof req.query.q === 'string' ? req.query.q : undefined;
+    try {
+      const [sessions, narratives, lessons] = await Promise.all([
+        callMcpTool(config.mcpHealthUrls.awareness, auth, 'recent_sessions', { days: 7 }).catch(() => null),
+        callMcpTool(config.mcpHealthUrls.knowledge, auth, 'list_narratives', { status: 'active', limit: 20 }).catch(() => null),
+        callMcpTool(config.mcpHealthUrls.awareness, auth, 'recall_lessons', { query }).catch(() => null),
+      ]);
+      res.json({ sessions, narratives, lessons });
+    } catch (err) {
+      logger.warn('[server][regrounding] Failed', { userId, error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ error: 'regrounding aggregation failed' });
+    }
+  });
+
+  // POST /internal/activity — log a lightweight activity marker row to
+  // chat_messages (channel='system', metadata.kind='activity'). Same as the
+  // Claude Code activity-marker.sh hook does via the channel bridge.
+  app.post('/internal/activity', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { text, kind = 'activity' } = req.body ?? {};
+    if (!text || typeof text !== 'string') {
+      res.status(400).json({ error: 'text is required' });
+      return;
+    }
+    try {
+      await pgPool.query(
+        `INSERT INTO chat_messages (user_id, conversation_id, channel, direction, role, content, status, metadata)
+         VALUES ($1, gen_random_uuid(), 'system', 'inbound', 'system', $2, 'delivered', $3)`,
+        [userId, text.slice(0, 1000), JSON.stringify({ kind })],
+      );
+      res.json({ ok: true });
+    } catch (err) {
+      logger.warn('[server][activity] Failed', { userId, error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: 'activity write failed' });
+    }
+  });
+
+  // POST /internal/continuity-probe — report a continuity grade to ll5_app_log.
+  app.post('/internal/continuity-probe', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { grade, detail } = req.body ?? {};
+    if (!grade || typeof grade !== 'string') {
+      res.status(400).json({ error: 'grade is required' });
+      return;
+    }
+    appLog.info('continuity_probe', `grade=${grade}`, {
+      user_id: userId,
+      metadata: { grade, detail: typeof detail === 'string' ? detail.slice(0, 500) : undefined },
+    });
+    res.json({ ok: true });
+  });
+
+  // POST /internal/memory-intercept-log — log an intercept attempt for
+  // debugging (Phase 2.5 only; productionized memory-intercept uses
+  // /internal/ingest-memory in Phase 3).
+  app.post('/internal/memory-intercept-log', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { file_path, reason, matched } = req.body ?? {};
+    appLog.info('memory_intercept', `intercept ${matched ? 'matched' : 'skipped'}: ${reason ?? ''}`, {
+      user_id: userId,
+      metadata: {
+        file_path: typeof file_path === 'string' ? file_path : undefined,
+        reason: typeof reason === 'string' ? reason.slice(0, 300) : undefined,
+        matched: Boolean(matched),
+      },
+    });
+    res.json({ ok: true });
+  });
+
+  // POST /internal/recall-lessons — forward a recall_lessons query to the
+  // awareness MCP. The memory-recall plugin can't call MCP directly.
+  app.post('/internal/recall-lessons', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const auth = req.headers.authorization;
+    if (!auth) { res.status(401).json({ error: 'missing authorization' }); return; }
+    const { query } = req.body ?? {};
+    if (!query || typeof query !== 'string') {
+      res.status(400).json({ error: 'query is required' });
+      return;
+    }
+    try {
+      const out = await callMcpTool(config.mcpHealthUrls.awareness, auth, 'recall_lessons', { query });
+      res.json({ ok: true, result: out });
+    } catch (err) {
+      logger.warn('[server][recallLessons] Failed', { userId, error: err instanceof Error ? err.message : String(err) });
+      res.status(502).json({ error: 'recall_lessons failed' });
     }
   });
 

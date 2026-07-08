@@ -2,6 +2,8 @@
 
 Annotated source tree of the ll5 monorepo. MCP server names use ll5- prefix (ll5-calendar, ll5-messaging) to avoid Claude Code SDK collisions.
 
+**Dual run-variant [2026-07-08]:** ll5 now builds two agent runtime variants. Shared content in `packages/ll5-run-shared/`, variant repos are `ll5-run-claude-code` (renamed from `ll5-run`) and `ll5-run-opencode` (new). Gateway `agent-trigger.ts` is env-driven (no-op for Claude Code, HTTP for opencode). Agent container in compose parameterized by `AGENT_VARIANT`. See `docs/implementation/dual-run-variant-plan.md`.
+
 ---
 
 ```
@@ -10,6 +12,14 @@ ll5/
 ├── package.json                       # npm workspaces root
 ├── tsconfig.json                      # Base TypeScript config
 ├── .env.example                       # All environment variables documented
+├── scripts/
+│   └── render-mcp-config.ts           # Renders mcp-endpoints.json → Claude Code .claude/settings.json or opencode opencode-mcp-fragment.json (--format claude|opencode, --config, --output, --worker)
+│
+├── packages/ll5-run-shared/            # Shared content for both agent variants (dual run-variant Phase 1)
+│   ├── CLAUDE.md                       # Persona, 14 Hard Rules, GTD coaching (moved from ll5-run)
+│   ├── mcp-endpoints.json              # MCP endpoint definitions (source of truth for render script)
+│   ├── skills/                         # 17 SKILL.md files (daily, review, clarify, engage, sweep, plan, etc.)
+│   └── prompts/                        # narrative-loop.md, reconcile-loop.md (worker prompts)
 │
 ├── .github/workflows/
 │   ├── build-and-push.yml            # CI: build changed packages, push to GHCR, deploy via SSH (pulls only GHCR images, never DBs; 15min command_timeout — 5min wasn't enough under host pressure). `detect-changes` diffs the TIP commit only (`HEAD~1..HEAD`): a `shared`/`docker` change rebuilds all 8, but if it sits under a later tip commit it's skipped → stale dependents (partial-deploy trap; force a full rebuild with a docs-only commit or `workflow_dispatch` empty `packages`). Host `docker login` uses non-expiring `GHCR_READ_PAT`, NOT `GITHUB_TOKEN` (the ephemeral `ghs_` token clobbered the shared host cred → recurring GHCR `denied`; fixed 2026-05-22). Also runs `compose-drift-check` in parallel with build — diffs the on-host compose vs `docker/docker-compose.prod.yml` and fails loudly on manual edits (does not block deploy; deploy resyncs from repo).

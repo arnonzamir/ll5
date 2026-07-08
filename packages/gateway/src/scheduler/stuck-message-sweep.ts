@@ -1,5 +1,7 @@
 import type { Pool } from 'pg';
+import { triggerAgent, getAgentSessionId } from '../utils/agent-trigger.js';
 import { logger } from '../utils/logger.js';
+import type { SourceRoutingMeta, SchedulerEventMeta } from '../utils/system-message.js';
 
 interface StuckMessageSweepConfig {
   /** How often to scan. */
@@ -132,6 +134,45 @@ export class StuckMessageSweep {
         attempts: result.rows.map((r) => r.attempt),
         renotifyAfterMinutes,
       });
+      // Agent trigger redelivery (dual-run-variant Phase 2): alongside
+      // pg_notify (which re-notifies the Claude Code channel bridge), also
+      // call triggerAgent for the opencode variant. This is the redelivery
+      // mechanism — if the initial triggerAgent in insertSystemMessage
+      // failed, the sweep retries it here. Fire-and-forget per row; a
+      // failure here just means the next sweep tick tries again (up to
+      // maxRenotifies, after which pass B flips the row to delivered).
+      if (process.env.OPENCODE_SERVER_URL) {
+        for (const row of result.rows) {
+          void (async () => {
+            try {
+              const sessionId = await getAgentSessionId(this.pool, row.user_id);
+              if (!sessionId) return;
+              const meta = row.metadata as Record<string, unknown> | null;
+              const source = meta?.source as SourceRoutingMeta | undefined;
+              const scheduler = meta
+                ? ({
+                    scheduler: meta.scheduler,
+                    event_id: meta.event_id,
+                    fired_at: meta.fired_at,
+                  } as SchedulerEventMeta | undefined)
+                : undefined;
+              await triggerAgent(sessionId, {
+                content: row.content,
+                metadata: {
+                  ...(source ? { source } : {}),
+                  ...(scheduler ? { scheduler } : {}),
+                },
+              });
+            } catch (err) {
+              logger.warn('[StuckMessageSweep][renotify] triggerAgent redelivery failed', {
+                id: row.id,
+                user_id: row.user_id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          })();
+        }
+      }
     }
   }
 
