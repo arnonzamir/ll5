@@ -1729,3 +1729,5 @@ New capability — agent access to photos taken on the phone, matched to day eve
 - gateway env: OPENCODE_SERVER_URL=http://agent:4096, OPENCODE_MODEL_ID=minimax-m3
 - agent container: ssh:2222 + opencode serve:4096, both healthy
 - Old Claude container (js8owk0g0...) stopped and removed.
+
+2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected

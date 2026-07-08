@@ -331,6 +331,10 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # opencode variant: Zen API key for model access.
           OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
+          # Model selection for opencode variant (only used by triggerAgent when
+          # OPENCODE_SERVER_URL is set). Default minimax-m3 (Zen).
+          OPENCODE_MODEL_ID: ${{ vars.OPENCODE_MODEL_ID || 'minimax-m3' }}
+          OPENCODE_PROVIDER_ID: ${{ vars.OPENCODE_PROVIDER_ID || 'opencode' }}
           # Variant selection: "claude" or "opencode". Default: claude.
           AGENT_VARIANT: ${{ secrets.AGENT_VARIANT || 'claude' }}
         with:
@@ -417,19 +421,25 @@ jobs:
             AGENT_VARIANT="${AGENT_VARIANT:-claude}"
             if [ "$AGENT_VARIANT" = "opencode" ]; then
               OPC_URL="http://agent:4096"
+              OPC_MODEL="${OPENCODE_MODEL_ID:-minimax-m3}"
+              OPC_PROVIDER="${OPENCODE_PROVIDER_ID:-opencode}"
             else
               OPC_URL=""
+              OPC_MODEL=""
+              OPC_PROVIDER=""
             fi
             touch .env
-            grep -v -E '^(AGENT_VARIANT|OPENCODE_SERVER_URL|CLAUDE_CODE_OAUTH_TOKEN|OPENCODE_ZEN_API_KEY)=' .env > .env.agent.tmp 2>/dev/null || true
+            grep -v -E '^(AGENT_VARIANT|OPENCODE_SERVER_URL|OPENCODE_MODEL_ID|OPENCODE_PROVIDER_ID|CLAUDE_CODE_OAUTH_TOKEN|OPENCODE_ZEN_API_KEY)=' .env > .env.agent.tmp 2>/dev/null || true
             mv .env.agent.tmp .env
             {
               printf 'AGENT_VARIANT=%s\n' "$AGENT_VARIANT"
               printf 'OPENCODE_SERVER_URL=%s\n' "$OPC_URL"
+              printf 'OPENCODE_MODEL_ID=%s\n' "$OPC_MODEL"
+              printf 'OPENCODE_PROVIDER_ID=%s\n' "$OPC_PROVIDER"
               printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$CLAUDE_CODE_OAUTH_TOKEN"
               printf 'OPENCODE_ZEN_API_KEY=%s\n' "$OPENCODE_ZEN_API_KEY"
             } >> .env
-            echo "Injected AGENT_VARIANT=$AGENT_VARIANT OPENCODE_SERVER_URL=$OPC_URL into .env"
+            echo "Injected AGENT_VARIANT=$AGENT_VARIANT OPENCODE_SERVER_URL=$OPC_URL OPENCODE_MODEL_ID=$OPC_MODEL OPENCODE_PROVIDER_ID=$OPC_PROVIDER into .env"
 
             # Ensure the dedicated Evolution's database exists (idempotent) before
             # its container runs prisma migrate on boot.

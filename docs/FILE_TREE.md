@@ -388,3 +388,6 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 <!-- 2026-07-07 pencil-the-timeline liveness governor: eval_record.py ships pencil_count (create_tickler+create_event/turn); gateway /telemetry/eval-moment whitelist + ll5_eval_moments mapping carry it; anomaly-monitor behavior.pencil_reflex_stalled (staleness on last pencil_count>0 moment, 72h, self-arming range gt:0). -->
 
 2026-07-09: gateway compose now exposes OPENCODE_MODEL_ID (default minimax-m3).
+יום ה׳ יולי 09 2026 00:24:36 IDT: deploy: inject OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID in .env when AGENT_VARIANT=opencode
+
+2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected
