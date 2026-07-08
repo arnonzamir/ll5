@@ -712,14 +712,16 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
 
     try {
       if (sessionType === 'main') {
-        // Set both the fast-lookup column AND the JSONB map entry
+        // Set both the fast-lookup column AND the JSONB map entry.
+        // Cast $2 to text explicitly so pg's parameter type inference works
+        // when $2 is used in multiple positions (column + jsonb_build_object).
         await pgPool.query(
           `INSERT INTO user_settings (user_id, agent_session_id, agent_sessions, settings, updated_at)
-           VALUES ($1, $2, jsonb_build_object('main', $2), '{}'::jsonb, now())
+           VALUES ($1, $2::text, jsonb_build_object('main', $2::text), '{}'::jsonb, now())
            ON CONFLICT (user_id) DO UPDATE SET
              agent_session_id = EXCLUDED.agent_session_id,
              agent_sessions = user_settings.agent_sessions
-               || jsonb_build_object('main', EXCLUDED.agent_session_id),
+               || jsonb_build_object('main', EXCLUDED.agent_session_id::text),
              updated_at = now()`,
           [userId, sessionId],
         );
