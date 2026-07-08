@@ -76,6 +76,16 @@ describe('processPhoneContacts', () => {
     expect(pool.query).not.toHaveBeenCalled();
   });
 
+  it('skips corrupt address-book entries with absurdly long names', async () => {
+    const contacts = [
+      { sender: 'x'.repeat(201), body: '+972544589555' },
+    ];
+
+    const enriched = await processPhoneContacts(pool, 'user-1', contacts);
+    expect(enriched).toBe(0);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
   it('passes display name and phone number to the update', async () => {
     const contacts = [
       { sender: 'Test User', body: '+972544589555' },

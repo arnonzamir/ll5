@@ -1,6 +1,10 @@
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 
+// display_name is VARCHAR(255); real names/group names are far shorter. Anything
+// longer is corrupt address-book data (e.g. spam text saved as a contact name).
+const MAX_DISPLAY_NAME_LENGTH = 200;
+
 /**
  * Normalize a phone number for matching against WhatsApp JIDs.
  * Strips +, spaces, dashes, parens — keeps digits only.
@@ -48,6 +52,12 @@ export async function processPhoneContacts(
     const name = contact.sender?.trim();
     const phone = contact.body?.trim();
     if (!name || !phone) continue;
+
+    // Skip corrupt address-book entries: no real contact or group name is this
+    // long. In practice these are spam/notification text saved as a "name" on the
+    // phone. Guards against enriching real contacts with junk (and against the
+    // display_name column overflow that this used to trigger).
+    if (name.length > MAX_DISPLAY_NAME_LENGTH) continue;
 
     const variants = normalizePhone(phone);
     if (variants.length === 0) continue;

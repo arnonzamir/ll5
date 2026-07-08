@@ -35,7 +35,7 @@ ll5/
 │
 ├── docker/
 │   ├── Dockerfile.mcp                # Shared Dockerfile for all MCP servers (PACKAGE_NAME build arg)
-│   ├── Dockerfile.gateway            # Gateway-specific Dockerfile (copies src/migrations to dist; latest: 039_extend_contact_display_name)
+│   ├── Dockerfile.gateway            # Gateway-specific Dockerfile (copies src/migrations to dist)
 │   ├── Dockerfile.dashboard          # Next.js standalone Dockerfile
 │   ├── Dockerfile.vault              # Vault MCP (DECISION-022): Dockerfile.mcp shape on node:20-slim (glibc for bw) + `npm i -g @bitwarden/cli`; BITWARDENCLI_APPDATA_DIR=/tmp/bw; node-fetch healthcheck (no wget on slim)
 │   ├── docker-compose.yml            # Local dev: ES + PG

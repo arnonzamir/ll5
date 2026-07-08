@@ -282,6 +282,8 @@ If the stack goes down and a redeploy gets "manifest unknown" (image SHA pruned 
 4. The repo's `docker/docker-compose.prod.yml` is authoritative for the 10-service stack (ES + PG + 6 MCPs + gateway + dashboard). CI re-scps it on every deploy from main.
 5. **Do NOT hot-edit the on-host compose file.** CI runs a drift check in two places: a parallel job in `.github/workflows/build-and-push.yml` (every push to main), and a daily scheduled run in `.github/workflows/compose-drift-check.yml` (06:00 UTC). Both scp the host file down, normalize trailing whitespace + comment-only + blank lines, diff against `docker/docker-compose.prod.yml`, and fail loudly on mismatch. If you need a hot patch, commit it to the repo and push — the next deploy resyncs the host. The next deploy will overwrite any manual on-host edit regardless, so the check exists only so you know that's about to happen.
 
+**phone-contact junk names (2026-07-08):** `processPhoneContacts` warns `value too long for type character varying(255)` when a phone address-book entry has a corrupt multi-KB "name" (spam/fraud SMS saved as a contact name). This is **non-fatal** (caught; webhook returns `failed:0`) — not an outage. The fix is the > 200-char skip guard in `processors/phone-contacts.ts`; do NOT widen `messaging_contacts.display_name` (an earlier hotfix did, to TEXT — reverted, since the UPDATE enriches existing rows and TEXT lets junk overwrite real contact names). Column stays VARCHAR(255).
+
 ## Auth
 
 | Item | Value |
