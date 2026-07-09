@@ -21,11 +21,9 @@ The opencode agent runtime is fully operational on the production server. Detail
 7. Missing `channel`/`content`/`direction`/`role` fields in gateway POST calls → updated all tools
 8. Correlation-id proxy crash on `ERR_HTTP_HEADERS_SENT` → `headersSent` guard in catch block
 9. Healthcheck included proxy (optional service) causing false unhealthy → removed proxy from healthcheck
+10. Worker agent `.md` frontmatter overrode model to `anthropic/claude-sonnet-4-20250514` — narrative-loop and reconcile-loop silently produced empty output → fixed to `opencode/deepseek-v4-flash-free`
 
-**Known gaps vs Claude Code variant:** (see docs for full list)
-- Missing `reply` tool (separate from `push_to_user`)
-- `stop-mirror` posts `channel:"web"` instead of `channel:"cli"`
-- Missing `POST /today-card`, `/tray-items`, `/chat/upload` tools
+**Known gaps vs Claude Code variant:** (see docs for full list). 7 of 11 gaps now fixed — see `docs/opencode-variant-deployment.md#known-gaps-vs-claude-code-variant`.
 
 ### Dual run-variant migration — Phases 0-5 complete (2026-07-09)
 Restructured ll5 to support two interchangeable agent runtime variants (Claude Code + opencode). See `docs/implementation/dual-run-variant-plan.md` + `dual-run-MASTER-INDEX.md`.

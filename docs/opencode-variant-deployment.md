@@ -179,6 +179,24 @@ Baked into image:
 - `notification_level` for push_to_user
 - `idempotency_key` for dedup
 
+### 8. Correlation-id proxy crash on `ERR_HTTP_HEADERS_SENT` (2026-07-09)
+
+**Problem:** The proxy's catch block for MCP errors called `res.writeHead()` + `res.end()` without checking `res.headersSent`. When an upstream error also wrote headers, this caused `ERR_HTTP_HEADERS_SENT` → uncaught exception → proxy crash.
+
+**Fix:** Added `if (res.headersSent) return;` guard before `res.writeHead()` in the proxy's catch block.
+
+### 9. Healthcheck includes proxy — false unhealthy (2026-07-09)
+
+**Problem:** The container `HEALTHCHECK` script checked BOTH opencode (port 4096) and the proxy (port 4097). The proxy is an optional sidecar that goes up/down independently, causing false unhealthy status even when the main agent was running.
+
+**Fix:** Removed proxy check from `healthcheck.sh` — only check opencode server port 4096.
+
+### 10. Worker agent model mismatch — `.md` frontmatter overrides correct config (2026-07-09)
+
+**Problem:** `narrative-loop.ts` and `reconcile-loop.ts` run via `client.session.prompt({ agent: "..." })`. The agent `.md` files in `.opencode/agents/` declared `model: anthropic/claude-sonnet-4-20250514` in their YAML frontmatter, which overrode the correct model `opencode/deepseek-v4-flash-free` in `opencode.json`. Workers appeared to run (`[narrative-loop] session ...`, `[narrative-loop] done: {}`) but immediately failed with `ProviderModelNotFoundError` — producing empty output silently.
+
+**Fix:** Changed all three agent `.md` files (`narrative-consolidator`, `reconcile-worker`, `grounding-reviewer`) to use `model: opencode/deepseek-v4-flash-free`, matching `opencode.json`.
+
 ## Troubleshooting
 
 ### Worker scripts fail with `ERR_MODULE_NOT_FOUND`
@@ -223,15 +241,17 @@ The opencode variant is functional but has these gaps compared to the Claude Cod
 
 | Feature | Status | Priority |
 |---------|--------|----------|
-| `reply` tool (separate from `push_to_user`, supports `conversation_id`, marks delivered) | Missing | High |
-| `stop-mirror` posts with `channel: "cli"` + `idempotency_key` (matches Claude variant contract) | Missing | High |
-| `narrate` metadata `kind: "thinking"` (sends `"note"` instead) | Needs fix | Medium |
-| `POST /today-card` — phone Today card | Missing | Medium |
-| `POST /tray-items` — phone decision tray items | Missing | Medium |
-| `POST /chat/upload` — image upload | Missing | Medium |
+| `reply` tool (separate from `push_to_user`, supports `conversation_id`, marks delivered) | Fixed | High |
+| `stop-mirror` posts with `channel: "cli"` + `idempotency_key` (matches Claude variant contract) | Fixed | High |
+| `narrate` metadata `kind: "thinking"` (sends `"note"` instead) | Fixed | Medium |
+| `POST /today-card` — phone Today card | Fixed | Medium |
+| `POST /tray-items` — phone decision tray items | Fixed | Medium |
+| `POST /chat/upload` — image upload | Fixed | Medium |
+| Worker agent model mismatch (`.md` frontmatter used `anthropic/claude-sonnet-4-20250514`, overriding `opencode.json`'s `opencode/deepseek-v4-flash-free`) | Fixed | High |
 | Narration watchdog gateway POST ("Still working..." message) | Missing | Low |
 | MCP probe failure notification | Missing | Low |
 | Tool telemetry (`POST /telemetry/tool-result`) | Missing | Low |
+| Proxy auto-restart loop | Fixed | High |
 | SSE listener for inbound messages | Not needed (opencode native events) | Won't fix |
 
 ## Related Files
