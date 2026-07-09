@@ -23,6 +23,8 @@ The opencode agent runtime is fully operational on the production server. Detail
 9. Healthcheck included proxy (optional service) causing false unhealthy → removed proxy from healthcheck
 10. Worker agent `.md` frontmatter overrode model to `anthropic/claude-sonnet-4-20250514` — narrative-loop and reconcile-loop silently produced empty output → fixed to `opencode/deepseek-v4-flash-free`
 
+**Anomaly monitor fix (2026-07-09):** `loop.reconcile_worker` threshold raised 45m→90m — the opencode variant's worker cadence is ~60min (3520s sleep between cycles), so 45m fired a false alarm on every first sleep gap. 90m catches a double-missed cycle. Also removed a stale `agent` container (15h old Claude variant orphan) on the server.
+
 **Worker tracking UI (2026-07-09):** New `agent_session_heartbeats` JSONB column (migration 040), `GET /me/agent-sessions` endpoint returning agent_session_id, agent_sessions, and per-worker heartbeat timestamps. `POST /internal/agent-session` now records ISO timestamps on every registration call. Dashboard `WorkersCard` component (15s poll) shows 3 workers (Interactive, Narrative, Reconcile) with green/yellow/red live-status dots and last-seen age. Added to the Settings → Agent page.
 
 **Known gaps vs Claude Code variant:** (see docs for full list). 7 of 11 gaps now fixed — see `docs/opencode-variant-deployment.md#known-gaps-vs-claude-code-variant`.

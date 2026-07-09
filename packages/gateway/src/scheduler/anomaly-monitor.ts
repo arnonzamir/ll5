@@ -570,11 +570,13 @@ function buildChecks(): Check[] {
     // no call → the loop (or agent) is dead. Same null-age convention as forward_work_stalled:
     // the tool was NEVER called yet (worker not deployed) → toolCallAgeMinutes returns null →
     // runStaleness returns false → NO alert. Arms itself once the worker first runs.
+    // maxMinutes=90 accommodates the opencode variant's ~60-min cadence (sleep 3520s after each
+    // cycle) while still catching a double-missed cycle.
     {
       kind: 'staleness',
       key: 'loop.reconcile_worker',
       label: 'Reconciliation worker loop',
-      maxMinutes: 45,
+      maxMinutes: 90,
       severity: 'warning',
       suggestion: 'The reconcile worker stopped calling list_reconcile_work — check the reconcile loop / the agent container.',
       ageMinutes: (m) => m.toolCallAgeMinutes('list_reconcile_work'),
