@@ -734,4 +734,4 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 **AGENT_VARIANT fix (2026-07-09):** Production .env had `AGENT_VARIANT=claude` → `OPENCODE_SERVER_URL` was empty → gateway never triggered agent on user messages. Fixed to `opencode`, stack restarted. `AgentTriggerListener` now connected; `prompt_async` returns HTTP 204. POST /alerts endpoint manually deployed via docker cp (lost on container restart until CI passes).
 
-**Next deploy:** CI build #29045339945 — variant checkout passes (token supplied), Dockerfile fix committed. Latest failure: `MCP_BASE_DOMAIN` missing from build args (render-mcp-config.ts requires it). Fixed: added `ARG MCP_BASE_DOMAIN` to both Dockerfiles + build_args in CI workflow. Gateway image with POST /alerts will be deployed on CI success.
+**Next deploy:** CI push-triggered builds exclude variant packages now (they have their own CI repos; GHCR push from ll5 repo gets 403 for packages owned by variant repos). Variant images are pulled from GHCR at deploy time (already built by variant repos' own CI). Gateway image with POST /alerts will be deployed on CI success.

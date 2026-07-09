@@ -41,7 +41,11 @@ jobs:
         run: |
           # findhub-poller disabled 2026-06-03 (Find Hub locate requests were ringing devices)
           # run-claude / run-opencode: agent variants (Phase 4)
-          PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "gateway" "dashboard" "vault" "run-claude" "run-opencode")
+          # Variants are NOT in the default push matrix — they have their own CI in
+          # their own repos. They're only built via workflow_dispatch or repository_dispatch.
+          INFRA_PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "gateway" "dashboard" "vault")
+          VARIANT_PACKAGES=("run-claude" "run-opencode")
+          PACKAGES=("${INFRA_PACKAGES[@]}" "${VARIANT_PACKAGES[@]}")
 
           # On manual dispatch with specific packages, use those
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.packages }}" ]]; then
@@ -64,32 +68,27 @@ jobs:
             PACKAGES=("run-claude" "run-opencode")
           fi
 
-          # On push, check which packages changed (shared changes trigger all)
+          # On push, check which packages changed (shared changes trigger ALL infra)
           if [[ "${{ github.event_name }}" == "push" ]]; then
             CHANGED=$(git diff --name-only HEAD~1 HEAD)
             # packages/shared/ OR packages/ll5-run-shared/ OR docker/ OR
-            # scripts/render-mcp-config.ts → rebuild everything
+            # scripts/render-mcp-config.ts → rebuild all infra packages
             SHARED_CHANGED=$(echo "$CHANGED" | grep -cE "packages/(shared|ll5-run-shared)/" || true)
             DOCKER_CHANGED=$(echo "$CHANGED" | grep -c "docker/" || true)
             RENDER_CHANGED=$(echo "$CHANGED" | grep -c "scripts/render-mcp-config.ts" || true)
 
+            # Variants are never built on push — they have their own CI repos
+            PACKAGES=("${INFRA_PACKAGES[@]}")
+
             if [[ "$SHARED_CHANGED" -eq 0 && "$DOCKER_CHANGED" -eq 0 && "$RENDER_CHANGED" -eq 0 ]]; then
               FILTERED=()
               for pkg in "${PACKAGES[@]}"; do
-                # Infra packages: check packages/$pkg/ directory
-                if [[ "$pkg" != "run-claude" && "$pkg" != "run-opencode" ]]; then
-                  if echo "$CHANGED" | grep -q "packages/$pkg/"; then
-                    FILTERED+=("$pkg")
-                  fi
+                if echo "$CHANGED" | grep -q "packages/$pkg/"; then
+                  FILTERED+=("$pkg")
                 fi
               done
               if [[ ${#FILTERED[@]} -gt 0 ]]; then
                 PACKAGES=("${FILTERED[@]}")
-              else
-                # No infra packages changed and no shared/docker/render changes
-                # → nothing to build (variant packages have no in-repo source
-                # to diff against; they're triggered by repository_dispatch)
-                PACKAGES=()
               fi
             fi
           fi
