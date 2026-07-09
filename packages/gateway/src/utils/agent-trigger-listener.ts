@@ -95,8 +95,13 @@ async function handleNotification(pool: Pool, payloadStr: string) {
       return;
     }
 
+    // Only attach source routing metadata for external channels (WhatsApp,
+    // Telegram, etc). Unified channels (web, android, cli) are user-initiated
+    // turns — the external-authority-gate must NOT block tools on these turns.
+    // System messages (insertSystemMessage) already handle their own metadata.
+    const EXTERNAL_CHANNELS = ['whatsapp', 'telegram', 'slack', 'sms'];
     const metadata: any = {};
-    if (payload.channel || payload.source) {
+    if (payload.channel && EXTERNAL_CHANNELS.includes(payload.channel)) {
       metadata.source = {
         platform: payload.channel,
         ...(payload.source?.remote_jid ? { remote_jid: payload.source.remote_jid } : {}),

@@ -440,13 +440,14 @@ export class AnomalyMonitor {
  */
 function buildChecks(): Check[] {
   return [
-    // FRESHNESS — "did it stop". The narrative loop calls list_narrative_work every
-    // ~20 min; >45 min with no call means the loop (or the agent) is dead.
+    // FRESHNESS — "did it stop". The narrative loop calls list_narrative_work
+    // every ~20 min (Claude Code variant) or ~60 min (opencode variant, sleep 3600s).
+    // maxMinutes=90 accommodates the opencode cadence (catches a double-missed cycle).
     {
       kind: 'staleness',
       key: 'loop.narrative_consolidation',
       label: 'Narrative-maintenance loop',
-      maxMinutes: 45,
+      maxMinutes: 90,
       severity: 'warning',
       suggestion: 'The in-container narrative loop stopped calling list_narrative_work — check scripts/narrative-loop.sh / the agent container.',
       ageMinutes: (m) => m.toolCallAgeMinutes('list_narrative_work'),

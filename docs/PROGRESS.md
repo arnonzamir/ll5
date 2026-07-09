@@ -4,6 +4,21 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — Web/Android tool-block fix + watchdog false-positive fix
+
+**Root cause:** The opencode variant's `agent-trigger-listener` (gateway) tagged ALL inbound messages with `source.platform`, including web/Android. The opencode `turn-context.ts` plugin then set `externally_triggered: true` for any platform, triggering the external-authority-gate (Hard Rule 13). This blocked ALL non-allowlisted tools on web/Android turns — the agent couldn't call `check_mcp_connectivity`, `create_tickler`, `create_wake`, or any state-changing tool from the dashboard. Only WhatsApp/Telegram should trigger Rule 13.
+
+**Fixes (gateway repo):**
+- `agent-trigger-listener.ts`: Only attach source metadata for external channels (whatsapp/telegram/slack/sms). Unified channels (web/android/cli) get no source → `turn-context` treats them as user-initiated → gate stays open.
+- `anomaly-monitor.ts`: `loop.narrative_consolidation` threshold raised 45m→90m (same as `loop.reconcile_worker`). The opencode variant's worker cadence is ~60 min (sleep 3600s); the 45m threshold was designed for Claude Code's ~20-min cadence.
+
+**Fixes (ll5-run-opencode repo):**
+- `turn-context.ts`: Added `UNIFIED_CHANNELS = ['web','android','cli']` — these are user-initiated, `externally_triggered` is only set for contact/group platforms.
+- `external-authority-gate.ts`: Fixed `check_mcp_connectivity` bypass — actual tool name has no `ll5channel__` prefix (plugin tools don't get server prefixes).
+- `stop-mirror.ts`: Fixed gateway contract — was sending `{text, source}` instead of `{channel:'web', content, direction:'outbound', role:'assistant'}`. The stop-mirror has been silently failing since deployment, meaning the agent's fallback reply mechanism was broken. This is why web and Android showed different conversations — `push_to_user` worked but `stop-mirror` never fired as a fallback.
+
+---
+
 ## Current Status
 
 **opencode variant LIVE and working** (2026-07-09). Agent container running at `ghcr.io/arnonzamir/ll5-run-opencode:latest`. Agents responds to chat messages on web + Android + WhatsApp. Workers (reconcile, narrative, continuity-probe) run successfully. MCPs (6/6) connected and healthy. Container healthcheck: healthy. See `docs/opencode-variant-deployment.md` for full deployment history and procedure.

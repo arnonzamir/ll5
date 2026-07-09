@@ -4,6 +4,16 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — Web/Android tool-block fix + stop-mirror fix
+
+**Critical fix:** Web and Android dashboard turns were being treated as "externally triggered" by the opencode external-authority-gate (Hard Rule 13), blocking all non-allowlisted tools. Root cause: `agent-trigger-listener.ts` attached `source.platform='web'` to all inbound messages, and `turn-context.ts` set `externally_triggered=true` for any platform value. Fix: only attach source metadata for external channels (whatsapp/telegram/slack/sms); `turn-context.ts` now exempts unified channels (web/android/cli).
+
+**Stop-mirror fix:** The `stop-mirror.ts` plugin was sending wrong field names to the gateway (`text` instead of `content`, no `channel`/`direction`/`role`). It has been silently failing since deployment. Fix: send proper gateway contract (`channel:'web', content, direction:'outbound', role:'assistant'`). This restores the fallback reply mechanism — the agent's responses now appear in the unified conversation even when `push_to_user` wasn't explicitly called.
+
+**Watchdog threshold fix:** `loop.narrative_consolidation` threshold raised 45m→90m in `anomaly-monitor.ts` to accommodate the opencode variant's ~60-min worker cadence.
+
+---
+
 ## Architecture
 
 **Dual run-variant migration [2026-07-09, UPDATED]:** opencode variant LIVE and fully operational on host. See `docs/opencode-variant-deployment.md` for complete deployment history, architecture, issues resolved, and repeatable deployment procedure. Two interchangeable agent runtime variants: Claude Code (`ll5-run-claude-code` repo) and opencode (`ll5-run-opencode` repo). Shared content (CLAUDE.md, skills, prompts, MCP endpoint definitions) lives in `packages/ll5-run-shared/`. Gateway has env-driven `agent-trigger.ts`. Agent container in `docker/docker-compose.prod.yml` parameterized by `AGENT_VARIANT`. Switching variants = change `AGENT_VARIANT` in `.env`, deploy.
