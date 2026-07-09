@@ -727,3 +727,11 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 **Variant wiring on host (2026-07-08)**: gateway.env now also includes OPENCODE_MODEL_ID=minimax-m3 (composed into prompt_async body to avoid Anthropic fallback).
 
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected
+
+**CI build fix (2026-07-09):**
+- `VARIANT_REPO_READ_PAT` was missing → `actions/checkout@v4` failed "Input required and not supplied: token" when checking out variant repos. Fixed by setting the secret with local `gho_` token (has `repo` scope; works for Git ops). Secret updated: 2026-07-09T15:54:56Z.
+- `docker/Dockerfile.ll5-run-claude` had stale paths: `hooks/` → `.claude/hooks/` (fix) + `tmux.conf` was missing from variant repo → replaced COPY with RUN-generated default.
+
+**AGENT_VARIANT fix (2026-07-09):** Production .env had `AGENT_VARIANT=claude` → `OPENCODE_SERVER_URL` was empty → gateway never triggered agent on user messages. Fixed to `opencode`, stack restarted. `AgentTriggerListener` now connected; `prompt_async` returns HTTP 204. POST /alerts endpoint manually deployed via docker cp (lost on container restart until CI passes).
+
+**Next deploy:** CI rebuild running (build #29031492398, triggered via workflow_dispatch) — run-claude variant checkout now passes (token supplied), Dockerfile fix pending. Gateway image with POST /alerts will be deployed on CI success.

@@ -1753,10 +1753,17 @@ New capability — agent access to photos taken on the phone, matched to day eve
 - Watchdog operates independently of the agent runtime: generates short-lived `ll5.` auth tokens from `AUTH_SECRET` extracted via docker inspect of the gateway container.
 - `docker/ll5-watchdog.service` + `docker/ll5-watchdog.timer` — 5-minute timer, deployed to `/etc/systemd/system/` on production server.
 - Verified: watchdog status, auth token generation, Docker container health detection all working. Full alert → FCM pipeline verified after CI deploy.
+- **2026-07-09 fix:** AGENT_VARIANT was `claude` on production → OPENCODE_SERVER_URL was empty → gateway never triggered agent for user messages. Fixed to `opencode` in .env, stack restarted, prompt_async test passes (HTTP 204).
 
 ## Variant wiring (2026-07-08)
 - gateway env: OPENCODE_SERVER_URL=http://agent:4096, OPENCODE_MODEL_ID=minimax-m3
 - agent container: ssh:2222 + opencode serve:4096, both healthy
 - Old Claude container (js8owk0g0...) stopped and removed.
+
+## CI build fix (2026-07-09)
+- `VARIANT_REPO_READ_PAT` GitHub secret was missing → `actions/checkout@v4` failed with "Input required and not supplied: token" when checking out variant repos (run-claude, run-opencode).
+- Set the secret using local `gho_` token (has `repo` scope, validates for Git operations).
+- Also fixed `docker/Dockerfile.ll5-run-claude`: `hooks/` path was `variant-content/hooks/` but the claude variant repo has it at `.claude/hooks/`; `tmux.conf` was missing from the variant repo entirely — changed to generate a minimal default via `RUN` command.
+- CI rebuild triggered to verify — run-claude build no longer gets past the variant checkout, but `run-opencode` Dockerfile was already correct (no changes needed).
 
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected

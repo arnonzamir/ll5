@@ -42,11 +42,12 @@ COPY packages/ll5-run-shared/mcp-endpoints.json /workspace/mcp-endpoints.json
 COPY scripts/render-mcp-config.ts /workspace/scripts/render-mcp-config.ts
 
 # ---------- Variant-specific content (from ll5-run-claude-code repo) ----------
-COPY variant-content/hooks/ /workspace/.claude/hooks/
+COPY variant-content/.claude/hooks/ /workspace/.claude/hooks/
 COPY variant-content/channel/ /workspace/channel/
 COPY variant-content/scripts/ /workspace/scripts/
 COPY variant-content/ll5-server /workspace/ll5-server
-COPY variant-content/tmux.conf /workspace/tmux.conf
+# tmux.conf must exist in variant repo; if absent, generate a minimal default
+RUN test -f /workspace/tmux.conf || printf 'set -g mouse on\nset -g status off\n' > /workspace/tmux.conf
 COPY variant-content/.claude/agents/ /workspace/.claude/agents/
 COPY variant-content/.mcp.reconcile.json /workspace/.mcp.reconcile.json
 COPY variant-content/.mcp.narrate.json /workspace/.mcp.narrate.json

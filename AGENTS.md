@@ -90,5 +90,5 @@ Read `docs/testing.md` for full standard. Key points:
 
 ## Git conventions
 
-- Only commit/amend/push/PR when explicitly asked
+- After finishing work: auto-commit, push, deploy, and verify. Skip only when specifically told not to, or when there's a clear reason not to (e.g. code doesn't compile, tests failing).
 - `.mcp.json`, `.claude/`, `.env` are gitignored (may hold secrets)
