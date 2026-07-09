@@ -710,31 +710,32 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
       return;
     }
 
+    const ts = new Date().toISOString();
     try {
       if (sessionType === 'main') {
-        // Set both the fast-lookup column AND the JSONB map entry.
-        // Cast $2 to text explicitly so pg's parameter type inference works
-        // when $2 is used in multiple positions (column + jsonb_build_object).
         await pgPool.query(
-          `INSERT INTO user_settings (user_id, agent_session_id, agent_sessions, settings, updated_at)
-           VALUES ($1, $2::text, jsonb_build_object('main', $2::text), '{}'::jsonb, now())
+          `INSERT INTO user_settings (user_id, agent_session_id, agent_sessions, agent_session_heartbeats, settings, updated_at)
+           VALUES ($1, $2::text, jsonb_build_object('main', $2::text), jsonb_build_object('main', $3::text), '{}'::jsonb, now())
            ON CONFLICT (user_id) DO UPDATE SET
              agent_session_id = EXCLUDED.agent_session_id,
              agent_sessions = user_settings.agent_sessions
                || jsonb_build_object('main', EXCLUDED.agent_session_id::text),
+             agent_session_heartbeats = user_settings.agent_session_heartbeats
+               || jsonb_build_object('main', $3::text),
              updated_at = now()`,
-          [userId, sessionId],
+          [userId, sessionId, ts],
         );
       } else {
-        // Only update the JSONB map for worker sessions
         await pgPool.query(
-          `INSERT INTO user_settings (user_id, agent_sessions, settings, updated_at)
-           VALUES ($1, jsonb_build_object($2::text, $3::text), '{}'::jsonb, now())
+          `INSERT INTO user_settings (user_id, agent_sessions, agent_session_heartbeats, settings, updated_at)
+           VALUES ($1, jsonb_build_object($2::text, $4::text), jsonb_build_object($2::text, $3::text), '{}'::jsonb, now())
            ON CONFLICT (user_id) DO UPDATE SET
              agent_sessions = user_settings.agent_sessions
+               || jsonb_build_object($2::text, $4::text),
+             agent_session_heartbeats = user_settings.agent_session_heartbeats
                || jsonb_build_object($2::text, $3::text),
              updated_at = now()`,
-          [userId, sessionType, sessionId],
+          [userId, sessionType, ts, sessionId],
         );
       }
 
@@ -752,6 +753,31 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         sessionType,
       });
       res.status(500).json({ error: message });
+    }
+  });
+
+  // GET /me/agent-sessions — return session IDs + heartbeat timestamps for
+  // the current user's agent workers. Used by the dashboard Workers card.
+  app.get('/me/agent-sessions', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const result = await pgPool.query(
+        `SELECT agent_session_id, agent_sessions, agent_session_heartbeats
+         FROM user_settings WHERE user_id = $1`,
+        [userId],
+      );
+      if (result.rows.length === 0) {
+        res.json({ agent_session_id: null, agent_sessions: {}, agent_session_heartbeats: {} });
+        return;
+      }
+      const row = result.rows[0];
+      res.json({
+        agent_session_id: row.agent_session_id ?? null,
+        agent_sessions: row.agent_sessions ?? {},
+        agent_session_heartbeats: row.agent_session_heartbeats ?? {},
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

@@ -188,6 +188,29 @@ export async function revokeAgentCredential(id: string): Promise<{ ok: boolean }
   }
 }
 
+/* ---------- Agent sessions and workers ---------- */
+
+/** GET /me/agent-sessions — session IDs + heartbeat timestamps for all workers. */
+export async function fetchAgentSessions(): Promise<{
+  agent_session_id: string | null;
+  agent_sessions: Record<string, string>;
+  agent_session_heartbeats: Record<string, string>;
+}> {
+  const headers = await authHeaders();
+  if (!headers) return { agent_session_id: null, agent_sessions: {}, agent_session_heartbeats: {} };
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent-sessions`, {
+      headers,
+      cache: "no-store",
+    });
+    if (!res.ok) return { agent_session_id: null, agent_sessions: {}, agent_session_heartbeats: {} };
+    return (await res.json()) as { agent_session_id: string | null; agent_sessions: Record<string, string>; agent_session_heartbeats: Record<string, string>; };
+  } catch (err) {
+    console.error("[agent] fetchAgentSessions failed:", err instanceof Error ? err.message : String(err));
+    return { agent_session_id: null, agent_sessions: {}, agent_session_heartbeats: {} };
+  }
+}
+
 /* ---------- Hosted agent runtime (self) ---------- */
 
 /** Pull the `{ runtime: {...} }` envelope (or a bare runtime object) out of a

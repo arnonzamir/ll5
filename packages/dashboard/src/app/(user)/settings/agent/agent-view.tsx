@@ -30,6 +30,7 @@ import {
 import { ClaudeKeyForm } from "./claude-key-form";
 import {
   fetchAgentCredentials,
+  fetchAgentSessions,
   fetchLlmCredential,
   fetchRuntime,
   generateConnection,
@@ -109,6 +110,9 @@ export function AgentSettingsView() {
 
       {/* ---- Hosted runtime ---- */}
       <RuntimeSection llmConfigured={llm.configured} />
+
+      {/* ---- Workers ---- */}
+      <WorkersCard />
     </div>
   );
 }
@@ -446,6 +450,93 @@ function OnceShownKit({ kit, onDismiss }: { kit: ConnectionKit; onDismiss: () =>
         I&apos;ve saved it — dismiss
       </Button>
     </div>
+  );
+}
+
+/* ---------- Workers card ---------- */
+
+const WORKER_NAMES: Record<string, string> = {
+  main: "Interactive",
+  "narrative-loop": "Narrative",
+  "reconcile-loop": "Reconcile",
+};
+
+function heartbeatAge(iso: string | undefined): number | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms)) return null;
+  return Math.floor(ms / 1000);
+}
+
+function WorkersCard() {
+  const [sessions, setSessions] = useState<{
+    agent_session_id: string | null;
+    agent_sessions: Record<string, string>;
+    agent_session_heartbeats: Record<string, string>;
+  }>({ agent_session_id: null, agent_sessions: {}, agent_session_heartbeats: {} });
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    const result = await fetchAgentSessions();
+    setSessions(result);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 15000);
+    return () => clearInterval(interval);
+  }, [load]);
+
+  const workerKeys = ["main", "narrative-loop", "reconcile-loop"] as const;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <Server className="h-5 w-5 text-primary" /> Workers
+        </CardTitle>
+        <CardDescription>
+          Background agent workers and their last-seen heartbeats.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-300" />}
+        {!loading && workerKeys.map((key) => {
+          const sessionId = sessions.agent_sessions[key];
+          const heartbeat = sessions.agent_session_heartbeats[key];
+          const age = heartbeatAge(heartbeat);
+          const alive = age !== null && age < 120;
+          const stale = age !== null && age >= 120 && age < 300;
+          const dead = age !== null && age >= 300;
+          return (
+            <div key={key} className="flex items-center gap-3 rounded-md border border-gray-200 bg-white p-3 text-sm">
+              {/* Status dot */}
+              <span
+                className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${
+                  dead ? "bg-red-400" : stale ? "bg-amber-400" : alive ? "bg-green-400" : "bg-gray-300"
+                }`}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{WORKER_NAMES[key] ?? key}</span>
+                  {!sessionId && <span className="text-xs text-gray-400">not registered</span>}
+                </div>
+                {sessionId && (
+                  <div className="mt-0.5 text-xs text-gray-400 font-mono">
+                    {sessionId.slice(0, 16)}…
+                  </div>
+                )}
+              </div>
+              <div className="shrink-0 text-right text-xs text-gray-400">
+                {age !== null && `${age}s ago`}
+                {age === null && "—"}
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 

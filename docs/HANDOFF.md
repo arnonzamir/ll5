@@ -8,6 +8,8 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 **Dual run-variant migration [2026-07-09, UPDATED]:** opencode variant LIVE and fully operational on host. See `docs/opencode-variant-deployment.md` for complete deployment history, architecture, issues resolved, and repeatable deployment procedure. Two interchangeable agent runtime variants: Claude Code (`ll5-run-claude-code` repo) and opencode (`ll5-run-opencode` repo). Shared content (CLAUDE.md, skills, prompts, MCP endpoint definitions) lives in `packages/ll5-run-shared/`. Gateway has env-driven `agent-trigger.ts`. Agent container in `docker/docker-compose.prod.yml` parameterized by `AGENT_VARIANT`. Switching variants = change `AGENT_VARIANT` in `.env`, deploy.
 
+**Worker tracking (2026-07-09):** Gateway `GET /me/agent-sessions` returns `{agent_session_id, agent_sessions, agent_session_heartbeats}` per user. `POST /internal/agent-session` now records heartbeat ISO timestamps in `agent_session_heartbeats` JSONB (migration 040). Dashboard WorkersCard (`agent-view.tsx` WorkersCard) polls every 15s, shows 3 workers with green/yellow/red health dots by age (<2min / <5min / ≥5min). Server action: `fetchAgentSessions` in `agent-server-actions.ts`.
+
 **opencode variant container (2026-07-09):**
 - Image: `ghcr.io/arnonzamir/ll5-run-opencode:latest`
 - Port: 4096 (opencode serve), 4097 (correlation-id proxy)
