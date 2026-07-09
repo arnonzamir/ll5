@@ -6,16 +6,34 @@ Current state of the LL5 personal assistant system.
 
 ## Current Status
 
-**Phase:** Full system operational — 6 MCPs, gateway, dashboard, Android app, agent client. **opencode variant validating on host:** new `agent` container (image `ll5-agent:dev`, port 2222/4096) running; gateway has `OPENCODE_SERVER_URL=http://10.0.9.17:4096`; old Claude Code container stopped. `agent-trigger.ts` now passes `model:{providerID, modelID}` so a fresh session uses `opencode/minimax-m3` (Zen) instead of falling back to Anthropic default. `sessions/ll5.sh`+AGENTS.md document the `ll5 new|logs|restart|stop|exec|shell` commands and Termius wiring.
+**opencode variant LIVE and working** (2026-07-09). Agent container running at `ghcr.io/arnonzamir/ll5-run-opencode:latest`. Agents responds to chat messages on web + Android + WhatsApp. Workers (reconcile, narrative, continuity-probe) run successfully. MCPs (6/6) connected and healthy. See `docs/opencode-variant-deployment.md` for full deployment history and procedure.
 
-### Dual run-variant migration — Phases 0-4 complete (2026-07-08)
+### opencode variant live (2026-07-09) — Phase 5 & 6 complete
+The opencode agent runtime is fully operational on the production server. Detailed history, architecture, issues, and deployment procedure documented in `docs/opencode-variant-deployment.md`.
+
+**Issues encountered and resolved (in order):**
+1. CI workflow repo name mismatch → fixed
+2. Wrong model name (anthropic default) → switched to `opencode/deepseek-v4-flash-free`
+3. Session registration SQL type inference → `::text` casts
+4. `@opencode-ai/sdk` not installed at workspace root → added `npm install` to Dockerfile
+5. Stale workspace Docker volume shadowing new image content → removed from compose, deleted volume
+6. `wget` hangs on keepalive HTTP connections in entrypoint → replaced with `curl --max-time`
+7. Missing `channel`/`content`/`direction`/`role` fields in gateway POST calls → updated all tools
+
+**Known gaps vs Claude Code variant:** (see docs for full list)
+- Missing `reply` tool (separate from `push_to_user`)
+- `stop-mirror` posts `channel:"web"` instead of `channel:"cli"`
+- Missing `POST /today-card`, `/tray-items`, `/chat/upload` tools
+
+### Dual run-variant migration — Phases 0-5 complete (2026-07-09)
 Restructured ll5 to support two interchangeable agent runtime variants (Claude Code + opencode). See `docs/implementation/dual-run-variant-plan.md` + `dual-run-MASTER-INDEX.md`.
 - **Phase 0:** `ll5-run` renamed to `ll5-run-claude-code` on GitHub.
 - **Phase 1:** Shared content (CLAUDE.md, 17 skills, prompts, mcp-endpoints.json) extracted to `packages/ll5-run-shared/`. `scripts/render-mcp-config.ts` renders MCP config for both variants. 21 files created.
-- **Phase 2:** Gateway `agent-trigger.ts` (env-driven no-op/HTTP trigger), migration 039 (`agent_session_id` + `agent_sessions` JSONB), 7 new `/internal/*` endpoints (agent-session, ingest-memory, regrounding, activity, continuity-probe, memory-intercept-log, recall-lessons). `system-message.ts` + `stuck-message-sweep.ts` modified. Tests: 758 passed. Typecheck: clean.
-- **Phase 4:** `Dockerfile.ll5-run-claude` + `Dockerfile.ll5-run-opencode` created. `build-and-push.yml` extended with variant packages (`run-claude`, `run-opencode`), variant repo checkout, repository_dispatch handler. `docker-compose.prod.yml` agent service added (parameterized, no published ports, persistent $HOME, variant-specific volumes, traefik.enable=false).
+- **Phase 2:** Gateway `agent-trigger.ts` (env-driven no-op/HTTP trigger), migration 039 (`agent_session_id` + `agent_sessions` JSONB), 7 new `/internal/*` endpoints (agent-session, ingest-memory, regrounding, activity, continuity-probe, memory-intercept-log, recall-lessons). `system-message.ts` + `stuck-message-sweep.ts` modified.
 - **Phase 3:** `ll5-run-opencode` repo created (35 files: 18 plugins, 3 agent definitions, 7 SDK worker scripts, opencode.json, docker-entrypoint.sh, healthcheck.sh, CI workflow).
-- **Remaining:** Phase 4.5 (standalone→compose transition), Phase 5 (deploy opencode), Phase 6 (switch and use). E2E test on host: agent-session SQL had a `pg type inference` bug when `$2` used twice in the same INSERT (column + jsonb_build_object); fixed with explicit `::text` casts.
+- **Phase 4:** `Dockerfile.ll5-run-claude` + `Dockerfile.ll5-run-opencode` created. `build-and-push.yml` extended. `docker-compose.prod.yml` agent service added.
+- **Phase 5 (deploy opencode):** Image built and pushed, container running, all services healthy.
+- **Phase 6 (switch and use):** Chat working end-to-end; agent responds; workers running.
 
 ### Phone-contact junk-name guard
 Correction of an earlier same-day change. **What actually happened:** `processPhoneContacts` logged `warn`-level "value too long for type character varying(255)" lines when a phone address-book entry had a corrupt 2KB "name" (spam/fraud SMS text saved as a contact name). These were **non-fatal** — caught in try/catch, the webhook still returned `accepted:N, failed:0`; nothing was broken. An earlier hotfix mis-read this as an outage and widened `messaging_contacts.display_name` to TEXT, which is **worse** — it lets that junk *overwrite* real contacts' display names (the UPDATE enriches existing rows). **Correct fix (this change):** skip address-book entries whose name is > 200 chars in `processors/phone-contacts.ts` (`MAX_DISPLAY_NAME_LENGTH`) — no real name/group name is that long — so junk is dropped, not stored, and the column overflow can't happen. Reverted the live column back to VARCHAR(255), deleted the bogus migration 039 + its schema_migrations row. Gateway tests green.

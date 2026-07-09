@@ -2,7 +2,7 @@
 
 Annotated source tree of the ll5 monorepo. MCP server names use ll5- prefix (ll5-calendar, ll5-messaging) to avoid Claude Code SDK collisions.
 
-**Dual run-variant [2026-07-08, UPDATED]:** Phase 6 live-validation in progress. ll5 now builds two agent runtime variants. Shared content in `packages/ll5-run-shared/`, variant repos are `ll5-run-claude-code` (renamed from `ll5-run`) and `ll5-run-opencode` (new). Gateway `agent-trigger.ts` is env-driven (no-op for Claude Code, HTTP for opencode) and now sends `model:{providerID:'opencode', modelID:OPENCODE_MODEL_ID}` (default `minimax-m3`). Agent container in compose parameterized by `AGENT_VARIANT`; host has it set to `opencode` with the new `agent` container running on ssh:2222 / opencode:4096. Old Claude container stopped. `scripts/ll5.sh` wrapper for Termius access to the agent tmux. See `docs/implementation/dual-run-variant-plan.md` + `dual-run-MASTER-INDEX.md`.
+**Dual run-variant [2026-07-09, UPDATED]:** opencode variant LIVE and operational on host (see `docs/opencode-variant-deployment.md`). Two interchangeable agent runtime variants. Gateway `agent-trigger.ts` is env-driven (no-op for Claude Code, HTTP POST for opencode with `model:{providerID:'opencode', modelID:deepseek-v4-flash-free}`). Agent container in compose parameterized by `AGENT_VARIANT` (host: `opencode`). Image: `ghcr.io/arnonzamir/ll5-run-opencode:latest` (self-contained CI build in variant repo).
 
 ---
 
@@ -56,6 +56,7 @@ ll5/
 │   ├── purpose.md                    # Design principles and constraints
 │   ├── PROGRESS.md                   # Current status, recent changes, known issues
 │   ├── HANDOFF.md                    # Everything to continue: server, auth, DBs, deploy
+│   ├── opencode-variant-deployment.md # opencode variant: architecture, deployment, issues, troubleshooting
 │   ├── FILE_TREE.md                  # This file
 │   ├── design/
 │   │   ├── system-architecture.md    # Topology, components, data flows
