@@ -1753,7 +1753,8 @@ New capability — agent access to photos taken on the phone, matched to day eve
 - Watchdog operates independently of the agent runtime: generates short-lived `ll5.` auth tokens from `AUTH_SECRET` extracted via docker inspect of the gateway container.
 - `docker/ll5-watchdog.service` + `docker/ll5-watchdog.timer` — 5-minute timer, deployed to `/etc/systemd/system/` on production server.
 - Verified: watchdog status, auth token generation, Docker container health detection all working. Full alert → FCM pipeline verified after CI deploy.
-- **2026-07-09 fix:** AGENT_VARIANT was `claude` on production → OPENCODE_SERVER_URL was empty → gateway never triggered agent for user messages. Fixed to `opencode` in .env, stack restarted, prompt_async test passes (HTTP 204).
+- **2026-07-09 fix:** AGENT_VARIANT was `claude` on production → OPENCODE_SERVER_URL was empty → gateway never triggered agent for user messages. Fixed to `opencode` in .env, set `AGENT_VARIANT` GitHub secret, stack restarted, prompt_async test passes (HTTP 204).
+- **2026-07-09: Zen API key + DeepSeek v4-pro** — switched from free-tier `opencode/deepseek-v4-flash-free` to paid `opencode/deepseek-v4-pro` via user's Zen API key. Updated opencode.json in `ll5-run-opencode` repo ([3c49258](https://github.com/arnonzamir/ll5-run-opencode/commit/3c49258)), rebuilt image, deployed. Gateway env: `OPENCODE_MODEL_ID=deepseek-v4-pro`, `OPENCODE_PROVIDER_ID=opencode`. API key stored as `OPENCODE_ZEN_API_KEY` GitHub secret.
 
 ## Variant wiring (2026-07-08)
 - gateway env: OPENCODE_SERVER_URL=http://agent:4096, OPENCODE_MODEL_ID=minimax-m3
