@@ -6,7 +6,7 @@ Current state of the LL5 personal assistant system.
 
 ## Current Status
 
-**opencode variant LIVE and working** (2026-07-09). Agent container running at `ghcr.io/arnonzamir/ll5-run-opencode:latest`. Agents responds to chat messages on web + Android + WhatsApp. Workers (reconcile, narrative, continuity-probe) run successfully. MCPs (6/6) connected and healthy. See `docs/opencode-variant-deployment.md` for full deployment history and procedure.
+**opencode variant LIVE and working** (2026-07-09). Agent container running at `ghcr.io/arnonzamir/ll5-run-opencode:latest`. Agents responds to chat messages on web + Android + WhatsApp. Workers (reconcile, narrative, continuity-probe) run successfully. MCPs (6/6) connected and healthy. Container healthcheck: healthy. See `docs/opencode-variant-deployment.md` for full deployment history and procedure.
 
 ### opencode variant live (2026-07-09) — Phase 5 & 6 complete
 The opencode agent runtime is fully operational on the production server. Detailed history, architecture, issues, and deployment procedure documented in `docs/opencode-variant-deployment.md`.
@@ -19,6 +19,8 @@ The opencode agent runtime is fully operational on the production server. Detail
 5. Stale workspace Docker volume shadowing new image content → removed from compose, deleted volume
 6. `wget` hangs on keepalive HTTP connections in entrypoint → replaced with `curl --max-time`
 7. Missing `channel`/`content`/`direction`/`role` fields in gateway POST calls → updated all tools
+8. Correlation-id proxy crash on `ERR_HTTP_HEADERS_SENT` → `headersSent` guard in catch block
+9. Healthcheck included proxy (optional service) causing false unhealthy → removed proxy from healthcheck
 
 **Known gaps vs Claude Code variant:** (see docs for full list)
 - Missing `reply` tool (separate from `push_to_user`)

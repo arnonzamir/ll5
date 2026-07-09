@@ -2,7 +2,7 @@
 
 Annotated source tree of the ll5 monorepo. MCP server names use ll5- prefix (ll5-calendar, ll5-messaging) to avoid Claude Code SDK collisions.
 
-**Dual run-variant [2026-07-09, UPDATED]:** opencode variant LIVE and operational on host (see `docs/opencode-variant-deployment.md`). Two interchangeable agent runtime variants. Gateway `agent-trigger.ts` is env-driven (no-op for Claude Code, HTTP POST for opencode with `model:{providerID:'opencode', modelID:deepseek-v4-flash-free}`). Agent container in compose parameterized by `AGENT_VARIANT` (host: `opencode`). Image: `ghcr.io/arnonzamir/ll5-run-opencode:latest` (self-contained CI build in variant repo).
+**Dual run-variant [2026-07-09, UPDATED]:** opencode variant LIVE and operational on host (see `docs/opencode-variant-deployment.md`). Two interchangeable agent runtime variants (Claude Code + opencode). Gateway `agent-trigger.ts` is env-driven (no-op for Claude Code, HTTP POST for opencode with `model:{providerID:'opencode', modelID:deepseek-v4-flash-free}`). Agent container in compose parameterized by `AGENT_VARIANT` (host: `opencode`). Image: `ghcr.io/arnonzamir/ll5-run-opencode:latest` (self-contained CI build in variant repo). Container healthcheck fixed (proxy excluded), proxy crash fixed (headersSent guard).
 
 ---
 

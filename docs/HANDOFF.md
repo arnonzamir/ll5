@@ -15,6 +15,8 @@ Everything needed to continue working on the LL5 personal assistant system.
 - Provider: Zen API (free tier)
 - Persistent volume: only `agent-home:/data/home` (no workspace volume — content comes from image)
 - CI: Self-contained build in `arnonzamir/ll5-run-opencode` repo, auto-pushes to GHCR on push to main
+- Healthcheck: checks opencode server port 4096 only (proxy optional, excluded)
+- Issues resolved: see `docs/opencode-variant-deployment.md` for full history
 
 **In-progress build [2026-07-07]:** DECISION-025 (active context integration) is design-complete and implementation is starting — reactive grounding (ll5-run Rule 15 rewrite + external-web class), then an off-agent reconciliation `claude -p` worker (locked-down tool surface; `pgrep`-defer so the narrative loop is untouched; deterministic `stakes`-stamp gate → human-confirm on consequential closes) + a governor on the eval spine. Built + tested LOCALLY before any push. See `docs/decisions/DECISION-025-*.md` + `docs/requirements/BRD-active-context-integration.md`. **Phase 1a is committed locally (unpushed):** ll5-run `b1587ac` (Rule 15 + web-grounding); ll5 gateway `open-loops.ts` (D2 read-model). The reactive-grounding piece (Rule 15) is independently deployable + high-value; the gateway pieces (open-loops.ts, reconcile.ts, reconcile-gate.ts, migration 003) are inert until the worker/governor wire them. Continuation brief for finishing DECISION-025: docs/implementation/DECISION-025-continuation.md.
 
