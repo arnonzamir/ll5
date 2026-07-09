@@ -1764,6 +1764,6 @@ New capability — agent access to photos taken on the phone, matched to day eve
 - `VARIANT_REPO_READ_PAT` GitHub secret was missing → `actions/checkout@v4` failed with "Input required and not supplied: token" when checking out variant repos (run-claude, run-opencode).
 - Set the secret using local `gho_` token (has `repo` scope, validates for Git operations).
 - Also fixed `docker/Dockerfile.ll5-run-claude`: `hooks/` path was `variant-content/hooks/` but the claude variant repo has it at `.claude/hooks/`; `tmux.conf` was missing from the variant repo entirely — changed to generate a minimal default via `RUN` command.
-- CI rebuild triggered to verify — run-claude build no longer gets past the variant checkout, but `run-opencode` Dockerfile was already correct (no changes needed).
+- Variant Docker builds also failed because `MCP_BASE_DOMAIN` env var wasn't passed (render-mcp-config.ts requires it). Added `ARG MCP_BASE_DOMAIN` to both Dockerfiles + `build_args` in CI workflow.
 
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected

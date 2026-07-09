@@ -56,6 +56,7 @@ COPY variant-content/docker-entrypoint.sh /workspace/docker-entrypoint.sh
 # MCP endpoints config baked into opencode.json (from variant repo, points at
 # correlation-id proxy 127.0.0.1:4097). Render the shared source-of-truth for
 # reference only — NOT merged (the variant repo's opencode.json is authoritative).
+ARG MCP_BASE_DOMAIN
 RUN npx tsx /workspace/scripts/render-mcp-config.ts \
       --format opencode \
       --config /workspace/mcp-endpoints.json \

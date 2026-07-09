@@ -54,6 +54,8 @@ COPY variant-content/.mcp.narrate.json /workspace/.mcp.narrate.json
 COPY variant-content/docker-entrypoint.sh /workspace/docker-entrypoint.sh
 COPY variant-content/scripts/get-mcp-auth.sh /workspace/scripts/get-mcp-auth.sh
 
+ARG MCP_BASE_DOMAIN
+
 # ---------- Render MCP config from shared source-of-truth ----------
 # Reads mcp-endpoints.json, emits .claude/settings.json with headersHelper
 # pointing to get-mcp-auth.sh (emits Bearer + correlation-id headers).

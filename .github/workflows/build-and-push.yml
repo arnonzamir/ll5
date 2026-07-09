@@ -252,10 +252,13 @@ jobs:
               echo "build_args=" >> "$GITHUB_OUTPUT" ;;
             run-claude)
               echo "file=docker/Dockerfile.ll5-run-claude" >> "$GITHUB_OUTPUT"
-              echo "build_args=" >> "$GITHUB_OUTPUT" ;;
+              echo "build_args=MCP_BASE_DOMAIN=${{ vars.MCP_BASE_DOMAIN || 'noninoni.click' }}" >> "$GITHUB_OUTPUT" ;;
             run-opencode)
               echo "file=docker/Dockerfile.ll5-run-opencode" >> "$GITHUB_OUTPUT"
-              echo "build_args=OPENCODE_VERSION=${{ secrets.OPENCODE_VERSION || '1.17.15' }}" >> "$GITHUB_OUTPUT" ;;
+              echo "build_args<<EOF" >> "$GITHUB_OUTPUT"
+              echo "OPENCODE_VERSION=${{ secrets.OPENCODE_VERSION || '1.17.15' }}" >> "$GITHUB_OUTPUT"
+              echo "MCP_BASE_DOMAIN=${{ vars.MCP_BASE_DOMAIN || 'noninoni.click' }}" >> "$GITHUB_OUTPUT"
+              echo "EOF" >> "$GITHUB_OUTPUT" ;;
             *)
               echo "file=docker/Dockerfile.mcp" >> "$GITHUB_OUTPUT"
               echo "build_args=PACKAGE_NAME=${{ matrix.package }}" >> "$GITHUB_OUTPUT" ;;
