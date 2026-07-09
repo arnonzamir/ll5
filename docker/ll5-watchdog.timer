@@ -1,0 +1,12 @@
+[Unit]
+Description=Run LL5 watchdog every 5 minutes
+Documentation=https://github.com/arnonzamir/ll5
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

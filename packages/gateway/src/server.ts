@@ -56,7 +56,7 @@ import { WhatsAppQueue } from './utils/whatsapp-queue.js';
 import { dispatchEvolutionEvent, type DispatchDeps } from './processors/whatsapp-dispatch.js';
 import { createUploadsRouter, resolveUploadsDir, createPublicUploadsRouter, resolvePublicUploadsDir } from './uploads-route.js';
 import type { EnvConfig } from './utils/env.js';
-import { getFiringAlerts } from './utils/alerting.js';
+import { raiseAlert, getFiringAlerts } from './utils/alerting.js';
 import { logger } from './utils/logger.js';
 import { recordWebhookFailure } from './utils/webhook-stats.js';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
@@ -1499,6 +1499,27 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     } catch (err) {
       logger.error('[GET /alerts] failed', { error: err instanceof Error ? err.message : String(err) });
       res.json({ alerts: [] });
+    }
+  });
+
+  // Raise a system alert (used by external watchdog for agent liveness).
+  app.post('/alerts', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { key, severity, summary, value, expected, suggestion } = req.body as Record<string, string | undefined>;
+    if (!key || !severity || !summary) {
+      res.status(400).json({ error: 'key, severity, and summary are required' });
+      return;
+    }
+    if (severity !== 'warning' && severity !== 'critical') {
+      res.status(400).json({ error: 'severity must be "warning" or "critical"' });
+      return;
+    }
+    try {
+      await raiseAlert(pgPool, { userId, key, severity, summary, value, expected, suggestion });
+      res.json({ ok: true });
+    } catch (err) {
+      logger.error('[POST /alerts] failed', { key, error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: 'Failed to raise alert' });
     }
   });
 

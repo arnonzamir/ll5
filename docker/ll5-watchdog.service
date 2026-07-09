@@ -1,0 +1,38 @@
+[Unit]
+Description=LL5 Agent Watchdog — independent liveness monitor
+Documentation=https://github.com/arnonzamir/ll5
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ll5-watchdog check
+# Gateway public URL
+Environment=LL5_PUBLIC_URL=https://gateway.noninoni.click
+# SMTP via Brevo (already configured for the LL5 stack)
+Environment=SMTP_HOST=smtp-relay.brevo.com
+Environment=SMTP_PORT=587
+# Fill these in after copying:
+# Environment=SMTP_USER=
+# Environment=SMTP_PASS=
+# Environment=ALERT_EMAIL=arnonzamir@gmail.com
+# Environment=SMTP_FROM=LL5 Watchdog <no-reply@noninoni.click>
+# Alert every 3rd consecutive failure (reduces noise on extended downtime)
+Environment=LL5_WATCHDOG_NTH_FAIL=3
+Environment=LL5_WATCHDOG_RECOVERY_MSG=true
+Environment=LL5_WATCHDOG_DATA_DIR=/var/lib/ll5-watchdog
+# Lock file prevents concurrent runs; service will skip if previous still running
+StandardOutput=append:/var/log/ll5-watchdog.log
+StandardError=append:/var/log/ll5-watchdog.log
+
+# Security hardening
+CapabilityBoundingSet=
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+ReadWritePaths=/var/lib/ll5-watchdog /var/log
+
+[Install]
+WantedBy=multi-user.target

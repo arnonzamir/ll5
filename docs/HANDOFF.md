@@ -722,6 +722,8 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 (2026-07-07) Pencil-the-timeline reflex + liveness governor: anomaly-monitor behavior.pencil_reflex_stalled watches pencil_count on ll5_eval_moments (72h, self-arming). Persona rules for full-calendar-union grounding + OOO precedence + pencil-on-LL5-System live. -->
 
+**Agent-liveness watchdog (2026-07-09)**: `docker/agent-watchdog.sh` deployed to `/usr/local/bin/ll5-watchdog`, runs via systemd timer every 5 minutes (`docker/ll5-watchdog.service` + `docker/ll5-watchdog.timer`). Checks agent health via `docker inspect` (primary) → direct HTTP `:4096` (fallback). On failure, raises a system alert via the gateway's new `POST /alerts` endpoint → existing `raiseAlert()` spine → FCM push to phone + [ALERT] system message to agent. The watchdog generates short-lived `ll5.` auth tokens using `AUTH_SECRET` extracted from the gateway container via docker inspect. The `POST /alerts` endpoint (in `gateway/src/server.ts`) accepts `{key, severity, summary, value?, expected?, suggestion?}` and requires Bearer ll5. auth. Alert key used: `service.agent-liveness`. Override conf at `/etc/systemd/system/ll5-watchdog.service.d/override.conf` (currently has SMTP creds from earlier attempt — no longer needed but harmless). State/log in `/var/lib/ll5-watchdog/`.
+
 **Variant wiring on host (2026-07-08)**: gateway.env now also includes OPENCODE_MODEL_ID=minimax-m3 (composed into prompt_async body to avoid Anthropic fallback).
 
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected

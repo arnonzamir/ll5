@@ -1747,6 +1747,13 @@ Agent messages were rendered as raw text, so Markdown tables (`| … |`) and `**
 New capability — agent access to photos taken on the phone, matched to day events. **Reuses the existing media system** (ll5_media + awareness media tools). Gateway side: added `camera_photo` push type (`push-data.ts`) + `processors/camera-photo.ts` → indexes into `ll5_media` (source:camera, with `taken_at` + `lat`/`lon` for event-matching) and posts a concise `[Photo]` system message so the agent can react proactively-but-selectively (decided: full-image upload + proactive-smart). Gated by `data_sources.camera_photos`. Google Photos API is NOT viable (restricted to app-created media since Mar 2025) — on-device MediaStore is the source. Android capture + persona next. 181 tests pass.
 - 2026-07-04: bw CLI pinned 2024.4.1 in Dockerfile.vault (newer CLIs need userDecryptionOptions Vaultwarden doesn't send for --apikey login); vaultwarden Traefik labels renamed vaultwarden-web-* + traefik.docker.network=coolify (ll5-vault name collision had merged its service with the vault MCP's — mcp-vault served Vaultwarden 404s)
 - 2026-07-04: reply/reaction anchoring — WA quoted-reply context extracted (processors/whatsapp-webhook.ts contextInfo → '[replying to: «…»]'), channel resolves reply_to_id/reaction targets to content snippets, new get_message channel tool resolves any message UUID
+## Agent-liveness watchdog (2026-07-09)
+- New `docker/agent-watchdog.sh` — systemd-timer-based watchdog that checks agent health via `docker inspect` (primary) and direct HTTP `:4096` (fallback).
+- Raises system alerts through the gateway's `POST /alerts` endpoint (new) → existing alert spine → FCM push to phone + [ALERT] system message.
+- Watchdog operates independently of the agent runtime: generates short-lived `ll5.` auth tokens from `AUTH_SECRET` extracted via docker inspect of the gateway container.
+- `docker/ll5-watchdog.service` + `docker/ll5-watchdog.timer` — 5-minute timer, deployed to `/etc/systemd/system/` on production server.
+- Verified: watchdog status, auth token generation, Docker container health detection all working. Full alert → FCM pipeline verified after CI deploy.
+
 ## Variant wiring (2026-07-08)
 - gateway env: OPENCODE_SERVER_URL=http://agent:4096, OPENCODE_MODEL_ID=minimax-m3
 - agent container: ssh:2222 + opencode serve:4096, both healthy
