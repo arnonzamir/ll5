@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-11 — Agent page: fuller runtime info
+
+Runtime card now shows a details grid: provider, model, per-tool model overrides, container id (short), host, and last heartbeat — alongside status/actions and the Workers heartbeats. Purely additive.
+
+---
+
 ## 2026-07-11 — Per-user agent-trigger routing (multi-tenant)
 
 The gateway's opencode trigger URL was a single global `OPENCODE_SERVER_URL` — fine for one tenant, but a second tenant's triggers would hit the first tenant's container. Added `resolveAgentBaseUrl(pool, userId)`: a user with a **running** `agent_runtimes` row routes to their deterministic container `http://ll5-agent-<userId>:4096`; otherwise falls back to the global env (shared-agent compose, or a user without a per-user container). `triggerAgent` now takes an optional `baseUrl`; all 3 call sites (system-message, agent-trigger-listener, stuck-message-sweep) resolve + pass it. Claude-variant no-op behavior (empty env → null) preserved. +5 tests. This removes the dependency on the global env flip for routing — arnon now routes to his container via the runtime row regardless of the env value (env remains the fallback).

@@ -94,7 +94,7 @@ export function AgentSettingsView() {
       </Card>
 
       {/* ---- Hosted runtime ---- */}
-      <RuntimeSection llmConfigured={llm.configured} />
+      <RuntimeSection llm={llm} />
 
       {/* ---- Workers ---- */}
       <WorkersCard />
@@ -104,9 +104,19 @@ export function AgentSettingsView() {
 
 /* ---------- Hosted runtime section ---------- */
 
+function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <>
+      <dt className="text-gray-400">{label}</dt>
+      <dd className={`min-w-0 break-words text-gray-700 ${mono ? "font-mono" : ""}`}>{value}</dd>
+    </>
+  );
+}
+
 const POLL_MS = 4000;
 
-function RuntimeSection({ llmConfigured }: { llmConfigured: boolean }) {
+function RuntimeSection({ llm }: { llm: LlmCredentialStatus }) {
+  const llmConfigured = llm.configured;
   const [runtime, setRuntime] = useState<AgentRuntime>({ status: "none" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -187,6 +197,24 @@ function RuntimeSection({ llmConfigured }: { llmConfigured: boolean }) {
           )}
           {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-300" />}
         </div>
+
+        {/* Details grid — full runtime + config info */}
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-xs">
+          <DetailRow label="Provider" value={llm.provider ?? (llm.configured ? "—" : "not set")} />
+          <DetailRow label="Model" value={llm.model ?? "(image default)"} />
+          {llm.model_overrides && Object.keys(llm.model_overrides).length > 0 && (
+            <DetailRow
+              label="Per-tool models"
+              value={Object.entries(llm.model_overrides).map(([s, m]) => `${s}: ${m}`).join(", ")}
+            />
+          )}
+          <DetailRow label="Container" value={runtime.container_id ? runtime.container_id.slice(0, 12) : "—"} mono />
+          <DetailRow label="Host" value={runtime.host ?? "—"} />
+          <DetailRow
+            label="Last heartbeat"
+            value={runtime.last_seen_at ? relativeTime(runtime.last_seen_at) : "—"}
+          />
+        </dl>
 
         {/* Last error (from the runtime, not a UI error) */}
         {runtime.last_error && (
