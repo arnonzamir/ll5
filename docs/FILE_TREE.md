@@ -396,7 +396,7 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-09: gateway compose now exposes OPENCODE_MODEL_ID (default corrected to deepseek-v4-pro on 2026-07-10; PROVIDER_ID typo opencede→opencode fixed).
 2026-07-10: variant→ll5 auto-deploy restored — LL5_DISPATCH_PAT secret set on ll5-run-opencode; trigger-ll5-rebuild now dispatches rebuild-agent to ll5.
 2026-07-10: gateway POST /alerts gained a resolve path ({key,resolved:true} → clearAlert) for the opencode MCP-connectivity probe (raise-on-fail + clear-on-recovery).
-2026-07-10: build-and-push.yml — repository_dispatch is now deploy-only (was rebuilding the variant image → 403); deploy job runs when build is skipped.
+2026-07-10: build-and-push.yml — repository_dispatch is now deploy-only (was rebuilding the variant image → 403); deploy job runs when build is skipped; empty build matrix emits '' (not {"package":[]}) so build skips cleanly.
 יום ה׳ יולי 09 2026 00:24:36 IDT: deploy: inject OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID in .env when AGENT_VARIANT=opencode
 
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected

@@ -97,9 +97,13 @@ jobs:
             fi
           fi
 
-          # Build JSON matrix (empty array if no packages to build)
+          # Build JSON matrix. When there is NOTHING to build (e.g.
+          # repository_dispatch = deploy-only), emit an EMPTY string, not
+          # {"package":[]}: the build job's `if: matrix != ''` then skips it
+          # cleanly. A zero-entry matrix object instead makes the build job fail
+          # ("matrix vector does not contain any values") and blocks deploy.
           if [[ ${#PACKAGES[@]} -eq 0 ]]; then
-            echo "matrix={\"package\":[]}" >> "$GITHUB_OUTPUT"
+            echo "matrix=" >> "$GITHUB_OUTPUT"
           else
             JSON=$(printf '%s\n' "${PACKAGES[@]}" | jq -R . | jq -sc '{package: .}')
             echo "matrix=$JSON" >> "$GITHUB_OUTPUT"
