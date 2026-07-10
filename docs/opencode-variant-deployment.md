@@ -264,9 +264,10 @@ The opencode variant is functional but has these gaps compared to the Claude Cod
 | `POST /chat/upload` — image upload | Fixed | Medium |
 | Worker agent model mismatch (`.md` frontmatter used `anthropic/claude-sonnet-4-20250514`, overriding `opencode.json`'s `opencode/deepseek-v4-flash-free`) | Fixed | High |
 | Model config split-brain + `OPENCODE_PROVIDER_ID` typo (`opencede`) → main session fell back to free `minimax-m3`; single global default now in `opencode.json`, agents inherit (see issue #11) | Fixed | High |
-| Narration watchdog gateway POST ("Still working..." message) | Missing | Low |
-| MCP probe failure notification | Missing | Low |
-| Tool telemetry (`POST /telemetry/tool-result`) | Missing | Low |
+| Narration watchdog gateway POST ("Still on it..." message) | Fixed | Low |
+| MCP probe failure notification (raises/clears `mcp.connectivity` alert) | Fixed | Low |
+| Tool telemetry (`POST /telemetry/tool-result`) | Fixed | Low |
+| MCP probe HTTP 406 (missing `Accept: application/json, text/event-stream`) | Fixed | Low |
 | Proxy auto-restart loop | Fixed | High |
 | SSE listener for inbound messages | Not needed (opencode native events) | Won't fix |
 

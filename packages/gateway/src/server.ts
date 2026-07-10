@@ -56,7 +56,7 @@ import { WhatsAppQueue } from './utils/whatsapp-queue.js';
 import { dispatchEvolutionEvent, type DispatchDeps } from './processors/whatsapp-dispatch.js';
 import { createUploadsRouter, resolveUploadsDir, createPublicUploadsRouter, resolvePublicUploadsDir } from './uploads-route.js';
 import type { EnvConfig } from './utils/env.js';
-import { raiseAlert, getFiringAlerts } from './utils/alerting.js';
+import { raiseAlert, clearAlert, getFiringAlerts } from './utils/alerting.js';
 import { logger } from './utils/logger.js';
 import { recordWebhookFailure } from './utils/webhook-stats.js';
 import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
@@ -1502,12 +1502,30 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
-  // Raise a system alert (used by external watchdog for agent liveness).
+  // Raise (or resolve) a system alert (used by external watchdog for agent
+  // liveness, and by the agent's MCP-connectivity probe). Pass `resolved: true`
+  // with just a `key` to clear a previously-raised alert on recovery — this lets
+  // on-demand probes raise-on-failure + clear-on-recovery idempotently by key.
   app.post('/alerts', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
-    const { key, severity, summary, value, expected, suggestion } = req.body as Record<string, string | undefined>;
-    if (!key || !severity || !summary) {
-      res.status(400).json({ error: 'key, severity, and summary are required' });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const { key, severity, summary, value, expected, suggestion } = body as Record<string, string | undefined>;
+    if (!key) {
+      res.status(400).json({ error: 'key is required' });
+      return;
+    }
+    if (body.resolved === true) {
+      try {
+        await clearAlert(pgPool, userId, key);
+        res.json({ ok: true, cleared: true });
+      } catch (err) {
+        logger.error('[POST /alerts] clear failed', { key, error: err instanceof Error ? err.message : String(err) });
+        res.status(500).json({ error: 'Failed to clear alert' });
+      }
+      return;
+    }
+    if (!severity || !summary) {
+      res.status(400).json({ error: 'severity and summary are required (or pass resolved:true with key)' });
       return;
     }
     if (severity !== 'warning' && severity !== 'critical') {

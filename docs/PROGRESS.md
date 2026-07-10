@@ -4,6 +4,19 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — opencode P2/P3 parity gaps closed (probe 406, watchdog, telemetry)
+
+The four remaining opencode-vs-Claude gaps are fixed (variant `c217d02`, naming corrected in `d5fe585`; gateway side here):
+
+- **MCP probe 406 (P2):** `check_mcp_connectivity` now sends `Accept: application/json, text/event-stream` + full `initialize` params. The header-less probe was 406'd by the streamable-HTTP MCPs → false "down".
+- **Probe failure notification (P3b):** probe raises a keyed `mcp.connectivity` warning alert when any MCP is unreachable and clears it on recovery. Required a gateway change: `POST /alerts` now accepts `{ key, resolved: true }` → `clearAlert(userId, key)`, so on-demand probes can raise-on-failure + clear-on-recovery idempotently.
+- **Narration "Still on it" backstop (P3a):** narration-watchdog arms on chat.message and posts one short narration if >15s pass on a user-waiting turn with no user-facing message.
+- **Tool telemetry (P3c):** new `tool-telemetry.ts` reports channel/plugin tool results to `POST /telemetry/tool-result` (MCP tools already log via the proxy).
+
+Also verified + settled a naming question: **opencode names MCP tools `<server>_<tool>` with a SINGLE underscore** (not `__` like Claude Code) — confirmed from the live permission engine (`permission=awareness_write_journal`). `d5fe585` corrected every `__` reference in the variant (external-authority-gate allowlist, activity-marker, cron-block, opencode.json, agent `.md`s, memory-intercept). The double-underscore mismatch had silently DENIED `note_observation` on external turns since Jul 7 → no observations → `list_narrative_work` empty → 188 narratives untouched for 3 days.
+
+---
+
 ## 2026-07-10 — Restored variant→ll5 auto-deploy (trigger-ll5-rebuild)
 
 The variant repo's `trigger-ll5-rebuild` workflow had been failing (`Parameter token or opts.auth is required`) because the `LL5_DISPATCH_PAT` secret was never set on `arnonzamir/ll5-run-opencode` — so variant-only pushes did NOT auto-redeploy the ll5 stack (manual `docker compose pull agent` was the workaround). Created a classic PAT (`repo`, no expiry), set it as the `LL5_DISPATCH_PAT` secret, and verified: manual `workflow_dispatch` of the trigger succeeded and ll5 received the `repository_dispatch` (`rebuild-agent`, `package: run-opencode`) → auto build+deploy. Full chain restored: variant push → image build → dispatch → ll5 deploy. (ll5 already handled `repository_dispatch: types: [rebuild-agent]` — the PAT was the only missing piece.)
