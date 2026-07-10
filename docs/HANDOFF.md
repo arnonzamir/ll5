@@ -25,8 +25,9 @@ Everything needed to continue working on the LL5 personal assistant system.
 **opencode variant container (2026-07-09):**
 - Image: `ghcr.io/arnonzamir/ll5-run-opencode:latest`
 - Port: 4096 (opencode serve), 4097 (correlation-id proxy)
-- Model: `opencode/deepseek-v4-flash-free`
-- Provider: Zen API (free tier)
+- Model: `opencode/deepseek-v4-pro` (single global default in `opencode.json`; every agent and the main session inherit it unless explicitly overridden)
+- Provider: Zen API (paid tier, `OPENCODE_ZEN_API_KEY`)
+- Model override knobs: global default = `opencode.json` `model`/`small_model`; per-worker = add `model:` to that agent's `.opencode/agents/*.md` (or its `opencode.json` `agent.<name>` entry); per main-session/case = gateway env `OPENCODE_MODEL_ID` + `OPENCODE_PROVIDER_ID` (GitHub repo vars → compose → prompt_async body)
 - Persistent volume: only `agent-home:/data/home` (no workspace volume — content comes from image)
 - CI: Self-contained build in `arnonzamir/ll5-run-opencode` repo, auto-pushes to GHCR on push to main
 - Healthcheck: checks opencode server port 4096 only (proxy optional, excluded)
@@ -734,7 +735,7 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 **Agent-liveness watchdog (2026-07-09)**: `docker/agent-watchdog.sh` deployed to `/usr/local/bin/ll5-watchdog`, runs via systemd timer every 5 minutes (`docker/ll5-watchdog.service` + `docker/ll5-watchdog.timer`). Checks agent health via `docker inspect` (primary) → direct HTTP `:4096` (fallback). On failure, raises a system alert via the gateway's new `POST /alerts` endpoint → existing `raiseAlert()` spine → FCM push to phone + [ALERT] system message to agent. The watchdog generates short-lived `ll5.` auth tokens using `AUTH_SECRET` extracted from the gateway container via docker inspect. The `POST /alerts` endpoint (in `gateway/src/server.ts`) accepts `{key, severity, summary, value?, expected?, suggestion?}` and requires Bearer ll5. auth. Alert key used: `service.agent-liveness`. Override conf at `/etc/systemd/system/ll5-watchdog.service.d/override.conf` (currently has SMTP creds from earlier attempt — no longer needed but harmless). State/log in `/var/lib/ll5-watchdog/`.
 
-**Variant wiring on host (2026-07-08)**: gateway.env now also includes OPENCODE_MODEL_ID=minimax-m3 (composed into prompt_async body to avoid Anthropic fallback).
+**Variant wiring on host (2026-07-08, corrected 2026-07-10)**: gateway.env includes OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID (composed into prompt_async body to set the main session's model). Correct values: `OPENCODE_MODEL_ID=deepseek-v4-pro`, `OPENCODE_PROVIDER_ID=opencode`. NOTE (2026-07-10): the GitHub repo var `OPENCODE_PROVIDER_ID` had been misspelled `opencede` — opencode couldn't resolve the provider and silently fell back to its free built-in (minimax-m3), which is why the main session ran the wrong model. Var fixed; CI/compose defaults corrected from `minimax-m3` to `deepseek-v4-pro`. Takes effect on next deploy (live container keeps the old .env until redeployed).
 
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected
 

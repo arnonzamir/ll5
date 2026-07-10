@@ -334,8 +334,10 @@ jobs:
           # opencode variant: Zen API key for model access.
           OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
           # Model selection for opencode variant (only used by triggerAgent when
-          # OPENCODE_SERVER_URL is set). Default minimax-m3 (Zen).
-          OPENCODE_MODEL_ID: ${{ vars.OPENCODE_MODEL_ID || 'minimax-m3' }}
+          # OPENCODE_SERVER_URL is set). Default deepseek-v4-pro (Zen paid tier).
+          # Set the repo var OPENCODE_MODEL_ID to override the main session's model
+          # per-deployment without a code change; leave unset to inherit the default.
+          OPENCODE_MODEL_ID: ${{ vars.OPENCODE_MODEL_ID || 'deepseek-v4-pro' }}
           OPENCODE_PROVIDER_ID: ${{ vars.OPENCODE_PROVIDER_ID || 'opencode' }}
           # Variant selection: "claude" or "opencode". Default: claude.
           AGENT_VARIANT: ${{ secrets.AGENT_VARIANT || 'claude' }}
@@ -423,7 +425,7 @@ jobs:
             AGENT_VARIANT="${AGENT_VARIANT:-claude}"
             if [ "$AGENT_VARIANT" = "opencode" ]; then
               OPC_URL="http://agent:4096"
-              OPC_MODEL="${OPENCODE_MODEL_ID:-minimax-m3}"
+              OPC_MODEL="${OPENCODE_MODEL_ID:-deepseek-v4-pro}"
               OPC_PROVIDER="${OPENCODE_PROVIDER_ID:-opencode}"
             else
               OPC_URL=""

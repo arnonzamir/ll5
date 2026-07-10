@@ -8,7 +8,9 @@ Two interchangeable agent runtime variants power LL5:
 - **Claude Code** — `arnonzamir/ll5-run-claude-code` (legacy)
 - **opencode** — `arnonzamir/ll5-run-opencode` (current)
 
-The opencode variant replaces Claude Code's proprietary runtime with the open-source [opencode](https://opencode.ai) server, using DeepSeek v4 Flash Free as the LLM provider. Shared content (persona, skills, prompts, MCP endpoints) lives in `packages/ll5-run-shared/` in the main ll5 repo.
+The opencode variant replaces Claude Code's proprietary runtime with the open-source [opencode](https://opencode.ai) server, using DeepSeek v4 Pro (Zen paid tier) as the LLM provider. Shared content (persona, skills, prompts, MCP endpoints) lives in `packages/ll5-run-shared/` in the main ll5 repo.
+
+**Model config (single source of truth):** The global default model is set once, in `opencode.json` top-level `model`/`small_model` = `opencode/deepseek-v4-pro`. Every agent and the main session inherit it. Override tiers: per-worker → add a `model:` line to that agent's `.opencode/agents/*.md`; per main-session/case → gateway env `OPENCODE_MODEL_ID` + `OPENCODE_PROVIDER_ID` (GitHub repo vars). Agent `.md` frontmatter pins NO model by design (a stale pin there once silently overrode `opencode.json`); the frontmatter test enforces this.
 
 ## Architecture
 
@@ -24,7 +26,7 @@ User (Android / Web / WhatsApp)
          │            └────────┬─────────┘
          │                     │
          │            ┌────────▼─────────┐
-         │            │  opencode serve   │──▶ DeepSeek v4 Flash
+         │            │  opencode serve   │──▶ DeepSeek v4 Pro
          │            │  (port 4096)      │    (Zen API)
          │            └────────┬─────────┘
          │                     │
@@ -46,7 +48,7 @@ User (Android / Web / WhatsApp)
 | Aspect | Claude Code | opencode |
 |--------|-------------|----------|
 | **Runtime** | Claude Code CLI (`claude -p`) | `opencode serve` (HTTP API) |
-| **LLM** | Anthropic Claude | DeepSeek v4 Flash Free (via Zen API) |
+| **LLM** | Anthropic Claude | DeepSeek v4 Pro (via Zen API, paid tier) |
 | **Agent trigger** | Subprocess via `claude -p` | HTTP POST to `/session/:id/prompt_async` |
 | **Plugin model** | Shell/Python hooks (PreToolUse, Stop, etc.) | TypeScript plugins via `@opencode-ai/plugin` SDK |
 | **Workers** | `claude -p` subprocess with restricted config | SDK-based `client.session.create()/prompt()` |
@@ -197,6 +199,19 @@ Baked into image:
 
 **Fix:** Changed all three agent `.md` files (`narrative-consolidator`, `reconcile-worker`, `grounding-reviewer`) to use `model: opencode/deepseek-v4-flash-free`, matching `opencode.json`.
 
+### 11. Main session ran the wrong model — provider-var typo + config split-brain (2026-07-10)
+
+**Problem:** The main interactive session ran `minimax-m3` instead of the intended `deepseek-v4-pro`. Two compounding causes:
+1. **Provider typo (root cause):** The GitHub repo var `OPENCODE_PROVIDER_ID` was misspelled `opencede`. The gateway composes `model: { providerID, modelID }` into the `prompt_async` body; opencode couldn't resolve provider `opencede` and silently fell back to its free built-in (`minimax-m3`). `OPENCODE_MODEL_ID` was already correct (`deepseek-v4-pro`).
+2. **Config split-brain:** The model was pinned in 4+ disagreeing places. The 3 agent `.md` frontmatter still said `opencode/deepseek-v4-flash-free` (from issue #10) and — because `.md` frontmatter *overrides* `opencode.json` — workers ran flash-free while `opencode.json` claimed `deepseek-v4-pro`. The frontmatter test asserted the stale value, so CI stayed green on the wrong config.
+
+**Fix (single default, explicit override tiers):**
+- Global default lives once in `opencode.json` `model`/`small_model` = `opencode/deepseek-v4-pro`.
+- Removed the per-agent `model` from all 4 `opencode.json` `agent.*` entries and the 3 `.md` frontmatter → all inherit the global default. Override = add a `model:` line back per agent, or use the gateway env vars for the main session.
+- Rewrote `agent-frontmatter.test.ts` to enforce inherit-by-default (no pinned model) instead of a literal value.
+- Fixed the var `OPENCODE_PROVIDER_ID` `opencede`→`opencode`; corrected the CI + compose fallback defaults `minimax-m3`→`deepseek-v4-pro` so a missing var still resolves correctly.
+- Takes effect on next deploy — the live container keeps its old injected `.env` until redeployed.
+
 ## Troubleshooting
 
 ### Worker scripts fail with `ERR_MODULE_NOT_FOUND`
@@ -248,6 +263,7 @@ The opencode variant is functional but has these gaps compared to the Claude Cod
 | `POST /tray-items` — phone decision tray items | Fixed | Medium |
 | `POST /chat/upload` — image upload | Fixed | Medium |
 | Worker agent model mismatch (`.md` frontmatter used `anthropic/claude-sonnet-4-20250514`, overriding `opencode.json`'s `opencode/deepseek-v4-flash-free`) | Fixed | High |
+| Model config split-brain + `OPENCODE_PROVIDER_ID` typo (`opencede`) → main session fell back to free `minimax-m3`; single global default now in `opencode.json`, agents inherit (see issue #11) | Fixed | High |
 | Narration watchdog gateway POST ("Still working..." message) | Missing | Low |
 | MCP probe failure notification | Missing | Low |
 | Tool telemetry (`POST /telemetry/tool-result`) | Missing | Low |

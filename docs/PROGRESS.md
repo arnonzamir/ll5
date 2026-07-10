@@ -4,6 +4,22 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — opencode model config: single default + provider-typo fix
+
+**Root cause (main session ran wrong model):** The GitHub repo var `OPENCODE_PROVIDER_ID` was misspelled `opencede`. The gateway composes `model: { providerID, modelID }` into the opencode `prompt_async` body; with an unresolvable provider, opencode discarded the model spec and fell back to its free built-in (`minimax-m3`). `OPENCODE_MODEL_ID` itself was already `deepseek-v4-pro`.
+
+**Secondary issue (config split-brain):** The model was pinned in 4+ disagreeing places — `opencode.json` (global + 4 per-agent), the 3 agent `.md` frontmatter (stale `deepseek-v4-flash-free`, which *overrides* `opencode.json`), and the frontmatter test (asserted the stale value, so CI stayed green on the wrong config). Workers ran flash-free while `opencode.json` claimed pro; nothing ran the intended model.
+
+**Fix — one default, explicit override tiers:**
+- **Global default** = `opencode.json` top-level `model`/`small_model` = `opencode/deepseek-v4-pro`. The only place the default lives.
+- Removed the per-agent `model` from all 4 `opencode.json` `agent.*` entries and from the 3 `.opencode/agents/*.md` frontmatter → every agent inherits the global default.
+- **Per-worker override** = add a `model:` line back to that agent's `.md` (or `opencode.json` `agent.<name>`). **Per main-session/case override** = gateway env `OPENCODE_MODEL_ID`/`OPENCODE_PROVIDER_ID`.
+- Rewrote `agent-frontmatter.test.ts` to enforce inherit-by-default (frontmatter pins NO model) instead of locking a literal value.
+- Fixed `OPENCODE_PROVIDER_ID` var `opencede`→`opencode`; changed CI (`build-and-push.yml` ×2) + `docker-compose.prod.yml` fallback defaults `minimax-m3`→`deepseek-v4-pro` so a missing var still resolves correctly.
+- Variant test suite: 28/28 pass. Takes effect on next deploy (live container keeps old `.env` until redeployed).
+
+---
+
 ## 2026-07-10 — Web/Android tool-block fix + watchdog false-positive fix
 
 **Root cause:** The opencode variant's `agent-trigger-listener` (gateway) tagged ALL inbound messages with `source.platform`, including web/Android. The opencode `turn-context.ts` plugin then set `externally_triggered: true` for any platform, triggering the external-authority-gate (Hard Rule 13). This blocked ALL non-allowlisted tools on web/Android turns — the agent couldn't call `check_mcp_connectivity`, `create_tickler`, `create_wake`, or any state-changing tool from the dashboard. Only WhatsApp/Telegram should trigger Rule 13.
@@ -1772,7 +1788,7 @@ New capability — agent access to photos taken on the phone, matched to day eve
 - **2026-07-09: Zen API key + DeepSeek v4-pro** — switched from free-tier `opencode/deepseek-v4-flash-free` to paid `opencode/deepseek-v4-pro` via user's Zen API key. Updated opencode.json in `ll5-run-opencode` repo ([3c49258](https://github.com/arnonzamir/ll5-run-opencode/commit/3c49258)), rebuilt image, deployed. Gateway env: `OPENCODE_MODEL_ID=deepseek-v4-pro`, `OPENCODE_PROVIDER_ID=opencode`. API key stored as `OPENCODE_ZEN_API_KEY` GitHub secret.
 
 ## Variant wiring (2026-07-08)
-- gateway env: OPENCODE_SERVER_URL=http://agent:4096, OPENCODE_MODEL_ID=minimax-m3
+- gateway env: OPENCODE_SERVER_URL=http://agent:4096, OPENCODE_MODEL_ID=deepseek-v4-pro, OPENCODE_PROVIDER_ID=opencode
 - agent container: ssh:2222 + opencode serve:4096, both healthy
 - Old Claude container (js8owk0g0...) stopped and removed.
 

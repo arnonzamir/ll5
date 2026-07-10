@@ -437,9 +437,9 @@ services:
       #   claude   → empty (gateway uses PG NOTIFY → channel bridge flow)
       OPENCODE_SERVER_URL: ${OPENCODE_SERVER_URL:-}
       # Opencode model selection (only used when OPENCODE_SERVER_URL is set).
-      # Empty = opencode default (Anthropic fallback); filled in by deploy from
-      # AGENT_VARIANT. Default value matches the parent repo (Zen minimax-m3).
-      OPENCODE_MODEL_ID: ${OPENCODE_MODEL_ID:-minimax-m3}
+      # Empty = opencode.json default; filled in by deploy from AGENT_VARIANT.
+      # Default deepseek-v4-pro matches opencode.json's global default (Zen paid).
+      OPENCODE_MODEL_ID: ${OPENCODE_MODEL_ID:-deepseek-v4-pro}
       OPENCODE_PROVIDER_ID: ${OPENCODE_PROVIDER_ID:-opencode}
       # Agent-orchestrator service (separate). Optional — empty disables the
       # runtime-control plane with a clear "runtime not configured" error.

@@ -70,9 +70,12 @@ export async function triggerAgent(
     parts: [{ type: 'text', text: payload.content }],
   };
 
-  // Pick the model from the opencode variant's configured provider/model env
-  // vars so a fresh opencode session doesn't fall back to its built-in default
-  // (claude-sonnet-4-20250514). Format: "opencode/minimax-m3" -> models live at
+  // Pick the model for the main session from the opencode variant's configured
+  // provider/model env vars. This is the per-case override knob: OPENCODE_MODEL_ID
+  // overrides opencode.json's global default for THIS session only. Deploy default
+  // is "deepseek-v4-pro" (see build-and-push.yml / docker-compose.prod.yml); leave
+  // the env unset to inherit opencode.json's default instead of injecting per-turn.
+  // Format: providerID="opencode", modelID="deepseek-v4-pro" -> models live at
   // opencode.ai/zen/v1/models for the `opencode` provider.
   const modelId = process.env.OPENCODE_MODEL_ID;
   const providerId = process.env.OPENCODE_PROVIDER_ID ?? 'opencode';
