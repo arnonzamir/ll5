@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-11 — Fix: opencode container heartbeat + routing on error
+
+Enabling the console exposed two pre-existing gaps: (1) the opencode container never sent heartbeats, so `agent_runtimes` drifted to `error/heartbeat_stale`; (2) `resolveAgentBaseUrl` only routed to the per-user container on `status='running'`, so an error status fell back to the global `OPENCODE_SERVER_URL` (a stopped shared agent) — breaking the user's triggers. Fixes: opencode entrypoint now runs a 60s heartbeat loop (`POST /me/agent/heartbeat`); `resolveAgentBaseUrl` routes to the per-user container for `running|provisioning|error` (a lagging heartbeat no longer misroutes), falling back to global only when the row is absent or `stopped`.
+
+---
+
 ## 2026-07-11 — Per-user opencode web console (flag-gated, DECISION-026)
 
 Built the per-user console: opencode's web UI at `agent-<uid>.<CONSOLE_DOMAIN_BASE>` (Traefik labels stamped by the orchestrator), gated by the tenant LL5 token via a `forwardAuth` handshake (`/me/agent/console/enter` mints a console token → cookie validated by `/internal/console-auth`). Dashboard "Open console" button (shown when running). **OFF until `CONSOLE_DOMAIN_BASE` is set** — gateway returns 503, orchestrator emits no labels. Also confirmed the tenant LL5 token already scopes 100% of MCP + tool calls (proxy injects it on every MCP request; every gw()/plugin call sends it). Follow-up: `OPENCODE_SERVER_PASSWORD` for internal defense-in-depth; verify Traefik picks up labels on the non-Coolify orchestrator containers before enabling.

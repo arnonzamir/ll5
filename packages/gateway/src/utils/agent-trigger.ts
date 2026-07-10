@@ -45,7 +45,15 @@ export async function resolveAgentBaseUrl(pool: Pool, userId: string): Promise<s
       'SELECT status FROM agent_runtimes WHERE user_id = $1',
       [userId],
     );
-    if (res.rows[0]?.status === 'running') {
+    const status = res.rows[0]?.status;
+    // A user who has provisioned a per-user container routes to it whenever the
+    // container is meant to be up. We include 'error' because the opencode
+    // heartbeat can lag (a fresh/among-restart container is marked stale→error
+    // before its first heartbeat) — the container is still the right target, and
+    // a failed trigger just retries via the sweep. Only a genuinely absent row or
+    // a user-'stopped' container falls back to the global URL (shared-agent
+    // deployment, which has no agent_runtimes row at all).
+    if (status === 'running' || status === 'provisioning' || status === 'error') {
       // Deterministic per-user container name (see agent-orchestrator
       // docker-runtime: `ll5-agent-${userId}`), DNS-resolvable on the network.
       return `http://ll5-agent-${userId}:4096`;

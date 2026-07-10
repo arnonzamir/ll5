@@ -415,3 +415,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-11: agent-view.tsx runtime card — details grid (provider/model/per-tool overrides/container/host/heartbeat) via DetailRow; RuntimeSection now takes full llm status.
 
 2026-07-11: per-user opencode console (DECISION-026, flag-gated) — orchestrator console-labels.ts (Traefik agent-<uid>.<base> + forwardAuth); gateway console.ts (console token + /me/agent/console/enter + /internal/console-auth); dashboard Open-console button; CONSOLE_DOMAIN_BASE in compose (empty=off).
+
+2026-07-11: fix opencode heartbeat gap — entrypoint 60s POST /me/agent/heartbeat loop; gateway resolveAgentBaseUrl routes to container on running|provisioning|error (not just running).

@@ -180,15 +180,17 @@ describe('agent-trigger (dual-run-variant Phase 2)', () => {
     expect(url).toBeNull();
   });
 
-  it('resolveAgentBaseUrl routes to the per-user container when the runtime is running', async () => {
+  it('resolveAgentBaseUrl routes to the per-user container for running/provisioning/error', async () => {
     process.env.OPENCODE_SERVER_URL = 'http://agent:4096';
-    const url = await resolveAgentBaseUrl(mockPool([{ status: 'running' }]), 'user-abc');
-    expect(url).toBe('http://ll5-agent-user-abc:4096');
+    for (const status of ['running', 'provisioning', 'error']) {
+      const url = await resolveAgentBaseUrl(mockPool([{ status }]), 'user-abc');
+      expect(url).toBe('http://ll5-agent-user-abc:4096');
+    }
   });
 
-  it('resolveAgentBaseUrl falls back to the global URL when no running container', async () => {
+  it('resolveAgentBaseUrl falls back to the global URL when no row or stopped', async () => {
     process.env.OPENCODE_SERVER_URL = 'http://agent:4096';
-    expect(await resolveAgentBaseUrl(mockPool([{ status: 'error' }]), 'u1')).toBe('http://agent:4096');
+    expect(await resolveAgentBaseUrl(mockPool([{ status: 'stopped' }]), 'u1')).toBe('http://agent:4096');
     expect(await resolveAgentBaseUrl(mockPool([]), 'u2')).toBe('http://agent:4096');
   });
 
