@@ -4,6 +4,17 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — Tenant-level agent LLM config (provider/model/key) + user UI
+
+Made the agent's LLM config **per-tenant** and user-configurable, extending the existing BYO-key provisioning scaffold (which was Claude-key-only):
+- **Schema** (041): `agent_llm_credentials` gains `provider` (anthropic|opencode), `model`, `base_url`.
+- **Orchestrator**: `loadCredential` reads the full row; the per-user 0600 env-file now writes provider-specific keys — opencode → `AGENT_VARIANT=opencode` + `OPENCODE_ZEN_API_KEY`/`OPENCODE_MODEL_ID`/`OPENCODE_PROVIDER_ID`/`OPENCODE_SERVER_URL`; anthropic → `ANTHROPIC_API_KEY`. Per-provider image via `imagesByProvider` (`AGENT_IMAGE_OPENCODE` env). 25 tests.
+- **Gateway** `agent.ts`: `PUT/GET /me/agent/llm-credential` now carry `provider`/`model`/`base_url` with per-provider key + model-catalog validation; new `GET /me/agent/models`. 21 tests.
+- **Dashboard** `(user)/settings/agent`: provider selector + model dropdown + provider-aware key form (fetches the catalog). 21 tests, typecheck clean.
+- **Deployment note:** this wires the ORCHESTRATOR (per-user container) path. The current live deployment is still the single shared compose agent with global env; cutover to orchestrator-per-user is a separate operational step.
+
+---
+
 ## 2026-07-10 — INCIDENT: Zen $62 spend cap → agent dark; switched to free tier
 
 The opencode agent went fully dark ~12:36Z — 0-token workers, 0 journals/narratives/observations, no eval moments, all 3 liveness alerts firing. **Root cause = billing, not code:** the Zen workspace hit its `$62/month` spending limit → `deepseek-v4-pro` refused on every model call (`AI_APICallError: ... monthly spending limit of $62`). All the session's code fixes were correct and deployed; the agent simply couldn't call its model. Diagnose: `docker logs agent-xkkcc… | grep "spending limit"`.

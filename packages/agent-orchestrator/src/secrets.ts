@@ -11,18 +11,31 @@ import path from 'node:path';
  * `ps`/`docker inspect`). NEVER log the values.
  *
  * --- ORCHESTRATOR ⇄ BASE-IMAGE CONTRACT ---
- * The env-file contains exactly these keys (KEY=value, one per line):
- *   LL5_USER_ID, LL5_AGENT_TOKEN, ANTHROPIC_API_KEY, LL5_GATEWAY_URL, MCP_BASE_DOMAIN
+ * Common keys (always written): LL5_USER_ID, LL5_AGENT_TOKEN, LL5_GATEWAY_URL,
+ * MCP_BASE_DOMAIN, AGENT_VARIANT.
+ * Provider-specific keys:
+ *   anthropic → ANTHROPIC_API_KEY
+ *   opencode  → OPENCODE_ZEN_API_KEY, OPENCODE_MODEL_ID, OPENCODE_PROVIDER_ID,
+ *               and OPENCODE_SERVER_URL when a base_url is set.
  * Mounted read-only at the path the orchestrator passes as LL5_AGENT_ENV_FILE
  * (default /run/ll5/agent.env). The entrypoint MUST `set -a; . "$file"; set +a`
- * before launching Claude Code so the credential never appears in argv.
+ * before launching the agent so the credential never appears in argv.
  */
+export type AgentProvider = 'anthropic' | 'opencode';
+
 export interface SecretEnv {
   userId: string;
   agentToken: string;
-  anthropicApiKey: string;
+  /** The user's decrypted provider API key (Anthropic key or Zen/opencode key). */
+  apiKey: string;
   gatewayUrl: string;
   mcpBaseDomain: string;
+  /** Which runtime variant this user's container runs. */
+  provider: AgentProvider;
+  /** Per-tenant model id (e.g. "deepseek-v4-flash-free"). Optional → image default. */
+  model?: string | null;
+  /** opencode server URL / provider base. Optional → image default. */
+  baseUrl?: string | null;
 }
 
 export interface SecretsWriterOptions {
@@ -59,14 +72,23 @@ export class SecretsWriter {
   async write(env: SecretEnv): Promise<string> {
     await mkdir(this.dir, { recursive: true, mode: 0o700 });
     const target = this.hostPathFor(env.userId);
+    const variant = env.provider === 'opencode' ? 'opencode' : 'claude';
     const lines = [
       `LL5_USER_ID=${escapeValue(env.userId)}`,
       `LL5_AGENT_TOKEN=${escapeValue(env.agentToken)}`,
-      `ANTHROPIC_API_KEY=${escapeValue(env.anthropicApiKey)}`,
       `LL5_GATEWAY_URL=${escapeValue(env.gatewayUrl)}`,
       `MCP_BASE_DOMAIN=${escapeValue(env.mcpBaseDomain)}`,
-      '',
+      `AGENT_VARIANT=${escapeValue(variant)}`,
     ];
+    if (env.provider === 'opencode') {
+      lines.push(`OPENCODE_ZEN_API_KEY=${escapeValue(env.apiKey)}`);
+      lines.push(`OPENCODE_PROVIDER_ID=${escapeValue('opencode')}`);
+      if (env.model) lines.push(`OPENCODE_MODEL_ID=${escapeValue(env.model)}`);
+      if (env.baseUrl) lines.push(`OPENCODE_SERVER_URL=${escapeValue(env.baseUrl)}`);
+    } else {
+      lines.push(`ANTHROPIC_API_KEY=${escapeValue(env.apiKey)}`);
+    }
+    lines.push('');
     await writeFile(target, lines.join('\n'), { mode: 0o600, encoding: 'utf8' });
     await chmod(target, 0o600);
     return target;

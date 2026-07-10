@@ -72,6 +72,30 @@ function looksLikeAnthropicKey(key: string): boolean {
   );
 }
 
+// Per-provider agent LLM config: which key format is accepted and the models
+// the UI offers. Keep model lists conservative + curated (not the full catalog).
+export const PROVIDERS = ['anthropic', 'opencode'] as const;
+export type AgentLlmProvider = (typeof PROVIDERS)[number];
+
+export const MODEL_CATALOG: Record<AgentLlmProvider, { label: string; models: string[] }> = {
+  anthropic: {
+    label: 'Claude (Anthropic)',
+    models: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'],
+  },
+  opencode: {
+    label: 'opencode (Zen)',
+    models: ['deepseek-v4-flash-free', 'deepseek-v4-pro', 'minimax-m3'],
+  },
+};
+
+/** Validate a key for the given provider without logging it. */
+function keyValidForProvider(provider: AgentLlmProvider, key: string): boolean {
+  if (typeof key !== 'string' || key.length < 8 || key.length > 400) return false;
+  if (provider === 'anthropic') return looksLikeAnthropicKey(key);
+  // opencode/Zen keys have no fixed public prefix — accept any non-trivial token.
+  return provider === 'opencode';
+}
+
 /**
  * Mint a fresh 90-day agent token for `userId`/`role` and record it (hash only)
  * in agent_credentials. Returns the raw token (caller must not store/log it
@@ -264,14 +288,44 @@ export function createAgentRouter(
 
   // PUT /me/agent/llm-credential — store the user's BYO Anthropic API key,
   // encrypted at rest. Validates the prefix; NEVER logs or returns the key.
+  // GET /me/agent/models — provider + model catalog for the settings UI.
+  router.get('/me/agent/models', authMw, async (_req: Request, res: Response) => {
+    res.json({
+      providers: PROVIDERS.map((p) => ({
+        provider: p,
+        label: MODEL_CATALOG[p].label,
+        models: MODEL_CATALOG[p].models,
+      })),
+    });
+  });
+
   router.put('/me/agent/llm-credential', authMw, async (req: Request, res: Response) => {
     const userId = (req as Request & { userId: string }).userId;
-    const { api_key } = (req.body ?? {}) as { api_key?: string };
+    const body = (req.body ?? {}) as {
+      api_key?: string; provider?: string; model?: string; base_url?: string;
+    };
+    const api_key = body.api_key;
+    // Back-compat: default to anthropic (the old key-only contract).
+    const provider = (body.provider ?? 'anthropic') as AgentLlmProvider;
 
-    if (!api_key || typeof api_key !== 'string' || !looksLikeAnthropicKey(api_key)) {
-      res.status(400).json({ error: 'api_key must be a valid Anthropic API key (sk-ant-…)' });
+    if (!PROVIDERS.includes(provider)) {
+      res.status(400).json({ error: `provider must be one of: ${PROVIDERS.join(', ')}` });
       return;
     }
+    if (!api_key || !keyValidForProvider(provider, api_key)) {
+      res.status(400).json({
+        error: provider === 'anthropic'
+          ? 'api_key must be a valid Anthropic API key (sk-ant-…)'
+          : 'api_key must be a valid opencode/Zen API key',
+      });
+      return;
+    }
+    const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
+    if (model && !MODEL_CATALOG[provider].models.includes(model)) {
+      res.status(400).json({ error: `model must be one of: ${MODEL_CATALOG[provider].models.join(', ')}` });
+      return;
+    }
+    const base_url = typeof body.base_url === 'string' && body.base_url.trim() ? body.base_url.trim() : null;
 
     if (!encryptionKey) {
       logger.error('[agent][putLlmCredential] ENCRYPTION_KEY not configured', { userId });
@@ -284,17 +338,20 @@ export function createAgentRouter(
     try {
       const ciphertext = encryptSecret(api_key, encryptionKey);
       await pool.query(
-        `INSERT INTO agent_llm_credentials (user_id, kind, ciphertext, last4, updated_at)
-         VALUES ($1, 'api_key', $2, $3, now())
+        `INSERT INTO agent_llm_credentials (user_id, kind, ciphertext, last4, provider, model, base_url, updated_at)
+         VALUES ($1, 'api_key', $2, $3, $4, $5, $6, now())
          ON CONFLICT (user_id) DO UPDATE SET
            kind = 'api_key',
            ciphertext = EXCLUDED.ciphertext,
            last4 = EXCLUDED.last4,
+           provider = EXCLUDED.provider,
+           model = EXCLUDED.model,
+           base_url = EXCLUDED.base_url,
            updated_at = now()`,
-        [userId, ciphertext, last4],
+        [userId, ciphertext, last4, provider, model, base_url],
       );
-      logger.info('[agent][putLlmCredential] LLM credential set', { userId, kind: 'api_key', last4 });
-      res.json({ configured: true, kind: 'api_key', last4 });
+      logger.info('[agent][putLlmCredential] LLM credential set', { userId, provider, model, last4 });
+      res.json({ configured: true, kind: 'api_key', provider, model, base_url, last4 });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[agent][putLlmCredential] Failed', { userId, error: message });
@@ -306,8 +363,10 @@ export function createAgentRouter(
   router.get('/me/agent/llm-credential', authMw, async (req: Request, res: Response) => {
     const userId = (req as Request & { userId: string }).userId;
     try {
-      const result = await pool.query<{ kind: string; last4: string | null }>(
-        `SELECT kind, last4 FROM agent_llm_credentials WHERE user_id = $1`,
+      const result = await pool.query<{
+        kind: string; last4: string | null; provider: string | null; model: string | null; base_url: string | null;
+      }>(
+        `SELECT kind, last4, provider, model, base_url FROM agent_llm_credentials WHERE user_id = $1`,
         [userId],
       );
       if (result.rows.length === 0) {
@@ -315,7 +374,14 @@ export function createAgentRouter(
         return;
       }
       const row = result.rows[0];
-      res.json({ configured: true, kind: row.kind, last4: row.last4 });
+      res.json({
+        configured: true,
+        kind: row.kind,
+        last4: row.last4,
+        provider: row.provider ?? 'anthropic',
+        model: row.model,
+        base_url: row.base_url,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[agent][getLlmCredential] Failed', { userId, error: message });
@@ -351,7 +417,7 @@ export function createAgentRouter(
         [userId],
       );
       if (cred.rows.length === 0) {
-        res.status(400).json({ error: 'connect your Claude API key first' });
+        res.status(400).json({ error: 'connect your LLM API key first' });
         return;
       }
 

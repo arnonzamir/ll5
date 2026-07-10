@@ -7,6 +7,7 @@ export interface OrchestratorEnv {
   encryptionKey: string;
   orchestratorSecret: string;
   image: string;
+  imagesByProvider?: Partial<Record<'anthropic' | 'opencode', string>>;
   maxContainersPerHost: number;
   memoryBytes: number;
   restartPolicy: string;
@@ -42,6 +43,10 @@ export function loadEnv(): OrchestratorEnv {
     encryptionKey: required('ENCRYPTION_KEY'),
     orchestratorSecret: required('ORCHESTRATOR_SECRET'),
     image: process.env.AGENT_IMAGE || 'ghcr.io/arnonzamir/ll5-agent-tenant:latest',
+    imagesByProvider: {
+      opencode: process.env.AGENT_IMAGE_OPENCODE || 'ghcr.io/arnonzamir/ll5-run-opencode:latest',
+      anthropic: process.env.AGENT_IMAGE_ANTHROPIC || process.env.AGENT_IMAGE_CLAUDE || undefined,
+    },
     maxContainersPerHost: num('MAX_CONTAINERS_PER_HOST', 25),
     // 2 GiB default per agent container.
     memoryBytes: num('AGENT_MEMORY_BYTES', 2 * 1024 * 1024 * 1024),

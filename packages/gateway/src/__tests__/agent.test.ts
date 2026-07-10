@@ -221,13 +221,53 @@ describe('agent connection plane', () => {
 
       expect(res._status).toBe(200);
       const body = res._json as any;
-      expect(body).toEqual({ configured: true, kind: 'api_key', last4: '7890' });
+      expect(body).toMatchObject({ configured: true, kind: 'api_key', last4: '7890', provider: 'anthropic' });
       // The raw key is never echoed back.
       expect(JSON.stringify(body)).not.toContain(apiKey);
       // Stored ciphertext is encrypted (not the plaintext) and decrypts back.
       expect(stored.ciphertext).not.toContain(apiKey);
       expect(decryptSecret(stored.ciphertext, ENCRYPTION_KEY)).toBe(apiKey);
       expect(stored.last4).toBe('7890');
+    });
+
+    it('accepts an opencode key + model and stores provider/model', async () => {
+      const stored: { provider?: string; model?: string } = {};
+      const { pool } = makePool([
+        (sql, params) => {
+          if (sql.includes('INSERT INTO agent_llm_credentials')) {
+            stored.provider = params[3] as string;
+            stored.model = params[4] as string;
+            return { rows: [], rowCount: 1 };
+          }
+          return undefined;
+        },
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'put', '/me/agent/llm-credential');
+      const req = makeReq({
+        headers: authHeader(userToken('user-a')),
+        body: { api_key: 'zen-live-key-abcdef123456', provider: 'opencode', model: 'deepseek-v4-flash-free' },
+      });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(200);
+      expect(res._json).toMatchObject({ configured: true, provider: 'opencode', model: 'deepseek-v4-flash-free' });
+      expect(stored.provider).toBe('opencode');
+      expect(stored.model).toBe('deepseek-v4-flash-free');
+    });
+
+    it('rejects a model not in the provider catalog', async () => {
+      const { pool, query } = makePool([]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'put', '/me/agent/llm-credential');
+      const req = makeReq({
+        headers: authHeader(userToken('user-a')),
+        body: { api_key: 'zen-live-key-abcdef123456', provider: 'opencode', model: 'gpt-9-ultra' },
+      });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(400);
+      expect(query).not.toHaveBeenCalled();
     });
   });
 
@@ -247,7 +287,7 @@ describe('agent connection plane', () => {
     it('returns status only (kind + last4), never the secret', async () => {
       const { pool } = makePool([
         (sql) => (sql.includes('FROM agent_llm_credentials')
-          ? { rows: [{ kind: 'api_key', last4: '7890' }] }
+          ? { rows: [{ kind: 'api_key', last4: '7890', provider: 'opencode', model: 'deepseek-v4-flash-free', base_url: null }] }
           : undefined),
       ]);
       const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
@@ -255,7 +295,7 @@ describe('agent connection plane', () => {
       const req = makeReq({ headers: authHeader(userToken('user-a')) });
       const res = makeRes();
       await chain(req, res);
-      expect(res._json).toEqual({ configured: true, kind: 'api_key', last4: '7890' });
+      expect(res._json).toEqual({ configured: true, kind: 'api_key', last4: '7890', provider: 'opencode', model: 'deepseek-v4-flash-free', base_url: null });
     });
   });
 
@@ -300,7 +340,7 @@ describe('agent connection plane', () => {
       await chain(req, res);
 
       expect(res._status).toBe(400);
-      expect((res._json as any).error).toContain('Claude API key');
+      expect((res._json as any).error).toContain('LLM API key');
       expect(orch.provision).not.toHaveBeenCalled();
     });
 

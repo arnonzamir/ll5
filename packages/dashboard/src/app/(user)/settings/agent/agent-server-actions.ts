@@ -6,6 +6,7 @@ import {
   isLikelyAnthropicApiKey,
   parseRuntime,
   type AgentCredential,
+  type AgentModelsCatalog,
   type AgentRuntime,
   type ConnectionKit,
   type LlmCredentialStatus,
@@ -36,11 +37,30 @@ export async function fetchLlmCredential(): Promise<LlmCredentialStatus> {
       configured: raw.configured === true,
       kind: raw.kind as LlmCredentialStatus["kind"],
       last4: typeof raw.last4 === "string" ? raw.last4 : undefined,
+      provider: raw.provider as LlmCredentialStatus["provider"],
+      model: (raw.model as string | null) ?? null,
+      base_url: (raw.base_url as string | null) ?? null,
     };
   } catch (err) {
     // Never include the key in any log line.
     console.error("[agent] fetchLlmCredential failed:", err instanceof Error ? err.message : String(err));
     return { configured: false };
+  }
+}
+
+/** GET /me/agent/models — provider + model catalog for the settings dropdowns. */
+export async function fetchAgentModels(): Promise<AgentModelsCatalog> {
+  const headers = await authHeaders();
+  const empty: AgentModelsCatalog = { providers: [] };
+  if (!headers) return empty;
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/models`, { headers, cache: "no-store" });
+    if (!res.ok) return empty;
+    const raw = (await res.json()) as AgentModelsCatalog;
+    return Array.isArray(raw.providers) ? raw : empty;
+  } catch (err) {
+    console.error("[agent] fetchAgentModels failed:", err instanceof Error ? err.message : String(err));
+    return empty;
   }
 }
 
@@ -51,25 +71,37 @@ export async function fetchLlmCredential(): Promise<LlmCredentialStatus> {
  * The raw key is NEVER logged.
  */
 export async function saveLlmCredential(
-  apiKey: string,
+  input: string | { apiKey: string; provider?: "anthropic" | "opencode"; model?: string | null; baseUrl?: string | null },
 ): Promise<{ ok: boolean; status?: LlmCredentialStatus; error?: string }> {
   const headers = await authHeaders();
   if (!headers) return { ok: false, error: "Not authenticated" };
 
-  const trimmed = apiKey.trim();
-  if (!isLikelyAnthropicApiKey(trimmed)) {
+  // Back-compat: a bare string is an Anthropic key.
+  const opts = typeof input === "string" ? { apiKey: input, provider: "anthropic" as const } : input;
+  const provider = opts.provider ?? "anthropic";
+  const trimmed = opts.apiKey.trim();
+  if (provider === "anthropic" && !isLikelyAnthropicApiKey(trimmed)) {
     return { ok: false, error: "That doesn't look like an Anthropic API key (expected sk-ant-…)." };
+  }
+  if (trimmed.length < 8) {
+    return { ok: false, error: "That key looks too short." };
   }
 
   try {
     const res = await fetch(`${env.GATEWAY_URL}/me/agent/llm-credential`, {
       method: "PUT",
       headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: trimmed }),
+      body: JSON.stringify({
+        api_key: trimmed,
+        provider,
+        model: opts.model ?? undefined,
+        base_url: opts.baseUrl ?? undefined,
+      }),
     });
     if (!res.ok) {
       if (res.status === 400) {
-        return { ok: false, error: "The key was rejected (must start with sk-ant-…)." };
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        return { ok: false, error: body.error ?? "The key or model was rejected." };
       }
       console.error("[agent] saveLlmCredential failed:", res.status);
       return { ok: false, error: `Save failed (${res.status}).` };
@@ -81,6 +113,9 @@ export async function saveLlmCredential(
         configured: raw.configured === true,
         kind: raw.kind as LlmCredentialStatus["kind"],
         last4: typeof raw.last4 === "string" ? raw.last4 : undefined,
+        provider: raw.provider as LlmCredentialStatus["provider"],
+        model: (raw.model as string | null) ?? null,
+        base_url: (raw.base_url as string | null) ?? null,
       },
     };
   } catch (err) {

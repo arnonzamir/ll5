@@ -400,6 +400,7 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-10: docs/claude-vs-opencode-tools.md — NEW: tool-for-tool parity matrix (MCPs, channel tools, hooks↔plugins, workers) between the Claude Code and opencode variants + open gaps.
 2026-07-10: docs/implementation/impl-opencode-tool-gaps.md — NEW: multi-agent plan to close the opencode tool gaps (Tier 1 plugin tools, Tier 2 vision subagent, Tier 3 vault/system MCPs).
 2026-07-10: model default switched deepseek-v4-pro → deepseek-v4-flash-free (Zen $62 paid cap hit; opencode.json + OPENCODE_MODEL_ID var + CI/compose defaults).
+2026-07-10: tenant-level agent LLM config — migration 041 (agent_llm_credentials + provider/model/base_url); orchestrator secrets.ts per-provider env-file + imagesByProvider; gateway agent.ts provider/model + GET /me/agent/models; dashboard (user)/settings/agent provider+model UI.
 יום ה׳ יולי 09 2026 00:24:36 IDT: deploy: inject OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID in .env when AGENT_VARIANT=opencode
 
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected

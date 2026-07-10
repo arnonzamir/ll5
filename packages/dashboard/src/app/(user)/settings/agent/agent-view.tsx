@@ -30,6 +30,7 @@ import {
 import { ClaudeKeyForm } from "./claude-key-form";
 import {
   fetchAgentCredentials,
+  fetchAgentModels,
   fetchAgentSessions,
   fetchLlmCredential,
   fetchRuntime,
@@ -45,6 +46,7 @@ import {
   isTransientRuntime,
   runtimeStatusBadge,
   type AgentCredential,
+  type AgentModelsCatalog,
   type AgentRuntime,
   type ConnectionKit,
   type LlmCredentialStatus,
@@ -53,17 +55,20 @@ import { relativeTime } from "@/app/(admin)/admin/tenants/tenants-types";
 
 export function AgentSettingsView() {
   const [llm, setLlm] = useState<LlmCredentialStatus>({ configured: false });
+  const [catalog, setCatalog] = useState<AgentModelsCatalog>({ providers: [] });
   const [credentials, setCredentials] = useState<AgentCredential[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [llmStatus, creds] = await Promise.all([
+    const [llmStatus, creds, models] = await Promise.all([
       fetchLlmCredential(),
       fetchAgentCredentials(),
+      fetchAgentModels(),
     ]);
     setLlm(llmStatus);
     setCredentials(creds);
+    setCatalog(models);
     setLoading(false);
   }, []);
 
@@ -91,14 +96,14 @@ export function AgentSettingsView() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
-            <KeyRound className="h-5 w-5 text-primary" /> Claude API key
+            <KeyRound className="h-5 w-5 text-primary" /> Model &amp; API key
           </CardTitle>
           <CardDescription>
-            The credential your assistant uses to talk to Claude.
+            Choose the provider and model your assistant runs on, and connect your API key.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ClaudeKeyForm status={llm} onStatusChange={setLlm} />
+          <ClaudeKeyForm status={llm} catalog={catalog} onStatusChange={setLlm} />
         </CardContent>
       </Card>
 

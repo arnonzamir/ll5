@@ -14,12 +14,25 @@ export const ANTHROPIC_API_KEY_PREFIX = "sk-ant-";
 
 /** Status of the user's stored Claude (LLM) credential. Mirrors
  *  GET /me/agent/llm-credential. Never carries the key itself — only `last4`. */
+export type AgentLlmProvider = "anthropic" | "opencode";
+
 export interface LlmCredentialStatus {
   configured: boolean;
   /** Present only when configured. */
   kind?: "api_key" | "oauth_setup_token";
   /** Last 4 chars of the stored key — the only part ever shown. */
   last4?: string;
+  /** Which runtime/provider this credential targets. */
+  provider?: AgentLlmProvider;
+  /** Selected model id (null = image/env default). */
+  model?: string | null;
+  /** opencode server URL / provider base (null = default). */
+  base_url?: string | null;
+}
+
+/** Provider + model options for the settings dropdowns (GET /me/agent/models). */
+export interface AgentModelsCatalog {
+  providers: Array<{ provider: AgentLlmProvider; label: string; models: string[] }>;
 }
 
 /** One row in GET /me/agent/credentials. Hash-only on the backend; never a token. */

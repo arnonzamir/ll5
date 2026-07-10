@@ -17,8 +17,10 @@ export interface AgentRuntimeRow {
 export interface OrchestratorConfig {
   /** Hex AES-256 key for decrypting agent_llm_credentials.ciphertext. */
   encryptionKey: string;
-  /** Container image to launch. */
+  /** Default container image to launch (fallback when no per-provider image). */
   image: string;
+  /** Per-provider images (anthropic → Claude image, opencode → opencode image). */
+  imagesByProvider?: Partial<Record<'anthropic' | 'opencode', string>>;
   /** Per-host container cap. */
   maxContainersPerHost: number;
   /** Per-container hard memory limit, bytes. */
@@ -89,16 +91,32 @@ export class Orchestrator {
 
   // --- decryption -------------------------------------------------------
 
-  private async loadApiKey(userId: string): Promise<string> {
-    const res = await this.pool.query<{ ciphertext: string }>(
-      'SELECT ciphertext FROM agent_llm_credentials WHERE user_id = $1',
+  private async loadCredential(userId: string): Promise<{
+    provider: 'anthropic' | 'opencode';
+    model: string | null;
+    baseUrl: string | null;
+    apiKey: string;
+  }> {
+    const res = await this.pool.query<{
+      ciphertext: string;
+      provider: string | null;
+      model: string | null;
+      base_url: string | null;
+    }>(
+      'SELECT ciphertext, provider, model, base_url FROM agent_llm_credentials WHERE user_id = $1',
       [userId],
     );
     const row = res.rows[0];
     if (!row || !row.ciphertext) {
       throw new MissingCredentialError();
     }
-    return this.encryptor.decrypt(row.ciphertext, this.config.encryptionKey);
+    const provider = row.provider === 'opencode' ? 'opencode' : 'anthropic';
+    return {
+      provider,
+      model: row.model ?? null,
+      baseUrl: row.base_url ?? null,
+      apiKey: this.encryptor.decrypt(row.ciphertext, this.config.encryptionKey),
+    };
   }
 
   // --- agent_runtimes I/O ----------------------------------------------
@@ -153,8 +171,8 @@ export class Orchestrator {
     userId: string,
     agentToken: string,
   ): Promise<{ status: string; containerId: string; host: string }> {
-    // (1) load + decrypt the user's Claude credential (errors if none).
-    const anthropicApiKey = await this.loadApiKey(userId);
+    // (1) load + decrypt the user's LLM credential (errors if none).
+    const cred = await this.loadCredential(userId);
 
     // (2) enforce the per-host container cap.
     const live = await this.runningContainerCount();
@@ -177,14 +195,20 @@ export class Orchestrator {
     const envFilePath = await this.secrets.write({
       userId,
       agentToken,
-      anthropicApiKey,
+      apiKey: cred.apiKey,
       gatewayUrl: this.config.gatewayUrl,
       mcpBaseDomain: this.config.mcpBaseDomain,
+      provider: cred.provider,
+      model: cred.model,
+      baseUrl: cred.baseUrl,
     });
+
+    // Per-provider image: opencode and Claude ship as separate images.
+    const image = this.config.imagesByProvider?.[cred.provider] ?? this.config.image;
 
     const spec: RuntimeSpec = {
       userId,
-      image: this.config.image,
+      image,
       envFilePath,
       envFileTarget: ENV_FILE_TARGET,
       memoryBytes: this.config.memoryBytes,

@@ -33,6 +33,7 @@ async function main(): Promise<void> {
     config: {
       encryptionKey: env.encryptionKey,
       image: env.image,
+      imagesByProvider: env.imagesByProvider,
       maxContainersPerHost: env.maxContainersPerHost,
       memoryBytes: env.memoryBytes,
       restartPolicy: env.restartPolicy,
