@@ -22,6 +22,9 @@ export interface RuntimeSpec {
   labels: Record<string, string>;
   /** Restart policy name passed to the Docker Engine API (e.g. 'unless-stopped'). */
   restartPolicy: string;
+  /** Docker network to attach the container to so it can reach gateway/MCPs by
+   *  hostname (the ll5 stack network). Empty → default bridge (isolated). */
+  network?: string;
 }
 
 export interface ProvisionResult {

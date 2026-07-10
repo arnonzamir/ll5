@@ -43,7 +43,7 @@ jobs:
           # run-claude / run-opencode: agent variants (Phase 4)
           # Variants are NOT in the default push matrix — they have their own CI in
           # their own repos. They're only built via workflow_dispatch or repository_dispatch.
-          INFRA_PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "gateway" "dashboard" "vault")
+          INFRA_PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "gateway" "dashboard" "vault" "agent-orchestrator")
           VARIANT_PACKAGES=("run-claude" "run-opencode")
           PACKAGES=("${INFRA_PACKAGES[@]}" "${VARIANT_PACKAGES[@]}")
 
@@ -257,6 +257,9 @@ jobs:
               # Own Dockerfile: Dockerfile.mcp base + the Bitwarden CLI layer (DECISION-022).
               echo "file=docker/Dockerfile.vault" >> "$GITHUB_OUTPUT"
               echo "build_args=" >> "$GITHUB_OUTPUT" ;;
+            agent-orchestrator)
+              echo "file=docker/Dockerfile.agent-orchestrator" >> "$GITHUB_OUTPUT"
+              echo "build_args=" >> "$GITHUB_OUTPUT" ;;
             run-claude)
               echo "file=docker/Dockerfile.ll5-run-claude" >> "$GITHUB_OUTPUT"
               echo "build_args=MCP_BASE_DOMAIN=${{ vars.MCP_BASE_DOMAIN || 'noninoni.click' }}" >> "$GITHUB_OUTPUT" ;;
@@ -334,6 +337,10 @@ jobs:
           # ELASTICSEARCH_URL (inline creds); Coolify env doesn't reach the on-host
           # .env, so inject it here like the FINDHUB_* secrets.
           ELASTIC_PASSWORD: ${{ secrets.ELASTIC_PASSWORD }}
+          # Shared secret between the gateway and the agent-orchestrator control
+          # plane (per-user container provisioning). Coolify env doesn't reach the
+          # on-host .env, so inject it here.
+          ORCHESTRATOR_SECRET: ${{ secrets.ORCHESTRATOR_SECRET }}
           # Vault MCP machine-account secrets (DECISION-022). Same story: Coolify
           # env doesn't reach the on-host .env, so they come from GitHub secrets.
           # Values are printed by packages/vault/scripts/bootstrap.ts.
@@ -362,7 +369,7 @@ jobs:
           host: ${{ vars.SERVER_HOST }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES,ELASTIC_PASSWORD,BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD,RABBITMQ_PASSWORD,EVOLUTION_GLOBAL_KEY,CLAUDE_CODE_OAUTH_TOKEN,OPENCODE_ZEN_API_KEY,AGENT_VARIANT
+          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES,ELASTIC_PASSWORD,ORCHESTRATOR_SECRET,BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD,RABBITMQ_PASSWORD,EVOLUTION_GLOBAL_KEY,CLAUDE_CODE_OAUTH_TOKEN,OPENCODE_ZEN_API_KEY,AGENT_VARIANT
           command_timeout: 15m
           script: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u arnonzamir --password-stdin
@@ -415,6 +422,17 @@ jobs:
               echo "Injected ELASTIC_PASSWORD into .env"
             else
               echo "WARN: ELASTIC_PASSWORD secret empty — leaving .env untouched"
+            fi
+            # Inject ORCHESTRATOR_SECRET (idempotent). Guard on non-empty so a
+            # missing secret never blanks it (gateway↔orchestrator auth).
+            if [ -n "$ORCHESTRATOR_SECRET" ]; then
+              touch .env
+              grep -v '^ORCHESTRATOR_SECRET=' .env > .env.orch.tmp 2>/dev/null || true
+              mv .env.orch.tmp .env
+              printf 'ORCHESTRATOR_SECRET=%s\n' "$ORCHESTRATOR_SECRET" >> .env
+              echo "Injected ORCHESTRATOR_SECRET into .env"
+            else
+              echo "WARN: ORCHESTRATOR_SECRET secret empty — orchestrator disabled"
             fi
             # Inject WhatsApp ingest queue + Evolution reconciler secrets
             # (DECISION-024, idempotent). Guard on non-empty so a missing secret

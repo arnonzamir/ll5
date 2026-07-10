@@ -441,9 +441,10 @@ services:
       # Default deepseek-v4-pro matches opencode.json's global default (Zen paid).
       OPENCODE_MODEL_ID: ${OPENCODE_MODEL_ID:-deepseek-v4-flash-free}
       OPENCODE_PROVIDER_ID: ${OPENCODE_PROVIDER_ID:-opencode}
-      # Agent-orchestrator service (separate). Optional — empty disables the
-      # runtime-control plane with a clear "runtime not configured" error.
-      ORCHESTRATOR_URL: ${ORCHESTRATOR_URL:-}
+      # Agent-orchestrator service (per-user container control plane). The
+      # orchestrator now ships in this stack, so default the URL to its internal
+      # address; empty still disables it with a clear "runtime not configured".
+      ORCHESTRATOR_URL: ${ORCHESTRATOR_URL:-http://agent-orchestrator:3100}
       ORCHESTRATOR_SECRET: ${ORCHESTRATOR_SECRET:-}
       GOOGLE_MCP_URL: http://google:3000
       GOOGLE_MCP_API_KEY: ${API_KEY}
@@ -485,6 +486,47 @@ services:
       - "traefik.http.routers.ll5-gateway.tls=true"
       - "traefik.http.routers.ll5-gateway.tls.certresolver=letsencrypt"
       - "traefik.http.services.ll5-gateway.loadbalancer.server.port=3000"
+
+  # ---------- Agent orchestrator (per-user container control plane) ----------
+  # Launches/stops one opencode agent container per user via the host docker
+  # socket. SECURITY: mounts /var/run/docker.sock (root-equivalent host control)
+  # — only this service gets it. Per-user secrets are written to /run/ll5 (0600)
+  # and bind-mounted read-only into each agent container; /run/ll5 is shared with
+  # the host so the docker-socket bind resolves the same path.
+  agent-orchestrator:
+    <<: *defaults
+    image: ghcr.io/arnonzamir/ll5-agent-orchestrator:latest
+    container_name: agent-orchestrator-xkkcc0g4o48kkcows8488so4
+    environment:
+      NODE_ENV: production
+      PORT: "3100"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ORCHESTRATOR_SECRET: ${ORCHESTRATOR_SECRET:-}
+      # Injected into each per-user env-file so the agent reaches the gateway
+      # internally and MCPs via the public mcp-*.<domain> endpoints.
+      LL5_GATEWAY_URL: http://gateway:3000
+      MCP_BASE_DOMAIN: ${MCP_BASE_DOMAIN:-noninoni.click}
+      # Per-user agent image (opencode). Anthropic variant image is optional.
+      AGENT_IMAGE_OPENCODE: ghcr.io/arnonzamir/ll5-run-opencode:latest
+      # Attach each per-user container to the ll5 stack network so it resolves
+      # gateway/postgres/etc by hostname. Defaults to this stack's network.
+      AGENT_NETWORK: ${AGENT_NETWORK:-xkkcc0g4o48kkcows8488so4}
+      SECRETS_DIR: /run/ll5
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+      MAX_CONTAINERS_PER_HOST: ${MAX_CONTAINERS_PER_HOST:-10}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /run/ll5:/run/ll5
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
 
   # ---------- Find Hub poller (Python sidecar) — DISABLED 2026-06-03 ----------
   # Disabled because the periodic Find Hub LocateTracker requests were causing

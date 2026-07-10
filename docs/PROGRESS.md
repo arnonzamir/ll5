@@ -4,6 +4,18 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — Deploy the agent-orchestrator (per-user opencode containers)
+
+Stood up the `agent-orchestrator` control plane so each user gets their own opencode container (its own LL5 token scoping every MCP call = per-user isolation). Closed the opencode-under-orchestrator gaps the code review surfaced (the orchestrator was built for the Claude base-image):
+- **docker-runtime**: attach the ll5 stack network (`HostConfig.NetworkMode`, via `AGENT_NETWORK`) — without it the container lands on the default bridge and can't reach gateway/MCPs.
+- **opencode entrypoint** (`ll5-run-opencode` 8cd35c1): source `LL5_AGENT_ENV_FILE` (it read env directly before, ignoring the orchestrator's bind-mounted 0600 secret file).
+- **orchestrator secrets**: also emit `LL5_TOKEN` (opencode reads that; Claude base-image used `LL5_AGENT_TOKEN`).
+- **compose**: `agent-orchestrator` service (docker.sock + host-coherent `/run/ll5` mount + `AGENT_NETWORK` + `AGENT_IMAGE_OPENCODE`); CI matrix + Dockerfile case; gateway `ORCHESTRATOR_URL` defaulted to the internal address; `ORCHESTRATOR_SECRET` injected in the deploy step.
+- **SECURITY**: only this service mounts `/var/run/docker.sock` (root-equivalent). Per-user secrets are 0600 env-files bind-mounted read-only; never `-e`.
+- Provision flow: store the user's opencode llm-credential (`/settings/agent`) → `POST /me/agent/provision` → orchestrator launches `ll5-agent-<userid>` on the stack network. Old shared agent stays up.
+
+---
+
 ## 2026-07-10 — Tenant-level agent LLM config (provider/model/key) + user UI
 
 Made the agent's LLM config **per-tenant** and user-configurable, extending the existing BYO-key provisioning scaffold (which was Claude-key-only):

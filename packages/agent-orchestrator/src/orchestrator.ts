@@ -31,6 +31,8 @@ export interface OrchestratorConfig {
   gatewayUrl: string;
   /** Injected into the env-file as MCP_BASE_DOMAIN. */
   mcpBaseDomain: string;
+  /** Docker network to attach per-user containers to (the ll5 stack network). */
+  agentNetwork?: string;
   /** A 'running' row older than this (seconds) is stale. */
   heartbeatTimeoutSec: number;
   /** Don't restart the same user more than once per this many seconds. */
@@ -214,6 +216,7 @@ export class Orchestrator {
       memoryBytes: this.config.memoryBytes,
       labels: { 'll5.user_id': userId },
       restartPolicy: this.config.restartPolicy,
+      network: this.config.agentNetwork,
     };
 
     let result;

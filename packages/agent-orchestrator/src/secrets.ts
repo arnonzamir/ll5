@@ -76,6 +76,9 @@ export class SecretsWriter {
     const lines = [
       `LL5_USER_ID=${escapeValue(env.userId)}`,
       `LL5_AGENT_TOKEN=${escapeValue(env.agentToken)}`,
+      // Alias: the opencode entrypoint reads LL5_TOKEN (the Claude base-image uses
+      // LL5_AGENT_TOKEN). Emit both so either variant's entrypoint finds the token.
+      `LL5_TOKEN=${escapeValue(env.agentToken)}`,
       `LL5_GATEWAY_URL=${escapeValue(env.gatewayUrl)}`,
       `MCP_BASE_DOMAIN=${escapeValue(env.mcpBaseDomain)}`,
       `AGENT_VARIANT=${escapeValue(variant)}`,

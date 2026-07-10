@@ -39,6 +39,7 @@ async function main(): Promise<void> {
       restartPolicy: env.restartPolicy,
       gatewayUrl: env.gatewayUrl,
       mcpBaseDomain: env.mcpBaseDomain,
+      agentNetwork: env.agentNetwork,
       heartbeatTimeoutSec: env.heartbeatTimeoutSec,
       restartCooldownSec: env.restartCooldownSec,
     },

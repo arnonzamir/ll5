@@ -13,6 +13,7 @@ export interface OrchestratorEnv {
   restartPolicy: string;
   gatewayUrl: string;
   mcpBaseDomain: string;
+  agentNetwork?: string;
   heartbeatTimeoutSec: number;
   restartCooldownSec: number;
   reconcileIntervalMs: number;
@@ -53,6 +54,7 @@ export function loadEnv(): OrchestratorEnv {
     restartPolicy: process.env.AGENT_RESTART_POLICY || 'unless-stopped',
     gatewayUrl: process.env.LL5_GATEWAY_URL || 'https://ll5.noninoni.click',
     mcpBaseDomain: process.env.MCP_BASE_DOMAIN || 'noninoni.click',
+    agentNetwork: process.env.AGENT_NETWORK || undefined,
     heartbeatTimeoutSec: num('HEARTBEAT_TIMEOUT_SEC', 180),
     restartCooldownSec: num('RESTART_COOLDOWN_SEC', 300),
     reconcileIntervalMs: num('RECONCILE_INTERVAL_MS', 60_000),

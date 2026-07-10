@@ -76,6 +76,9 @@ export class DockerRuntime implements Runtime {
         Memory: spec.memoryBytes,
         // Pin a swap == memory so the limit is hard (no swap escape hatch).
         MemorySwap: spec.memoryBytes,
+        // Join the ll5 stack network so the container resolves gateway/mcp-* by
+        // hostname. Without this it lands on the default bridge and is isolated.
+        ...(spec.network ? { NetworkMode: spec.network } : {}),
       },
     };
 
