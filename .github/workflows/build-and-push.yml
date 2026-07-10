@@ -57,10 +57,14 @@ jobs:
             PACKAGES=("run-${{ inputs.agent_variant }}")
           fi
 
-          # On repository_dispatch (variant repo pushed), build that package
+          # On repository_dispatch (a variant repo pushed), DO NOT rebuild the
+          # variant image here: the variant repo's own CI already built+pushed
+          # its :latest, and ll5's GITHUB_TOKEN cannot push to the variant's GHCR
+          # package (403 Forbidden). Deploy-only — empty build matrix; the deploy
+          # job pulls the variant's freshly-built :latest. (client_payload.package
+          # is informational; the active AGENT_VARIANT selects which image runs.)
           if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            PKG="${{ github.event.client_payload.package }}"
-            PACKAGES=("$PKG")
+            PACKAGES=()
           fi
 
           # On schedule (weekly fallback), rebuild both variants
@@ -277,9 +281,18 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.package }}
 
   deploy:
-    needs: build
+    needs: [detect-changes, build]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event_name == 'repository_dispatch'
+    # Run on main pushes and on repository_dispatch (variant redeploy). Must run
+    # even when `build` is SKIPPED (repository_dispatch builds nothing — deploy
+    # pulls the variant's already-built :latest), but NOT when build actually
+    # failed. always() lets us evaluate the skipped case; guard on the results.
+    if: |
+      always() &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'repository_dispatch') &&
+      needs.detect-changes.result == 'success' &&
+      needs.build.result != 'failure' &&
+      needs.build.result != 'cancelled'
     steps:
       - uses: actions/checkout@v4
 
