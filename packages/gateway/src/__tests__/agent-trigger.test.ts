@@ -11,7 +11,12 @@ vi.mock('../utils/logger.js', () => ({
   },
 }));
 
-import { triggerAgent, getAgentSessionId, getAgentSessionForWorker } from '../utils/agent-trigger.js';
+import {
+  triggerAgent,
+  getAgentSessionId,
+  getAgentSessionForWorker,
+  resolveAgentBaseUrl,
+} from '../utils/agent-trigger.js';
 
 function mockPool(rows: Array<Record<string, unknown>>): Pool {
   const query = vi.fn(async () => ({ rows }));
@@ -165,6 +170,41 @@ describe('agent-trigger (dual-run-variant Phase 2)', () => {
     const pool = mockPool([]);
     const id = await getAgentSessionForWorker(pool, 'user-1', 'narrative-loop');
     expect(id).toBeNull();
+  });
+
+  // --- resolveAgentBaseUrl (multi-tenant routing) ---
+
+  it('resolveAgentBaseUrl returns null when OPENCODE_SERVER_URL is unset (Claude variant)', async () => {
+    delete process.env.OPENCODE_SERVER_URL;
+    const url = await resolveAgentBaseUrl(mockPool([{ status: 'running' }]), 'user-x');
+    expect(url).toBeNull();
+  });
+
+  it('resolveAgentBaseUrl routes to the per-user container when the runtime is running', async () => {
+    process.env.OPENCODE_SERVER_URL = 'http://agent:4096';
+    const url = await resolveAgentBaseUrl(mockPool([{ status: 'running' }]), 'user-abc');
+    expect(url).toBe('http://ll5-agent-user-abc:4096');
+  });
+
+  it('resolveAgentBaseUrl falls back to the global URL when no running container', async () => {
+    process.env.OPENCODE_SERVER_URL = 'http://agent:4096';
+    expect(await resolveAgentBaseUrl(mockPool([{ status: 'error' }]), 'u1')).toBe('http://agent:4096');
+    expect(await resolveAgentBaseUrl(mockPool([]), 'u2')).toBe('http://agent:4096');
+  });
+
+  it('resolveAgentBaseUrl falls back to the global URL if the query throws', async () => {
+    process.env.OPENCODE_SERVER_URL = 'http://agent:4096';
+    const pool = { query: vi.fn(async () => { throw new Error('db down'); }) } as unknown as Pool;
+    expect(await resolveAgentBaseUrl(pool, 'u3')).toBe('http://agent:4096');
+  });
+
+  it('triggerAgent POSTs to the caller-provided baseUrl (per-user container), not the global env', async () => {
+    process.env.OPENCODE_SERVER_URL = 'http://agent:4096';
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    await triggerAgent('sess-pu', { content: 'hi' }, 'http://ll5-agent-user-abc:4096');
+    const [url] = (fetchSpy as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toBe('http://ll5-agent-user-abc:4096/session/sess-pu/prompt_async');
   });
 });
 

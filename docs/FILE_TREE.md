@@ -409,3 +409,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected
 
 2026-07-10: fix dashboard ClaudeKeyForm — useEffect re-seeds from async-loaded status (key no longer shows "Not connected"/disappears after refresh).
+
+2026-07-11: gateway per-user agent-trigger routing — resolveAgentBaseUrl(pool,userId) → http://ll5-agent-<uid>:4096 when runtime running, else global OPENCODE_SERVER_URL; triggerAgent gains optional baseUrl; 3 call sites updated.

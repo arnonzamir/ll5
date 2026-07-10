@@ -25,6 +25,41 @@ export async function getAgentSessionId(pool: Pool, userId: string): Promise<str
 }
 
 /**
+ * Resolve the opencode server base URL to trigger for a given user.
+ *
+ * Multi-tenant routing: each user with a running orchestrator container is
+ * reachable at the deterministic container name `ll5-agent-<userId>:4096` on the
+ * stack network. We route there so one user's triggers never hit another user's
+ * container. Fallbacks:
+ *  - No OPENCODE_SERVER_URL env → null (Claude Code variant; HTTP trigger is a
+ *    no-op, the PG NOTIFY → channel bridge delivers instead).
+ *  - Env set but the user has no running per-user container (e.g. the shared
+ *    single-agent compose deployment, which has no agent_runtimes row) → the
+ *    global OPENCODE_SERVER_URL.
+ */
+export async function resolveAgentBaseUrl(pool: Pool, userId: string): Promise<string | null> {
+  const globalUrl = process.env.OPENCODE_SERVER_URL || null;
+  if (!globalUrl) return null; // Claude Code variant — no HTTP trigger.
+  try {
+    const res = await pool.query<{ status: string }>(
+      'SELECT status FROM agent_runtimes WHERE user_id = $1',
+      [userId],
+    );
+    if (res.rows[0]?.status === 'running') {
+      // Deterministic per-user container name (see agent-orchestrator
+      // docker-runtime: `ll5-agent-${userId}`), DNS-resolvable on the network.
+      return `http://ll5-agent-${userId}:4096`;
+    }
+  } catch (err) {
+    logger.warn('[agent-trigger] resolveAgentBaseUrl failed — using global URL', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return globalUrl;
+}
+
+/**
  * Read a specific worker session ID from the agent_sessions JSONB map.
  * Used by schedulers that target background workers (narrative-loop,
  * reconcile-loop) rather than the main interactive session.
@@ -62,8 +97,12 @@ export async function getAgentSessionForWorker(
 export async function triggerAgent(
   sessionId: string | null,
   payload: TriggerPayload,
+  baseUrl?: string | null,
 ): Promise<void> {
-  const url = process.env.OPENCODE_SERVER_URL;
+  // Prefer the per-user URL resolved by the caller (resolveAgentBaseUrl); fall
+  // back to the global env for back-compat (shared-agent deployments / callers
+  // not yet routing per-user).
+  const url = baseUrl ?? process.env.OPENCODE_SERVER_URL;
   if (!url || !sessionId) return; // Claude Code variant — no-op
 
   const body: Record<string, unknown> = {

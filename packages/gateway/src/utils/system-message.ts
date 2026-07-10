@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Pool } from 'pg';
-import { triggerAgent, getAgentSessionId } from './agent-trigger.js';
+import { triggerAgent, getAgentSessionId, resolveAgentBaseUrl } from './agent-trigger.js';
 import { sendFCMNotification } from './fcm-sender.js';
 import { logger } from './logger.js';
 import { recordTickOk, recordTickError } from './scheduler-health.js';
@@ -174,13 +174,14 @@ export async function insertSystemMessage(
           });
           return;
         }
+        const baseUrl = await resolveAgentBaseUrl(pool, userId);
         await triggerAgent(sessionId, {
           content: fullContent,
           metadata: {
             ...(sourceRouting ? { source: sourceRouting } : {}),
             ...(schedulerEvent ? { scheduler: schedulerEvent } : {}),
           },
-        });
+        }, baseUrl);
       } catch (err) {
         // Do NOT swallow — log loudly. The row stays pending; the
         // stuck-message-sweep will re-notify it (triggerAgent + pg_notify)

@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { triggerAgent, getAgentSessionId } from '../utils/agent-trigger.js';
+import { triggerAgent, getAgentSessionId, resolveAgentBaseUrl } from '../utils/agent-trigger.js';
 import { logger } from '../utils/logger.js';
 import type { SourceRoutingMeta, SchedulerEventMeta } from '../utils/system-message.js';
 
@@ -156,13 +156,14 @@ export class StuckMessageSweep {
                     fired_at: meta.fired_at,
                   } as SchedulerEventMeta | undefined)
                 : undefined;
+              const baseUrl = await resolveAgentBaseUrl(this.pool, row.user_id);
               await triggerAgent(sessionId, {
                 content: row.content,
                 metadata: {
                   ...(source ? { source } : {}),
                   ...(scheduler ? { scheduler } : {}),
                 },
-              });
+              }, baseUrl);
             } catch (err) {
               logger.warn('[StuckMessageSweep][renotify] triggerAgent redelivery failed', {
                 id: row.id,

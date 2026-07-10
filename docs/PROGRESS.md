@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-11 — Per-user agent-trigger routing (multi-tenant)
+
+The gateway's opencode trigger URL was a single global `OPENCODE_SERVER_URL` — fine for one tenant, but a second tenant's triggers would hit the first tenant's container. Added `resolveAgentBaseUrl(pool, userId)`: a user with a **running** `agent_runtimes` row routes to their deterministic container `http://ll5-agent-<userId>:4096`; otherwise falls back to the global env (shared-agent compose, or a user without a per-user container). `triggerAgent` now takes an optional `baseUrl`; all 3 call sites (system-message, agent-trigger-listener, stuck-message-sweep) resolve + pass it. Claude-variant no-op behavior (empty env → null) preserved. +5 tests. This removes the dependency on the global env flip for routing — arnon now routes to his container via the runtime row regardless of the env value (env remains the fallback).
+
+---
+
 ## 2026-07-10 — Fix: agent API key "disappears on refresh"
 
 `ClaudeKeyForm` seeded its display state with `useState(status)`, latching the pre-fetch `{configured:false}` the parent passes before its async credential fetch resolves — so the badge showed "Not connected" after every refresh even though the key was stored (GET returned `configured:true`). "Save" only appeared to work because the save handler set local state directly. Added a `useEffect([status])` that re-seeds local/provider/model/overrides when the loaded status arrives. Pre-existing bug; surfaced during the agent-config work. (Diagnosed against prod: token correctly carries `uid = auth_users.user_id`; credential row + GET both fine — the defect was purely client render state.)

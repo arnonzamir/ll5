@@ -1,6 +1,6 @@
 import { Client, Pool } from 'pg';
 import { logger } from './logger.js';
-import { triggerAgent, getAgentSessionId } from './agent-trigger.js';
+import { triggerAgent, getAgentSessionId, resolveAgentBaseUrl } from './agent-trigger.js';
 
 let listenerClient: Client | null = null;
 let keepRunning = true;
@@ -109,9 +109,10 @@ async function handleNotification(pool: Pool, payloadStr: string) {
     }
     
     // We do not set noReply here - it's a normal chat message.
+    const baseUrl = await resolveAgentBaseUrl(pool, payload.user_id);
     await triggerAgent(sessionId, {
       content: payload.content || '',
       metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-    });
+    }, baseUrl);
   }
 }
