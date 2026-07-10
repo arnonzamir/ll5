@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — Restored variant→ll5 auto-deploy (trigger-ll5-rebuild)
+
+The variant repo's `trigger-ll5-rebuild` workflow had been failing (`Parameter token or opts.auth is required`) because the `LL5_DISPATCH_PAT` secret was never set on `arnonzamir/ll5-run-opencode` — so variant-only pushes did NOT auto-redeploy the ll5 stack (manual `docker compose pull agent` was the workaround). Created a classic PAT (`repo`, no expiry), set it as the `LL5_DISPATCH_PAT` secret, and verified: manual `workflow_dispatch` of the trigger succeeded and ll5 received the `repository_dispatch` (`rebuild-agent`, `package: run-opencode`) → auto build+deploy. Full chain restored: variant push → image build → dispatch → ll5 deploy. (ll5 already handled `repository_dispatch: types: [rebuild-agent]` — the PAT was the only missing piece.)
+
+---
+
 ## 2026-07-10 — opencode model config: single default + provider-typo fix
 
 **Root cause (main session ran wrong model):** The GitHub repo var `OPENCODE_PROVIDER_ID` was misspelled `opencede`. The gateway composes `model: { providerID, modelID }` into the opencode `prompt_async` body; with an unresolvable provider, opencode discarded the model spec and fell back to its free built-in (`minimax-m3`). `OPENCODE_MODEL_ID` itself was already `deepseek-v4-pro`.
