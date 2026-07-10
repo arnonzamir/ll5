@@ -8,6 +8,7 @@ Current state of the LL5 personal assistant system.
 
 - **record_moment (parity bug 2):** added the `record_moment` plugin tool to opencode (the shared CLAUDE.md Eval rule tells the agent to call it; opencode had none → no-op) + allowed it in the external-authority-gate + eval-recorder now ships `decision_claimed`/`decision_mismatch` (flags a hollow ping_later). Variant `fa91358`, 44/44 tests.
 - **Tool parity matrix:** new `docs/claude-vs-opencode-tools.md` — full tool-for-tool comparison (MCP servers, channel tools, hooks↔plugins, workers). Key opencode gaps documented: no `vault`/`system` MCP, no `inspect_image` (vision), and 5 minor channel tools (get_message, get/set_user_settings, get_current_time, channel_health).
+- **Tool-gap fix plan:** new `docs/implementation/impl-opencode-tool-gaps.md` — multi-agent approach (tool→agent→model). Tier 1 = 5 trivial plugin tools; Tier 2 = `inspect_image` via a dedicated `image-analyst` vision subagent (deepseek-v4-pro is text-only; the plugin spawns the subagent via SDK so the gate's `task` deny stays); Tier 3 = `vault`/`system` MCPs, main-agent-only. Blocking decision: source a vision model (verify Zen catalog, else add a provider).
 
 ---
 
