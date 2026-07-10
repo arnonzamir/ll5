@@ -4,6 +4,13 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — record_moment tool parity + Claude-vs-opencode tool matrix
+
+- **record_moment (parity bug 2):** added the `record_moment` plugin tool to opencode (the shared CLAUDE.md Eval rule tells the agent to call it; opencode had none → no-op) + allowed it in the external-authority-gate + eval-recorder now ships `decision_claimed`/`decision_mismatch` (flags a hollow ping_later). Variant `fa91358`, 44/44 tests.
+- **Tool parity matrix:** new `docs/claude-vs-opencode-tools.md` — full tool-for-tool comparison (MCP servers, channel tools, hooks↔plugins, workers). Key opencode gaps documented: no `vault`/`system` MCP, no `inspect_image` (vision), and 5 minor channel tools (get_message, get/set_user_settings, get_current_time, channel_health).
+
+---
+
 ## 2026-07-10 — Reconcile worker un-stalled + CI repository_dispatch deploy-only fix
 
 **Reconcile worker outage:** The reconcile worker went silent (watchdog: "stopped calling list_reconcile_work", 141m > 90m) → open loops never closed (0 in the last hour). Root cause in `ll5-run-opencode/scripts/reconcile-loop.ts`: the single-flight guard keyed on `s.time?.compacting === undefined` — a field opencode never sets, so the predicate was ALWAYS true. Combined with opencode NOT dropping deleted sessions from `session.list()`, every finished `narrative-loop` session lingered and matched → reconcile deferred on every tick, permanently. The guard is also unnecessary (docker-entrypoint.sh runs the workers sequentially — no concurrency possible). Removed it (variant `09357b6`).
