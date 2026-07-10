@@ -287,7 +287,7 @@ describe('agent connection plane', () => {
     it('returns status only (kind + last4), never the secret', async () => {
       const { pool } = makePool([
         (sql) => (sql.includes('FROM agent_llm_credentials')
-          ? { rows: [{ kind: 'api_key', last4: '7890', provider: 'opencode', model: 'deepseek-v4-flash-free', base_url: null }] }
+          ? { rows: [{ kind: 'api_key', last4: '7890', provider: 'opencode', model: 'deepseek-v4-flash-free', base_url: null, model_overrides: { grounder: 'deepseek-v4-pro' } }] }
           : undefined),
       ]);
       const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
@@ -295,7 +295,104 @@ describe('agent connection plane', () => {
       const req = makeReq({ headers: authHeader(userToken('user-a')) });
       const res = makeRes();
       await chain(req, res);
-      expect(res._json).toEqual({ configured: true, kind: 'api_key', last4: '7890', provider: 'opencode', model: 'deepseek-v4-flash-free', base_url: null });
+      expect(res._json).toEqual({ configured: true, kind: 'api_key', last4: '7890', provider: 'opencode', model: 'deepseek-v4-flash-free', base_url: null, model_overrides: { grounder: 'deepseek-v4-pro' } });
+    });
+  });
+
+  describe('per-agent model overrides', () => {
+    it('stores valid model_overrides on save (opencode)', async () => {
+      const stored: { overridesJson?: string } = {};
+      const { pool } = makePool([
+        (sql, params) => {
+          if (sql.includes('INSERT INTO agent_llm_credentials')) {
+            stored.overridesJson = params[6] as string;
+            return { rows: [], rowCount: 1 };
+          }
+          return undefined;
+        },
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'put', '/me/agent/llm-credential');
+      const req = makeReq({
+        headers: authHeader(userToken('user-a')),
+        body: {
+          api_key: 'zen-live-key-abcdef123456', provider: 'opencode', model: 'deepseek-v4-flash-free',
+          model_overrides: { grounder: 'deepseek-v4-pro', bogus_slot: 'x', narrative: '' },
+        },
+      });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(200);
+      // Unknown slot + empty value dropped; only the valid slot kept.
+      expect(JSON.parse(stored.overridesJson!)).toEqual({ grounder: 'deepseek-v4-pro' });
+      expect((res._json as any).model_overrides).toEqual({ grounder: 'deepseek-v4-pro' });
+    });
+
+    it('rejects an override model not in the provider catalog', async () => {
+      const { pool, query } = makePool([]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'put', '/me/agent/llm-credential');
+      const req = makeReq({
+        headers: authHeader(userToken('user-a')),
+        body: { api_key: 'zen-live-key-abcdef123456', provider: 'opencode', model_overrides: { grounder: 'gpt-9-ultra' } },
+      });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(400);
+      expect(query).not.toHaveBeenCalled();
+    });
+
+    it('keyless update retunes model/overrides on an existing credential (ciphertext untouched)', async () => {
+      let updateParams: unknown[] | undefined;
+      const { pool, query } = makePool([
+        (sql) => (sql.startsWith('SELECT provider, last4 FROM agent_llm_credentials')
+          ? { rows: [{ provider: 'opencode', last4: '7890' }] } : undefined),
+        (sql, params) => {
+          if (sql.includes('UPDATE agent_llm_credentials')) { updateParams = params; return { rows: [], rowCount: 1 }; }
+          return undefined;
+        },
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'put', '/me/agent/llm-credential');
+      const req = makeReq({
+        headers: authHeader(userToken('user-a')),
+        body: { model: 'deepseek-v4-pro', model_overrides: { reconcile: 'minimax-m3' } },
+      });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(200);
+      // No INSERT (ciphertext never re-written); an UPDATE ran instead.
+      expect(query.mock.calls.some((c) => String(c[0]).includes('INSERT INTO agent_llm_credentials'))).toBe(false);
+      expect(updateParams?.[1]).toBe('deepseek-v4-pro');
+      expect(JSON.parse(updateParams?.[3] as string)).toEqual({ reconcile: 'minimax-m3' });
+      expect(res._json).toMatchObject({ configured: true, provider: 'opencode', model: 'deepseek-v4-pro', last4: '7890' });
+    });
+
+    it('keyless update 400s when no credential exists', async () => {
+      const { pool } = makePool([
+        (sql) => (sql.startsWith('SELECT provider, last4 FROM agent_llm_credentials') ? { rows: [] } : undefined),
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'put', '/me/agent/llm-credential');
+      const req = makeReq({ headers: authHeader(userToken('user-a')), body: { model: 'deepseek-v4-pro' } });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(400);
+    });
+  });
+
+  describe('GET /me/agent/models', () => {
+    it('returns providers + overridable slots', async () => {
+      const { pool } = makePool([]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'get', '/me/agent/models');
+      const req = makeReq({ headers: authHeader(userToken('user-a')) });
+      const res = makeRes();
+      await chain(req, res);
+      const body = res._json as any;
+      expect(body.providers.map((p: any) => p.provider)).toEqual(['anthropic', 'opencode']);
+      expect(body.slots.map((s: any) => s.slot)).toEqual(['grounder', 'narrative', 'reconcile']);
+      expect(body.slots.every((s: any) => typeof s.env === 'string' && s.env.startsWith('OPENCODE_'))).toBe(true);
     });
   });
 

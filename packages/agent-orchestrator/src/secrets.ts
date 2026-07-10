@@ -36,7 +36,24 @@ export interface SecretEnv {
   model?: string | null;
   /** opencode server URL / provider base. Optional → image default. */
   baseUrl?: string | null;
+  /**
+   * Per-agent/per-tool model overrides (opencode only). Keyed by slot id
+   * (grounder/narrative/reconcile); each emits its OPENCODE_<SLOT>_MODEL env
+   * the sub-agent reads at spawn. Absent slots inherit `model`.
+   */
+  modelOverrides?: Record<string, string> | null;
 }
+
+/**
+ * Slot id → container env var the corresponding opencode sub-agent reads. Mirror
+ * of AGENT_MODEL_SLOTS in the gateway (packages/gateway/src/agent.ts) — keep in
+ * sync. Only these slots are emitted; unknown keys are ignored.
+ */
+const SLOT_ENV: Record<string, string> = {
+  grounder: 'OPENCODE_GROUNDER_MODEL',
+  narrative: 'OPENCODE_NARRATIVE_MODEL',
+  reconcile: 'OPENCODE_RECONCILE_MODEL',
+};
 
 export interface SecretsWriterOptions {
   /** Directory secrets live in (should be tmpfs/private). */
@@ -88,6 +105,11 @@ export class SecretsWriter {
       lines.push(`OPENCODE_PROVIDER_ID=${escapeValue('opencode')}`);
       if (env.model) lines.push(`OPENCODE_MODEL_ID=${escapeValue(env.model)}`);
       if (env.baseUrl) lines.push(`OPENCODE_SERVER_URL=${escapeValue(env.baseUrl)}`);
+      // Per-slot model overrides → OPENCODE_<SLOT>_MODEL (sub-agents read these).
+      for (const [slot, model] of Object.entries(env.modelOverrides ?? {})) {
+        const key = SLOT_ENV[slot];
+        if (key && model) lines.push(`${key}=${escapeValue(model)}`);
+      }
     } else {
       lines.push(`ANTHROPIC_API_KEY=${escapeValue(env.apiKey)}`);
     }

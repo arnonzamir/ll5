@@ -28,11 +28,22 @@ export interface LlmCredentialStatus {
   model?: string | null;
   /** opencode server URL / provider base (null = default). */
   base_url?: string | null;
+  /** Per-agent/per-tool model overrides, keyed by slot id (opencode only). */
+  model_overrides?: Record<string, string>;
+}
+
+/** One overridable sub-agent/tool model slot (GET /me/agent/models → slots). */
+export interface AgentModelSlot {
+  slot: string;
+  label: string;
+  description: string;
+  env: string;
 }
 
 /** Provider + model options for the settings dropdowns (GET /me/agent/models). */
 export interface AgentModelsCatalog {
   providers: Array<{ provider: AgentLlmProvider; label: string; models: string[] }>;
+  slots?: AgentModelSlot[];
 }
 
 /** One row in GET /me/agent/credentials. Hash-only on the backend; never a token. */

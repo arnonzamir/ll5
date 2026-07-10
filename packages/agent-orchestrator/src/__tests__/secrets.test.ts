@@ -67,6 +67,21 @@ describe('SecretsWriter', () => {
     expect(content).not.toContain('ANTHROPIC_API_KEY');
   });
 
+  it('emits per-slot model override env vars (known slots only)', async () => {
+    const dir = await tmpDir();
+    const w = new SecretsWriter({ dir });
+    const p = await w.write({
+      userId: 'user-oc-slots', agentToken: 't', apiKey: 'k', gatewayUrl: 'g',
+      mcpBaseDomain: 'm', provider: 'opencode', model: 'deepseek-v4-flash-free',
+      modelOverrides: { grounder: 'deepseek-v4-pro', reconcile: 'minimax-m3', bogus: 'x' },
+    });
+    const content = await readFile(p, 'utf8');
+    expect(content).toContain(`OPENCODE_GROUNDER_MODEL='deepseek-v4-pro'`);
+    expect(content).toContain(`OPENCODE_RECONCILE_MODEL='minimax-m3'`);
+    expect(content).not.toContain('OPENCODE_NARRATIVE_MODEL='); // not overridden
+    expect(content).not.toContain('bogus'); // unknown slot ignored
+  });
+
   it('opencode without model/baseUrl omits those lines', async () => {
     const dir = await tmpDir();
     const w = new SecretsWriter({ dir });

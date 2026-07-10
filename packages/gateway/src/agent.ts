@@ -88,6 +88,66 @@ export const MODEL_CATALOG: Record<AgentLlmProvider, { label: string; models: st
   },
 };
 
+// Per-agent/per-tool model slots the user can override independently of the main
+// model. Each slot maps to a container env var the corresponding sub-agent reads
+// at spawn time (auto-ground.ts / narrative-loop.ts / reconcile-loop.ts). An
+// empty/absent override means the slot inherits the main `model`. Only the
+// opencode runtime spawns these sub-agents, so slots are opencode-scoped.
+export interface AgentModelSlot {
+  slot: string;
+  label: string;
+  description: string;
+  /** Container env var the orchestrator emits for this slot. */
+  env: string;
+}
+export const AGENT_MODEL_SLOTS: AgentModelSlot[] = [
+  {
+    slot: 'grounder',
+    label: 'Grounder (auto-recall)',
+    description: 'Read-only context recall injected before proactive turns.',
+    env: 'OPENCODE_GROUNDER_MODEL',
+  },
+  {
+    slot: 'narrative',
+    label: 'Narrative consolidator',
+    description: 'Off-agent batch narrative maintenance loop.',
+    env: 'OPENCODE_NARRATIVE_MODEL',
+  },
+  {
+    slot: 'reconcile',
+    label: 'Reconcile worker',
+    description: 'Off-agent open-loop reconciliation loop.',
+    env: 'OPENCODE_RECONCILE_MODEL',
+  },
+];
+const AGENT_MODEL_SLOT_IDS = new Set(AGENT_MODEL_SLOTS.map((s) => s.slot));
+
+/**
+ * Validate + normalize a model_overrides map against a provider's catalog.
+ * Returns the cleaned map, or an error string. Unknown slots and empty values
+ * are dropped; every kept value must be in the provider's model list.
+ */
+export function sanitizeModelOverrides(
+  provider: AgentLlmProvider,
+  raw: unknown,
+): { overrides: Record<string, string> } | { error: string } {
+  if (raw == null) return { overrides: {} };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { error: 'model_overrides must be an object' };
+  }
+  const allowed = MODEL_CATALOG[provider].models;
+  const out: Record<string, string> = {};
+  for (const [slot, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!AGENT_MODEL_SLOT_IDS.has(slot)) continue;
+    if (value == null || value === '') continue;
+    if (typeof value !== 'string' || !allowed.includes(value)) {
+      return { error: `model_overrides.${slot} must be one of: ${allowed.join(', ')}` };
+    }
+    out[slot] = value;
+  }
+  return { overrides: out };
+}
+
 /** Validate a key for the given provider without logging it. */
 function keyValidForProvider(provider: AgentLlmProvider, key: string): boolean {
   if (typeof key !== 'string' || key.length < 8 || key.length > 400) return false;
@@ -296,6 +356,8 @@ export function createAgentRouter(
         label: MODEL_CATALOG[p].label,
         models: MODEL_CATALOG[p].models,
       })),
+      // Per-agent/per-tool slots (opencode only) the user can override.
+      slots: AGENT_MODEL_SLOTS,
     });
   });
 
@@ -303,8 +365,60 @@ export function createAgentRouter(
     const userId = (req as Request & { userId: string }).userId;
     const body = (req.body ?? {}) as {
       api_key?: string; provider?: string; model?: string; base_url?: string;
+      model_overrides?: unknown;
     };
     const api_key = body.api_key;
+
+    // Keyless model-config update: no new key, but a credential already exists.
+    // Lets the user retune model / model_overrides / base_url without re-pasting
+    // the key. Validates against the STORED provider; the key/ciphertext is left
+    // untouched.
+    if (!api_key) {
+      if (!encryptionKey) {
+        res.status(500).json({ error: 'Secret storage not configured' });
+        return;
+      }
+      const existing = await pool.query<{ provider: string | null; last4: string | null }>(
+        'SELECT provider, last4 FROM agent_llm_credentials WHERE user_id = $1',
+        [userId],
+      );
+      if (existing.rows.length === 0) {
+        res.status(400).json({ error: 'api_key required (no stored credential to update)' });
+        return;
+      }
+      const storedProvider = (existing.rows[0].provider ?? 'anthropic') as AgentLlmProvider;
+      const model2 = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
+      if (model2 && !MODEL_CATALOG[storedProvider].models.includes(model2)) {
+        res.status(400).json({ error: `model must be one of: ${MODEL_CATALOG[storedProvider].models.join(', ')}` });
+        return;
+      }
+      const base_url2 = typeof body.base_url === 'string' && body.base_url.trim() ? body.base_url.trim() : null;
+      const sane = sanitizeModelOverrides(storedProvider, body.model_overrides);
+      if ('error' in sane) {
+        res.status(400).json({ error: sane.error });
+        return;
+      }
+      try {
+        await pool.query(
+          `UPDATE agent_llm_credentials
+             SET model = $2, base_url = $3, model_overrides = $4, updated_at = now()
+           WHERE user_id = $1`,
+          [userId, model2, base_url2, JSON.stringify(sane.overrides)],
+        );
+        logger.info('[agent][putLlmCredential] model config updated (keyless)', { userId, provider: storedProvider, model: model2 });
+        res.json({
+          configured: true, kind: 'api_key', provider: storedProvider,
+          model: model2, base_url: base_url2, model_overrides: sane.overrides,
+          last4: existing.rows[0].last4,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error('[agent][putLlmCredential] keyless update failed', { userId, error: message });
+        res.status(500).json({ error: message });
+      }
+      return;
+    }
+
     // Back-compat: default to anthropic (the old key-only contract).
     const provider = (body.provider ?? 'anthropic') as AgentLlmProvider;
 
@@ -327,6 +441,13 @@ export function createAgentRouter(
     }
     const base_url = typeof body.base_url === 'string' && body.base_url.trim() ? body.base_url.trim() : null;
 
+    const sanitized = sanitizeModelOverrides(provider, body.model_overrides);
+    if ('error' in sanitized) {
+      res.status(400).json({ error: sanitized.error });
+      return;
+    }
+    const model_overrides = sanitized.overrides;
+
     if (!encryptionKey) {
       logger.error('[agent][putLlmCredential] ENCRYPTION_KEY not configured', { userId });
       res.status(500).json({ error: 'Secret storage not configured' });
@@ -338,8 +459,8 @@ export function createAgentRouter(
     try {
       const ciphertext = encryptSecret(api_key, encryptionKey);
       await pool.query(
-        `INSERT INTO agent_llm_credentials (user_id, kind, ciphertext, last4, provider, model, base_url, updated_at)
-         VALUES ($1, 'api_key', $2, $3, $4, $5, $6, now())
+        `INSERT INTO agent_llm_credentials (user_id, kind, ciphertext, last4, provider, model, base_url, model_overrides, updated_at)
+         VALUES ($1, 'api_key', $2, $3, $4, $5, $6, $7, now())
          ON CONFLICT (user_id) DO UPDATE SET
            kind = 'api_key',
            ciphertext = EXCLUDED.ciphertext,
@@ -347,11 +468,12 @@ export function createAgentRouter(
            provider = EXCLUDED.provider,
            model = EXCLUDED.model,
            base_url = EXCLUDED.base_url,
+           model_overrides = EXCLUDED.model_overrides,
            updated_at = now()`,
-        [userId, ciphertext, last4, provider, model, base_url],
+        [userId, ciphertext, last4, provider, model, base_url, JSON.stringify(model_overrides)],
       );
       logger.info('[agent][putLlmCredential] LLM credential set', { userId, provider, model, last4 });
-      res.json({ configured: true, kind: 'api_key', provider, model, base_url, last4 });
+      res.json({ configured: true, kind: 'api_key', provider, model, base_url, model_overrides, last4 });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[agent][putLlmCredential] Failed', { userId, error: message });
@@ -364,9 +486,10 @@ export function createAgentRouter(
     const userId = (req as Request & { userId: string }).userId;
     try {
       const result = await pool.query<{
-        kind: string; last4: string | null; provider: string | null; model: string | null; base_url: string | null;
+        kind: string; last4: string | null; provider: string | null; model: string | null;
+        base_url: string | null; model_overrides: Record<string, string> | null;
       }>(
-        `SELECT kind, last4, provider, model, base_url FROM agent_llm_credentials WHERE user_id = $1`,
+        `SELECT kind, last4, provider, model, base_url, model_overrides FROM agent_llm_credentials WHERE user_id = $1`,
         [userId],
       );
       if (result.rows.length === 0) {
@@ -381,6 +504,7 @@ export function createAgentRouter(
         provider: row.provider ?? 'anthropic',
         model: row.model,
         base_url: row.base_url,
+        model_overrides: row.model_overrides ?? {},
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

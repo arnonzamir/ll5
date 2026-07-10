@@ -45,15 +45,21 @@ interface ClaudeKeyFormProps {
  */
 export function ClaudeKeyForm({ status, catalog, onStatusChange, compact = false }: ClaudeKeyFormProps) {
   const providers = catalog?.providers ?? [];
+  const slots = catalog?.slots ?? [];
   const [local, setLocal] = useState<LlmCredentialStatus>(status);
   const [provider, setProvider] = useState<AgentLlmProvider>(status.provider ?? "anthropic");
   const [model, setModel] = useState<string>(status.model ?? "");
+  const [overrides, setOverrides] = useState<Record<string, string>>(status.model_overrides ?? {});
   const [apiKey, setApiKey] = useState("");
   const [reveal, setReveal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const modelsForProvider = providers.find((p) => p.provider === provider)?.models ?? [];
+  // Per-agent/per-tool overrides are opencode-only (only that runtime spawns
+  // the grounder / narrative / reconcile sub-agents).
+  const showSlots = provider === "opencode" && slots.length > 0;
 
   function applyStatus(next: LlmCredentialStatus) {
     setLocal(next);
@@ -65,17 +71,35 @@ export function ClaudeKeyForm({ status, catalog, onStatusChange, compact = false
     // Reset the model to the first option of the new provider.
     const firstModel = providers.find((p) => p.provider === next)?.models[0] ?? "";
     setModel(firstModel);
+    setOverrides({}); // slots are provider-specific
     setError(null);
+  }
+
+  function setSlot(slot: string, value: string) {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      if (value) next[slot] = value;
+      else delete next[slot];
+      return next;
+    });
+    setSaved(false);
   }
 
   function handleSave() {
     setError(null);
+    setSaved(false);
     const key = apiKey;
     startTransition(async () => {
-      const result = await saveLlmCredential({ apiKey: key, provider, model: model || null });
+      const result = await saveLlmCredential({
+        apiKey: key,
+        provider,
+        model: model || null,
+        modelOverrides: showSlots ? overrides : {},
+      });
       if (result.ok) {
         setApiKey(""); // never retain the raw key in component state after save
         setReveal(false);
+        setSaved(true);
         applyStatus(result.status ?? (await fetchLlmCredential()));
       } else {
         setError(result.error ?? "Failed to save the key.");
@@ -135,13 +159,43 @@ export function ClaudeKeyForm({ status, catalog, onStatusChange, compact = false
               id="agent-model"
               className={selectCls}
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={(e) => { setModel(e.target.value); setSaved(false); }}
             >
               {modelsForProvider.length === 0 && <option value="">(default)</option>}
               {modelsForProvider.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
+          </div>
+        </div>
+      )}
+
+      {/* Per-agent / per-tool model overrides (opencode only) */}
+      {showSlots && (
+        <div className="space-y-2 rounded-md border border-input p-3">
+          <div>
+            <Label>Per-tool models</Label>
+            <p className="text-xs text-gray-400">
+              Override the model for specific sub-agents. Leave on “Default” to inherit the main model above.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {slots.map((s) => (
+              <div key={s.slot} className="space-y-1">
+                <Label htmlFor={`slot-${s.slot}`} title={s.description}>{s.label}</Label>
+                <select
+                  id={`slot-${s.slot}`}
+                  className={selectCls}
+                  value={overrides[s.slot] ?? ""}
+                  onChange={(e) => setSlot(s.slot, e.target.value)}
+                >
+                  <option value="">Default (main model)</option>
+                  {modelsForProvider.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -174,10 +228,19 @@ export function ClaudeKeyForm({ status, catalog, onStatusChange, compact = false
               {reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
-          <Button onClick={handleSave} disabled={isPending || apiKey.trim().length === 0}>
+          <Button
+            onClick={handleSave}
+            disabled={isPending || (apiKey.trim().length === 0 && !local.configured)}
+          >
             {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
           </Button>
         </div>
+        {local.configured && apiKey.trim().length === 0 && (
+          <p className="text-xs text-gray-400">
+            Saving with the key field empty updates the model settings only — your stored key is kept.
+          </p>
+        )}
+        {saved && !error && <p className="text-xs text-green-600">Saved.</p>}
         {error && <p className="text-xs text-red-600">{error}</p>}
         <p className="text-xs text-gray-400">{HELPER_COPY}</p>
       </div>

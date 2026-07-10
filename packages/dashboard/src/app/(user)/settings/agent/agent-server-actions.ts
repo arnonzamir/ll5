@@ -40,6 +40,10 @@ export async function fetchLlmCredential(): Promise<LlmCredentialStatus> {
       provider: raw.provider as LlmCredentialStatus["provider"],
       model: (raw.model as string | null) ?? null,
       base_url: (raw.base_url as string | null) ?? null,
+      model_overrides:
+        raw.model_overrides && typeof raw.model_overrides === "object"
+          ? (raw.model_overrides as Record<string, string>)
+          : {},
     };
   } catch (err) {
     // Never include the key in any log line.
@@ -71,7 +75,15 @@ export async function fetchAgentModels(): Promise<AgentModelsCatalog> {
  * The raw key is NEVER logged.
  */
 export async function saveLlmCredential(
-  input: string | { apiKey: string; provider?: "anthropic" | "opencode"; model?: string | null; baseUrl?: string | null },
+  input:
+    | string
+    | {
+        apiKey: string;
+        provider?: "anthropic" | "opencode";
+        model?: string | null;
+        baseUrl?: string | null;
+        modelOverrides?: Record<string, string>;
+      },
 ): Promise<{ ok: boolean; status?: LlmCredentialStatus; error?: string }> {
   const headers = await authHeaders();
   if (!headers) return { ok: false, error: "Not authenticated" };
@@ -80,11 +92,16 @@ export async function saveLlmCredential(
   const opts = typeof input === "string" ? { apiKey: input, provider: "anthropic" as const } : input;
   const provider = opts.provider ?? "anthropic";
   const trimmed = opts.apiKey.trim();
-  if (provider === "anthropic" && !isLikelyAnthropicApiKey(trimmed)) {
-    return { ok: false, error: "That doesn't look like an Anthropic API key (expected sk-ant-…)." };
-  }
-  if (trimmed.length < 8) {
-    return { ok: false, error: "That key looks too short." };
+  // Empty key = keyless config update (retune model/overrides on an existing
+  // credential). Only validate the key when one is actually being set.
+  const keyless = trimmed.length === 0;
+  if (!keyless) {
+    if (provider === "anthropic" && !isLikelyAnthropicApiKey(trimmed)) {
+      return { ok: false, error: "That doesn't look like an Anthropic API key (expected sk-ant-…)." };
+    }
+    if (trimmed.length < 8) {
+      return { ok: false, error: "That key looks too short." };
+    }
   }
 
   try {
@@ -92,10 +109,11 @@ export async function saveLlmCredential(
       method: "PUT",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
-        api_key: trimmed,
-        provider,
+        api_key: keyless ? undefined : trimmed,
+        provider: keyless ? undefined : provider,
         model: opts.model ?? undefined,
         base_url: opts.baseUrl ?? undefined,
+        model_overrides: opts.modelOverrides ?? undefined,
       }),
     });
     if (!res.ok) {
@@ -116,6 +134,10 @@ export async function saveLlmCredential(
         provider: raw.provider as LlmCredentialStatus["provider"],
         model: (raw.model as string | null) ?? null,
         base_url: (raw.base_url as string | null) ?? null,
+        model_overrides:
+          raw.model_overrides && typeof raw.model_overrides === "object"
+            ? (raw.model_overrides as Record<string, string>)
+            : {},
       },
     };
   } catch (err) {

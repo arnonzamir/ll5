@@ -402,6 +402,7 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-10: model default switched deepseek-v4-pro → deepseek-v4-flash-free (Zen $62 paid cap hit; opencode.json + OPENCODE_MODEL_ID var + CI/compose defaults).
 2026-07-10: tenant-level agent LLM config — migration 041 (agent_llm_credentials + provider/model/base_url); orchestrator secrets.ts per-provider env-file + imagesByProvider; gateway agent.ts provider/model + GET /me/agent/models; dashboard (user)/settings/agent provider+model UI.
 2026-07-10: deploy agent-orchestrator (per-user opencode containers) — docker-runtime network attach (AGENT_NETWORK); ll5-run-opencode entrypoint sources LL5_AGENT_ENV_FILE; orchestrator emits LL5_TOKEN; compose agent-orchestrator service (docker.sock + /run/ll5) + CI matrix + gateway ORCHESTRATOR_URL/SECRET.
+2026-07-10: per-agent/per-tool model overrides — migration 042 (agent_llm_credentials.model_overrides JSONB); gateway agent.ts AGENT_MODEL_SLOTS + sanitizeModelOverrides + keyless PUT + slots in GET /me/agent/models; orchestrator secrets.ts SLOT_ENV → OPENCODE_<SLOT>_MODEL; ll5-run-opencode narrative-loop.ts/reconcile-loop.ts read slot env; dashboard (user)/settings/agent "Per-tool models" dropdowns.
 יום ה׳ יולי 09 2026 00:24:36 IDT: deploy: inject OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID in .env when AGENT_VARIANT=opencode
 
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected

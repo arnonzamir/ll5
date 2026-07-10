@@ -4,6 +4,20 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — Per-agent/per-tool model overrides (UI-configurable)
+
+The tenant LLM config now supports **per-sub-agent model overrides** on top of the main model. A user can, for example, keep the cheap main model but run the grounder on a stronger one.
+- **Schema** (042): `agent_llm_credentials.model_overrides JSONB DEFAULT '{}'` — map of `slot → model_id`.
+- **Slots** (opencode-only, they're the sub-agents the runtime spawns): `grounder` → `OPENCODE_GROUNDER_MODEL`, `narrative` → `OPENCODE_NARRATIVE_MODEL`, `reconcile` → `OPENCODE_RECONCILE_MODEL`. Registry = `AGENT_MODEL_SLOTS` in gateway `agent.ts`; mirrored in orchestrator `secrets.ts` (`SLOT_ENV`).
+- **Gateway**: `PUT /me/agent/llm-credential` accepts + validates `model_overrides` (unknown slots / empty values dropped; each value must be in the provider catalog). `GET /me/agent/models` now returns the `slots` list. New **keyless update** path: a PUT with no `api_key` on an existing credential retunes model/overrides/base_url only — the stored key is never re-pasted or re-written.
+- **Orchestrator**: `loadCredential` reads `model_overrides`; `SecretsWriter` emits `OPENCODE_<SLOT>_MODEL` for each known slot.
+- **opencode variant** (`ll5-run-opencode`): `narrative-loop.ts` / `reconcile-loop.ts` read their slot env and pass `model` at spawn; `auto-ground.ts` already read `OPENCODE_GROUNDER_MODEL`.
+- **Dashboard** `(user)/settings/agent`: a "Per-tool models" section (opencode only) with a dropdown per slot ("Default (main model)" = inherit). Save works with an empty key field (config-only update).
+- Tests: gateway +5, orchestrator +1, all green; typecheck clean across gateway/orchestrator/dashboard/variant.
+- **Note on the Zen cap:** verified the local "opencode-go" key is the **same workspace** (`wrk_01KX…`) as the capped key — both 402 on `deepseek-v4-pro` with the $62 `MonthlyLimitError`. The go key does NOT unlock pro; only raising the workspace cap does. Still on `deepseek-v4-flash-free`.
+
+---
+
 ## 2026-07-10 — Deploy the agent-orchestrator (per-user opencode containers)
 
 Stood up the `agent-orchestrator` control plane so each user gets their own opencode container (its own LL5 token scoping every MCP call = per-user isolation). Closed the opencode-under-orchestrator gaps the code review surfaced (the orchestrator was built for the Claude base-image):

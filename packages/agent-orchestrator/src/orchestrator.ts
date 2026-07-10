@@ -97,6 +97,7 @@ export class Orchestrator {
     provider: 'anthropic' | 'opencode';
     model: string | null;
     baseUrl: string | null;
+    modelOverrides: Record<string, string>;
     apiKey: string;
   }> {
     const res = await this.pool.query<{
@@ -104,8 +105,9 @@ export class Orchestrator {
       provider: string | null;
       model: string | null;
       base_url: string | null;
+      model_overrides: Record<string, string> | null;
     }>(
-      'SELECT ciphertext, provider, model, base_url FROM agent_llm_credentials WHERE user_id = $1',
+      'SELECT ciphertext, provider, model, base_url, model_overrides FROM agent_llm_credentials WHERE user_id = $1',
       [userId],
     );
     const row = res.rows[0];
@@ -117,6 +119,7 @@ export class Orchestrator {
       provider,
       model: row.model ?? null,
       baseUrl: row.base_url ?? null,
+      modelOverrides: row.model_overrides ?? {},
       apiKey: this.encryptor.decrypt(row.ciphertext, this.config.encryptionKey),
     };
   }
@@ -203,6 +206,7 @@ export class Orchestrator {
       provider: cred.provider,
       model: cred.model,
       baseUrl: cred.baseUrl,
+      modelOverrides: cred.modelOverrides,
     });
 
     // Per-provider image: opencode and Claude ship as separate images.
