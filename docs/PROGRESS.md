@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-11 — Retire the shared agent from auto-deploy (compose profile)
+
+The legacy shared single-tenant `agent` service kept resurrecting on every `docker compose up -d` deploy and re-registering the (single) user's `agent_session_id`, colliding with the per-user orchestrator container (per-user triggers 404 on a session that lives on the old agent). Gated `agent` behind the `shared-agent` compose profile so normal deploys skip it; the deploy's agent health-check is now informational. Kept for rollback: `docker compose --profile shared-agent up -d agent`. Stop the currently-running one + reclaim the session on the per-user container to finish the cutover.
+
+---
+
 ## 2026-07-11 — Fix: opencode container heartbeat + routing on error
 
 Enabling the console exposed two pre-existing gaps: (1) the opencode container never sent heartbeats, so `agent_runtimes` drifted to `error/heartbeat_stale`; (2) `resolveAgentBaseUrl` only routed to the per-user container on `status='running'`, so an error status fell back to the global `OPENCODE_SERVER_URL` (a stopped shared agent) — breaking the user's triggers. Fixes: opencode entrypoint now runs a 60s heartbeat loop (`POST /me/agent/heartbeat`); `resolveAgentBaseUrl` routes to the per-user container for `running|provisioning|error` (a lagging heartbeat no longer misroutes), falling back to global only when the row is absent or `stopped`.

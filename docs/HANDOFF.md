@@ -743,6 +743,8 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 **Agent page fuller info (2026-07-11)**: runtime card shows provider/model/per-tool-overrides/container/host/heartbeat via a details grid.
 
+**Shared agent retired from auto-deploy (2026-07-11)**: legacy `agent` compose service gated behind the `shared-agent` profile so `docker compose up -d` no longer starts it (it was resurrecting on deploys + clobbering the per-user session). Rollback: `docker compose --profile shared-agent up -d agent`.
+
 **opencode heartbeat + routing fix (2026-07-11)**: opencode entrypoint runs a 60s POST /me/agent/heartbeat loop (else the runtime drifts to error/heartbeat_stale); resolveAgentBaseUrl routes to the per-user container for running/provisioning/error (lagging heartbeat no longer misroutes to the global URL).
 
 **Per-user opencode console (2026-07-11, DECISION-026, flag-gated OFF)**: opencode web UI per user at `agent-<uid>.<CONSOLE_DOMAIN_BASE>` — orchestrator stamps Traefik labels (`console-labels.ts`), gated by the tenant LL5 token via forwardAuth. Gateway `console.ts`: `GET /me/agent/console/enter` (mints an HMAC console token → URL) + `GET /internal/console-auth` (Traefik forwardAuth target; validates cookie/query token, uid must match host, plants HttpOnly `ll5_console` cookie). Enable: set `CONSOLE_DOMAIN_BASE=noninoni.click` on gateway + orchestrator, re-provision. Empty ⇒ 503 + no labels. VERIFY Traefik picks up labels on the non-Coolify orchestrator containers first. Tenant LL5 token already scopes 100% of MCP/tool calls (4097 proxy injects Bearer on every MCP req; all gw()/plugin calls send it).

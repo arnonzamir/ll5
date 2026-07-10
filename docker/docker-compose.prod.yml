@@ -741,8 +741,15 @@ services:
       - "traefik.http.services.ll5-vault.loadbalancer.server.port=3000"
 
   # ---------- Agent (variant-selectable) ----------
+  # LEGACY shared single-tenant agent. Superseded by per-user orchestrator
+  # containers (ll5-agent-<uid>). Gated behind the "shared-agent" compose profile
+  # so normal deploys (`docker compose up -d`) DO NOT start it — otherwise it
+  # resurrects on every deploy and collides with the per-user container for the
+  # single user_settings.agent_session_id row. Kept for rollback: bring it back
+  # with `docker compose --profile shared-agent up -d agent`.
   agent:
     <<: *defaults
+    profiles: ["shared-agent"]
     image: ghcr.io/arnonzamir/ll5-run-${AGENT_VARIANT:-claude}:latest
     container_name: agent-xkkcc0g4o48kkcows8488so4
     environment:

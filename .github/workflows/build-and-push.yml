@@ -500,13 +500,16 @@ jobs:
             docker compose up -d
 
             # ===== Agent health check =====
+            # The legacy shared "agent" service is gated behind the "shared-agent"
+            # compose profile (retired in favor of per-user orchestrator
+            # containers ll5-agent-<uid>). A normal `docker compose up -d` does NOT
+            # start it, so "not running" here is EXPECTED, not an error.
             sleep 10
-            AGENT_STATUS=$(docker compose ps agent --format json 2>/dev/null | jq -r '.State' 2>/dev/null || echo "unknown")
+            AGENT_STATUS=$(docker compose ps agent --format json 2>/dev/null | jq -r '.State' 2>/dev/null || echo "absent")
             if [ "$AGENT_STATUS" = "running" ]; then
-              echo "Agent container running (variant: $AGENT_VARIANT)"
+              echo "Shared agent container running (variant: $AGENT_VARIANT)"
             else
-              echo "::error::Agent container not running (status: $AGENT_STATUS, variant: $AGENT_VARIANT)"
-              docker compose logs agent --tail 50 2>/dev/null || true
+              echo "Shared agent not running (status: $AGENT_STATUS) — expected; per-user orchestrator containers serve tenants."
             fi
 
       - name: Health check
