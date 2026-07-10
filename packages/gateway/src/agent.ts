@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 import { generateToken } from '@ll5/shared';
 import { chatAuthMiddleware } from './chat.js';
+import { registerConsoleRoutes } from './console.js';
 import { encryptSecret } from './utils/encryption.js';
 import { logger } from './utils/logger.js';
 import {
@@ -241,6 +242,9 @@ export function createAgentRouter(
 ): Router {
   const router = Router();
   const authMw = chatAuthMiddleware(authSecret);
+
+  // Per-user opencode console routes (enter handshake + Traefik forwardAuth).
+  registerConsoleRoutes(router, authSecret);
 
   // POST /me/agent/connection — mint a long-TTL agent token + return the
   // one-time connection kit (token + .mcp.json). Stores only sha256(token).

@@ -19,11 +19,13 @@ import {
   RefreshCw,
   Server,
   Square,
+  TerminalSquare,
 } from "lucide-react";
 import { ClaudeKeyForm } from "./claude-key-form";
 import {
   fetchAgentModels,
   fetchAgentSessions,
+  fetchConsoleUrl,
   fetchLlmCredential,
   fetchRuntime,
   provisionRuntime,
@@ -121,6 +123,22 @@ function RuntimeSection({ llm }: { llm: LlmCredentialStatus }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [consolePending, setConsolePending] = useState(false);
+
+  async function handleConsole() {
+    setError(null);
+    setConsolePending(true);
+    try {
+      const result = await fetchConsoleUrl();
+      if (result.ok && result.url) {
+        window.open(result.url, "_blank", "noopener");
+      } else {
+        setError(result.error ?? "Could not open the console.");
+      }
+    } finally {
+      setConsolePending(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const rt = await fetchRuntime();
@@ -252,6 +270,17 @@ function RuntimeSection({ llm }: { llm: LlmCredentialStatus }) {
               ) : (
                 <>
                   <Square className="h-3.5 w-3.5 mr-1.5" /> Stop
+                </>
+              )}
+            </Button>
+          )}
+          {runtime.status === "running" && (
+            <Button variant="outline" onClick={handleConsole} disabled={consolePending}>
+              {consolePending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <TerminalSquare className="h-3.5 w-3.5 mr-1.5" /> Open console
                 </>
               )}
             </Button>

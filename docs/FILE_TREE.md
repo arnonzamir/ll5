@@ -413,3 +413,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-11: gateway per-user agent-trigger routing — resolveAgentBaseUrl(pool,userId) → http://ll5-agent-<uid>:4096 when runtime running, else global OPENCODE_SERVER_URL; triggerAgent gains optional baseUrl; 3 call sites updated.
 
 2026-07-11: agent-view.tsx runtime card — details grid (provider/model/per-tool overrides/container/host/heartbeat) via DetailRow; RuntimeSection now takes full llm status.
+
+2026-07-11: per-user opencode console (DECISION-026, flag-gated) — orchestrator console-labels.ts (Traefik agent-<uid>.<base> + forwardAuth); gateway console.ts (console token + /me/agent/console/enter + /internal/console-auth); dashboard Open-console button; CONSOLE_DOMAIN_BASE in compose (empty=off).

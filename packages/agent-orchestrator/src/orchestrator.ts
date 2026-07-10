@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { logger } from './logger.js';
 import type { Runtime, RuntimeSpec } from './runtime/runtime.js';
 import { SecretsWriter, ENV_FILE_TARGET } from './secrets.js';
+import { buildConsoleLabels } from './console-labels.js';
 import type { Encryptor } from './encryption.js';
 
 export interface AgentRuntimeRow {
@@ -33,6 +34,11 @@ export interface OrchestratorConfig {
   mcpBaseDomain: string;
   /** Docker network to attach per-user containers to (the ll5 stack network). */
   agentNetwork?: string;
+  /** Base domain for per-user console subdomains (agent-<uid>.<base>). Empty =
+   *  console disabled (no Traefik labels emitted). */
+  consoleDomainBase?: string;
+  /** In-network gateway URL Traefik forwardAuth calls (defaults to gatewayUrl). */
+  consoleForwardAuthUrl?: string;
   /** A 'running' row older than this (seconds) is stale. */
   heartbeatTimeoutSec: number;
   /** Don't restart the same user more than once per this many seconds. */
@@ -212,13 +218,21 @@ export class Orchestrator {
     // Per-provider image: opencode and Claude ship as separate images.
     const image = this.config.imagesByProvider?.[cred.provider] ?? this.config.image;
 
+    // Per-user console route (Traefik). Only for the opencode variant (it serves
+    // the web UI on :4096) and only when CONSOLE_DOMAIN_BASE is configured — else
+    // buildConsoleLabels returns {} and no router is created.
+    const consoleLabels =
+      cred.provider === 'opencode'
+        ? buildConsoleLabels(userId, this.config.consoleDomainBase, this.config.consoleForwardAuthUrl ?? this.config.gatewayUrl)
+        : {};
+
     const spec: RuntimeSpec = {
       userId,
       image,
       envFilePath,
       envFileTarget: ENV_FILE_TARGET,
       memoryBytes: this.config.memoryBytes,
-      labels: { 'll5.user_id': userId },
+      labels: { 'll5.user_id': userId, ...consoleLabels },
       restartPolicy: this.config.restartPolicy,
       network: this.config.agentNetwork,
     };

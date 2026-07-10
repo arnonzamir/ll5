@@ -40,6 +40,8 @@ async function main(): Promise<void> {
       gatewayUrl: env.gatewayUrl,
       mcpBaseDomain: env.mcpBaseDomain,
       agentNetwork: env.agentNetwork,
+      consoleDomainBase: env.consoleDomainBase,
+      consoleForwardAuthUrl: env.consoleForwardAuthUrl,
       heartbeatTimeoutSec: env.heartbeatTimeoutSec,
       restartCooldownSec: env.restartCooldownSec,
     },

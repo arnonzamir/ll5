@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-11 — Per-user opencode web console (flag-gated, DECISION-026)
+
+Built the per-user console: opencode's web UI at `agent-<uid>.<CONSOLE_DOMAIN_BASE>` (Traefik labels stamped by the orchestrator), gated by the tenant LL5 token via a `forwardAuth` handshake (`/me/agent/console/enter` mints a console token → cookie validated by `/internal/console-auth`). Dashboard "Open console" button (shown when running). **OFF until `CONSOLE_DOMAIN_BASE` is set** — gateway returns 503, orchestrator emits no labels. Also confirmed the tenant LL5 token already scopes 100% of MCP + tool calls (proxy injects it on every MCP request; every gw()/plugin call sends it). Follow-up: `OPENCODE_SERVER_PASSWORD` for internal defense-in-depth; verify Traefik picks up labels on the non-Coolify orchestrator containers before enabling.
+
+---
+
 ## 2026-07-11 — Agent page: fuller runtime info
 
 Runtime card now shows a details grid: provider, model, per-tool model overrides, container id (short), host, and last heartbeat — alongside status/actions and the Workers heartbeats. Purely additive.

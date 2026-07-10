@@ -436,6 +436,10 @@ services:
       #   opencode → http://agent:4096 (gateway triggers agent via HTTP POST)
       #   claude   → empty (gateway uses PG NOTIFY → channel bridge flow)
       OPENCODE_SERVER_URL: ${OPENCODE_SERVER_URL:-}
+      # Per-user opencode console: base domain for agent-<uid>.<base> subdomains.
+      # Empty = console feature OFF (gateway /me/agent/console/enter returns 503,
+      # orchestrator emits no Traefik labels). Set to e.g. noninoni.click to enable.
+      CONSOLE_DOMAIN_BASE: ${CONSOLE_DOMAIN_BASE:-}
       # Opencode model selection (only used when OPENCODE_SERVER_URL is set).
       # Empty = opencode.json default; filled in by deploy from AGENT_VARIANT.
       # Default deepseek-v4-pro matches opencode.json's global default (Zen paid).
@@ -508,6 +512,10 @@ services:
       # internally and MCPs via the public mcp-*.<domain> endpoints.
       LL5_GATEWAY_URL: http://gateway:3000
       MCP_BASE_DOMAIN: ${MCP_BASE_DOMAIN:-noninoni.click}
+      # Per-user console: base domain (empty = off) + in-network gateway URL the
+      # Traefik forwardAuth middleware calls. Emits agent-<uid>.<base> routing labels.
+      CONSOLE_DOMAIN_BASE: ${CONSOLE_DOMAIN_BASE:-}
+      CONSOLE_FORWARDAUTH_URL: ${CONSOLE_FORWARDAUTH_URL:-http://gateway:3000}
       # Per-user agent image (opencode). Anthropic variant image is optional.
       AGENT_IMAGE_OPENCODE: ghcr.io/arnonzamir/ll5-run-opencode:latest
       # Attach each per-user container to the ll5 stack network so it resolves

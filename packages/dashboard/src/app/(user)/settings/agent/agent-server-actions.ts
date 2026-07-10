@@ -229,6 +229,27 @@ export async function generateConnection(
   }
 }
 
+/** GET /me/agent/console/enter — mint a console URL (opencode web UI) for the
+ *  caller's container. Returns { url } to open in a new tab, or an error (503 if
+ *  the console feature isn't enabled server-side). */
+export async function fetchConsoleUrl(): Promise<{ ok: boolean; url?: string; error?: string }> {
+  const headers = await authHeaders();
+  if (!headers) return { ok: false, error: "Not authenticated" };
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/console/enter`, { headers, cache: "no-store" });
+    if (!res.ok) {
+      if (res.status === 503) return { ok: false, error: "Console isn't enabled yet." };
+      return { ok: false, error: `Console unavailable (${res.status}).` };
+    }
+    const raw = (await res.json()) as { url?: string };
+    if (!raw.url) return { ok: false, error: "No console URL returned." };
+    return { ok: true, url: raw.url };
+  } catch (err) {
+    console.error("[agent] fetchConsoleUrl failed:", err instanceof Error ? err.message : String(err));
+    return { ok: false, error: "Network error opening the console." };
+  }
+}
+
 /** DELETE /me/agent/credentials/:id — revoke an agent credential. */
 export async function revokeAgentCredential(id: string): Promise<{ ok: boolean }> {
   const headers = await authHeaders();
