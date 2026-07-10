@@ -10,6 +10,12 @@ The legacy shared single-tenant `agent` service kept resurrecting on every `dock
 
 ---
 
+## 2026-07-11 — Fix: console SPA blank (forwardAuth cookie never reached the browser)
+
+The console loaded its index (200) but every SPA asset/API/SSE follow-up 401'd — the opencode UI came up blank. Cause: Traefik `authResponseHeaders` copies the forwardAuth Set-Cookie onto the UPSTREAM request, not the client, so a "200 + Set-Cookie" never planted the console cookie in the browser. Fix: on the query-token hit, `/internal/console-auth` now returns a 302 + Set-Cookie to the token-stripped URL (Traefik passes non-2xx auth responses through to the client); the browser sets the cookie, follows the redirect, and subsequent requests authenticate via the cookie branch. +4 endpoint tests.
+
+---
+
 ## 2026-07-11 — Fix: opencode container heartbeat + routing on error
 
 Enabling the console exposed two pre-existing gaps: (1) the opencode container never sent heartbeats, so `agent_runtimes` drifted to `error/heartbeat_stale`; (2) `resolveAgentBaseUrl` only routed to the per-user container on `status='running'`, so an error status fell back to the global `OPENCODE_SERVER_URL` (a stopped shared agent) — breaking the user's triggers. Fixes: opencode entrypoint now runs a 60s heartbeat loop (`POST /me/agent/heartbeat`); `resolveAgentBaseUrl` routes to the per-user container for `running|provisioning|error` (a lagging heartbeat no longer misroutes), falling back to global only when the row is absent or `stopped`.

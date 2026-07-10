@@ -419,3 +419,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-11: fix opencode heartbeat gap — entrypoint 60s POST /me/agent/heartbeat loop; gateway resolveAgentBaseUrl routes to container on running|provisioning|error (not just running).
 
 2026-07-11: retire shared agent from auto-deploy — compose `agent` service gated behind "shared-agent" profile (was resurrecting on every deploy + colliding with per-user container); deploy health-check made informational.
+
+2026-07-11: fix console forwardAuth cookie — /internal/console-auth returns 302+Set-Cookie (not 200) so the cookie reaches the browser (authResponseHeaders only hits the upstream); SPA follow-ups now authenticate.

@@ -114,13 +114,28 @@ export function registerConsoleRoutes(router: Router, authSecret: string): void 
     }
     const fromQuery = verifyConsoleToken(queryTok, authSecret);
     if (fromQuery && fromQuery.uid === hostUid) {
-      // First hit: plant the token as an HttpOnly cookie on the console origin so
-      // the SPA's subsequent asset/API/SSE requests authenticate without the query.
+      // First hit: plant the token as an HttpOnly cookie and REDIRECT to the
+      // token-stripped URL. This must be a 302 (a non-2xx): Traefik forwardAuth
+      // returns non-2xx auth responses — headers + all — straight to the CLIENT,
+      // so the Set-Cookie reaches the browser. (On a 2xx, Traefik would only copy
+      // authResponseHeaders onto the UPSTREAM request, never to the client, which
+      // is why a "200 + Set-Cookie" here never planted the cookie.) The browser
+      // sets the cookie, follows the redirect, and the cookie branch above then
+      // authenticates every subsequent SPA asset/API/SSE request.
+      const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? 'https';
+      let cleanUri = '/';
+      try {
+        const u = new URL(fwdUri, 'http://x');
+        u.searchParams.delete('ll5_console_token');
+        cleanUri = u.pathname + (u.search || '');
+      } catch {
+        cleanUri = '/';
+      }
       res.setHeader(
         'Set-Cookie',
         `${CONSOLE_COOKIE}=${queryTok}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${CONSOLE_TTL_SEC}`,
       );
-      res.status(200).send('ok');
+      res.redirect(302, `${proto}://${host}${cleanUri}`);
       return;
     }
 
