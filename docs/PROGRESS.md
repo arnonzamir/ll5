@@ -4,6 +4,15 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — Agent settings page: 100% on the new (orchestrator) system
+
+Cleaned `/settings/agent` so it configures + monitors ONLY the new per-user orchestrator system:
+- **Removed** the old "Connection kit" section (mint token + `.mcp.json` for a self-run Claude Code on your own machine — the pre-orchestrator BYO path). No other consumer referenced it; the backend endpoints (`/me/agent/connection`, `/me/agent/credentials`) + their server actions/types remain for now (harmless, `formatMcpConfig` still unit-tested).
+- **Kept + made provider-agnostic**: Model & API key (provider/model + per-tool models), Hosted runtime (provision/stop the orchestrator container), Workers (heartbeats of the workers inside your container). De-Claude'd all copy ("your Claude credential" → "your configured provider/model/key").
+- Typecheck clean; agent-types tests unchanged/green.
+
+---
+
 ## 2026-07-10 — Per-agent/per-tool model overrides (UI-configurable)
 
 The tenant LLM config now supports **per-sub-agent model overrides** on top of the main model. A user can, for example, keep the cheap main model but run the grounder on a stronger one.
