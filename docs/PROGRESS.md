@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — Fix: agent API key "disappears on refresh"
+
+`ClaudeKeyForm` seeded its display state with `useState(status)`, latching the pre-fetch `{configured:false}` the parent passes before its async credential fetch resolves — so the badge showed "Not connected" after every refresh even though the key was stored (GET returned `configured:true`). "Save" only appeared to work because the save handler set local state directly. Added a `useEffect([status])` that re-seeds local/provider/model/overrides when the loaded status arrives. Pre-existing bug; surfaced during the agent-config work. (Diagnosed against prod: token correctly carries `uid = auth_users.user_id`; credential row + GET both fine — the defect was purely client render state.)
+
+---
+
 ## 2026-07-10 — Agent settings page: 100% on the new (orchestrator) system
 
 Cleaned `/settings/agent` so it configures + monitors ONLY the new per-user orchestrator system:

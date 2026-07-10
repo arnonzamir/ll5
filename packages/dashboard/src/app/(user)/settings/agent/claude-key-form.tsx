@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,6 +60,18 @@ export function ClaudeKeyForm({ status, catalog, onStatusChange, compact = false
   // Per-agent/per-tool overrides are opencode-only (only that runtime spawns
   // the grounder / narrative / reconcile sub-agents).
   const showSlots = provider === "opencode" && slots.length > 0;
+
+  // Sync display state when the parent delivers a new status. The parent fetches
+  // the credential ASYNChronously, so the FIRST status this component sees is the
+  // pre-fetch {configured:false}; `useState(status)` would latch that forever and
+  // show "Not connected" even after the real status loads (the "key disappears on
+  // refresh" bug). Re-seed whenever the status object changes (load or save).
+  useEffect(() => {
+    setLocal(status);
+    setProvider(status.provider ?? "anthropic");
+    setModel(status.model ?? "");
+    setOverrides(status.model_overrides ?? {});
+  }, [status]);
 
   function applyStatus(next: LlmCredentialStatus) {
     setLocal(next);
