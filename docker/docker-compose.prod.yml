@@ -439,7 +439,7 @@ services:
       # Opencode model selection (only used when OPENCODE_SERVER_URL is set).
       # Empty = opencode.json default; filled in by deploy from AGENT_VARIANT.
       # Default deepseek-v4-pro matches opencode.json's global default (Zen paid).
-      OPENCODE_MODEL_ID: ${OPENCODE_MODEL_ID:-deepseek-v4-pro}
+      OPENCODE_MODEL_ID: ${OPENCODE_MODEL_ID:-deepseek-v4-flash-free}
       OPENCODE_PROVIDER_ID: ${OPENCODE_PROVIDER_ID:-opencode}
       # Agent-orchestrator service (separate). Optional — empty disables the
       # runtime-control plane with a clear "runtime not configured" error.

@@ -4,6 +4,14 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-10 — INCIDENT: Zen $62 spend cap → agent dark; switched to free tier
+
+The opencode agent went fully dark ~12:36Z — 0-token workers, 0 journals/narratives/observations, no eval moments, all 3 liveness alerts firing. **Root cause = billing, not code:** the Zen workspace hit its `$62/month` spending limit → `deepseek-v4-pro` refused on every model call (`AI_APICallError: ... monthly spending limit of $62`). All the session's code fixes were correct and deployed; the agent simply couldn't call its model. Diagnose: `docker logs agent-xkkcc… | grep "spending limit"`.
+
+**Stopgap:** switched the default model to `opencode/deepseek-v4-flash-free` (free tier, $0, unaffected by the paid cap) — `opencode.json` default + gateway `OPENCODE_MODEL_ID` var + CI/compose defaults. Deploys via the working pipeline. **Follow-up (requested):** make the opencode instance config (URLs, keys, model) tenant-level (tables `agent_runtimes` / `agent_llm_credentials` already exist) + a user-facing UI to set model + API key. See the next work item.
+
+---
+
 ## 2026-07-10 — record_moment tool parity + Claude-vs-opencode tool matrix
 
 - **record_moment (parity bug 2):** added the `record_moment` plugin tool to opencode (the shared CLAUDE.md Eval rule tells the agent to call it; opencode had none → no-op) + allowed it in the external-authority-gate + eval-recorder now ships `decision_claimed`/`decision_mismatch` (flags a hollow ping_later). Variant `fa91358`, 44/44 tests.
