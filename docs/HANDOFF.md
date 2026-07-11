@@ -749,6 +749,8 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 **Console SPA cookie fix (2026-07-11)**: /internal/console-auth returns 302+Set-Cookie (NOT 200) on the query-token hit — Traefik authResponseHeaders only reaches the upstream, so a 200+Set-Cookie never planted the browser cookie and the SPA came up blank (asset/API 401s). The 302 (non-2xx) response is passed through to the client by Traefik forwardAuth.
 
+**Inner-voice folded/expandable (2026-07-11)**: stop-mirror classifyMirror (variant lib/mirror-classify.js) marks grounding-brief/processing prose display_compact (dimmed) + honors [[silent]]/[[compact]]; only real answers are full messages. Dashboard CompactRow is click-to-expand (full text) for inner-voice + tool-call rows.
+
 **opencode-go plan = pro, uncapped (2026-07-11)**: opencode-go uses endpoint `https://opencode.ai/zen/go/v1` (NOT the $62-capped /zen/v1) — runs deepseek-v4-pro etc. Defined as a custom provider in the variant opencode.json (container registry lacked it). Entrypoint writes auth.json under OPENCODE_PROVIDER_ID + patches opencode.json model=`<provider>/<model>`. Orchestrator emits OPENCODE_PROVIDER_ID=opencode-go. Gateway triggerAgent no longer injects a per-turn model (container owns it; change model → re-provision). flash-free returns EMPTY on large contexts (reasoning starves output) — that was the silent-agent cause.
 
 **Model config: opencode-go + all models (2026-07-11)**: PROVIDERS adds `opencode-go` (same Zen backend as opencode, different account/key; orchestrator loadCredential maps it to container provider "opencode"). Full Zen model catalog (~55) + permissive model validation for opencode/opencode-go (any non-empty model). Anthropic strict.

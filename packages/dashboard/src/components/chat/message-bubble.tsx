@@ -145,6 +145,7 @@ export function ThinkingLine({ m }: { m: Message }) {
 
 function CompactRow({ m }: { m: Message }) {
   const isThinking = m.metadata?.kind === "thinking";
+  const [expanded, setExpanded] = useState(false);
   const time = new Date(m.created_at).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -153,6 +154,9 @@ function CompactRow({ m }: { m: Message }) {
   if (isThinking) return <ThinkingLine m={m} />;
 
   const Icon: LucideIcon = pickCompactIcon(m);
+  const content = m.content ?? "";
+  // Click any compact row (inner-voice narration OR a tool-call marker) to
+  // toggle between the folded one-liner and the full text.
   return (
     <div
       className="flex items-start gap-2 py-0.5 px-1 text-[13px] text-ink-400 font-mono"
@@ -160,7 +164,16 @@ function CompactRow({ m }: { m: Message }) {
     >
       <Icon className="w-3.5 h-3.5 shrink-0 mt-0.5 text-ink-300" />
       <span className="text-[11px] text-ink-400 shrink-0">{time}</span>
-      <span className="flex-1 truncate leading-snug">{m.content ?? ""}</span>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className={`flex-1 text-left leading-snug hover:text-ink-500 ${
+          expanded ? "whitespace-pre-wrap break-words" : "truncate"
+        }`}
+        title={expanded ? "Collapse" : "Expand"}
+      >
+        {content}
+      </button>
     </div>
   );
 }

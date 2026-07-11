@@ -16,6 +16,12 @@ The console loaded its index (200) but every SPA asset/API/SSE follow-up 401'd �
 
 ---
 
+## 2026-07-11 — Inner voice: folded/dimmed + expandable (chat UI)
+
+The agent's thinking (grounding briefs, "Processing…", "Let me search…") was flooding the thread as full chat bubbles. Two-part fix so it reads like the Claude-era UX: (1) variant stop-mirror `classifyMirror` marks inner-voice/working-note prose as `display_compact` (dimmed folded row) and honors `[[silent]]`/`[[compact]]` prefixes — only real answers become full messages; (2) dashboard CompactRow is now click-to-expand (folded one-liner ↔ full text) for BOTH inner-voice rows and tool-call markers. So everything's available, dimmed/folded, expandable.
+
+---
+
 ## 2026-07-11 — opencode-go plan support (pro, uncapped) + model wiring
 
 Root-caused the silent agent: deepseek-v4-flash-free (a reasoning model) returns EMPTY content on the agent's large-context turns (reasoning exhausts the output budget), and every PAID model on the `opencode` provider is capped at $62. The fix is the **opencode-go plan**: a distinct Zen endpoint `https://opencode.ai/zen/go/v1` (NOT under the $62 cap) that runs deepseek-v4-pro/glm/etc. Verified pro works there with the go key. Wiring: opencode.json defines opencode-go as a custom provider (the container registry lacked it); entrypoint writes auth.json under OPENCODE_PROVIDER_ID and patches opencode.json model to `<provider>/<model>`; orchestrator loadCredential returns zenProvider (opencode|opencode-go) and secrets emits OPENCODE_PROVIDER_ID accordingly; gateway triggerAgent NO LONGER injects a per-turn model (the container owns model selection now). Model change → re-provision to apply.

@@ -425,3 +425,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-11: model config — opencode-go provider (same Zen, different key; orchestrator maps to container provider opencode); full Zen model catalog + permissive model validation for opencode/opencode-go; dashboard provider union + placeholder.
 
 2026-07-11: opencode-go plan (pro, uncapped /zen/go/v1) — opencode.json custom provider def; entrypoint auth.json per OPENCODE_PROVIDER_ID + patches opencode.json model; orchestrator zenProvider + secrets OPENCODE_PROVIDER_ID; gateway triggerAgent drops per-turn model injection.
+
+2026-07-11: inner-voice UX — variant stop-mirror classifyMirror (lib/mirror-classify.js) dims working-note prose to display_compact + honors [[silent]]/[[compact]]; dashboard CompactRow click-to-expand full text (inner voice + tool calls).
