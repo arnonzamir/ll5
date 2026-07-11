@@ -82,6 +82,20 @@ describe('SecretsWriter', () => {
     expect(content).not.toContain('bogus'); // unknown slot ignored
   });
 
+  it('opencode-go writes OPENCODE_PROVIDER_ID=opencode-go (Go endpoint)', async () => {
+    const dir = await tmpDir();
+    const w = new SecretsWriter({ dir });
+    const p = await w.write({
+      userId: 'user-go', agentToken: 't', apiKey: 'go-key', gatewayUrl: 'g',
+      mcpBaseDomain: 'm', provider: 'opencode', zenProvider: 'opencode-go',
+      model: 'deepseek-v4-pro',
+    });
+    const content = await readFile(p, 'utf8');
+    expect(content).toContain(`OPENCODE_PROVIDER_ID='opencode-go'`);
+    expect(content).toContain(`OPENCODE_MODEL_ID='deepseek-v4-pro'`);
+    expect(content).toContain(`OPENCODE_ZEN_API_KEY='go-key'`);
+  });
+
   it('opencode without model/baseUrl omits those lines', async () => {
     const dir = await tmpDir();
     const w = new SecretsWriter({ dir });

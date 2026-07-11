@@ -117,18 +117,12 @@ export async function triggerAgent(
     parts: [{ type: 'text', text: payload.content }],
   };
 
-  // Pick the model for the main session from the opencode variant's configured
-  // provider/model env vars. This is the per-case override knob: OPENCODE_MODEL_ID
-  // overrides opencode.json's global default for THIS session only. Deploy default
-  // is "deepseek-v4-pro" (see build-and-push.yml / docker-compose.prod.yml); leave
-  // the env unset to inherit opencode.json's default instead of injecting per-turn.
-  // Format: providerID="opencode", modelID="deepseek-v4-pro" -> models live at
-  // opencode.ai/zen/v1/models for the `opencode` provider.
-  const modelId = process.env.OPENCODE_MODEL_ID;
-  const providerId = process.env.OPENCODE_PROVIDER_ID ?? 'opencode';
-  if (modelId) {
-    body.model = { providerID: providerId, modelID: modelId };
-  }
+  // NOTE: we intentionally do NOT inject a per-turn model here. Each per-user
+  // container sets its own default model in opencode.json at boot (entrypoint,
+  // from the tenant's provider+model — e.g. opencode-go/deepseek-v4-pro on the Go
+  // plan). Injecting the gateway's global OPENCODE_MODEL_ID would override that
+  // with the wrong provider/model (e.g. force a go tenant back onto the capped
+  // opencode/ endpoint). Model selection lives with the tenant's container.
 
   if (payload.noReply) {
     body.noReply = true;

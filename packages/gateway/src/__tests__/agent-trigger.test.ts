@@ -216,7 +216,10 @@ describe('triggerAgent model selection', () => {
     delete process.env.OPENCODE_PROVIDER_ID;
   });
 
-  it('includes model:{providerID,modelID} when OPENCODE_MODEL_ID is set', async () => {
+  it('never injects a per-turn model — the container owns model selection', async () => {
+    // Model is set per-container in opencode.json (entrypoint, from the tenant's
+    // provider+model). Injecting the gateway's global model here would override a
+    // Go-plan container back onto the capped opencode/ endpoint.
     process.env.OPENCODE_SERVER_URL = 'http://agent:4096';
     process.env.OPENCODE_MODEL_ID = 'minimax-m3';
     process.env.OPENCODE_PROVIDER_ID = 'opencode';
@@ -224,29 +227,6 @@ describe('triggerAgent model selection', () => {
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
 
     await triggerAgent('sess-model', { content: 'hello' });
-
-    const body = JSON.parse((fetchSpy as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string);
-    expect(body.model).toEqual({ providerID: 'opencode', modelID: 'minimax-m3' });
-  });
-
-  it('defaults providerID to "opencode" when OPENCODE_PROVIDER_ID is unset', async () => {
-    process.env.OPENCODE_SERVER_URL = 'http://agent:4096';
-    process.env.OPENCODE_MODEL_ID = 'gpt-5.4';
-    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
-    await triggerAgent('sess-model-default', { content: 'hello' });
-
-    const body = JSON.parse((fetchSpy as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string);
-    expect(body.model).toEqual({ providerID: 'opencode', modelID: 'gpt-5.4' });
-  });
-
-  it('omits model field when OPENCODE_MODEL_ID is unset (back-compat)', async () => {
-    process.env.OPENCODE_SERVER_URL = 'http://agent:4096';
-    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-
-    await triggerAgent('sess-model-bc', { content: 'hello' });
 
     const body = JSON.parse((fetchSpy as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string);
     expect(body.model).toBeUndefined();

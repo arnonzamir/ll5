@@ -101,6 +101,9 @@ export class Orchestrator {
 
   private async loadCredential(userId: string): Promise<{
     provider: 'anthropic' | 'opencode';
+    /** The opencode Zen provider id written into the container (opencode |
+     *  opencode-go). Same runtime image; different endpoint + billing. */
+    zenProvider: 'opencode' | 'opencode-go';
     model: string | null;
     baseUrl: string | null;
     modelOverrides: Record<string, string>;
@@ -120,12 +123,15 @@ export class Orchestrator {
     if (!row || !row.ciphertext) {
       throw new MissingCredentialError();
     }
-    // opencode-go is the same Zen backend as opencode (different account/key);
-    // the container always runs provider "opencode" — only the stored key differs.
+    // opencode + opencode-go share the same runtime IMAGE (provider 'opencode'
+    // for image selection), but the container-side Zen provider id differs:
+    // opencode → /zen/v1 (capped), opencode-go → /zen/go/v1 (Go plan, pro-capable).
+    const zenProvider = row.provider === 'opencode-go' ? 'opencode-go' : 'opencode';
     const provider =
       row.provider === 'opencode' || row.provider === 'opencode-go' ? 'opencode' : 'anthropic';
     return {
       provider,
+      zenProvider,
       model: row.model ?? null,
       baseUrl: row.base_url ?? null,
       modelOverrides: row.model_overrides ?? {},
@@ -213,6 +219,7 @@ export class Orchestrator {
       gatewayUrl: this.config.gatewayUrl,
       mcpBaseDomain: this.config.mcpBaseDomain,
       provider: cred.provider,
+      zenProvider: cred.zenProvider,
       model: cred.model,
       baseUrl: cred.baseUrl,
       modelOverrides: cred.modelOverrides,

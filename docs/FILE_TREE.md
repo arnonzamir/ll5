@@ -423,3 +423,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-11: fix console forwardAuth cookie — /internal/console-auth returns 302+Set-Cookie (not 200) so the cookie reaches the browser (authResponseHeaders only hits the upstream); SPA follow-ups now authenticate.
 
 2026-07-11: model config — opencode-go provider (same Zen, different key; orchestrator maps to container provider opencode); full Zen model catalog + permissive model validation for opencode/opencode-go; dashboard provider union + placeholder.
+
+2026-07-11: opencode-go plan (pro, uncapped /zen/go/v1) — opencode.json custom provider def; entrypoint auth.json per OPENCODE_PROVIDER_ID + patches opencode.json model; orchestrator zenProvider + secrets OPENCODE_PROVIDER_ID; gateway triggerAgent drops per-turn model injection.

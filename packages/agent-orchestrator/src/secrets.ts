@@ -32,6 +32,10 @@ export interface SecretEnv {
   mcpBaseDomain: string;
   /** Which runtime variant this user's container runs. */
   provider: AgentProvider;
+  /** opencode Zen provider id written into the container (opencode | opencode-go).
+   *  Selects the endpoint: opencode → /zen/v1 (capped); opencode-go → /zen/go/v1
+   *  (Go plan, pro-capable). Defaults to 'opencode'. */
+  zenProvider?: 'opencode' | 'opencode-go';
   /** Per-tenant model id (e.g. "deepseek-v4-flash-free"). Optional → image default. */
   model?: string | null;
   /** opencode server URL / provider base. Optional → image default. */
@@ -102,7 +106,7 @@ export class SecretsWriter {
     ];
     if (env.provider === 'opencode') {
       lines.push(`OPENCODE_ZEN_API_KEY=${escapeValue(env.apiKey)}`);
-      lines.push(`OPENCODE_PROVIDER_ID=${escapeValue('opencode')}`);
+      lines.push(`OPENCODE_PROVIDER_ID=${escapeValue(env.zenProvider ?? 'opencode')}`);
       if (env.model) lines.push(`OPENCODE_MODEL_ID=${escapeValue(env.model)}`);
       if (env.baseUrl) lines.push(`OPENCODE_SERVER_URL=${escapeValue(env.baseUrl)}`);
       // Per-slot model overrides → OPENCODE_<SLOT>_MODEL (sub-agents read these).
