@@ -508,6 +508,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ll5}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ll5}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       ORCHESTRATOR_SECRET: ${ORCHESTRATOR_SECRET:-}
+      # GHCR read PAT so the orchestrator force-pulls :latest before provisioning
+      # (never runs a stale local image). Empty = anonymous pull (fails on the
+      # private image → falls back to the local image; no regression).
+      GHCR_PULL_TOKEN: ${GHCR_PULL_TOKEN:-}
+      GHCR_PULL_USER: ${GHCR_PULL_USER:-arnonzamir}
       # Injected into each per-user env-file so the agent reaches the gateway
       # internally and MCPs via the public mcp-*.<domain> endpoints.
       LL5_GATEWAY_URL: http://gateway:3000

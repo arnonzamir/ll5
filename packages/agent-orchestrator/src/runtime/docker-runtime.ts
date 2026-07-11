@@ -30,7 +30,12 @@ export class DockerRuntime implements Runtime {
     this.host = opts.host ?? process.env.AGENT_HOST_NAME ?? 'agent-host-1';
   }
 
-  private request(method: string, path: string, body?: unknown): Promise<DockerResponse> {
+  private request(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<DockerResponse> {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     return new Promise((resolve, reject) => {
       const req = http.request(
@@ -41,6 +46,7 @@ export class DockerRuntime implements Runtime {
           headers: {
             'Content-Type': 'application/json',
             ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
+            ...(extraHeaders ?? {}),
           },
         },
         (res) => {
@@ -61,7 +67,52 @@ export class DockerRuntime implements Runtime {
     return encodeURIComponent(JSON.stringify({ label: [`ll5.user_id=${userId}`] }));
   }
 
+  /**
+   * Best-effort pull of the image before create, so a provision never silently
+   * runs a STALE local image. (`docker pull` on the host can report "up to date"
+   * without refreshing the :latest digest, and the orchestrator create uses
+   * whatever tag is local — that quietly re-ran old builds during 2026-07-11.)
+   * A private GHCR image needs auth: set GHCR_PULL_TOKEN (+ GHCR_PULL_USER).
+   * Any failure (auth, network) is logged and IGNORED — create then falls back
+   * to the local image rather than blocking provisioning.
+   */
+  private async pullImage(image: string): Promise<void> {
+    const slash = image.lastIndexOf('/');
+    const colon = image.lastIndexOf(':');
+    const hasTag = colon > slash;
+    const fromImage = hasTag ? image.slice(0, colon) : image;
+    const tag = hasTag ? image.slice(colon + 1) : 'latest';
+    const headers: Record<string, string> = {};
+    const token = process.env.GHCR_PULL_TOKEN;
+    if (token) {
+      headers['X-Registry-Auth'] = Buffer.from(
+        JSON.stringify({ username: process.env.GHCR_PULL_USER || 'x-access-token', password: token }),
+      ).toString('base64');
+    }
+    try {
+      const res = await this.request(
+        'POST',
+        `/images/create?fromImage=${encodeURIComponent(fromImage)}&tag=${encodeURIComponent(tag)}`,
+        undefined,
+        headers,
+      );
+      if (res.status >= 300) {
+        logger.warn('[docker] image pull non-2xx — using local image', { image, status: res.status });
+      } else {
+        logger.info('[docker] pulled latest image before provision', { image });
+      }
+    } catch (err) {
+      logger.warn('[docker] image pull failed — using local image', {
+        image,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   async provision(spec: RuntimeSpec): Promise<ProvisionResult> {
+    // Refresh the image first so we never run a stale local build (best-effort).
+    await this.pullImage(spec.image);
+
     // SECURITY: secrets are NOT in Env/Cmd here. They live in the 0600 env-file
     // bind-mounted read-only at spec.envFileTarget; the base-image entrypoint
     // sources it. We pass only the env-file *path* (non-secret) via Env so the

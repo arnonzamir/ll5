@@ -434,6 +434,17 @@ jobs:
             else
               echo "WARN: ORCHESTRATOR_SECRET secret empty — orchestrator disabled"
             fi
+            # GHCR read PAT for the orchestrator's force-pull-before-provision (so
+            # a per-user container never runs a stale local image). Reuses the same
+            # non-expiring read:packages PAT + user the host docker login uses.
+            if [ -n "$GHCR_TOKEN" ]; then
+              touch .env
+              grep -vE '^GHCR_PULL_(TOKEN|USER)=' .env > .env.ghcr.tmp 2>/dev/null || true
+              mv .env.ghcr.tmp .env
+              printf 'GHCR_PULL_TOKEN=%s\n' "$GHCR_TOKEN" >> .env
+              printf 'GHCR_PULL_USER=%s\n' 'arnonzamir' >> .env
+              echo "Injected GHCR_PULL_TOKEN/USER into .env"
+            fi
             # Inject WhatsApp ingest queue + Evolution reconciler secrets
             # (DECISION-024, idempotent). Guard on non-empty so a missing secret
             # never blanks a working .env — both degrade safely when absent

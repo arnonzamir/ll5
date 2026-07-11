@@ -16,6 +16,12 @@ The console loaded its index (200) but every SPA asset/API/SSE follow-up 401'd �
 
 ---
 
+## 2026-07-11 — Orchestrator force-pulls the image before provision
+
+Fixes the day's recurring "the fix didn't take" trap: `docker pull` on the host reported "up to date" without refreshing the `:latest` digest, so orchestrator provisions silently ran STALE local builds. `DockerRuntime.provision` now `pullImage(spec.image)` first — best-effort (auth failure / network → falls back to the local image, no regression). Private GHCR → `GHCR_PULL_TOKEN`/`GHCR_PULL_USER` (reuses `GHCR_READ_PAT` + `arnonzamir`, injected into `.env` by the deploy). Full session recap in docs/SESSION-2026-07-11.md.
+
+---
+
 ## 2026-07-11 — Inner voice: folded/dimmed + expandable (chat UI)
 
 The agent's thinking (grounding briefs, "Processing…", "Let me search…") was flooding the thread as full chat bubbles. Two-part fix so it reads like the Claude-era UX: (1) variant stop-mirror `classifyMirror` marks inner-voice/working-note prose as `display_compact` (dimmed folded row) and honors `[[silent]]`/`[[compact]]` prefixes — only real answers become full messages; (2) dashboard CompactRow is now click-to-expand (folded one-liner ↔ full text) for BOTH inner-voice rows and tool-call markers. So everything's available, dimmed/folded, expandable.
