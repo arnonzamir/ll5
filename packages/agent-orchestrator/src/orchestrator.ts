@@ -120,7 +120,10 @@ export class Orchestrator {
     if (!row || !row.ciphertext) {
       throw new MissingCredentialError();
     }
-    const provider = row.provider === 'opencode' ? 'opencode' : 'anthropic';
+    // opencode-go is the same Zen backend as opencode (different account/key);
+    // the container always runs provider "opencode" — only the stored key differs.
+    const provider =
+      row.provider === 'opencode' || row.provider === 'opencode-go' ? 'opencode' : 'anthropic';
     return {
       provider,
       model: row.model ?? null,

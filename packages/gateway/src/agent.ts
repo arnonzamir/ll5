@@ -74,9 +74,33 @@ function looksLikeAnthropicKey(key: string): boolean {
 }
 
 // Per-provider agent LLM config: which key format is accepted and the models
-// the UI offers. Keep model lists conservative + curated (not the full catalog).
-export const PROVIDERS = ['anthropic', 'opencode'] as const;
+// the UI offers. `opencode` and `opencode-go` are the same Zen provider with
+// DIFFERENT accounts/keys (go = a separate Zen workspace); both resolve to the
+// container-side provider id "opencode" with the same model catalog.
+export const PROVIDERS = ['anthropic', 'opencode', 'opencode-go'] as const;
 export type AgentLlmProvider = (typeof PROVIDERS)[number];
+
+// The full opencode Zen model catalog (from `opencode models`). Offered for both
+// opencode and opencode-go. Validation for these providers is permissive (any
+// non-empty model is accepted) so newly-released Zen models work without a code
+// change — this list drives the dropdown, not a hard allow-list.
+const OPENCODE_MODELS = [
+  'deepseek-v4-flash-free', 'deepseek-v4-flash', 'deepseek-v4-pro',
+  'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5', 'claude-opus-4-1',
+  'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-sonnet-4',
+  'claude-haiku-4-5', 'claude-fable-5',
+  'gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.5-pro', 'gpt-5.5', 'gpt-5.4-pro',
+  'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'gpt-5.3-codex-spark',
+  'gpt-5.2', 'gpt-5.2-codex', 'gpt-5.1', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini',
+  'gpt-5', 'gpt-5-codex', 'gpt-5-nano',
+  'gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-3-flash',
+  'glm-5.2', 'glm-5.1', 'glm-5',
+  'grok-4.5', 'grok-build-0.1',
+  'kimi-k2.7-code', 'kimi-k2.6', 'kimi-k2.5',
+  'minimax-m3', 'minimax-m2.7', 'minimax-m2.5',
+  'qwen3.6-plus', 'qwen3.5-plus',
+  'big-pickle', 'hy3-free', 'mimo-v2.5-free', 'nemotron-3-ultra-free', 'north-mini-code-free',
+];
 
 export const MODEL_CATALOG: Record<AgentLlmProvider, { label: string; models: string[] }> = {
   anthropic: {
@@ -84,10 +108,26 @@ export const MODEL_CATALOG: Record<AgentLlmProvider, { label: string; models: st
     models: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'],
   },
   opencode: {
-    label: 'opencode (Zen)',
-    models: ['deepseek-v4-flash-free', 'deepseek-v4-pro', 'minimax-m3'],
+    label: 'opencode Zen',
+    models: OPENCODE_MODELS,
+  },
+  'opencode-go': {
+    label: 'opencode Zen (Go account)',
+    models: OPENCODE_MODELS,
   },
 };
+
+/** opencode-family providers share the Zen backend + permissive model validation. */
+function isOpencodeProvider(p: AgentLlmProvider): boolean {
+  return p === 'opencode' || p === 'opencode-go';
+}
+
+/** Validate a model for a provider. opencode/opencode-go accept any non-empty
+ *  model (the catalog is a UI hint, not an allow-list); anthropic is strict. */
+function modelValidForProvider(provider: AgentLlmProvider, model: string): boolean {
+  if (isOpencodeProvider(provider)) return model.length > 0 && model.length <= 100;
+  return MODEL_CATALOG[provider].models.includes(model);
+}
 
 // Per-agent/per-tool model slots the user can override independently of the main
 // model. Each slot maps to a container env var the corresponding sub-agent reads
@@ -136,13 +176,12 @@ export function sanitizeModelOverrides(
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     return { error: 'model_overrides must be an object' };
   }
-  const allowed = MODEL_CATALOG[provider].models;
   const out: Record<string, string> = {};
   for (const [slot, value] of Object.entries(raw as Record<string, unknown>)) {
     if (!AGENT_MODEL_SLOT_IDS.has(slot)) continue;
     if (value == null || value === '') continue;
-    if (typeof value !== 'string' || !allowed.includes(value)) {
-      return { error: `model_overrides.${slot} must be one of: ${allowed.join(', ')}` };
+    if (typeof value !== 'string' || !modelValidForProvider(provider, value)) {
+      return { error: `model_overrides.${slot} is not a valid model for ${provider}` };
     }
     out[slot] = value;
   }
@@ -154,7 +193,7 @@ function keyValidForProvider(provider: AgentLlmProvider, key: string): boolean {
   if (typeof key !== 'string' || key.length < 8 || key.length > 400) return false;
   if (provider === 'anthropic') return looksLikeAnthropicKey(key);
   // opencode/Zen keys have no fixed public prefix — accept any non-trivial token.
-  return provider === 'opencode';
+  return isOpencodeProvider(provider);
 }
 
 /**
@@ -392,8 +431,8 @@ export function createAgentRouter(
       }
       const storedProvider = (existing.rows[0].provider ?? 'anthropic') as AgentLlmProvider;
       const model2 = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
-      if (model2 && !MODEL_CATALOG[storedProvider].models.includes(model2)) {
-        res.status(400).json({ error: `model must be one of: ${MODEL_CATALOG[storedProvider].models.join(', ')}` });
+      if (model2 && !modelValidForProvider(storedProvider, model2)) {
+        res.status(400).json({ error: `model is not valid for ${storedProvider}` });
         return;
       }
       const base_url2 = typeof body.base_url === 'string' && body.base_url.trim() ? body.base_url.trim() : null;
@@ -439,8 +478,8 @@ export function createAgentRouter(
       return;
     }
     const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
-    if (model && !MODEL_CATALOG[provider].models.includes(model)) {
-      res.status(400).json({ error: `model must be one of: ${MODEL_CATALOG[provider].models.join(', ')}` });
+    if (model && !modelValidForProvider(provider, model)) {
+      res.status(400).json({ error: `model is not valid for ${provider}` });
       return;
     }
     const base_url = typeof body.base_url === 'string' && body.base_url.trim() ? body.base_url.trim() : null;

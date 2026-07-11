@@ -16,6 +16,12 @@ The console loaded its index (200) but every SPA asset/API/SSE follow-up 401'd �
 
 ---
 
+## 2026-07-11 — Model config: opencode-go provider + all Zen models
+
+Added `opencode-go` as a selectable provider (same Zen backend as `opencode`, a different account/key; the container always runs provider id "opencode", only the stored key differs — orchestrator maps it). Expanded the opencode model catalog to the full Zen list (~55 models) and made model validation permissive for opencode/opencode-go (any non-empty model — the catalog is a UI hint, not an allow-list — so new Zen models work without a code change). Anthropic stays strict. Dashboard picks it up via the catalog. Also reverted reactive grounding to proactive-only after it wedged the agent (recursion storm) — reactive memory now via memory-recall + correction-capture.
+
+---
+
 ## 2026-07-11 — Fix: opencode container heartbeat + routing on error
 
 Enabling the console exposed two pre-existing gaps: (1) the opencode container never sent heartbeats, so `agent_runtimes` drifted to `error/heartbeat_stale`; (2) `resolveAgentBaseUrl` only routed to the per-user container on `status='running'`, so an error status fell back to the global `OPENCODE_SERVER_URL` (a stopped shared agent) — breaking the user's triggers. Fixes: opencode entrypoint now runs a 60s heartbeat loop (`POST /me/agent/heartbeat`); `resolveAgentBaseUrl` routes to the per-user container for `running|provisioning|error` (a lagging heartbeat no longer misroutes), falling back to global only when the row is absent or `stopped`.

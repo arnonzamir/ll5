@@ -256,18 +256,58 @@ describe('agent connection plane', () => {
       expect(stored.model).toBe('deepseek-v4-flash-free');
     });
 
-    it('rejects a model not in the provider catalog', async () => {
+    it('rejects an unknown model for a strict provider (anthropic)', async () => {
       const { pool, query } = makePool([]);
       const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
       const chain = getChain(router, 'put', '/me/agent/llm-credential');
       const req = makeReq({
         headers: authHeader(userToken('user-a')),
-        body: { api_key: 'zen-live-key-abcdef123456', provider: 'opencode', model: 'gpt-9-ultra' },
+        body: { api_key: 'sk-ant-api03-ABCDEF1234567890', provider: 'anthropic', model: 'claude-imaginary-9' },
       });
       const res = makeRes();
       await chain(req, res);
       expect(res._status).toBe(400);
       expect(query).not.toHaveBeenCalled();
+    });
+
+    it('accepts any non-empty model for opencode (permissive — all Zen models)', async () => {
+      const stored: { model?: string } = {};
+      const { pool } = makePool([
+        (sql, params) => {
+          if (sql.includes('INSERT INTO agent_llm_credentials')) { stored.model = params[4] as string; return { rows: [], rowCount: 1 }; }
+          return undefined;
+        },
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'put', '/me/agent/llm-credential');
+      const req = makeReq({
+        headers: authHeader(userToken('user-a')),
+        body: { api_key: 'zen-live-key-abcdef123456', provider: 'opencode', model: 'gpt-5.6-sol' },
+      });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(200);
+      expect(stored.model).toBe('gpt-5.6-sol');
+    });
+
+    it('accepts the opencode-go provider + go key', async () => {
+      const stored: { provider?: string } = {};
+      const { pool } = makePool([
+        (sql, params) => {
+          if (sql.includes('INSERT INTO agent_llm_credentials')) { stored.provider = params[3] as string; return { rows: [], rowCount: 1 }; }
+          return undefined;
+        },
+      ]);
+      const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
+      const chain = getChain(router, 'put', '/me/agent/llm-credential');
+      const req = makeReq({
+        headers: authHeader(userToken('user-a')),
+        body: { api_key: 'sk-go-key-abcdef1234567890', provider: 'opencode-go', model: 'deepseek-v4-pro' },
+      });
+      const res = makeRes();
+      await chain(req, res);
+      expect(res._status).toBe(200);
+      expect(stored.provider).toBe('opencode-go');
     });
   });
 
@@ -328,18 +368,24 @@ describe('agent connection plane', () => {
       expect((res._json as any).model_overrides).toEqual({ grounder: 'deepseek-v4-pro' });
     });
 
-    it('rejects an override model not in the provider catalog', async () => {
-      const { pool, query } = makePool([]);
+    it('accepts any non-empty override model for opencode (permissive)', async () => {
+      const stored: { overridesJson?: string } = {};
+      const { pool } = makePool([
+        (sql, params) => {
+          if (sql.includes('INSERT INTO agent_llm_credentials')) { stored.overridesJson = params[6] as string; return { rows: [], rowCount: 1 }; }
+          return undefined;
+        },
+      ]);
       const router = createAgentRouter(pool, AUTH_SECRET, ENCRYPTION_KEY, MCP_BASE_DOMAIN);
       const chain = getChain(router, 'put', '/me/agent/llm-credential');
       const req = makeReq({
         headers: authHeader(userToken('user-a')),
-        body: { api_key: 'zen-live-key-abcdef123456', provider: 'opencode', model_overrides: { grounder: 'gpt-9-ultra' } },
+        body: { api_key: 'zen-live-key-abcdef123456', provider: 'opencode', model_overrides: { grounder: 'gpt-5.6-sol' } },
       });
       const res = makeRes();
       await chain(req, res);
-      expect(res._status).toBe(400);
-      expect(query).not.toHaveBeenCalled();
+      expect(res._status).toBe(200);
+      expect(JSON.parse(stored.overridesJson!)).toEqual({ grounder: 'gpt-5.6-sol' });
     });
 
     it('keyless update retunes model/overrides on an existing credential (ciphertext untouched)', async () => {
@@ -390,7 +436,7 @@ describe('agent connection plane', () => {
       const res = makeRes();
       await chain(req, res);
       const body = res._json as any;
-      expect(body.providers.map((p: any) => p.provider)).toEqual(['anthropic', 'opencode']);
+      expect(body.providers.map((p: any) => p.provider)).toEqual(['anthropic', 'opencode', 'opencode-go']);
       expect(body.slots.map((s: any) => s.slot)).toEqual(['grounder', 'narrative', 'reconcile']);
       expect(body.slots.every((s: any) => typeof s.env === 'string' && s.env.startsWith('OPENCODE_'))).toBe(true);
     });

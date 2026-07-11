@@ -14,7 +14,7 @@ export const ANTHROPIC_API_KEY_PREFIX = "sk-ant-";
 
 /** Status of the user's stored Claude (LLM) credential. Mirrors
  *  GET /me/agent/llm-credential. Never carries the key itself — only `last4`. */
-export type AgentLlmProvider = "anthropic" | "opencode";
+export type AgentLlmProvider = "anthropic" | "opencode" | "opencode-go";
 
 export interface LlmCredentialStatus {
   configured: boolean;

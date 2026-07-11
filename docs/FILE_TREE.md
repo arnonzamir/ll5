@@ -421,3 +421,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-11: retire shared agent from auto-deploy — compose `agent` service gated behind "shared-agent" profile (was resurrecting on every deploy + colliding with per-user container); deploy health-check made informational.
 
 2026-07-11: fix console forwardAuth cookie — /internal/console-auth returns 302+Set-Cookie (not 200) so the cookie reaches the browser (authResponseHeaders only hits the upstream); SPA follow-ups now authenticate.
+
+2026-07-11: model config — opencode-go provider (same Zen, different key; orchestrator maps to container provider opencode); full Zen model catalog + permissive model validation for opencode/opencode-go; dashboard provider union + placeholder.

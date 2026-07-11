@@ -24,6 +24,7 @@ const HELPER_COPY =
 const PLACEHOLDER: Record<AgentLlmProvider, string> = {
   anthropic: "sk-ant-…",
   opencode: "your opencode / Zen API key",
+  "opencode-go": "your opencode Zen (Go account) API key",
 };
 
 interface ClaudeKeyFormProps {
@@ -59,7 +60,7 @@ export function ClaudeKeyForm({ status, catalog, onStatusChange, compact = false
   const modelsForProvider = providers.find((p) => p.provider === provider)?.models ?? [];
   // Per-agent/per-tool overrides are opencode-only (only that runtime spawns
   // the grounder / narrative / reconcile sub-agents).
-  const showSlots = provider === "opencode" && slots.length > 0;
+  const showSlots = (provider === "opencode" || provider === "opencode-go") && slots.length > 0;
 
   // Sync display state when the parent delivers a new status. The parent fetches
   // the credential ASYNChronously, so the FIRST status this component sees is the

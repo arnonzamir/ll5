@@ -79,7 +79,7 @@ export async function saveLlmCredential(
     | string
     | {
         apiKey: string;
-        provider?: "anthropic" | "opencode";
+        provider?: "anthropic" | "opencode" | "opencode-go";
         model?: string | null;
         baseUrl?: string | null;
         modelOverrides?: Record<string, string>;
