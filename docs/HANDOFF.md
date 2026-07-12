@@ -795,3 +795,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 ## 2026-07-12 — Image/audio analysis
 - Agent tools: `inspect_image` (Zen vision, OPENCODE_IMAGE_MODEL=claude-haiku-4-5), `transcribe_audio` (Groq Whisper, OPENCODE_AUDIO_MODEL=whisper-large-v3, needs GROQ_API_KEY). In ll5-run-opencode channel plugin.
 - UI slots `image`+`audio` in AGENT_MODEL_SLOTS (agent.ts) → secrets.ts emits OPENCODE_IMAGE_MODEL/OPENCODE_AUDIO_MODEL. GROQ_API_KEY passed through orchestrator env → per-user env-file. **Set GROQ_API_KEY in host/Coolify env + GitHub secret for audio to work.**
+
+## 2026-07-12 — Audio key wired
+- GROQ_API_KEY: GitHub secret set + deploy injects into on-host .env → agent-orchestrator → per-user env-file → transcribe_audio. Verified: Groq whisper-large-v3 transcribed a test clip (HTTP 200).

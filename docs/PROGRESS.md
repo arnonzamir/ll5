@@ -1966,3 +1966,9 @@ New capability — agent access to photos taken on the phone, matched to day eve
 - Variant Docker builds also failed because `MCP_BASE_DOMAIN` env var wasn't passed (render-mcp-config.ts requires it). Added `ARG MCP_BASE_DOMAIN` to both Dockerfiles + `build_args` in CI workflow. Also removed variant packages from on-push build matrix (variants have their own CI in their own repos; GHCR push from ll5 repo gets 403 for ll5-run-opencode).
 
 2026-07-09T00:24:40: deploy: OPENCODE_MODEL_ID + OPENCODE_PROVIDER_ID env injected
+
+## 2026-07-12 — Audio transcription key live
+
+GROQ_API_KEY wired end-to-end (CI secret + deploy .env injection). Groq whisper-large-v3 verified transcribing. transcribe_audio now functional once the deploy lands + agent re-provisions.
+
+---

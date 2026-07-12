@@ -439,3 +439,6 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 - packages/gateway/src/agent.ts — AGENT_MODEL_SLOTS += image, audio
 - packages/agent-orchestrator/src/secrets.ts — image/audio slot envs + GROQ_API_KEY passthrough
 - docker/docker-compose.prod.yml — GROQ_API_KEY on agent-orchestrator
+
+## 2026-07-12 — GROQ_API_KEY CI injection
+- .github/workflows/build-and-push.yml — deploy upserts GROQ_API_KEY into on-host .env from GitHub secret (Coolify env does not reach on-host .env). Enables the agent transcribe_audio tool.
