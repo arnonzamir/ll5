@@ -1978,3 +1978,9 @@ New capability — agent access to photos taken on the phone, matched to day eve
 GROQ_API_KEY wired end-to-end (CI secret + deploy .env injection). Groq whisper-large-v3 verified transcribing. transcribe_audio now functional once the deploy lands + agent re-provisions.
 
 ---
+
+## 2026-07-12 — anthropic-direct model ids corrected
+
+agent-models.ts + opencode.json now use the real Anthropic API ids (claude-haiku-4-5-20251001, claude-fable-5). Groq key can be set per-tenant via the new keys UI.
+
+---

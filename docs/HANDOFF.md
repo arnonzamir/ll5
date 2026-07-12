@@ -805,3 +805,7 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 - Orchestrator emits LL5_DEFAULT_PROVIDER/MODEL + LL5_SLOT_<X>_PROVIDER/_MODEL + OPENCODE_ZEN_API_KEY/GROQ_API_KEY/ANTHROPIC_API_KEY. Agent entrypoint (ll5-run-opencode) maps abstract→runtime provider.
 - UI: settings/agent → AgentModelsForm (keys + default + per-slot rows). Old ClaudeKeyForm retired.
 - Anthropic-direct provider needs a user ANTHROPIC_API_KEY (sk-ant-) added in the keys section.
+
+## 2026-07-12 — anthropic ids + groq key
+- anthropic-direct catalog: claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5-20251001, claude-fable-5.
+- Groq key: set per-tenant via PUT /me/agent/provider-key (or the keys UI); orchestrator also carries a system GROQ_API_KEY fallback.

@@ -447,3 +447,6 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 - packages/gateway/src/agent-models.ts — provider/model catalog + capabilities + config validation
 - packages/gateway/src/migrations/043_agent_multi_provider.sql
 - packages/dashboard/.../settings/agent/agent-models-form.tsx — redesigned form
+
+## 2026-07-12 — anthropic-direct model ids corrected
+- agent-models.ts / opencode.json: claude-haiku-4-5-20251001 + claude-fable-5 (real Anthropic API ids).

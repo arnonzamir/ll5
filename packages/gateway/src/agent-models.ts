@@ -64,7 +64,8 @@ const GROQ_MODELS: CatalogModel[] = [
 // Model ids follow Anthropic's API naming; adjust when the key is added if a name
 // 404s (the dropdown is a hint, not an allow-list).
 const ANTHROPIC_MODELS: CatalogModel[] = [
-  { id: 'claude-opus-4-8', caps: V }, { id: 'claude-sonnet-5', caps: V }, { id: 'claude-haiku-4-5', caps: V },
+  { id: 'claude-opus-4-8', caps: V }, { id: 'claude-sonnet-5', caps: V },
+  { id: 'claude-haiku-4-5-20251001', caps: V }, { id: 'claude-fable-5', caps: V },
 ];
 
 export const PROVIDER_CATALOG: Record<AgentProviderId, CatalogProvider> = {
