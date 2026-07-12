@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-12 — Image + audio analysis tools (text-only agent can now see/hear)
+
+deepseek is text-only, so images/voice notes were unseen. Added `inspect_image` (Zen vision, default claude-haiku-4-5) and `transcribe_audio` (Groq Whisper, default whisper-large-v3, needs GROQ_API_KEY) to the agent channel plugin, plus two new UI model slots (`image`, `audio`) in AGENT_MODEL_SLOTS. Orchestrator passes GROQ_API_KEY through to per-user env-files. WhatsApp already embeds `[<mediaType> attached: /uploads/…]` in content, so the agent gets the path; CLAUDE.md now instructs it to call the tools before responding. **Action needed: set GROQ_API_KEY in the deploy env to enable audio.**
+
+---
+
 ## 2026-07-12 — Chat: per-turn model+cost footer, tool-call mirroring, spend telemetry
 
 Chat bubbles now show a meta footer (time; + model, tokens, cost for assistant turns). The agent mirrors each work tool call to the thread as a folded compact row with full args+result on expand (`kind:"tool-call"`, main session only, comm tools skipped). New `POST /telemetry/turn-cost` persists real per-turn usage (opencode token counts × verified Zen price table) to ES `ll5_turn_costs` — spend is now queryable by day/model/agent (previously nothing persisted tokens or cost). Also fixed: `narration-watchdog` "Still on it…" now fires only for the MAIN session (background workers/grounder no longer leak it). Agent-side in ll5-run-opencode: `tool-mirror.ts`, `model-cost.js`, stop-mirror metadata.

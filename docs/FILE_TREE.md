@@ -434,3 +434,8 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 - packages/gateway/src/server.ts — + POST /telemetry/turn-cost (ES ll5_turn_costs)
 - packages/dashboard/src/components/chat/message-bubble.tsx — MetaFooter (time/model/cost); tool-call compact rows
 - packages/dashboard/src/lib/chat/{types.ts,constants.ts} — metadata cost fields + wrench icon
+
+## 2026-07-12 — image/audio analysis
+- packages/gateway/src/agent.ts — AGENT_MODEL_SLOTS += image, audio
+- packages/agent-orchestrator/src/secrets.ts — image/audio slot envs + GROQ_API_KEY passthrough
+- docker/docker-compose.prod.yml — GROQ_API_KEY on agent-orchestrator

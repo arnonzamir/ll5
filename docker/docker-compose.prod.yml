@@ -513,6 +513,9 @@ services:
       # private image → falls back to the local image; no regression).
       GHCR_PULL_TOKEN: ${GHCR_PULL_TOKEN:-}
       GHCR_PULL_USER: ${GHCR_PULL_USER:-arnonzamir}
+      # Groq key for the agent's transcribe_audio tool (Zen has no speech models).
+      # Passed through into each per-user env-file. Empty = audio transcription off.
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
       # Injected into each per-user env-file so the agent reaches the gateway
       # internally and MCPs via the public mcp-*.<domain> endpoints.
       LL5_GATEWAY_URL: http://gateway:3000

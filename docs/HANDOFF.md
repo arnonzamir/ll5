@@ -791,3 +791,7 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 **AGENT_VARIANT fix (2026-07-09):** Production .env had `AGENT_VARIANT=claude` → `OPENCODE_SERVER_URL` was empty → gateway never triggered agent on user messages. Fixed to `opencode`, stack restarted. `AgentTriggerListener` now connected; `prompt_async` returns HTTP 204. POST /alerts endpoint manually deployed via docker cp (lost on container restart until CI passes).
 
 **Next deploy:** CI push-triggered builds exclude variant packages now (they have their own CI repos). Variant images pulled from GHCR at deploy time (already built by variant repos' own CI). `AGENT_VARIANT` GitHub secret set to `opencode`. Gateway image with POST /alerts deployed on CI success. **Zen API key configured (2026-07-09):** `OPENCODE_ZEN_API_KEY` secret set, model switched to `deepseek-v4-pro`, `OPENCODE_MODEL_ID`/`OPENCODE_PROVIDER_ID` GitHub vars set.
+
+## 2026-07-12 — Image/audio analysis
+- Agent tools: `inspect_image` (Zen vision, OPENCODE_IMAGE_MODEL=claude-haiku-4-5), `transcribe_audio` (Groq Whisper, OPENCODE_AUDIO_MODEL=whisper-large-v3, needs GROQ_API_KEY). In ll5-run-opencode channel plugin.
+- UI slots `image`+`audio` in AGENT_MODEL_SLOTS (agent.ts) → secrets.ts emits OPENCODE_IMAGE_MODEL/OPENCODE_AUDIO_MODEL. GROQ_API_KEY passed through orchestrator env → per-user env-file. **Set GROQ_API_KEY in host/Coolify env + GitHub secret for audio to work.**

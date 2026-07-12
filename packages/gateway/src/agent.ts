@@ -160,6 +160,18 @@ export const AGENT_MODEL_SLOTS: AgentModelSlot[] = [
     description: 'Off-agent open-loop reconciliation loop.',
     env: 'OPENCODE_RECONCILE_MODEL',
   },
+  {
+    slot: 'image',
+    label: 'Image analysis',
+    description: 'Vision model for inspect_image (the main model is text-only). Zen vision, e.g. claude-haiku-4-5.',
+    env: 'OPENCODE_IMAGE_MODEL',
+  },
+  {
+    slot: 'audio',
+    label: 'Audio transcription',
+    description: 'Speech-to-text for transcribe_audio. Groq Whisper (Zen has no speech models), e.g. whisper-large-v3. Requires GROQ_API_KEY.',
+    env: 'OPENCODE_AUDIO_MODEL',
+  },
 ];
 const AGENT_MODEL_SLOT_IDS = new Set(AGENT_MODEL_SLOTS.map((s) => s.slot));
 

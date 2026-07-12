@@ -57,6 +57,8 @@ const SLOT_ENV: Record<string, string> = {
   grounder: 'OPENCODE_GROUNDER_MODEL',
   narrative: 'OPENCODE_NARRATIVE_MODEL',
   reconcile: 'OPENCODE_RECONCILE_MODEL',
+  image: 'OPENCODE_IMAGE_MODEL',
+  audio: 'OPENCODE_AUDIO_MODEL',
 };
 
 export interface SecretsWriterOptions {
@@ -113,6 +115,11 @@ export class SecretsWriter {
       for (const [slot, model] of Object.entries(env.modelOverrides ?? {})) {
         const key = SLOT_ENV[slot];
         if (key && model) lines.push(`${key}=${escapeValue(model)}`);
+      }
+      // Groq key for transcribe_audio (Zen has no speech models). System-level
+      // secret passed through from the orchestrator's own env when present.
+      if (process.env.GROQ_API_KEY) {
+        lines.push(`GROQ_API_KEY=${escapeValue(process.env.GROQ_API_KEY)}`);
       }
     } else {
       lines.push(`ANTHROPIC_API_KEY=${escapeValue(env.apiKey)}`);
