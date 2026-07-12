@@ -228,22 +228,22 @@ const assertAllScopedToU1 = (es: Client) => {
 describe('AnomalyMonitor — DECISION-025 reconcile liveness + governor freshness (staleness)', () => {
   beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
 
-  it('registers loop.reconcile_worker (45m) and loop.reconcile_governor (45m)', () => {
+  it('registers loop.reconcile_worker (90m) and loop.reconcile_governor (45m)', () => {
     const m = mk({} as Client);
     const w = byKey(m, 'loop.reconcile_worker');
     expect(w.kind).toBe('staleness');
-    expect(w.maxMinutes).toBe(45);
+    expect(w.maxMinutes).toBe(90);
     const g = byKey(m, 'loop.reconcile_governor');
     expect(g.kind).toBe('staleness');
     expect(g.maxMinutes).toBe(45);
   });
 
-  it('reconcile_worker: fresh call → no alert; stale (>45m) → alert; NEVER-called (null) → NO alert', async () => {
+  it('reconcile_worker: fresh call → no alert; stale (>90m) → alert; NEVER-called (null) → NO alert', async () => {
     const freshEs = esSearch({ hits: { hits: [{ _source: { timestamp: ago(10) } }] } });
     const fresh = mk(freshEs);
     expect(await priv(fresh).runStaleness(byKey(fresh, 'loop.reconcile_worker'))).toBe(false);
 
-    const staleEs = esSearch({ hits: { hits: [{ _source: { timestamp: ago(90) } }] } });
+    const staleEs = esSearch({ hits: { hits: [{ _source: { timestamp: ago(120) } }] } });
     const stale = mk(staleEs);
     expect(await priv(stale).runStaleness(byKey(stale, 'loop.reconcile_worker'))).toBe(true);
     expect(lastArg().key).toBe('loop.reconcile_worker');

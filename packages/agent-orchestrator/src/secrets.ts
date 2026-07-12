@@ -23,29 +23,29 @@ import path from 'node:path';
  */
 export type AgentProvider = 'anthropic' | 'opencode';
 
+/** Abstract model provider a slot can point at. */
+export type AgentProviderKey = 'zen' | 'groq' | 'anthropic';
+export interface AgentModelRef { provider: AgentProviderKey; model: string }
+export interface AgentModelConfig {
+  default: AgentModelRef;
+  /** null/absent → inherit default. Keys: main/grounder/narrative/reconcile/image/audio. */
+  slots: Record<string, AgentModelRef | null>;
+}
+
+/** Slots emitted as LL5_SLOT_<UPPER>_PROVIDER / _MODEL for the entrypoint. */
+const EMIT_SLOTS = ['main', 'grounder', 'narrative', 'reconcile', 'image', 'audio'] as const;
+
 export interface SecretEnv {
   userId: string;
   agentToken: string;
-  /** The user's decrypted provider API key (Anthropic key or Zen/opencode key). */
-  apiKey: string;
   gatewayUrl: string;
   mcpBaseDomain: string;
   /** Which runtime variant this user's container runs. */
   provider: AgentProvider;
-  /** opencode Zen provider id written into the container (opencode | opencode-go).
-   *  Selects the endpoint: opencode → /zen/v1 (capped); opencode-go → /zen/go/v1
-   *  (Go plan, pro-capable). Defaults to 'opencode'. */
-  zenProvider?: 'opencode' | 'opencode-go';
-  /** Per-tenant model id (e.g. "deepseek-v4-flash-free"). Optional → image default. */
-  model?: string | null;
-  /** opencode server URL / provider base. Optional → image default. */
-  baseUrl?: string | null;
-  /**
-   * Per-agent/per-tool model overrides (opencode only). Keyed by slot id
-   * (grounder/narrative/reconcile); each emits its OPENCODE_<SLOT>_MODEL env
-   * the sub-agent reads at spawn. Absent slots inherit `model`.
-   */
-  modelOverrides?: Record<string, string> | null;
+  /** Decrypted per-provider API keys (only those configured). */
+  keys: Partial<Record<AgentProviderKey, string>>;
+  /** Resolved model config: default + per-slot {provider, model}. */
+  config: AgentModelConfig;
 }
 
 /**
@@ -107,22 +107,34 @@ export class SecretsWriter {
       `AGENT_VARIANT=${escapeValue(variant)}`,
     ];
     if (env.provider === 'opencode') {
-      lines.push(`OPENCODE_ZEN_API_KEY=${escapeValue(env.apiKey)}`);
-      lines.push(`OPENCODE_PROVIDER_ID=${escapeValue(env.zenProvider ?? 'opencode')}`);
-      if (env.model) lines.push(`OPENCODE_MODEL_ID=${escapeValue(env.model)}`);
-      if (env.baseUrl) lines.push(`OPENCODE_SERVER_URL=${escapeValue(env.baseUrl)}`);
-      // Per-slot model overrides → OPENCODE_<SLOT>_MODEL (sub-agents read these).
-      for (const [slot, model] of Object.entries(env.modelOverrides ?? {})) {
-        const key = SLOT_ENV[slot];
-        if (key && model) lines.push(`${key}=${escapeValue(model)}`);
-      }
-      // Groq key for transcribe_audio (Zen has no speech models). System-level
-      // secret passed through from the orchestrator's own env when present.
-      if (process.env.GROQ_API_KEY) {
-        lines.push(`GROQ_API_KEY=${escapeValue(process.env.GROQ_API_KEY)}`);
+      const { keys, config } = env;
+      // Provider keys (only those configured). Groq falls back to the system key.
+      if (keys.zen) lines.push(`OPENCODE_ZEN_API_KEY=${escapeValue(keys.zen)}`);
+      const groq = keys.groq ?? process.env.GROQ_API_KEY;
+      if (groq) lines.push(`GROQ_API_KEY=${escapeValue(groq)}`);
+      if (keys.anthropic) lines.push(`ANTHROPIC_API_KEY=${escapeValue(keys.anthropic)}`);
+
+      // Abstract default + per-slot {provider, model}; the entrypoint maps each
+      // abstract provider (zen/groq/anthropic) to a runtime opencode provider.
+      lines.push(`LL5_DEFAULT_PROVIDER=${escapeValue(config.default.provider)}`);
+      lines.push(`LL5_DEFAULT_MODEL=${escapeValue(config.default.model)}`);
+      const main = config.slots.main ?? config.default;
+      lines.push(`LL5_SLOT_MAIN_PROVIDER=${escapeValue(main.provider)}`);
+      lines.push(`LL5_SLOT_MAIN_MODEL=${escapeValue(main.model)}`);
+      // Other slots: emit ONLY when explicitly set (unset → inherit default/main
+      // at runtime, or the tool's own built-in default for image/audio).
+      for (const slot of EMIT_SLOTS) {
+        if (slot === 'main') continue;
+        const ref = config.slots[slot];
+        if (ref?.provider && ref?.model) {
+          const up = slot.toUpperCase();
+          lines.push(`LL5_SLOT_${up}_PROVIDER=${escapeValue(ref.provider)}`);
+          lines.push(`LL5_SLOT_${up}_MODEL=${escapeValue(ref.model)}`);
+        }
       }
     } else {
-      lines.push(`ANTHROPIC_API_KEY=${escapeValue(env.apiKey)}`);
+      // Legacy Claude-Code variant: single Anthropic key.
+      if (env.keys.anthropic) lines.push(`ANTHROPIC_API_KEY=${escapeValue(env.keys.anthropic)}`);
     }
     lines.push('');
     await writeFile(target, lines.join('\n'), { mode: 0o600, encoding: 'utf8' });

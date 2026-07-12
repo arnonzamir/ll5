@@ -437,7 +437,7 @@ describe('agent connection plane', () => {
       await chain(req, res);
       const body = res._json as any;
       expect(body.providers.map((p: any) => p.provider)).toEqual(['anthropic', 'opencode', 'opencode-go']);
-      expect(body.slots.map((s: any) => s.slot)).toEqual(['grounder', 'narrative', 'reconcile']);
+      expect(body.slots.map((s: any) => s.slot)).toEqual(['grounder', 'narrative', 'reconcile', 'image', 'audio']);
       expect(body.slots.every((s: any) => typeof s.env === 'string' && s.env.startsWith('OPENCODE_'))).toBe(true);
     });
   });

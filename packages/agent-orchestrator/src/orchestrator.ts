@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { logger } from './logger.js';
 import type { Runtime, RuntimeSpec } from './runtime/runtime.js';
 import { SecretsWriter, ENV_FILE_TARGET } from './secrets.js';
+import type { AgentProviderKey, AgentModelConfig } from './secrets.js';
 import { buildConsoleLabels } from './console-labels.js';
 import type { Encryptor } from './encryption.js';
 
@@ -100,43 +101,74 @@ export class Orchestrator {
   // --- decryption -------------------------------------------------------
 
   private async loadCredential(userId: string): Promise<{
+    /** Image-variant selector: 'opencode' (multi-provider) or 'anthropic'
+     *  (legacy Claude-Code variant). */
     provider: 'anthropic' | 'opencode';
-    /** The opencode Zen provider id written into the container (opencode |
-     *  opencode-go). Same runtime image; different endpoint + billing. */
-    zenProvider: 'opencode' | 'opencode-go';
-    model: string | null;
-    baseUrl: string | null;
-    modelOverrides: Record<string, string>;
-    apiKey: string;
+    /** Decrypted per-provider keys (only those configured). */
+    keys: Partial<Record<AgentProviderKey, string>>;
+    /** The resolved model config: default + per-slot {provider, model}. */
+    config: AgentModelConfig;
   }> {
     const res = await this.pool.query<{
-      ciphertext: string;
+      ciphertext: string | null;
       provider: string | null;
       model: string | null;
       base_url: string | null;
       model_overrides: Record<string, string> | null;
+      provider_keys: Record<string, { ciphertext?: string; last4?: string }> | null;
+      model_config: AgentModelConfig | null;
     }>(
-      'SELECT ciphertext, provider, model, base_url, model_overrides FROM agent_llm_credentials WHERE user_id = $1',
+      `SELECT ciphertext, provider, model, base_url, model_overrides, provider_keys, model_config
+         FROM agent_llm_credentials WHERE user_id = $1`,
       [userId],
     );
     const row = res.rows[0];
-    if (!row || !row.ciphertext) {
-      throw new MissingCredentialError();
-    }
-    // opencode + opencode-go share the same runtime IMAGE (provider 'opencode'
-    // for image selection), but the container-side Zen provider id differs:
-    // opencode → /zen/v1 (capped), opencode-go → /zen/go/v1 (Go plan, pro-capable).
-    const zenProvider = row.provider === 'opencode-go' ? 'opencode-go' : 'opencode';
-    const provider =
-      row.provider === 'opencode' || row.provider === 'opencode-go' ? 'opencode' : 'anthropic';
-    return {
-      provider,
-      zenProvider,
-      model: row.model ?? null,
-      baseUrl: row.base_url ?? null,
-      modelOverrides: row.model_overrides ?? {},
-      apiKey: this.encryptor.decrypt(row.ciphertext, this.config.encryptionKey),
+    if (!row) throw new MissingCredentialError();
+
+    const legacyProviderMap: Record<string, AgentProviderKey> = {
+      opencode: 'zen', 'opencode-go': 'zen', anthropic: 'anthropic',
     };
+
+    // Decrypt per-provider keys.
+    const keys: Partial<Record<AgentProviderKey, string>> = {};
+    for (const [p, entry] of Object.entries(row.provider_keys ?? {})) {
+      if ((p === 'zen' || p === 'groq' || p === 'anthropic') && entry?.ciphertext) {
+        keys[p] = this.encryptor.decrypt(entry.ciphertext, this.config.encryptionKey);
+      }
+    }
+    // Backfill the legacy single key into its mapped provider slot (provider may
+    // be null on very old rows → default to anthropic's mapping).
+    if (row.ciphertext) {
+      const mapped = legacyProviderMap[row.provider ?? 'anthropic'] ?? 'zen';
+      if (!keys[mapped]) keys[mapped] = this.encryptor.decrypt(row.ciphertext, this.config.encryptionKey);
+    }
+
+    // Resolve config: prefer model_config; else synthesise from legacy.
+    let config: AgentModelConfig;
+    if (row.model_config && row.model_config.default) {
+      config = row.model_config;
+    } else {
+      const prov = legacyProviderMap[row.provider ?? 'anthropic'] ?? 'zen';
+      const model = row.model || (prov === 'zen' ? 'deepseek-v4-flash' : 'claude-haiku-4-5');
+      const slots: Record<string, { provider: AgentProviderKey; model: string } | null> = {};
+      for (const [slot, m] of Object.entries(row.model_overrides ?? {})) {
+        if (m) slots[slot] = { provider: prov, model: m };
+      }
+      config = { default: { provider: prov, model }, slots };
+    }
+
+    // The main model's provider key MUST exist, else the agent can't run.
+    const mainProvider = (config.slots.main ?? config.default).provider;
+    if (!keys[mainProvider]) throw new MissingCredentialError();
+
+    // Image variant: pure-legacy anthropic (Claude-Code) stays 'anthropic';
+    // anything using the new config / zen / groq runs the opencode image.
+    const provider: 'anthropic' | 'opencode' =
+      row.provider === 'anthropic' && !row.model_config && Object.keys(row.provider_keys ?? {}).length === 0
+        ? 'anthropic'
+        : 'opencode';
+
+    return { provider, keys, config };
   }
 
   // --- agent_runtimes I/O ----------------------------------------------
@@ -215,14 +247,11 @@ export class Orchestrator {
     const envFilePath = await this.secrets.write({
       userId,
       agentToken,
-      apiKey: cred.apiKey,
       gatewayUrl: this.config.gatewayUrl,
       mcpBaseDomain: this.config.mcpBaseDomain,
       provider: cred.provider,
-      zenProvider: cred.zenProvider,
-      model: cred.model,
-      baseUrl: cred.baseUrl,
-      modelOverrides: cred.modelOverrides,
+      keys: cred.keys,
+      config: cred.config,
     });
 
     // Per-provider image: opencode and Claude ship as separate images.

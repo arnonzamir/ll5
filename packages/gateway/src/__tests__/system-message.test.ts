@@ -7,6 +7,7 @@ const getAgentSessionIdMock = vi.fn().mockResolvedValue('sess-abc-123');
 vi.mock('../utils/agent-trigger.js', () => ({
   triggerAgent: (...a: unknown[]) => triggerAgentMock(...a),
   getAgentSessionId: (...a: unknown[]) => getAgentSessionIdMock(...a),
+  resolveAgentBaseUrl: () => Promise.resolve(null),
 }));
 
 // Mock FCM + scheduler-health so the real insertSystemMessage can run without

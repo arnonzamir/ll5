@@ -21,7 +21,7 @@ import {
   Square,
   TerminalSquare,
 } from "lucide-react";
-import { ClaudeKeyForm } from "./claude-key-form";
+import { AgentModelsForm } from "./agent-models-form";
 import {
   fetchAgentModels,
   fetchAgentSessions,
@@ -83,15 +83,15 @@ export function AgentSettingsView() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
-            <KeyRound className="h-5 w-5 text-primary" /> Model &amp; API key
+            <KeyRound className="h-5 w-5 text-primary" /> Models &amp; API keys
           </CardTitle>
           <CardDescription>
-            Choose the provider and model your assistant runs on, connect your API key, and
-            (for opencode) pick per-tool models.
+            Add a key per provider (Zen · Groq · Anthropic), set a default model, and give each
+            job (main agent, grounder, narrative, reconcile, image, audio) its own provider + model.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ClaudeKeyForm status={llm} catalog={catalog} onStatusChange={setLlm} />
+          <AgentModelsForm />
         </CardContent>
       </Card>
 

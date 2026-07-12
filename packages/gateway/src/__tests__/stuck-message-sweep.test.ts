@@ -8,6 +8,7 @@ const getAgentSessionIdMock = vi.fn().mockResolvedValue('sess-test-123');
 vi.mock('../utils/agent-trigger.js', () => ({
   triggerAgent: (...a: unknown[]) => triggerAgentMock(...a),
   getAgentSessionId: (...a: unknown[]) => getAgentSessionIdMock(...a),
+  resolveAgentBaseUrl: () => Promise.resolve(null),
 }));
 
 import { StuckMessageSweep } from '../scheduler/stuck-message-sweep.js';

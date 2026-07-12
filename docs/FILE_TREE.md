@@ -442,3 +442,8 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 
 ## 2026-07-12 — GROQ_API_KEY CI injection
 - .github/workflows/build-and-push.yml — deploy upserts GROQ_API_KEY into on-host .env from GitHub secret (Coolify env does not reach on-host .env). Enables the agent transcribe_audio tool.
+
+## 2026-07-12 — multi-provider model config
+- packages/gateway/src/agent-models.ts — provider/model catalog + capabilities + config validation
+- packages/gateway/src/migrations/043_agent_multi_provider.sql
+- packages/dashboard/.../settings/agent/agent-models-form.tsx — redesigned form

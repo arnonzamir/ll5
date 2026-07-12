@@ -2,7 +2,13 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtemp, stat, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { SecretsWriter } from '../secrets.js';
+import { SecretsWriter, type AgentModelConfig } from '../secrets.js';
+
+const cfg = (over: Partial<AgentModelConfig> = {}): AgentModelConfig => ({
+  default: { provider: 'zen', model: 'deepseek-v4-flash' },
+  slots: {},
+  ...over,
+});
 
 describe('SecretsWriter', () => {
   const created: string[] = [];
@@ -18,16 +24,17 @@ describe('SecretsWriter', () => {
     return d;
   }
 
-  it('writes a 0600 anthropic env-file with the contract keys', async () => {
+  it('writes a 0600 anthropic (legacy Claude variant) env-file with the contract keys', async () => {
     const dir = await tmpDir();
     const w = new SecretsWriter({ dir });
     const userPath = await w.write({
       userId: 'user-1',
       agentToken: 'll5.agent.tok',
-      apiKey: 'sk-ant-secret',
       gatewayUrl: 'https://ll5.noninoni.click',
       mcpBaseDomain: 'noninoni.click',
       provider: 'anthropic',
+      keys: { anthropic: 'sk-ant-secret' },
+      config: cfg({ default: { provider: 'anthropic', model: 'claude-haiku-4-5' } }),
     });
 
     const st = await stat(userPath);
@@ -35,90 +42,78 @@ describe('SecretsWriter', () => {
 
     const content = await readFile(userPath, 'utf8');
     expect(content).toContain('LL5_USER_ID=');
-    expect(content).toContain('LL5_AGENT_TOKEN=');
-    expect(content).toContain('LL5_GATEWAY_URL=');
-    expect(content).toContain('MCP_BASE_DOMAIN=');
     expect(content).toContain(`AGENT_VARIANT='claude'`);
-    expect(content).toContain('ANTHROPIC_API_KEY=');
-    expect(content).toContain('sk-ant-secret');
-    // No opencode keys leak into an anthropic file.
+    expect(content).toContain(`ANTHROPIC_API_KEY='sk-ant-secret'`);
     expect(content).not.toContain('OPENCODE_ZEN_API_KEY');
   });
 
-  it('writes an opencode env-file with variant/model/key/url', async () => {
+  it('writes an opencode env-file with keys + abstract default/main', async () => {
     const dir = await tmpDir();
     const w = new SecretsWriter({ dir });
     const userPath = await w.write({
       userId: 'user-oc',
       agentToken: 'tok',
-      apiKey: 'zen-key-123',
       gatewayUrl: 'g',
       mcpBaseDomain: 'm',
       provider: 'opencode',
-      model: 'deepseek-v4-flash-free',
-      baseUrl: 'http://agent:4096',
+      keys: { zen: 'zen-key-123' },
+      config: cfg(),
     });
     const content = await readFile(userPath, 'utf8');
     expect(content).toContain(`AGENT_VARIANT='opencode'`);
     expect(content).toContain(`OPENCODE_ZEN_API_KEY='zen-key-123'`);
-    expect(content).toContain(`OPENCODE_PROVIDER_ID='opencode'`);
-    expect(content).toContain(`OPENCODE_MODEL_ID='deepseek-v4-flash-free'`);
-    expect(content).toContain(`OPENCODE_SERVER_URL='http://agent:4096'`);
+    expect(content).toContain(`LL5_DEFAULT_PROVIDER='zen'`);
+    expect(content).toContain(`LL5_DEFAULT_MODEL='deepseek-v4-flash'`);
+    expect(content).toContain(`LL5_SLOT_MAIN_PROVIDER='zen'`);
+    expect(content).toContain(`LL5_SLOT_MAIN_MODEL='deepseek-v4-flash'`);
     expect(content).not.toContain('ANTHROPIC_API_KEY');
   });
 
-  it('emits per-slot model override env vars (known slots only)', async () => {
+  it('emits per-slot provider+model for set slots only, across providers', async () => {
     const dir = await tmpDir();
     const w = new SecretsWriter({ dir });
     const p = await w.write({
-      userId: 'user-oc-slots', agentToken: 't', apiKey: 'k', gatewayUrl: 'g',
-      mcpBaseDomain: 'm', provider: 'opencode', model: 'deepseek-v4-flash-free',
-      modelOverrides: { grounder: 'deepseek-v4-pro', reconcile: 'minimax-m3', bogus: 'x' },
+      userId: 'user-oc-slots', agentToken: 't', gatewayUrl: 'g', mcpBaseDomain: 'm',
+      provider: 'opencode',
+      keys: { zen: 'zk', groq: 'gk', anthropic: 'ak' },
+      config: cfg({
+        slots: {
+          narrative: { provider: 'anthropic', model: 'claude-haiku-4-5' },
+          image: { provider: 'zen', model: 'claude-haiku-4-5' },
+          audio: { provider: 'groq', model: 'whisper-large-v3' },
+        },
+      }),
     });
     const content = await readFile(p, 'utf8');
-    expect(content).toContain(`OPENCODE_GROUNDER_MODEL='deepseek-v4-pro'`);
-    expect(content).toContain(`OPENCODE_RECONCILE_MODEL='minimax-m3'`);
-    expect(content).not.toContain('OPENCODE_NARRATIVE_MODEL='); // not overridden
-    expect(content).not.toContain('bogus'); // unknown slot ignored
+    expect(content).toContain(`GROQ_API_KEY='gk'`);
+    expect(content).toContain(`ANTHROPIC_API_KEY='ak'`);
+    expect(content).toContain(`LL5_SLOT_NARRATIVE_PROVIDER='anthropic'`);
+    expect(content).toContain(`LL5_SLOT_NARRATIVE_MODEL='claude-haiku-4-5'`);
+    expect(content).toContain(`LL5_SLOT_AUDIO_PROVIDER='groq'`);
+    expect(content).toContain(`LL5_SLOT_AUDIO_MODEL='whisper-large-v3'`);
+    expect(content).not.toContain('LL5_SLOT_RECONCILE_'); // not set → inherits
   });
 
-  it('opencode-go writes OPENCODE_PROVIDER_ID=opencode-go (Go endpoint)', async () => {
+  it('main slot override wins over default for LL5_SLOT_MAIN_*', async () => {
     const dir = await tmpDir();
     const w = new SecretsWriter({ dir });
     const p = await w.write({
-      userId: 'user-go', agentToken: 't', apiKey: 'go-key', gatewayUrl: 'g',
-      mcpBaseDomain: 'm', provider: 'opencode', zenProvider: 'opencode-go',
-      model: 'deepseek-v4-pro',
+      userId: 'user-main', agentToken: 't', gatewayUrl: 'g', mcpBaseDomain: 'm',
+      provider: 'opencode', keys: { zen: 'k', groq: 'g' },
+      config: cfg({ slots: { main: { provider: 'groq', model: 'moonshotai/kimi-k2-instruct' } } }),
     });
     const content = await readFile(p, 'utf8');
-    expect(content).toContain(`OPENCODE_PROVIDER_ID='opencode-go'`);
-    expect(content).toContain(`OPENCODE_MODEL_ID='deepseek-v4-pro'`);
-    expect(content).toContain(`OPENCODE_ZEN_API_KEY='go-key'`);
-  });
-
-  it('opencode without model/baseUrl omits those lines', async () => {
-    const dir = await tmpDir();
-    const w = new SecretsWriter({ dir });
-    const p = await w.write({
-      userId: 'user-oc2', agentToken: 't', apiKey: 'k', gatewayUrl: 'g',
-      mcpBaseDomain: 'm', provider: 'opencode',
-    });
-    const content = await readFile(p, 'utf8');
-    expect(content).toContain('OPENCODE_ZEN_API_KEY=');
-    expect(content).not.toContain('OPENCODE_MODEL_ID=');
-    expect(content).not.toContain('OPENCODE_SERVER_URL=');
+    expect(content).toContain(`LL5_SLOT_MAIN_PROVIDER='groq'`);
+    expect(content).toContain(`LL5_SLOT_MAIN_MODEL='moonshotai/kimi-k2-instruct'`);
+    expect(content).toContain(`LL5_DEFAULT_PROVIDER='zen'`); // default unchanged
   });
 
   it('escapes single quotes safely', async () => {
     const dir = await tmpDir();
     const w = new SecretsWriter({ dir });
     const userPath = await w.write({
-      userId: 'user-2',
-      agentToken: "tok'with'quote",
-      apiKey: 'k',
-      gatewayUrl: 'g',
-      mcpBaseDomain: 'm',
-      provider: 'anthropic',
+      userId: 'user-2', agentToken: "tok'with'quote", gatewayUrl: 'g', mcpBaseDomain: 'm',
+      provider: 'anthropic', keys: { anthropic: 'k' }, config: cfg(),
     });
     const content = await readFile(userPath, 'utf8');
     expect(content).toContain(`LL5_AGENT_TOKEN='tok'\\''with'\\''quote'`);
@@ -128,12 +123,8 @@ describe('SecretsWriter', () => {
     const dir = await tmpDir();
     const w = new SecretsWriter({ dir });
     const p = await w.write({
-      userId: 'user-3',
-      agentToken: 't',
-      apiKey: 'k',
-      gatewayUrl: 'g',
-      mcpBaseDomain: 'm',
-      provider: 'anthropic',
+      userId: 'user-3', agentToken: 't', gatewayUrl: 'g', mcpBaseDomain: 'm',
+      provider: 'anthropic', keys: { anthropic: 'k' }, config: cfg(),
     });
     await w.remove('user-3');
     await expect(stat(p)).rejects.toThrow();

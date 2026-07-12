@@ -8,6 +8,11 @@ import { registerConsoleRoutes } from './console.js';
 import { encryptSecret } from './utils/encryption.js';
 import { logger } from './utils/logger.js';
 import {
+  AGENT_PROVIDERS, PROVIDER_CATALOG, MODEL_SLOTS, SLOT_IDS,
+  sanitizeModelConfig, keyOkForProvider, isProvider,
+  type AgentProviderId, type ModelConfig, type ModelRef,
+} from './agent-models.js';
+import {
   defaultOrchestratorClient,
   OrchestratorNotConfiguredError,
   type OrchestratorClient,
@@ -578,6 +583,153 @@ export function createAgentRouter(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[agent][deleteLlmCredential] Failed', { userId, error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // ===========================================================================
+  // Multi-provider model config (redesigned UI): per-provider keys + a default
+  // {provider,model} + per-slot {provider,model} overrides. Backed by the
+  // provider_keys / model_config JSONB columns; legacy single-credential rows are
+  // backfilled on read so existing agents keep working.
+  // ===========================================================================
+
+  const LEGACY_PROVIDER: Record<string, AgentProviderId> = {
+    opencode: 'zen', 'opencode-go': 'zen', anthropic: 'anthropic',
+  };
+
+  /** Build the effective ModelConfig for a user: prefer the new model_config
+   *  column; else synthesise one from the legacy provider/model/model_overrides. */
+  function effectiveConfig(row: {
+    provider: string | null; model: string | null;
+    model_overrides: Record<string, string> | null; model_config: ModelConfig | null;
+  }): ModelConfig {
+    if (row.model_config && (row.model_config as any).default) return row.model_config;
+    const prov = LEGACY_PROVIDER[row.provider ?? 'anthropic'] ?? 'zen';
+    const model = row.model || (prov === 'zen' ? 'deepseek-v4-flash' : 'claude-haiku-4-5');
+    const slots: Record<string, ModelRef | null> = {};
+    for (const [slot, m] of Object.entries(row.model_overrides ?? {})) {
+      if (SLOT_IDS.has(slot) && m) slots[slot] = { provider: prov, model: m };
+    }
+    return { default: { provider: prov, model }, slots };
+  }
+
+  // GET /me/agent/model-catalog — providers (with models+capabilities) + slots.
+  router.get('/me/agent/model-catalog', authMw, async (_req: Request, res: Response) => {
+    res.json({
+      providers: AGENT_PROVIDERS.map((id) => ({
+        id, label: PROVIDER_CATALOG[id].label, keyPrefix: PROVIDER_CATALOG[id].keyPrefix ?? null,
+        models: PROVIDER_CATALOG[id].models,
+      })),
+      slots: MODEL_SLOTS,
+    });
+  });
+
+  // GET /me/agent/model-config — key presence (last4 only) + effective config.
+  router.get('/me/agent/model-config', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    try {
+      const r = await pool.query<{
+        provider: string | null; model: string | null; last4: string | null;
+        model_overrides: Record<string, string> | null;
+        provider_keys: Record<string, { last4?: string }> | null;
+        model_config: ModelConfig | null;
+      }>(
+        `SELECT provider, model, last4, model_overrides, provider_keys, model_config
+           FROM agent_llm_credentials WHERE user_id = $1`,
+        [userId],
+      );
+      const row = r.rows[0];
+      const keys: Record<string, { configured: boolean; last4: string | null }> = {};
+      for (const p of AGENT_PROVIDERS) keys[p] = { configured: false, last4: null };
+      if (row) {
+        const pk = row.provider_keys ?? {};
+        for (const p of AGENT_PROVIDERS) {
+          if (pk[p]?.last4) keys[p] = { configured: true, last4: pk[p].last4 ?? null };
+        }
+        // Backfill the legacy single key into its mapped provider slot.
+        if (row.last4 && row.provider) {
+          const mapped = LEGACY_PROVIDER[row.provider] ?? 'zen';
+          if (!keys[mapped].configured) keys[mapped] = { configured: true, last4: row.last4 };
+        }
+      }
+      res.json({ keys, config: row ? effectiveConfig(row) : null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[agent][getModelConfig] Failed', { userId, error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // PUT /me/agent/provider-key { provider, api_key } — store one provider's key.
+  router.put('/me/agent/provider-key', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const { provider, api_key } = (req.body ?? {}) as { provider?: string; api_key?: string };
+    if (!isProvider(provider)) { res.status(400).json({ error: `provider must be one of: ${AGENT_PROVIDERS.join(', ')}` }); return; }
+    if (!api_key || !keyOkForProvider(provider, api_key)) {
+      res.status(400).json({ error: PROVIDER_CATALOG[provider].keyPrefix ? `key must start with ${PROVIDER_CATALOG[provider].keyPrefix}` : 'invalid key' });
+      return;
+    }
+    if (!encryptionKey) { res.status(500).json({ error: 'Secret storage not configured' }); return; }
+    try {
+      const entry = { ciphertext: encryptSecret(api_key, encryptionKey), last4: api_key.slice(-4), updated_at: new Date().toISOString() };
+      // Upsert into provider_keys JSONB. Ensure a row exists (kind api_key).
+      await pool.query(
+        `INSERT INTO agent_llm_credentials (user_id, kind, provider_keys)
+           VALUES ($1, 'api_key', jsonb_build_object($2::text, $3::jsonb))
+         ON CONFLICT (user_id) DO UPDATE SET
+           provider_keys = COALESCE(agent_llm_credentials.provider_keys, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb),
+           updated_at = now()`,
+        [userId, provider, JSON.stringify(entry)],
+      );
+      logger.info('[agent][putProviderKey] stored', { userId, provider, last4: entry.last4 });
+      res.json({ provider, configured: true, last4: entry.last4 });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[agent][putProviderKey] Failed', { userId, provider, error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // DELETE /me/agent/provider-key/:provider
+  router.delete('/me/agent/provider-key/:provider', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const provider = req.params.provider;
+    if (!isProvider(provider)) { res.status(400).json({ error: 'unknown provider' }); return; }
+    try {
+      await pool.query(
+        `UPDATE agent_llm_credentials SET provider_keys = (COALESCE(provider_keys,'{}'::jsonb) - $2), updated_at = now() WHERE user_id = $1`,
+        [userId, provider],
+      );
+      res.json({ provider, configured: false });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // PUT /me/agent/model-config { default, slots } — store the model config.
+  router.put('/me/agent/model-config', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const sane = sanitizeModelConfig(req.body);
+    if ('error' in sane) { res.status(400).json({ error: sane.error }); return; }
+    try {
+      const r = await pool.query(
+        `UPDATE agent_llm_credentials SET model_config = $2::jsonb, updated_at = now() WHERE user_id = $1`,
+        [userId, JSON.stringify(sane.config)],
+      );
+      if (r.rowCount === 0) {
+        // No row yet (keys not set) — create one holding just the config.
+        await pool.query(
+          `INSERT INTO agent_llm_credentials (user_id, kind, model_config) VALUES ($1, 'api_key', $2::jsonb)
+           ON CONFLICT (user_id) DO UPDATE SET model_config = EXCLUDED.model_config, updated_at = now()`,
+          [userId, JSON.stringify(sane.config)],
+        );
+      }
+      logger.info('[agent][putModelConfig] stored', { userId, default: sane.config.default });
+      res.json({ config: sane.config });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[agent][putModelConfig] Failed', { userId, error: message });
       res.status(500).json({ error: message });
     }
   });

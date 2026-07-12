@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-12 — Multi-provider per-slot agent models (redesign)
+
+Agent model config is now multi-provider: a key per provider (Zen / Groq / Anthropic-direct), a top-level default {provider, model}, and per-slot {provider, model} for main/grounder/narrative/reconcile/image/audio (each slot filtered to text/vision/audio-capable models). Backend: migration 043 (provider_keys + model_config JSONB on agent_llm_credentials, backward-compatible; relaxed ciphertext NOT NULL); gateway `agent-models.ts` catalog + endpoints (model-catalog, model-config, provider-key, delete). Orchestrator loadCredential/secrets emit LL5_DEFAULT_* + LL5_SLOT_<X>_PROVIDER/_MODEL + all three keys; the agent entrypoint maps abstract→runtime opencode providers (opencode/opencode-ds/groq/anthropic-direct). UI redesigned: API-keys section + default row + one provider/model row per slot. Legacy single-credential rows backfill so the running agent never breaks.
+
+---
+
 ## 2026-07-12 — Image + audio analysis tools (text-only agent can now see/hear)
 
 deepseek is text-only, so images/voice notes were unseen. Added `inspect_image` (Zen vision, default claude-haiku-4-5) and `transcribe_audio` (Groq Whisper, default whisper-large-v3, needs GROQ_API_KEY) to the agent channel plugin, plus two new UI model slots (`image`, `audio`) in AGENT_MODEL_SLOTS. Orchestrator passes GROQ_API_KEY through to per-user env-files. WhatsApp already embeds `[<mediaType> attached: /uploads/…]` in content, so the agent gets the path; CLAUDE.md now instructs it to call the tools before responding. **Action needed: set GROQ_API_KEY in the deploy env to enable audio.**

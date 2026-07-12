@@ -798,3 +798,10 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 ## 2026-07-12 — Audio key wired
 - GROQ_API_KEY: GitHub secret set + deploy injects into on-host .env → agent-orchestrator → per-user env-file → transcribe_audio. Verified: Groq whisper-large-v3 transcribed a test clip (HTTP 200).
+
+## 2026-07-12 — Multi-provider model config
+- agent_llm_credentials + provider_keys JSONB {provider:{ciphertext,last4}} + model_config JSONB {default,slots}. Keys per provider (zen/groq/anthropic).
+- Gateway: GET /me/agent/model-catalog, GET/PUT /me/agent/model-config, PUT/DELETE /me/agent/provider-key. agent-models.ts owns the catalog + validation.
+- Orchestrator emits LL5_DEFAULT_PROVIDER/MODEL + LL5_SLOT_<X>_PROVIDER/_MODEL + OPENCODE_ZEN_API_KEY/GROQ_API_KEY/ANTHROPIC_API_KEY. Agent entrypoint (ll5-run-opencode) maps abstract→runtime provider.
+- UI: settings/agent → AgentModelsForm (keys + default + per-slot rows). Old ClaudeKeyForm retired.
+- Anthropic-direct provider needs a user ANTHROPIC_API_KEY (sk-ant-) added in the keys section.

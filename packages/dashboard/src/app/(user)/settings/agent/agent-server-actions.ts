@@ -162,6 +162,99 @@ export async function removeLlmCredential(): Promise<{ ok: boolean }> {
   }
 }
 
+/* ---------- Multi-provider model config (redesigned) ---------- */
+
+export interface CatalogModel { id: string; caps: ("text" | "vision" | "audio")[] }
+export interface CatalogProvider { id: string; label: string; keyPrefix: string | null; models: CatalogModel[] }
+export interface CatalogSlot { slot: string; label: string; description: string; capability: "text" | "vision" | "audio" }
+export interface ModelCatalog { providers: CatalogProvider[]; slots: CatalogSlot[] }
+export interface ModelRef { provider: string; model: string }
+export interface ModelConfig { default: ModelRef; slots: Record<string, ModelRef | null> }
+export interface ModelConfigStatus {
+  keys: Record<string, { configured: boolean; last4: string | null }>;
+  config: ModelConfig | null;
+}
+
+export async function fetchModelCatalog(): Promise<ModelCatalog> {
+  const headers = await authHeaders();
+  const empty: ModelCatalog = { providers: [], slots: [] };
+  if (!headers) return empty;
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/model-catalog`, { headers, cache: "no-store" });
+    if (!res.ok) return empty;
+    return (await res.json()) as ModelCatalog;
+  } catch (err) {
+    console.error("[agent] fetchModelCatalog failed:", err instanceof Error ? err.message : String(err));
+    return empty;
+  }
+}
+
+export async function fetchModelConfig(): Promise<ModelConfigStatus> {
+  const headers = await authHeaders();
+  const empty: ModelConfigStatus = { keys: {}, config: null };
+  if (!headers) return empty;
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/model-config`, { headers, cache: "no-store" });
+    if (!res.ok) return empty;
+    return (await res.json()) as ModelConfigStatus;
+  } catch (err) {
+    console.error("[agent] fetchModelConfig failed:", err instanceof Error ? err.message : String(err));
+    return empty;
+  }
+}
+
+export async function saveProviderKey(provider: string, apiKey: string): Promise<{ ok: boolean; last4?: string; error?: string }> {
+  const headers = await authHeaders();
+  if (!headers) return { ok: false, error: "Not authenticated" };
+  const trimmed = apiKey.trim();
+  if (trimmed.length < 8) return { ok: false, error: "That key looks too short." };
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/provider-key`, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, api_key: trimmed }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: body.error ?? `Save failed (${res.status}).` };
+    }
+    const raw = (await res.json()) as { last4?: string };
+    return { ok: true, last4: raw.last4 };
+  } catch (err) {
+    console.error("[agent] saveProviderKey failed:", err instanceof Error ? err.message : String(err));
+    return { ok: false, error: "Network error while saving the key." };
+  }
+}
+
+export async function removeProviderKey(provider: string): Promise<{ ok: boolean }> {
+  const headers = await authHeaders();
+  if (!headers) return { ok: false };
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/provider-key/${encodeURIComponent(provider)}`, { method: "DELETE", headers });
+    return { ok: res.ok };
+  } catch { return { ok: false }; }
+}
+
+export async function saveModelConfig(config: ModelConfig): Promise<{ ok: boolean; error?: string }> {
+  const headers = await authHeaders();
+  if (!headers) return { ok: false, error: "Not authenticated" };
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/me/agent/model-config`, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: body.error ?? `Save failed (${res.status}).` };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("[agent] saveModelConfig failed:", err instanceof Error ? err.message : String(err));
+    return { ok: false, error: "Network error while saving." };
+  }
+}
+
 /* ---------- Connection kit (agent credential) ---------- */
 
 /** GET /me/agent/credentials — list issued agent credentials (hash-only). */
