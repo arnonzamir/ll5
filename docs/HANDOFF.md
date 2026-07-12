@@ -815,3 +815,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 ## 2026-07-12 — topics Recent sort
 - personal-knowledge narrative.repository: recency path now sorts by live max(observed_at), not the stale last_observed_at field.
+
+## 2026-07-12 — orchestrator deploy fix
+- build-and-push.yml pre-pull loop now includes agent-orchestrator (was stale-imaged on every deploy).

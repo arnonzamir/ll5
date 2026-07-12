@@ -454,3 +454,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 ## 2026-07-12 — strict per-tenant keys (secrets.ts)
 
 ## 2026-07-12 — narrative recency sort fix
+
+## 2026-07-12 — deploy pulls orchestrator

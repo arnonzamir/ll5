@@ -1996,3 +1996,9 @@ Removed the system-wide GROQ_API_KEY fallback from secrets.ts — provider keys 
 Active-topics "Recent" sorted by the stale denormalized last_observed_at (lags consolidation), so it mis-ordered / dropped genuinely-active topics. Now pulls a candidate window, overwrites with the LIVE max(observed_at), and sorts by that. In personal-knowledge narrative.repository.
 
 ---
+
+## 2026-07-12 — deploy pulls agent-orchestrator
+
+The deploy pre-pull loop omitted agent-orchestrator, so compose up ran a stale local image and the control plane never picked up code changes (multi-provider config was inert until a manual recreate). Added it to the loop.
+
+---

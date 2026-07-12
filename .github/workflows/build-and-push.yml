@@ -513,7 +513,11 @@ jobs:
             # Only pull our GHCR-built images — never databases (postgres, ES) or
             # third-party images (evolution). A new patch of postgres:16-alpine
             # would otherwise trigger a container recreate → downtime.
-            for img in gateway dashboard personal-knowledge gtd awareness google messaging health vault; do
+            # NOTE: agent-orchestrator MUST be here — it was omitted before, so
+            # `compose up` kept running a stale local image (the control plane
+            # never picked up code changes; e.g. multi-provider config was inert
+            # until a manual recreate). Its GHCR name is ll5-agent-orchestrator.
+            for img in gateway dashboard personal-knowledge gtd awareness google messaging health vault agent-orchestrator; do
               docker pull ghcr.io/arnonzamir/ll5-$img:latest 2>/dev/null || true
             done
             # Pull the selected agent variant image
