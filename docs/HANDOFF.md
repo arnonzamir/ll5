@@ -812,3 +812,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 ## 2026-07-12 — per-tenant keys enforced
 - secrets.ts writes only per-tenant keys (keys.zen/groq/anthropic); no shared process.env.GROQ_API_KEY fallback. Orchestrator compose GROQ_API_KEY is now unused (harmless).
+
+## 2026-07-12 — topics Recent sort
+- personal-knowledge narrative.repository: recency path now sorts by live max(observed_at), not the stale last_observed_at field.

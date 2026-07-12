@@ -245,11 +245,18 @@ export class ElasticsearchNarrativeRepository
       return { items: candidates.slice(offset, offset + limit), total };
     }
 
+    // Recency sort. The stored `last_observed_at` LAGS (it's only rewritten on
+    // consolidation, and consolidation can stall), so an ES sort on it mis-orders
+    // "Recent" and can even drop a genuinely-active topic below the page cut.
+    // Mirror the relevance path: pull a candidate window by the stored field,
+    // overwrite with the LIVE max(observed_at) via withLiveCounts, then sort by
+    // that live timestamp and page in-app. Working sets are dozens → cheap+exact.
+    const CANDIDATE_CAP = 200;
     const { hits, total } = await this.searchDocs<NarrativeDoc>(userId, {
       filters: filterClauses,
       musts: mustClauses,
-      size: limit,
-      from: offset,
+      size: CANDIDATE_CAP,
+      from: 0,
       sort: [{ last_observed_at: { order: 'desc', missing: '_last' } }],
     });
 
@@ -258,7 +265,10 @@ export class ElasticsearchNarrativeRepository
       .map((h) => docToNarrative(h._source!, h._id!));
 
     await this.withLiveCounts(userId, items);
-    return { items, total };
+    const liveTs = (n: Narrative): number =>
+      n.lastObservedAt ? new Date(n.lastObservedAt).getTime() : 0;
+    items.sort((a, b) => liveTs(b) - liveTs(a));
+    return { items: items.slice(offset, offset + limit), total };
   }
 
   async listForParticipant(userId: string, personId: string): Promise<Narrative[]> {

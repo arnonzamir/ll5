@@ -1990,3 +1990,9 @@ agent-models.ts + opencode.json now use the real Anthropic API ids (claude-haiku
 Removed the system-wide GROQ_API_KEY fallback from secrets.ts — provider keys are now strictly per-tenant (each tenant BYO-keys via the keys UI). All model config (keys, default, per-slot) is per-user in agent_llm_credentials.
 
 ---
+
+## 2026-07-12 — topics "Recent" sort fix
+
+Active-topics "Recent" sorted by the stale denormalized last_observed_at (lags consolidation), so it mis-ordered / dropped genuinely-active topics. Now pulls a candidate window, overwrites with the LIVE max(observed_at), and sorts by that. In personal-knowledge narrative.repository.
+
+---

@@ -452,3 +452,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 - agent-models.ts / opencode.json: claude-haiku-4-5-20251001 + claude-fable-5 (real Anthropic API ids).
 
 ## 2026-07-12 — strict per-tenant keys (secrets.ts)
+
+## 2026-07-12 — narrative recency sort fix
