@@ -1984,3 +1984,9 @@ GROQ_API_KEY wired end-to-end (CI secret + deploy .env injection). Groq whisper-
 agent-models.ts + opencode.json now use the real Anthropic API ids (claude-haiku-4-5-20251001, claude-fable-5). Groq key can be set per-tenant via the new keys UI.
 
 ---
+
+## 2026-07-12 — strict per-tenant keys
+
+Removed the system-wide GROQ_API_KEY fallback from secrets.ts — provider keys are now strictly per-tenant (each tenant BYO-keys via the keys UI). All model config (keys, default, per-slot) is per-user in agent_llm_credentials.
+
+---

@@ -809,3 +809,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 ## 2026-07-12 — anthropic ids + groq key
 - anthropic-direct catalog: claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5-20251001, claude-fable-5.
 - Groq key: set per-tenant via PUT /me/agent/provider-key (or the keys UI); orchestrator also carries a system GROQ_API_KEY fallback.
+
+## 2026-07-12 — per-tenant keys enforced
+- secrets.ts writes only per-tenant keys (keys.zen/groq/anthropic); no shared process.env.GROQ_API_KEY fallback. Orchestrator compose GROQ_API_KEY is now unused (harmless).

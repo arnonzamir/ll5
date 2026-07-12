@@ -108,10 +108,10 @@ export class SecretsWriter {
     ];
     if (env.provider === 'opencode') {
       const { keys, config } = env;
-      // Provider keys (only those configured). Groq falls back to the system key.
+      // Provider keys — STRICTLY per-tenant. Each tenant supplies their own key
+      // per provider (no shared/system fallback); only configured keys are written.
       if (keys.zen) lines.push(`OPENCODE_ZEN_API_KEY=${escapeValue(keys.zen)}`);
-      const groq = keys.groq ?? process.env.GROQ_API_KEY;
-      if (groq) lines.push(`GROQ_API_KEY=${escapeValue(groq)}`);
+      if (keys.groq) lines.push(`GROQ_API_KEY=${escapeValue(keys.groq)}`);
       if (keys.anthropic) lines.push(`ANTHROPIC_API_KEY=${escapeValue(keys.anthropic)}`);
 
       // Abstract default + per-slot {provider, model}; the entrypoint maps each
