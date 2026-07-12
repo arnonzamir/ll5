@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-12 — Chat: per-turn model+cost footer, tool-call mirroring, spend telemetry
+
+Chat bubbles now show a meta footer (time; + model, tokens, cost for assistant turns). The agent mirrors each work tool call to the thread as a folded compact row with full args+result on expand (`kind:"tool-call"`, main session only, comm tools skipped). New `POST /telemetry/turn-cost` persists real per-turn usage (opencode token counts × verified Zen price table) to ES `ll5_turn_costs` — spend is now queryable by day/model/agent (previously nothing persisted tokens or cost). Also fixed: `narration-watchdog` "Still on it…" now fires only for the MAIN session (background workers/grounder no longer leak it). Agent-side in ll5-run-opencode: `tool-mirror.ts`, `model-cost.js`, stop-mirror metadata.
+
+---
+
 ## 2026-07-11 — Retire the shared agent from auto-deploy (compose profile)
 
 The legacy shared single-tenant `agent` service kept resurrecting on every `docker compose up -d` deploy and re-registering the (single) user's `agent_session_id`, colliding with the per-user orchestrator container (per-user triggers 404 on a session that lives on the old agent). Gated `agent` behind the `shared-agent` compose profile so normal deploys skip it; the deploy's agent health-check is now informational. Kept for rollback: `docker compose --profile shared-agent up -d agent`. Stop the currently-running one + reclaim the session on the per-user container to finish the cutover.

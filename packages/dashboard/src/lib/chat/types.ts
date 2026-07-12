@@ -21,6 +21,13 @@ export interface Message {
   metadata?: {
     attachments?: Attachment[];
     kind?: string;
+    /** Turn usage stamped by stop-mirror (assistant bubbles). */
+    model?: string;
+    cost_usd?: number;
+    tokens?: { input?: number; output?: number; cached?: number };
+    /** tool-mirror rows. */
+    tool?: string;
+    duration_ms?: number;
     [key: string]: unknown;
   };
 }

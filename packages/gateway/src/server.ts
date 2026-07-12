@@ -965,6 +965,45 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     }
   });
 
+  // --- Per-turn LLM cost/usage (agent stop-mirror → ll5_turn_costs) ---
+  // opencode reports REAL provider token counts per turn; the box-side
+  // model-cost lib multiplies by the verified Zen price table. Stored in ES so
+  // spend is queryable by day / model / agent (nothing else persists tokens or
+  // cost — the provider's per-call cost is otherwise thrown away).
+  app.post('/telemetry/turn-cost', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ts = (b.ts ?? b.timestamp) as string | undefined;
+    if (!ts || typeof ts !== 'string') {
+      res.status(400).json({ error: 'ts required' });
+      return;
+    }
+    const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    const bool = (v: unknown) => (v == null ? undefined : Boolean(v));
+    try {
+      await esClient.index({
+        index: 'll5_turn_costs',
+        document: {
+          timestamp: ts,
+          user_id: userId,
+          session_id: str(b.session_id),
+          agent: str(b.agent),
+          model: str(b.model),
+          input_tokens: num(b.input_tokens),
+          output_tokens: num(b.output_tokens),
+          cached_tokens: num(b.cached_tokens),
+          cache_write_tokens: num(b.cache_write_tokens),
+          cost_usd: num(b.cost_usd),
+          is_main: bool(b.is_main),
+        },
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'index failed' });
+    }
+  });
+
   // --- Contact settings (unified routing/permission/media) ---
 
   app.get('/contact-settings', authMw, async (req: Request, res: Response) => {

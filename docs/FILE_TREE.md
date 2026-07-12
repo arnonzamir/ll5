@@ -429,3 +429,8 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-07-11: inner-voice UX — variant stop-mirror classifyMirror (lib/mirror-classify.js) dims working-note prose to display_compact + honors [[silent]]/[[compact]]; dashboard CompactRow click-to-expand full text (inner voice + tool calls).
 
 2026-07-11: orchestrator force-pull — DockerRuntime.pullImage(spec.image) before create (best-effort, X-Registry-Auth from GHCR_PULL_TOKEN); compose + deploy inject GHCR_PULL_TOKEN/USER from GHCR_READ_PAT. See docs/SESSION-2026-07-11.md for the full session.
+
+## 2026-07-12 — chat cost/telemetry surfaces
+- packages/gateway/src/server.ts — + POST /telemetry/turn-cost (ES ll5_turn_costs)
+- packages/dashboard/src/components/chat/message-bubble.tsx — MetaFooter (time/model/cost); tool-call compact rows
+- packages/dashboard/src/lib/chat/{types.ts,constants.ts} — metadata cost fields + wrench icon

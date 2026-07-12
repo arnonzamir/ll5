@@ -62,6 +62,8 @@ export const COMPACT_GROUP_WINDOW_MS = 60_000;
  *  Deterministic — same content always maps to the same icon. */
 export function compactIcon(m: Message): LucideIcon {
   const c = (m.content ?? "").toLowerCase();
+  // Mirrored tool calls (tool-mirror plugin) — a wrench, folded with full data.
+  if (m.metadata?.kind === "tool-call") return Wrench;
   // Agent activity markers (live tool-action rows from the PostToolUse hook).
   if (m.metadata?.kind === "activity") {
     if (c.startsWith("whatsapp →") || c.startsWith("telegram →")) return Send;

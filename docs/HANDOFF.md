@@ -4,6 +4,13 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ---
 
+## 2026-07-12 — Turn cost telemetry + chat instrumentation
+
+- **Spend data:** `POST /telemetry/turn-cost` (gateway `server.ts`) → ES index `ll5_turn_costs` `{timestamp,user_id,session_id,agent,model,input_tokens,output_tokens,cached_tokens,cache_write_tokens,cost_usd,is_main}`. Written by the agent's `stop-mirror` on each main-session turn end. Query this for per-day/model spend. Cost = real opencode token counts × price table in `ll5-run-opencode/.opencode/lib/model-cost.js` (verified against Zen's own `cost` field). Provider also returns a real `cost` per call, not currently captured (proxy could).
+- **Chat:** assistant bubbles footer time+model+cost from `metadata.{model,cost_usd,tokens}`; tool calls mirror as folded `kind:"tool-call"` rows. Model tiers (2026-07-12): main=deepseek-v4-flash (paid, opencode-ds proxy /zen/v1), small_model=deepseek-v4-flash-free.
+
+---
+
 ## 2026-07-10 — Web/Android tool-block fix + stop-mirror fix
 
 **Critical fix:** Web and Android dashboard turns were being treated as "externally triggered" by the opencode external-authority-gate (Hard Rule 13), blocking all non-allowlisted tools. Root cause: `agent-trigger-listener.ts` attached `source.platform='web'` to all inbound messages, and `turn-context.ts` set `externally_triggered=true` for any platform value. Fix: only attach source metadata for external channels (whatsapp/telegram/slack/sms); `turn-context.ts` now exempts unified channels (web/android/cli).

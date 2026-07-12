@@ -143,6 +143,46 @@ export function ThinkingLine({ m }: { m: Message }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Bubble meta footer — time, and for assistant turns the model + cost.
+// ---------------------------------------------------------------------------
+
+function fmtCost(usd?: number): string | null {
+  if (typeof usd !== "number" || !Number.isFinite(usd)) return null;
+  if (usd === 0) return "free";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(3)}`;
+}
+
+function MetaFooter({ m, align }: { m: Message; align: "left" | "right" }) {
+  const time = new Date(m.created_at).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const model = m.role !== "user" ? m.metadata?.model : undefined;
+  const cost = m.role !== "user" ? fmtCost(m.metadata?.cost_usd) : null;
+  const tok = m.role !== "user" ? m.metadata?.tokens : undefined;
+  const tokLabel =
+    tok && (tok.input || tok.output)
+      ? `${((tok.input ?? 0) + (tok.cached ?? 0)) / 1000 >= 1
+          ? Math.round(((tok.input ?? 0) + (tok.cached ?? 0)) / 100) / 10 + "k"
+          : (tok.input ?? 0) + (tok.cached ?? 0)}→${tok.output ?? 0}`
+      : null;
+  return (
+    <div
+      dir="ltr"
+      className={`mt-0.5 flex items-center gap-2 text-[10px] font-mono text-ink-400/80 ${
+        align === "right" ? "justify-end pr-1" : "pl-1"
+      }`}
+    >
+      <span>{time}</span>
+      {model && <span className="text-ink-400/70">· {model}</span>}
+      {tokLabel && <span className="text-ink-300/70" title="input(+cached)→output tokens">· {tokLabel} tok</span>}
+      {cost && <span className={cost === "free" ? "text-emerald-500/70" : "text-ink-400/70"}>· {cost}</span>}
+    </div>
+  );
+}
+
 function CompactRow({ m }: { m: Message }) {
   const isThinking = m.metadata?.kind === "thinking";
   const [expanded, setExpanded] = useState(false);
@@ -284,6 +324,7 @@ export function MessageBubble({
               <Markdown content={m.content ?? ""} />
             </div>
             <ReactionStrip reactions={reactions} onToggle={onRemoveReaction ?? (() => {})} />
+            <MetaFooter m={m} align="left" />
             <HoverBar
               align="left"
               onReply={onReply ? () => onReply(m) : undefined}
@@ -342,6 +383,7 @@ export function MessageBubble({
           {isUser ? m.content : <Markdown content={m.content ?? ""} />}
         </div>
         <ReactionStrip reactions={reactions} onToggle={onRemoveReaction ?? (() => {})} />
+        <MetaFooter m={m} align={isUser ? "right" : "left"} />
       </div>
       {isUser && m.status && (isLastUser || m.status === "failed") && (
         <div className="mt-0.5 mr-1">
