@@ -2014,3 +2014,9 @@ The deploy pre-pull loop omitted agent-orchestrator, so compose up ran a stale l
 Dashboard Re-provision / Save-models provisions without a preceding stop, so it 409-conflicted on the existing container name. DockerRuntime.provision now force-removes any container holding the target name before create.
 
 ---
+
+## 2026-07-13 — AGENT_IMAGE_ANTHROPIC
+
+Set AGENT_IMAGE_ANTHROPIC=ghcr.io/arnonzamir/ll5-run-claude:latest so the orchestrator can provision the Claude variant.
+
+---

@@ -827,3 +827,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 - Orchestrator loadCredential resolves variant → image; secrets emits CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY + ANTHROPIC_MODEL.
 - ll5-run-claude-code entrypoint: sources mounted secrets, accepts token/key, skips USERNAME/PIN login on LL5_TOKEN.
 - UI: Runtime toggle in settings/agent.
+
+## 2026-07-13 — claude image wired
+- compose: AGENT_IMAGE_ANTHROPIC → ll5-run-claude:latest (orchestrator picks it when variant=claude).

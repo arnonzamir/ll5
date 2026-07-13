@@ -524,8 +524,10 @@ services:
       # Traefik forwardAuth middleware calls. Emits agent-<uid>.<base> routing labels.
       CONSOLE_DOMAIN_BASE: ${CONSOLE_DOMAIN_BASE:-}
       CONSOLE_FORWARDAUTH_URL: ${CONSOLE_FORWARDAUTH_URL:-http://gateway:3000}
-      # Per-user agent image (opencode). Anthropic variant image is optional.
+      # Per-user agent images. opencode (default) + the Claude-Code variant,
+      # selected per-tenant by model_config.variant.
       AGENT_IMAGE_OPENCODE: ghcr.io/arnonzamir/ll5-run-opencode:latest
+      AGENT_IMAGE_ANTHROPIC: ghcr.io/arnonzamir/ll5-run-claude:latest
       # Attach each per-user container to the ll5 stack network so it resolves
       # gateway/postgres/etc by hostname. Defaults to this stack's network.
       AGENT_NETWORK: ${AGENT_NETWORK:-xkkcc0g4o48kkcows8488so4}
