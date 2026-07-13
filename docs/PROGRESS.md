@@ -2038,3 +2038,9 @@ Hosted-runtime panel showed stale legacy provider/model. Now shows the live mode
 Dockerfile.ll5-run-claude copied channel/ but never npm-installed it, so the ll5-channel MCP crashed (ERR_MODULE_NOT_FOUND @modelcontextprotocol/sdk) → no real-time gateway SSE inbound (only scheduled batches). Added npm install in /workspace/channel. Entrypoint also now includes ll5-channel in the generated .mcp.json.
 
 ---
+
+## 2026-07-13 — reply 500 + SSE silence (orphan conversation writes)
+
+Replying to a conversation_id with no chat_conversations row let the notify_chat_message trigger INSERT a SECOND active conversation → violated idx_chat_conversations_one_active → the whole insert (incl. its pg_notify → SSE) rolled back with 500. resolveWriteTarget now reroutes non-existent unified-channel ids to the active conversation. Fixes both the 500 and the missing real-time SSE for those writes.
+
+---

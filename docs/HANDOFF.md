@@ -841,3 +841,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 ## 2026-07-13 — claude real-time inbound
 - Dockerfile.ll5-run-claude: RUN npm install in /workspace/channel (channel MCP deps).
 - ll5-run-claude entrypoint: .mcp.json now includes local ll5-channel MCP.
+
+## 2026-07-13 — chat reply 500 fix
+- chat.ts resolveWriteTarget: non-existent unified conversation_id → reroute to active (was accept-as-is → trigger created a 2nd active → 500 + no NOTIFY/SSE).

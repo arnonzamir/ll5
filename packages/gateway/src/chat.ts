@@ -228,10 +228,16 @@ async function resolveWriteTarget(
   );
 
   if (result.rows.length === 0) {
-    // Not a tracked conversation — might be a brand-new id or a
-    // whatsapp/telegram one. Accept as-is; active-conversation logic
-    // doesn't apply.
-    return { kind: 'ok', conversation_id: requestedId };
+    // A unified-channel write to a conversation_id with no chat_conversations row
+    // (an orphaned/stale id — e.g. a client replying to a since-superseded thread).
+    // Accepting it as-is makes the notify_chat_message trigger INSERT a SECOND
+    // active conversation (archived_at NULL) → violates idx_chat_conversations_one_active
+    // → the whole insert (incl. its pg_notify → SSE) rolls back with a 500. Reroute
+    // to the user's active conversation instead. New conversations are created only
+    // via new_conversation (archive-then-create in a txn), never by a bare write here.
+    // (whatsapp/telegram remote ids never reach this function — it's unified-only.)
+    const active = await getOrCreateActiveConversation(client, userId);
+    return { kind: 'rerouted', conversation_id: active, original_id: requestedId };
   }
 
   const row = result.rows[0];
