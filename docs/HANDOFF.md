@@ -844,3 +844,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 ## 2026-07-13 — chat reply 500 fix
 - chat.ts resolveWriteTarget: non-existent unified conversation_id → reroute to active (was accept-as-is → trigger created a 2nd active → 500 + no NOTIFY/SSE).
+
+## 2026-07-13 — thinking backstop
+- use-chat-store setThinking: 120s auto-clear so a stale SSE cannot wedge the "coach is thinking" indicator.

@@ -11,6 +11,11 @@ import type { Message, Reaction } from "@/lib/chat/types";
 
 const CACHE_KEY = "ll5_chat_cache_v1";
 const CACHE_LIMIT = 30; // tail kept per conv; first paint feels instant
+
+// Auto-clear backstop for the "coach is thinking" indicator (a stale SSE stream
+// must not wedge it forever). Cancelled when a real assistant message clears it.
+const THINKING_MAX_MS = 120_000;
+let thinkingTimer: ReturnType<typeof setTimeout> | null = null;
 const FIRST_FETCH_LIMIT = 30; // initial server fetch; older paginate on scroll
 
 interface ChatCache {
@@ -242,6 +247,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   setThinking(v) {
+    // Defensive auto-clear: the "coach is thinking" flag is normally cleared by
+    // an assistant message over SSE. If the EventSource is stale/disconnected
+    // (e.g. after backend churn) that event never lands and the indicator would
+    // stick forever. Arm a timeout on set-true; cancel it on set-false.
+    if (thinkingTimer) { clearTimeout(thinkingTimer); thinkingTimer = null; }
+    if (v) {
+      thinkingTimer = setTimeout(() => {
+        thinkingTimer = null;
+        set({ thinking: false });
+      }, THINKING_MAX_MS);
+    }
     set({ thinking: v });
   },
 

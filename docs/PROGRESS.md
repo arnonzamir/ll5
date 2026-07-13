@@ -2044,3 +2044,9 @@ Dockerfile.ll5-run-claude copied channel/ but never npm-installed it, so the ll5
 Replying to a conversation_id with no chat_conversations row let the notify_chat_message trigger INSERT a SECOND active conversation → violated idx_chat_conversations_one_active → the whole insert (incl. its pg_notify → SSE) rolled back with 500. resolveWriteTarget now reroutes non-existent unified-channel ids to the active conversation. Fixes both the 500 and the missing real-time SSE for those writes.
 
 ---
+
+## 2026-07-13 — thinking-indicator auto-clear backstop
+
+"coach is thinking" is cleared by an assistant message over SSE; a stale/disconnected EventSource left it stuck forever. Added a 120s auto-clear timeout in setThinking. (Backend SSE verified healthy — the stick was a client stale-stream state.)
+
+---
