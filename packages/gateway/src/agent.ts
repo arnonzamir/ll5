@@ -834,6 +834,17 @@ export function createAgentRouter(
            updated_at = now()`,
         [userId],
       );
+      // Also bump the MAIN session heartbeat so the dashboard Workers panel's
+      // "Interactive" row stays live (it's otherwise only set at session
+      // registration → shows stale though the agent is up). Preserves the id.
+      await pool.query(
+        `UPDATE user_settings SET
+           agent_session_heartbeats = COALESCE(agent_session_heartbeats, '{}'::jsonb)
+             || jsonb_build_object('main', $2::text),
+           updated_at = now()
+         WHERE user_id = $1`,
+        [userId, new Date().toISOString()],
+      );
       logger.info('[agent][heartbeat]', { userId, status: 'running' });
       res.json({ ok: true });
     } catch (err) {

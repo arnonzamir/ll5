@@ -847,3 +847,8 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 ## 2026-07-13 — thinking backstop
 - use-chat-store setThinking: 120s auto-clear so a stale SSE cannot wedge the "coach is thinking" indicator.
+
+## 2026-07-13 — worker heartbeats
+- claude narrative/reconcile-loop.sh POST /internal/agent-session after each tick.
+- /me/agent/heartbeat bumps agent_session_heartbeats.main (Interactive row live).
+- claude entrypoint IS_SANDBOX=1 (claude -p runs as root).

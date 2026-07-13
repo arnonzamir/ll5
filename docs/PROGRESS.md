@@ -2050,3 +2050,9 @@ Replying to a conversation_id with no chat_conversations row let the notify_chat
 "coach is thinking" is cleared by an assistant message over SSE; a stale/disconnected EventSource left it stuck forever. Added a 120s auto-clear timeout in setThinking. (Backend SSE verified healthy — the stick was a client stale-stream state.)
 
 ---
+
+## 2026-07-13 — worker panel heartbeats (claude workers + main)
+
+Claude -p worker loops now POST /internal/agent-session after each tick (narrative/reconcile) so the Workers panel shows them live (verified narrative fresh). /me/agent/heartbeat now also bumps the MAIN session heartbeat so "Interactive" stays fresh (both variants). Also: IS_SANDBOX=1 in the claude entrypoint so claude -p workers can run as root.
+
+---
