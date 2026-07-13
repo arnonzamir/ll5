@@ -476,3 +476,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 ## 2026-07-13 — thinking auto-clear
 
 ## 2026-07-13 — worker panel heartbeats
+
+## 2026-07-13 — claude faster-whisper

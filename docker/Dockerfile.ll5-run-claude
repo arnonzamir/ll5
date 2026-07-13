@@ -24,8 +24,19 @@ FROM node:20-slim
 # python3 backs transcribe.py + misc tooling. (These were missing → ll5-server
 # error-looped on `curl: command not found` and never launched claude.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      tmux wget curl ca-certificates jq git procps less python3 \
+      tmux wget curl ca-certificates jq git procps less python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# On-box (private) voice-note transcription: scripts/transcribe.py uses
+# faster-whisper. Install it + pre-download the default 'small' model at build so
+# the FIRST voice note doesn't stall on a model download (audio never leaves the
+# container). HF_HOME points at an IMAGE path (not the /data/home volume, which
+# would shadow a $HOME cache at runtime), and is exported so runtime transcribe.py
+# finds the baked-in model. Without this transcribe.py fails "faster-whisper not
+# installed" and voice notes go untranscribed.
+ENV HF_HOME=/opt/hf-cache
+RUN pip3 install --no-cache-dir --break-system-packages faster-whisper \
+    && python3 -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
 
 # Claude Code CLI (subscription OAuth, not API key)
 RUN npm install -g @anthropic-ai/claude-code

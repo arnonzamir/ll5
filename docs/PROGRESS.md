@@ -2056,3 +2056,9 @@ Replying to a conversation_id with no chat_conversations row let the notify_chat
 Claude -p worker loops now POST /internal/agent-session after each tick (narrative/reconcile) so the Workers panel shows them live (verified narrative fresh). /me/agent/heartbeat now also bumps the MAIN session heartbeat so "Interactive" stays fresh (both variants). Also: IS_SANDBOX=1 in the claude entrypoint so claude -p workers can run as root.
 
 ---
+
+## 2026-07-13 — claude voice (faster-whisper) restored
+
+The claude variant transcribes voice notes on-box with faster-whisper (private — audio never leaves the container) via scripts/transcribe.py + a CLAUDE.md bash instruction; image reading uses Claude native vision (inspect_image returns the image). The current image was missing the faster-whisper package (only python3 was installed) → transcribe.py failed. Dockerfile.ll5-run-claude now pip-installs faster-whisper + pre-downloads the small model to a baked HF_HOME (/opt/hf-cache, not the shadowed /data/home volume).
+
+---

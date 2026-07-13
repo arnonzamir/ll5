@@ -852,3 +852,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 - claude narrative/reconcile-loop.sh POST /internal/agent-session after each tick.
 - /me/agent/heartbeat bumps agent_session_heartbeats.main (Interactive row live).
 - claude entrypoint IS_SANDBOX=1 (claude -p runs as root).
+
+## 2026-07-13 — claude voice fix
+- Dockerfile.ll5-run-claude: pip install faster-whisper + pre-download small model (HF_HOME=/opt/hf-cache). Restores on-box private voice transcription (transcribe.py).
