@@ -169,7 +169,7 @@ export interface CatalogProvider { id: string; label: string; keyPrefix: string 
 export interface CatalogSlot { slot: string; label: string; description: string; capability: "text" | "vision" | "audio" }
 export interface ModelCatalog { providers: CatalogProvider[]; slots: CatalogSlot[] }
 export interface ModelRef { provider: string; model: string }
-export interface ModelConfig { default: ModelRef; slots: Record<string, ModelRef | null> }
+export interface ModelConfig { variant: "opencode" | "claude"; default: ModelRef; slots: Record<string, ModelRef | null> }
 export interface ModelConfigStatus {
   keys: Record<string, { configured: boolean; last4: string | null }>;
   config: ModelConfig | null;

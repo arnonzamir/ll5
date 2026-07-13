@@ -23,10 +23,12 @@ import path from 'node:path';
  */
 export type AgentProvider = 'anthropic' | 'opencode';
 
-/** Abstract model provider a slot can point at. */
-export type AgentProviderKey = 'zen' | 'groq' | 'anthropic';
+/** Abstract model provider a slot can point at (+ claude-code for the CC token). */
+export type AgentProviderKey = 'zen' | 'groq' | 'anthropic' | 'claude-code';
+export type AgentVariant = 'opencode' | 'claude';
 export interface AgentModelRef { provider: AgentProviderKey; model: string }
 export interface AgentModelConfig {
+  variant?: AgentVariant;
   default: AgentModelRef;
   /** null/absent → inherit default. Keys: main/grounder/narrative/reconcile/image/audio. */
   slots: Record<string, AgentModelRef | null>;
@@ -133,8 +135,16 @@ export class SecretsWriter {
         }
       }
     } else {
-      // Legacy Claude-Code variant: single Anthropic key.
-      if (env.keys.anthropic) lines.push(`ANTHROPIC_API_KEY=${escapeValue(env.keys.anthropic)}`);
+      // Claude-Code variant. Prefer the subscription OAuth token; fall back to a
+      // plain Anthropic API key (the entrypoint accepts either). Emit the chosen
+      // Claude model tier as ANTHROPIC_MODEL (skip the 'default' sentinel).
+      if (env.keys['claude-code']) {
+        lines.push(`CLAUDE_CODE_OAUTH_TOKEN=${escapeValue(env.keys['claude-code'])}`);
+      } else if (env.keys.anthropic) {
+        lines.push(`ANTHROPIC_API_KEY=${escapeValue(env.keys.anthropic)}`);
+      }
+      const m = env.config.default.model;
+      if (m && m !== 'default') lines.push(`ANTHROPIC_MODEL=${escapeValue(m)}`);
     }
     lines.push('');
     await writeFile(target, lines.join('\n'), { mode: 0o600, encoding: 'utf8' });

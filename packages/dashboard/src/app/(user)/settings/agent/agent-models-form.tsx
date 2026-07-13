@@ -15,7 +15,13 @@ const selectCls =
   "h-9 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring min-w-[9rem]";
 
 const DEFAULT_CONFIG: ModelConfig = {
+  variant: "opencode",
   default: { provider: "zen", model: "deepseek-v4-flash" },
+  slots: {},
+};
+const CLAUDE_DEFAULT: ModelConfig = {
+  variant: "claude",
+  default: { provider: "claude-code", model: "default" },
   slots: {},
 };
 
@@ -33,7 +39,7 @@ export function AgentModelsForm() {
       const [cat, cfg] = await Promise.all([fetchModelCatalog(), fetchModelConfig()]);
       setCatalog(cat);
       setKeys(cfg.keys ?? {});
-      if (cfg.config?.default) setConfig({ default: cfg.config.default, slots: cfg.config.slots ?? {} });
+      if (cfg.config?.default) setConfig({ variant: cfg.config.variant ?? "opencode", default: cfg.config.default, slots: cfg.config.slots ?? {} });
     })();
   }, []);
 
@@ -131,14 +137,44 @@ export function AgentModelsForm() {
     );
   }
 
+  const variant = config.variant ?? "opencode";
+  const keyProviders = catalog.providers.filter((p) =>
+    variant === "claude" ? p.id === "claude-code" : p.id !== "claude-code",
+  );
+  const claudeModels = catalog.providers.find((p) => p.id === "claude-code")?.models ?? [];
+  const tabCls = (on: boolean) =>
+    `h-9 px-3 rounded-md text-sm border ${on ? "border-primary text-primary bg-primary/5" : "border-input text-ink-500 hover:text-ink-700"}`;
+
   return (
     <div className="space-y-5">
-      {/* ---- API keys ---- */}
+      {/* ---- Runtime variant ---- */}
       <section className="space-y-2 rounded-md border border-input p-3">
-        <Label>API keys</Label>
-        <p className="text-xs text-gray-400">One key per provider. Keys are write-only — stored encrypted, never shown.</p>
+        <Label>Runtime</Label>
+        <div className="flex gap-2">
+          <button type="button" className={tabCls(variant === "opencode")} onClick={() => setConfig(DEFAULT_CONFIG)}>
+            opencode (multi-provider)
+          </button>
+          <button type="button" className={tabCls(variant === "claude")} onClick={() => setConfig(CLAUDE_DEFAULT)}>
+            Claude Code (subscription)
+          </button>
+        </div>
+        <p className="text-xs text-gray-400">
+          {variant === "claude"
+            ? "Runs your Claude subscription — one Claude model, vision native. Sub-agents inherit it."
+            : "Per-slot models across Zen / Groq / Anthropic. Cheapest + most flexible."}
+        </p>
+      </section>
+
+      {/* ---- API keys (filtered by variant) ---- */}
+      <section className="space-y-2 rounded-md border border-input p-3">
+        <Label>{variant === "claude" ? "Claude Code token" : "API keys"}</Label>
+        <p className="text-xs text-gray-400">
+          {variant === "claude"
+            ? "Your subscription token from `claude setup-token` (sk-ant-oat…). Write-only, stored encrypted."
+            : "One key per provider. Write-only — stored encrypted, never shown."}
+        </p>
         <div className="space-y-2">
-          {catalog.providers.map((p) => {
+          {keyProviders.map((p) => {
             const k = keys[p.id];
             return (
               <div key={p.id} className="flex flex-wrap items-center gap-2">
@@ -168,36 +204,43 @@ export function AgentModelsForm() {
         </div>
       </section>
 
-      {/* ---- Default model ---- */}
-      <section className="space-y-2 rounded-md border border-input p-3">
-        <Label>Default model</Label>
-        <p className="text-xs text-gray-400">Fills any slot left on “Default”.</p>
-        <ProviderModelRow
-          value={config.default}
-          capability="text"
-          allowDefault={false}
-          onChange={(ref) => ref && setDefault(ref)}
-        />
-      </section>
+      {variant === "opencode" ? (
+        <>
+          {/* ---- Default model ---- */}
+          <section className="space-y-2 rounded-md border border-input p-3">
+            <Label>Default model</Label>
+            <p className="text-xs text-gray-400">Fills any slot left on “Default”.</p>
+            <ProviderModelRow value={config.default} capability="text" allowDefault={false} onChange={(ref) => ref && setDefault(ref)} />
+          </section>
 
-      {/* ---- Per-slot rows ---- */}
-      <section className="space-y-2 rounded-md border border-input p-3">
-        <Label>Per-slot models</Label>
-        <p className="text-xs text-gray-400">Each job can pick its own provider + model. “Default” inherits the default above.</p>
-        <div className="space-y-2">
-          {catalog.slots.map((s: CatalogSlot) => (
-            <div key={s.slot} className="flex flex-wrap items-center gap-2">
-              <span className="w-40 text-sm" title={s.description}>{s.label}</span>
-              <ProviderModelRow
-                value={config.slots[s.slot] ?? null}
-                capability={s.capability}
-                allowDefault={true}
-                onChange={(ref) => setSlot(s.slot, ref)}
-              />
+          {/* ---- Per-slot rows ---- */}
+          <section className="space-y-2 rounded-md border border-input p-3">
+            <Label>Per-slot models</Label>
+            <p className="text-xs text-gray-400">Each job can pick its own provider + model. “Default” inherits the default above.</p>
+            <div className="space-y-2">
+              {catalog.slots.map((s: CatalogSlot) => (
+                <div key={s.slot} className="flex flex-wrap items-center gap-2">
+                  <span className="w-40 text-sm" title={s.description}>{s.label}</span>
+                  <ProviderModelRow value={config.slots[s.slot] ?? null} capability={s.capability} allowDefault={true} onChange={(ref) => setSlot(s.slot, ref)} />
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </section>
+          </section>
+        </>
+      ) : (
+        /* ---- Claude model picker ---- */
+        <section className="space-y-2 rounded-md border border-input p-3">
+          <Label>Claude model</Label>
+          <p className="text-xs text-gray-400">Sub-agents (grounder/narrative/reconcile) inherit this; images are native to Claude.</p>
+          <select
+            className={selectCls}
+            value={config.default.model}
+            onChange={(e) => setDefault({ provider: "claude-code", model: e.target.value })}
+          >
+            {claudeModels.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+          </select>
+        </section>
+      )}
 
       <div className="flex items-center gap-3">
         <Button disabled={pending} onClick={onSaveConfig}>Save models</Button>

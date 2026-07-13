@@ -7,8 +7,15 @@
 // renders, the config shape persisted in agent_llm_credentials.model_config, and
 // the validation/normalisation both the PUT endpoints and the orchestrator use.
 
-export const AGENT_PROVIDERS = ['zen', 'groq', 'anthropic'] as const;
+// `claude-code` is the Claude-Code variant's subscription auth (an OAuth token),
+// not a per-slot model provider — it selects the Claude-Code runtime image and
+// carries the token. Zen/groq/anthropic are opencode-variant model providers.
+export const AGENT_PROVIDERS = ['zen', 'groq', 'anthropic', 'claude-code'] as const;
 export type AgentProviderId = (typeof AGENT_PROVIDERS)[number];
+
+/** Which runtime image a config targets. */
+export const AGENT_VARIANTS = ['opencode', 'claude'] as const;
+export type AgentVariant = (typeof AGENT_VARIANTS)[number];
 
 export type ModelCapability = 'text' | 'vision' | 'audio';
 
@@ -68,10 +75,17 @@ const ANTHROPIC_MODELS: CatalogModel[] = [
   { id: 'claude-haiku-4-5-20251001', caps: V }, { id: 'claude-fable-5', caps: V },
 ];
 
+// --- Claude Code — the subscription-token variant. Models it can run (Claude
+// only, vision native). The "key" is the OAuth token from `claude setup-token`.
+const CLAUDE_CODE_MODELS: CatalogModel[] = [
+  { id: 'default', caps: V }, { id: 'opus', caps: V }, { id: 'sonnet', caps: V }, { id: 'haiku', caps: V },
+];
+
 export const PROVIDER_CATALOG: Record<AgentProviderId, CatalogProvider> = {
   zen: { id: 'zen', label: 'OpenCode Zen', keyEnv: 'OPENCODE_ZEN_API_KEY', models: ZEN_MODELS },
   groq: { id: 'groq', label: 'Groq', keyEnv: 'GROQ_API_KEY', models: GROQ_MODELS },
   anthropic: { id: 'anthropic', label: 'Anthropic (direct)', keyEnv: 'ANTHROPIC_API_KEY', keyPrefix: 'sk-ant-', models: ANTHROPIC_MODELS },
+  'claude-code': { id: 'claude-code', label: 'Claude Code (subscription)', keyEnv: 'CLAUDE_CODE_OAUTH_TOKEN', keyPrefix: 'sk-ant-oat', models: CLAUDE_CODE_MODELS },
 };
 
 // --- Slots. Each declares the capability its model must have, so the UI filters
@@ -95,8 +109,12 @@ const SLOT_CAP = new Map(MODEL_SLOTS.map((s) => [s.slot, s.capability] as const)
 
 export interface ModelRef { provider: AgentProviderId; model: string; }
 export interface ModelConfig {
+  /** Which runtime image. 'opencode' (default) uses the per-slot multi-provider
+   *  config below; 'claude' runs the Claude-Code image (default is a Claude model
+   *  via the claude-code subscription token; slots are ignored). */
+  variant: AgentVariant;
   default: ModelRef;
-  /** null / absent → inherit default. */
+  /** null / absent → inherit default. Only used by the opencode variant. */
   slots: Record<string, ModelRef | null>;
 }
 
@@ -121,10 +139,25 @@ export function modelOkForSlotCapability(provider: AgentProviderId, model: strin
 export function sanitizeModelConfig(raw: unknown): { config: ModelConfig } | { error: string } {
   if (raw == null || typeof raw !== 'object') return { error: 'model_config must be an object' };
   const r = raw as Record<string, unknown>;
+  const variant: AgentVariant = r.variant === 'claude' ? 'claude' : 'opencode';
   const def = r.default as Record<string, unknown> | undefined;
   if (!def || !isProvider(def.provider) || typeof def.model !== 'string' || !def.model.trim()) {
     return { error: 'model_config.default must be { provider, model }' };
   }
+
+  if (variant === 'claude') {
+    // Claude-Code: default provider must be claude-code; model is a Claude tier.
+    if (def.provider !== 'claude-code') {
+      return { error: "claude variant default.provider must be 'claude-code'" };
+    }
+    const known = PROVIDER_CATALOG['claude-code'].models.some((m) => m.id === def.model);
+    if (!known) return { error: `claude default model must be one of: ${PROVIDER_CATALOG['claude-code'].models.map((m) => m.id).join(', ')}` };
+    // Slots are ignored for the claude variant — normalise to empty.
+    return { config: { variant, default: { provider: 'claude-code', model: String(def.model) }, slots: {} } };
+  }
+
+  // opencode variant: default must be a text model on a model provider.
+  if (def.provider === 'claude-code') return { error: 'claude-code provider requires the claude variant' };
   if (!modelOkForSlotCapability(def.provider, def.model.trim(), 'text')) {
     return { error: 'default model is invalid' };
   }
@@ -137,13 +170,14 @@ export function sanitizeModelConfig(raw: unknown): { config: ModelConfig } | { e
     if (!isProvider(v.provider) || typeof v.model !== 'string' || !v.model.trim()) {
       return { error: `model_config.slots.${slot} must be { provider, model } or null` };
     }
+    if (v.provider === 'claude-code') return { error: `model_config.slots.${slot}: claude-code is not a slot provider` };
     const cap = SLOT_CAP.get(slot) ?? 'text';
     if (!modelOkForSlotCapability(v.provider, v.model.trim(), cap)) {
       return { error: `model_config.slots.${slot}: ${v.model} is not a valid ${cap} model for ${v.provider}` };
     }
     outSlots[slot] = { provider: v.provider, model: v.model.trim() };
   }
-  return { config: { default: { provider: def.provider, model: def.model.trim() }, slots: outSlots } };
+  return { config: { variant, default: { provider: def.provider, model: def.model.trim() }, slots: outSlots } };
 }
 
 /** Resolve a slot to its effective ModelRef (slot override else default). */

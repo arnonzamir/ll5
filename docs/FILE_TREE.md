@@ -458,3 +458,7 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 ## 2026-07-12 — deploy pulls orchestrator
 
 ## 2026-07-13 — idempotent provision
+
+## 2026-07-13 — claude variant selectable
+- agent-models.ts: AGENT_VARIANTS + claude-code provider + variant in ModelConfig
+- agent-models-form.tsx: Runtime toggle + claude model picker

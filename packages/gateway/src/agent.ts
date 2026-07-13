@@ -604,14 +604,17 @@ export function createAgentRouter(
     provider: string | null; model: string | null;
     model_overrides: Record<string, string> | null; model_config: ModelConfig | null;
   }): ModelConfig {
-    if (row.model_config && (row.model_config as any).default) return row.model_config;
+    if (row.model_config && (row.model_config as any).default) {
+      // Backfill variant on configs stored before it existed.
+      return { ...row.model_config, variant: row.model_config.variant ?? 'opencode' };
+    }
     const prov = LEGACY_PROVIDER[row.provider ?? 'anthropic'] ?? 'zen';
     const model = row.model || (prov === 'zen' ? 'deepseek-v4-flash' : 'claude-haiku-4-5');
     const slots: Record<string, ModelRef | null> = {};
     for (const [slot, m] of Object.entries(row.model_overrides ?? {})) {
       if (SLOT_IDS.has(slot) && m) slots[slot] = { provider: prov, model: m };
     }
-    return { default: { provider: prov, model }, slots };
+    return { variant: 'opencode', default: { provider: prov, model }, slots };
   }
 
   // GET /me/agent/model-catalog — providers (with models+capabilities) + slots.

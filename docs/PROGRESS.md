@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-13 — Claude-Code variant selectable + generic multi-variant config
+
+The agent config is now variant-aware: `model_config.variant` = `opencode` (per-slot multi-provider, the default) or `claude` (Claude-Code subscription image). New provider `claude-code` holds the subscription OAuth token. Orchestrator picks the image by variant (not provider-inference) and emits CLAUDE_CODE_OAUTH_TOKEN + ANTHROPIC_MODEL for the claude branch. The Claude-Code entrypoint (ll5-run-claude-code) now works under the per-user orchestrator: sources the mounted secrets file, accepts token OR anthropic key, skips USERNAME/PIN login when LL5_TOKEN is injected. UI: a Runtime toggle (opencode | Claude Code) that swaps the keys section + shows a single Claude-model picker for the claude variant.
+
+---
+
 ## 2026-07-12 — Multi-provider per-slot agent models (redesign)
 
 Agent model config is now multi-provider: a key per provider (Zen / Groq / Anthropic-direct), a top-level default {provider, model}, and per-slot {provider, model} for main/grounder/narrative/reconcile/image/audio (each slot filtered to text/vision/audio-capable models). Backend: migration 043 (provider_keys + model_config JSONB on agent_llm_credentials, backward-compatible; relaxed ciphertext NOT NULL); gateway `agent-models.ts` catalog + endpoints (model-catalog, model-config, provider-key, delete). Orchestrator loadCredential/secrets emit LL5_DEFAULT_* + LL5_SLOT_<X>_PROVIDER/_MODEL + all three keys; the agent entrypoint maps abstract→runtime opencode providers (opencode/opencode-ds/groq/anthropic-direct). UI redesigned: API-keys section + default row + one provider/model row per slot. Legacy single-credential rows backfill so the running agent never breaks.

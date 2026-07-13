@@ -132,7 +132,7 @@ export class Orchestrator {
     // Decrypt per-provider keys.
     const keys: Partial<Record<AgentProviderKey, string>> = {};
     for (const [p, entry] of Object.entries(row.provider_keys ?? {})) {
-      if ((p === 'zen' || p === 'groq' || p === 'anthropic') && entry?.ciphertext) {
+      if ((p === 'zen' || p === 'groq' || p === 'anthropic' || p === 'claude-code') && entry?.ciphertext) {
         keys[p] = this.encryptor.decrypt(entry.ciphertext, this.config.encryptionKey);
       }
     }
@@ -157,18 +157,24 @@ export class Orchestrator {
       config = { default: { provider: prov, model }, slots };
     }
 
-    // The main model's provider key MUST exist, else the agent can't run.
+    // Variant selection: explicit config.variant wins; else a pure-legacy
+    // anthropic row is a Claude-Code user; else opencode.
+    const variant: 'opencode' | 'claude' =
+      config.variant === 'claude' ? 'claude'
+      : config.variant === 'opencode' ? 'opencode'
+      : row.provider === 'anthropic' && !row.model_config ? 'claude'
+      : 'opencode';
+
+    if (variant === 'claude') {
+      // Claude-Code needs the subscription OAuth token (or an Anthropic key).
+      if (!keys['claude-code'] && !keys.anthropic) throw new MissingCredentialError();
+      return { provider: 'anthropic', keys, config };
+    }
+
+    // opencode: the main model's provider key MUST exist, else the agent can't run.
     const mainProvider = (config.slots.main ?? config.default).provider;
     if (!keys[mainProvider]) throw new MissingCredentialError();
-
-    // Image variant: pure-legacy anthropic (Claude-Code) stays 'anthropic';
-    // anything using the new config / zen / groq runs the opencode image.
-    const provider: 'anthropic' | 'opencode' =
-      row.provider === 'anthropic' && !row.model_config && Object.keys(row.provider_keys ?? {}).length === 0
-        ? 'anthropic'
-        : 'opencode';
-
-    return { provider, keys, config };
+    return { provider: 'opencode', keys, config };
   }
 
   // --- agent_runtimes I/O ----------------------------------------------

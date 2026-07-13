@@ -821,3 +821,9 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 ## 2026-07-13 — provision idempotent
 - docker-runtime.ts provision() force-removes ll5-agent-<uid> before create → UI Re-provision no longer 409s.
+
+## 2026-07-13 — variant-aware agent config
+- model_config.variant: 'opencode'|'claude'. claude → Claude-Code image + claude-code OAuth token (provider_keys['claude-code']) + ANTHROPIC_MODEL.
+- Orchestrator loadCredential resolves variant → image; secrets emits CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY + ANTHROPIC_MODEL.
+- ll5-run-claude-code entrypoint: sources mounted secrets, accepts token/key, skips USERNAME/PIN login on LL5_TOKEN.
+- UI: Runtime toggle in settings/agent.
