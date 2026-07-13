@@ -830,3 +830,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 ## 2026-07-13 — claude image wired
 - compose: AGENT_IMAGE_ANTHROPIC → ll5-run-claude:latest (orchestrator picks it when variant=claude).
+
+## 2026-07-13 — claude image packages
+- Dockerfile.ll5-run-claude: + curl jq git procps python3 (ll5-server needs curl).

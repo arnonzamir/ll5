@@ -2020,3 +2020,9 @@ Dashboard Re-provision / Save-models provisions without a preceding stop, so it 
 Set AGENT_IMAGE_ANTHROPIC=ghcr.io/arnonzamir/ll5-run-claude:latest so the orchestrator can provision the Claude variant.
 
 ---
+
+## 2026-07-13 — claude image missing curl (ll5-server crash)
+
+Dockerfile.ll5-run-claude installed only tmux/wget/ca-certificates. ll5-server pings the gateway with curl → "curl: command not found" → error-loop, never launched claude. Added curl + jq + git + procps + python3.
+
+---

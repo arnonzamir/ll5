@@ -19,9 +19,12 @@
 
 FROM node:20-slim
 
-# Claude Code requires a PTY (tmux) + wget for healthchecks/render script
+# Claude Code needs a PTY (tmux) + wget for healthchecks/render. curl is required
+# by ll5-server (gateway pings) and jq/git/procps by the agent's helper scripts;
+# python3 backs transcribe.py + misc tooling. (These were missing → ll5-server
+# error-looped on `curl: command not found` and never launched claude.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      tmux wget ca-certificates \
+      tmux wget curl ca-certificates jq git procps less python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI (subscription OAuth, not API key)
