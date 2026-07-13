@@ -837,3 +837,7 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 ## 2026-07-13 — runtime UI + claude heartbeat
 - agent-view RuntimeSection: Provider/Model rows now from model_config (variant + main + slots), not legacy llm fields.
 - ll5-run-claude entrypoint: 60s /me/agent/heartbeat loop.
+
+## 2026-07-13 — claude real-time inbound
+- Dockerfile.ll5-run-claude: RUN npm install in /workspace/channel (channel MCP deps).
+- ll5-run-claude entrypoint: .mcp.json now includes local ll5-channel MCP.

@@ -2032,3 +2032,9 @@ Dockerfile.ll5-run-claude installed only tmux/wget/ca-certificates. ll5-server p
 Hosted-runtime panel showed stale legacy provider/model. Now shows the live model_config (variant + resolved main model + per-slot). Claude variant got a heartbeat loop (was showing heartbeat_stale/Error despite running).
 
 ---
+
+## 2026-07-13 — claude channel MCP deps (real-time inbound)
+
+Dockerfile.ll5-run-claude copied channel/ but never npm-installed it, so the ll5-channel MCP crashed (ERR_MODULE_NOT_FOUND @modelcontextprotocol/sdk) → no real-time gateway SSE inbound (only scheduled batches). Added npm install in /workspace/channel. Entrypoint also now includes ll5-channel in the generated .mcp.json.
+
+---

@@ -47,6 +47,10 @@ COPY scripts/render-mcp-config.ts /workspace/scripts/render-mcp-config.ts
 # ---------- Variant-specific content (from ll5-run-claude-code repo) ----------
 COPY variant-content/.claude/hooks/ /workspace/.claude/hooks/
 COPY variant-content/channel/ /workspace/channel/
+# The channel MCP (real-time gateway SSE inbound) needs its deps
+# (@modelcontextprotocol/sdk) — without this it fails ERR_MODULE_NOT_FOUND at
+# runtime and claude gets no real-time messages (only scheduled batch reviews).
+RUN cd /workspace/channel && npm install --omit=dev --no-audit --no-fund
 COPY variant-content/scripts/ /workspace/scripts/
 COPY variant-content/ll5-server /workspace/ll5-server
 # tmux.conf must exist in variant repo; if absent, generate a minimal default
