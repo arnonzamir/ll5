@@ -818,3 +818,6 @@ _gateway accepts camera_photo push items (phone camera reel): processors/camera-
 
 ## 2026-07-12 — orchestrator deploy fix
 - build-and-push.yml pre-pull loop now includes agent-orchestrator (was stale-imaged on every deploy).
+
+## 2026-07-13 — provision idempotent
+- docker-runtime.ts provision() force-removes ll5-agent-<uid> before create → UI Re-provision no longer 409s.

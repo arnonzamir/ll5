@@ -133,9 +133,17 @@ export class DockerRuntime implements Runtime {
       },
     };
 
+    // Idempotent provision: force-remove any container already holding this name
+    // before create. Otherwise a re-provision (e.g. the dashboard "Re-provision" /
+    // "Save models" button, which provisions WITHOUT a preceding stop) fails with
+    // a 409 name conflict on the still-present old container. 404 (nothing there)
+    // is fine; a real remove failure surfaces below at create time.
+    const name = `ll5-agent-${spec.userId}`;
+    await this.request('DELETE', `/containers/${encodeURIComponent(name)}?force=1`).catch(() => undefined);
+
     const created = await this.request(
       'POST',
-      `/containers/create?name=${encodeURIComponent(`ll5-agent-${spec.userId}`)}`,
+      `/containers/create?name=${encodeURIComponent(name)}`,
       createBody,
     );
     if (created.status >= 300) {

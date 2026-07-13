@@ -2002,3 +2002,9 @@ Active-topics "Recent" sorted by the stale denormalized last_observed_at (lags c
 The deploy pre-pull loop omitted agent-orchestrator, so compose up ran a stale local image and the control plane never picked up code changes (multi-provider config was inert until a manual recreate). Added it to the loop.
 
 ---
+
+## 2026-07-13 — idempotent provision (fix Re-provision 409)
+
+Dashboard Re-provision / Save-models provisions without a preceding stop, so it 409-conflicted on the existing container name. DockerRuntime.provision now force-removes any container holding the target name before create.
+
+---
