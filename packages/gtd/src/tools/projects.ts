@@ -78,6 +78,30 @@ export function registerProjectTools(server: McpServer, repo: HorizonRepository,
   );
 
   // -------------------------------------------------------------------------
+  // get_project
+  // -------------------------------------------------------------------------
+  server.tool(
+    'get_project',
+    'Get a single GTD project by ID, regardless of status.',
+    {
+      id: z.string().describe('Project ID (UUID)'),
+    },
+    async (params) => {
+      const userId = getUserId();
+      const project = await repo.findProjectById(userId, params.id);
+      if (!project) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: `Project not found: ${params.id}` }) }],
+          isError: true,
+        };
+      }
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ project }, null, 2) }],
+      };
+    },
+  );
+
+  // -------------------------------------------------------------------------
   // list_projects
   // -------------------------------------------------------------------------
   server.tool(

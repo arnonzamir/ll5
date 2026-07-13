@@ -11,6 +11,7 @@ vi.mock('@ll5/shared', () => ({
 import { logAudit } from '@ll5/shared';
 import { mapHorizonRow, mapInboxRow } from '../repositories/postgres/base.repository.js';
 import { registerActionTools } from '../tools/actions.js';
+import { registerProjectTools } from '../tools/projects.js';
 import { registerInboxTools } from '../tools/inbox.js';
 import { registerHealthTools } from '../tools/health.js';
 import { captureTools, parseToolResponse } from './_helpers.js';
@@ -685,5 +686,34 @@ describe('get_gtd_health tool handler', () => {
 
     const parsed = parseToolResponse<{ health: { daysSinceLastReview: number | null } }>(response);
     expect(parsed.health.daysSinceLastReview).toBeNull();
+  });
+});
+
+describe('get_project tool handler', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns the project for any status, scoped to the user', async () => {
+    const project = fakeAction({ id: 'p-1', horizon: 1, title: 'Ship v2', status: 'completed' });
+    const findProjectById = vi.fn(async () => project);
+    const repo = makeHorizonRepo({ findProjectById });
+    const tools = captureTools((s) => registerProjectTools(s, repo, getUserId));
+
+    const response = await tools.get('get_project')!({ id: 'p-1' });
+
+    expect(findProjectById.mock.calls[0][0]).toBe(USER_ID);
+    expect(findProjectById.mock.calls[0][1]).toBe('p-1');
+    const parsed = parseToolResponse<{ project: { id: string; title: string } }>(response);
+    expect(parsed.project.title).toBe('Ship v2');
+  });
+
+  it('returns isError when the project does not exist', async () => {
+    const repo = makeHorizonRepo({ findProjectById: vi.fn(async () => null) });
+    const tools = captureTools((s) => registerProjectTools(s, repo, getUserId));
+
+    const response = await tools.get('get_project')!({ id: 'missing' });
+
+    expect(response.isError).toBe(true);
+    const parsed = parseToolResponse<{ error: string }>(response);
+    expect(parsed.error).toContain('missing');
   });
 });

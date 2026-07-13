@@ -27,6 +27,7 @@ import {
   createAction,
   updateAction,
 } from "./action-server-actions";
+import { fetchProjects } from "../projects/projects-server-actions";
 
 interface Action {
   id: string;
@@ -34,18 +35,26 @@ interface Action {
   context?: string[];
   energy?: "low" | "medium" | "high";
   dueDate?: string | null;
+  projectId?: string | null;
   projectTitle?: string | null;
   status?: string;
   listType?: string | null;
   waitingFor?: string | null;
 }
 
+interface ProjectOption {
+  id: string;
+  title: string;
+}
+
 export function ActionsView() {
   const [actions, setActions] = useState<Action[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [status, setStatus] = useState("active");
   const [listType, setListType] = useState("todo");
   const [energy, setEnergy] = useState("all");
   const [context, setContext] = useState("all");
+  const [project, setProject] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [isPending, startTransition] = useTransition();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -54,13 +63,18 @@ export function ActionsView() {
   const [fadingOut, setFadingOut] = useState<Set<string>>(new Set());
   const [justCompleted, setJustCompleted] = useState<Set<string>>(new Set());
 
+  function buildFilters(): Record<string, string> {
+    const filters: Record<string, string> = {};
+    if (status !== "all") filters.status = status;
+    if (listType !== "all") filters.list_type = listType;
+    if (energy !== "all") filters.energy = energy;
+    if (project !== "all") filters.project_id = project;
+    return filters;
+  }
+
   function loadActions() {
     startTransition(async () => {
-      const filters: Record<string, string> = {};
-      if (status !== "all") filters.status = status;
-      if (listType !== "all") filters.list_type = listType;
-      if (energy !== "all") filters.energy = energy;
-      const result = await fetchActions(filters);
+      const result = await fetchActions(buildFilters());
       setActions(result);
     });
   }
@@ -68,7 +82,13 @@ export function ActionsView() {
   useEffect(() => {
     loadActions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, listType, energy]);
+  }, [status, listType, energy, project]);
+
+  useEffect(() => {
+    fetchProjects().then((result) =>
+      setProjects(result.map((p) => ({ id: p.id, title: p.title })))
+    );
+  }, []);
 
   const isFiltered = status === "active" || status !== "all";
 
@@ -128,11 +148,7 @@ export function ActionsView() {
       setEditDialogOpen(false);
       setEditAction(null);
       // Reload inline instead of calling loadActions() to avoid nesting startTransition
-      const filters: Record<string, string> = {};
-      if (status !== "all") filters.status = status;
-      if (listType !== "all") filters.list_type = listType;
-      if (energy !== "all") filters.energy = energy;
-      const result = await fetchActions(filters);
+      const result = await fetchActions(buildFilters());
       setActions(result);
     });
   }
@@ -218,6 +234,23 @@ export function ActionsView() {
           </Select>
         </div>
 
+        <div className="space-y-1">
+          <Label className="text-xs text-gray-500">Project</Label>
+          <Select value={project} onValueChange={setProject}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <Button
           variant="ghost"
           size="icon"
@@ -290,6 +323,25 @@ export function ActionsView() {
                     />
                   </div>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="project_id">Project</Label>
+                  <Select
+                    name="project_id"
+                    defaultValue={project !== "all" ? project : "none"}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No project</SelectItem>
+                      {projects.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Button type="submit" className="w-full">
                   Create Action
                 </Button>
@@ -351,7 +403,13 @@ export function ActionsView() {
             </DialogDescription>
           </DialogHeader>
           {editAction && (
-            <EditActionForm key={editAction.id} action={editAction} onSubmit={handleEdit} isPending={isPending} />
+            <EditActionForm
+              key={editAction.id}
+              action={editAction}
+              projects={projects}
+              onSubmit={handleEdit}
+              isPending={isPending}
+            />
           )}
         </DialogContent>
       </Dialog>
@@ -361,14 +419,23 @@ export function ActionsView() {
 
 function EditActionForm({
   action,
+  projects,
   onSubmit,
   isPending,
 }: {
   action: Action;
+  projects: ProjectOption[];
   onSubmit: (formData: FormData) => void;
   isPending: boolean;
 }) {
   const [editListType, setEditListType] = useState(action.listType ?? "todo");
+
+  // A completed/dropped project won't be in the active list, but the action may
+  // still point at it -- keep it selectable so saving doesn't silently unlink.
+  const projectOptions =
+    action.projectId && !projects.some((p) => p.id === action.projectId)
+      ? [...projects, { id: action.projectId, title: action.projectTitle ?? "(archived project)" }]
+      : projects;
 
   return (
     <form action={onSubmit} className="space-y-4">
@@ -454,6 +521,22 @@ function EditActionForm({
           />
         </div>
       )}
+      <div className="space-y-2">
+        <Label htmlFor="edit-project">Project</Label>
+        <Select name="project_id" defaultValue={action.projectId ?? "none"}>
+          <SelectTrigger id="edit-project">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">No project</SelectItem>
+            {projectOptions.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       <Button type="submit" className="w-full" disabled={isPending}>
         Save Changes
       </Button>

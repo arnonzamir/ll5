@@ -270,6 +270,10 @@ Dashboard (Next.js 15)
   ├── Dashboard + calendar use local timezone (not UTC) for all date calculations
   ├── /dashboard — GTD status + chat panel (50/50)
   ├── /actions, /projects, /inbox, /shopping — GTD pages
+  ├── /projects/[id] — project detail (2026-07-13): the project's actions + New Action (pre-linked),
+  │     Link Existing (unassigned active actions), Unlink, Edit. Actions view has a Project picker
+  │     (create + edit; "none" unlinks) + Project filter. Needs gtd tool `get_project` — deploy gtd
+  │     WITH the dashboard or the detail page 404s on every project.
   ├── /calendar — day/week timeline views with work hour coloring, current time line, configurable week start day
   ├── /calendar/settings — Google account connection + calendar source access modes
   ├── /calendar/ticklers — tickler list grouped by date (90 days), recurring badges

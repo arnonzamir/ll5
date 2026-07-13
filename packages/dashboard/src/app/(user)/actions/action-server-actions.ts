@@ -5,13 +5,14 @@ import { mcpCallList, mcpCall } from "@/lib/api";
 interface Action {
   id: string;
   title: string;
-  contexts?: string[];
+  context?: string[];
   energy?: "low" | "medium" | "high";
-  due_date?: string | null;
-  project_name?: string | null;
+  dueDate?: string | null;
+  projectId?: string | null;
+  projectTitle?: string | null;
   status?: string;
-  list_type?: string | null;
-  waiting_for?: string | null;
+  listType?: string | null;
+  waitingFor?: string | null;
 }
 
 export async function fetchActions(
@@ -38,6 +39,7 @@ export async function updateAction(
   const contextsRaw = formData.get("contexts") as string;
   const listType = formData.get("list_type") as string;
   const waitingFor = formData.get("waiting_for") as string;
+  const projectId = formData.get("project_id") as string | null;
 
   const args: Record<string, unknown> = { id };
   if (title) args.title = title;
@@ -46,6 +48,10 @@ export async function updateAction(
   if (dueDate) args.due_date = dueDate;
   if (listType) args.list_type = listType;
   if (waitingFor) args.waiting_for = waitingFor;
+  // "none" is the picker's unlink sentinel: send null to clear the FK.
+  if (projectId !== null) {
+    args.project_id = projectId === "none" ? null : projectId;
+  }
   if (contextsRaw !== undefined) {
     args.context = contextsRaw
       .split(",")
@@ -62,11 +68,13 @@ export async function createAction(formData: FormData): Promise<void> {
   const dueDate = formData.get("due_date") as string;
   const listType = formData.get("list_type") as string;
   const contextsRaw = formData.get("contexts") as string;
+  const projectId = formData.get("project_id") as string | null;
 
   const args: Record<string, unknown> = { title };
   if (energy) args.energy = energy;
   if (dueDate) args.due_date = dueDate;
   if (listType) args.list_type = listType;
+  if (projectId && projectId !== "none") args.project_id = projectId;
   if (contextsRaw) {
     args.context = contextsRaw
       .split(",")

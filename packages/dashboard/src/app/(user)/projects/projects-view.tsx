@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useEffect } from "react";
+import Link from "next/link";
 import { ProjectCard } from "@/components/project-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,10 +18,11 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { RefreshCw, Search } from "lucide-react";
-import { fetchProjects, updateProject } from "./projects-server-actions";
+import { Plus, RefreshCw, Search } from "lucide-react";
+import { fetchProjects, createProject } from "./projects-server-actions";
 
 interface Project {
   id: string;
@@ -36,13 +38,13 @@ interface Project {
 export function ProjectsView() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [status, setStatus] = useState("active");
   const [isPending, startTransition] = useTransition();
-  const [editProject, setEditProject] = useState<Project | null>(null);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   function loadProjects() {
     startTransition(async () => {
-      const result = await fetchProjects();
+      const result = await fetchProjects(status);
       setProjects(result);
     });
   }
@@ -50,7 +52,7 @@ export function ProjectsView() {
   useEffect(() => {
     loadProjects();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [status]);
 
   const filteredProjects = projects.filter((p) => {
     if (searchQuery && !p.title.toLowerCase().includes(searchQuery.toLowerCase())) {
@@ -59,25 +61,19 @@ export function ProjectsView() {
     return true;
   });
 
-  function openEditDialog(project: Project) {
-    setEditProject(project);
-    setEditDialogOpen(true);
-  }
-
-  function handleEdit(formData: FormData) {
-    if (!editProject) return;
+  function handleCreate(formData: FormData) {
     startTransition(async () => {
-      await updateProject(editProject.id, formData);
-      setEditDialogOpen(false);
-      setEditProject(null);
-      loadProjects();
+      await createProject(formData);
+      setDialogOpen(false);
+      const result = await fetchProjects(status);
+      setProjects(result);
     });
   }
 
   return (
     <div>
-      {/* Search and refresh */}
-      <div className="flex items-center gap-3 mb-4">
+      {/* Search, filter, create */}
+      <div className="flex items-end gap-3 mb-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input
@@ -87,6 +83,22 @@ export function ProjectsView() {
             className="pl-9"
           />
         </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-gray-500">Status</Label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="on_hold">On Hold</SelectItem>
+              <SelectItem value="dropped">Dropped</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         <Button
           variant="ghost"
           size="icon"
@@ -96,6 +108,51 @@ export function ProjectsView() {
         >
           <RefreshCw className={`h-4 w-4 ${isPending ? "animate-spin" : ""}`} />
         </Button>
+
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm">
+              <Plus className="h-4 w-4 mr-1" />
+              New Project
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>New Project</DialogTitle>
+              <DialogDescription>
+                A multi-step outcome you are committed to.
+              </DialogDescription>
+            </DialogHeader>
+            <form action={handleCreate} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="project-title">Title</Label>
+                <Input id="project-title" name="title" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="project-description">Description</Label>
+                <textarea
+                  id="project-description"
+                  name="description"
+                  rows={3}
+                  className="flex w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="project-category">Category</Label>
+                  <Input id="project-category" name="category" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="project-due-date">Due Date</Label>
+                  <Input id="project-due-date" name="due_date" type="date" />
+                </div>
+              </div>
+              <Button type="submit" className="w-full" disabled={isPending}>
+                Create Project
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Project grid */}
@@ -106,11 +163,7 @@ export function ProjectsView() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredProjects.map((p) => (
-            <div
-              key={p.id}
-              className="cursor-pointer"
-              onClick={() => openEditDialog(p)}
-            >
+            <Link key={p.id} href={`/projects/${p.id}`} className="block">
               <ProjectCard
                 title={p.title}
                 actionCount={
@@ -119,81 +172,10 @@ export function ProjectsView() {
                 category={p.category}
                 status={p.status}
               />
-            </div>
+            </Link>
           ))}
         </div>
       )}
-
-      {/* Edit Project Dialog */}
-      <Dialog
-        open={editDialogOpen}
-        onOpenChange={(open) => {
-          setEditDialogOpen(open);
-          if (!open) setEditProject(null);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Project</DialogTitle>
-            <DialogDescription>
-              Update this project&apos;s details.
-            </DialogDescription>
-          </DialogHeader>
-          {editProject && (
-            <form action={handleEdit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-project-title">Title</Label>
-                <Input
-                  id="edit-project-title"
-                  name="title"
-                  defaultValue={editProject.title}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-project-description">Description</Label>
-                <textarea
-                  id="edit-project-description"
-                  name="description"
-                  defaultValue={editProject.description ?? ""}
-                  rows={3}
-                  className="flex w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-project-category">Category</Label>
-                  <Input
-                    id="edit-project-category"
-                    name="category"
-                    defaultValue={editProject.category ?? ""}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-project-status">Status</Label>
-                  <Select
-                    name="status"
-                    defaultValue={editProject.status ?? "active"}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="on_hold">On Hold</SelectItem>
-                      <SelectItem value="dropped">Dropped</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <Button type="submit" className="w-full" disabled={isPending}>
-                Save Changes
-              </Button>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

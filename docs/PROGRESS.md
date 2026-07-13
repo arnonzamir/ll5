@@ -4,6 +4,14 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-13 — GTD: actions can finally be linked to projects from the UI
+
+The backend always supported it (`project_id` FK on actions; `create_action`/`update_action` accept it; `list_actions` filters by it) but no UI surface exposed it, so the projects view was a read-only list of orphan cards. Now: a **Project picker** in the action create + edit dialogs (with a `none` sentinel that unlinks) and a **Project filter** in the actions filter bar; a new **`/projects/[id]` detail page** — header (status/category/description + Edit), the project's actions with complete-toggle, **New Action** (created pre-linked), **Link Existing** (picks from active actions with no project), and per-row **Unlink**; **New Project** button + status filter on the projects grid (cards now navigate to the detail page instead of opening an edit dialog).
+
+Also fixed: `updateProject` in the dashboard sent `project_id` to the `update_project` tool, which requires `id` — every project edit from the UI was failing schema validation. New gtd tool `get_project` (wraps the existing `findProjectById` repo method) so the detail page can load a project of any status; +2 tests (144 gtd tests pass).
+
+---
+
 ## 2026-07-13 — Claude-Code variant selectable + generic multi-variant config
 
 The agent config is now variant-aware: `model_config.variant` = `opencode` (per-slot multi-provider, the default) or `claude` (Claude-Code subscription image). New provider `claude-code` holds the subscription OAuth token. Orchestrator picks the image by variant (not provider-inference) and emits CLAUDE_CODE_OAUTH_TOKEN + ANTHROPIC_MODEL for the claude branch. The Claude-Code entrypoint (ll5-run-claude-code) now works under the per-user orchestrator: sources the mounted secrets file, accepts token OR anthropic key, skips USERNAME/PIN login when LL5_TOKEN is injected. UI: a Runtime toggle (opencode | Claude Code) that swaps the keys section + shows a single Claude-model picker for the claude variant.
