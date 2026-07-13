@@ -27,9 +27,11 @@ import {
   fetchAgentSessions,
   fetchConsoleUrl,
   fetchLlmCredential,
+  fetchModelConfig,
   fetchRuntime,
   provisionRuntime,
   stopRuntime,
+  type ModelConfig,
 } from "./agent-server-actions";
 import {
   canProvision,
@@ -120,6 +122,10 @@ const POLL_MS = 4000;
 function RuntimeSection({ llm }: { llm: LlmCredentialStatus }) {
   const llmConfigured = llm.configured;
   const [runtime, setRuntime] = useState<AgentRuntime>({ status: "none" });
+  const [config, setConfig] = useState<ModelConfig | null>(null);
+  useEffect(() => {
+    void fetchModelConfig().then((c) => setConfig(c.config));
+  }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -218,14 +224,30 @@ function RuntimeSection({ llm }: { llm: LlmCredentialStatus }) {
 
         {/* Details grid — full runtime + config info */}
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-xs">
-          <DetailRow label="Provider" value={llm.provider ?? (llm.configured ? "—" : "not set")} />
-          <DetailRow label="Model" value={llm.model ?? "(image default)"} />
-          {llm.model_overrides && Object.keys(llm.model_overrides).length > 0 && (
-            <DetailRow
-              label="Per-tool models"
-              value={Object.entries(llm.model_overrides).map(([s, m]) => `${s}: ${m}`).join(", ")}
-            />
-          )}
+          <DetailRow
+            label="Runtime"
+            value={config ? (config.variant === "claude" ? "Claude Code (subscription)" : "opencode (multi-provider)") : "—"}
+          />
+          <DetailRow
+            label="Model"
+            value={
+              !config
+                ? "—"
+                : config.variant === "claude"
+                  ? `Claude ${config.default.model}`
+                  : `${(config.slots.main ?? config.default).provider} / ${(config.slots.main ?? config.default).model}`
+            }
+          />
+          {config && config.variant === "opencode" &&
+            Object.entries(config.slots).filter(([s, v]) => v && s !== "main").length > 0 && (
+              <DetailRow
+                label="Per-slot"
+                value={Object.entries(config.slots)
+                  .filter(([s, v]) => v && s !== "main")
+                  .map(([s, v]) => `${s}: ${v!.model}`)
+                  .join(", ")}
+              />
+            )}
           <DetailRow label="Container" value={runtime.container_id ? runtime.container_id.slice(0, 12) : "—"} mono />
           <DetailRow label="Host" value={runtime.host ?? "—"} />
           <DetailRow

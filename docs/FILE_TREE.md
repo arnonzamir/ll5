@@ -466,3 +466,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 ## 2026-07-13 — AGENT_IMAGE_ANTHROPIC in compose
 
 ## 2026-07-13 — claude Dockerfile packages
+
+## 2026-07-13 — runtime panel live config

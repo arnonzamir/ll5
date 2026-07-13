@@ -2026,3 +2026,9 @@ Set AGENT_IMAGE_ANTHROPIC=ghcr.io/arnonzamir/ll5-run-claude:latest so the orches
 Dockerfile.ll5-run-claude installed only tmux/wget/ca-certificates. ll5-server pings the gateway with curl → "curl: command not found" → error-loop, never launched claude. Added curl + jq + git + procps + python3.
 
 ---
+
+## 2026-07-13 — runtime panel shows live config + claude heartbeat
+
+Hosted-runtime panel showed stale legacy provider/model. Now shows the live model_config (variant + resolved main model + per-slot). Claude variant got a heartbeat loop (was showing heartbeat_stale/Error despite running).
+
+---
