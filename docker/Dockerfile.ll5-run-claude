@@ -57,6 +57,12 @@ COPY scripts/render-mcp-config.ts /workspace/scripts/render-mcp-config.ts
 
 # ---------- Variant-specific content (from ll5-run-claude-code repo) ----------
 COPY variant-content/.claude/hooks/ /workspace/.claude/hooks/
+# The hook WIRING (settings.json `hooks` block) — without this the hook scripts above
+# ship but nothing ever invokes them: eval-record, the conversation mirror, memory
+# intercept/recall, the narration watchdog and the external-authority gate all go dark.
+# The render step below MERGES mcpServers into this file (it used to overwrite it, which
+# is exactly how the wiring was lost on 2026-07-13).
+COPY variant-content/.claude/settings.json /workspace/.claude/settings.json
 COPY variant-content/channel/ /workspace/channel/
 # The channel MCP (real-time gateway SSE inbound) needs its deps
 # (@modelcontextprotocol/sdk) — without this it fails ERR_MODULE_NOT_FOUND at
@@ -75,12 +81,21 @@ COPY variant-content/scripts/get-mcp-auth.sh /workspace/scripts/get-mcp-auth.sh
 ARG MCP_BASE_DOMAIN
 
 # ---------- Render MCP config from shared source-of-truth ----------
-# Reads mcp-endpoints.json, emits .claude/settings.json with headersHelper
-# pointing to get-mcp-auth.sh (emits Bearer + correlation-id headers).
+# Reads mcp-endpoints.json, merges mcpServers (with headersHelper → get-mcp-auth.sh, which
+# emits Bearer + correlation-id headers) into the variant's settings.json, preserving its
+# `hooks` / `permissions` blocks.
 RUN npx tsx /workspace/scripts/render-mcp-config.ts \
       --config /workspace/mcp-endpoints.json \
       --format claude \
       --output /workspace/.claude/settings.json
+
+# Build-time tripwire: the image is broken if the render dropped the hook wiring or the
+# MCP servers. A silent loss here is invisible until a day of telemetry has gone missing.
+RUN node -e 'const s=require("/workspace/.claude/settings.json"); \
+  const ev=Object.keys(s.hooks||{}); \
+  if(!ev.length) throw new Error("settings.json has no hooks — hook wiring lost"); \
+  if(!Object.keys(s.mcpServers||{}).length) throw new Error("settings.json has no mcpServers"); \
+  console.error("[verify] hooks wired: "+ev.join(", "))'
 
 # ---------- Persistent $HOME ----------
 # Stored on a volume: onboarding bypass (.claude.json), OAuth token

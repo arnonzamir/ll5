@@ -156,6 +156,30 @@ Env:
   return { format, output, worker, configPath };
 }
 
+/**
+ * Merge the rendered MCP block INTO an existing output file, preserving every other
+ * top-level key. The claude output path is `.claude/settings.json` — the same file the
+ * variant repo uses to wire its hooks (Stop/PreToolUse/…). A plain overwrite silently
+ * deleted that wiring: the hook SCRIPTS shipped, nothing invoked them, and eval-record /
+ * mirror / memory / the external-authority gate all went dark for a day (2026-07-13).
+ * Only the MCP key we own (`mcpServers` | `mcp`) is replaced.
+ */
+function mergeIntoExisting(output: string, rendered: Record<string, unknown>): Record<string, unknown> {
+  if (!fs.existsSync(output)) return rendered;
+  let existing: Record<string, unknown>;
+  try {
+    existing = JSON.parse(fs.readFileSync(output, 'utf-8')) as Record<string, unknown>;
+  } catch (err) {
+    // A corrupt target is a build-time bug, not something to paper over.
+    throw new Error(`Existing output file is not valid JSON: ${output} (${String(err)})`);
+  }
+  const preserved = Object.keys(existing).filter((k) => !(k in rendered));
+  if (preserved.length > 0) {
+    console.error(`[render-mcp-config] Preserving existing keys in ${output}: ${preserved.join(', ')}`);
+  }
+  return { ...existing, ...rendered };
+}
+
 function main(): void {
   const { format, output, worker, configPath } = parseArgs(process.argv.slice(2));
   const config = loadConfig(configPath);
@@ -166,16 +190,15 @@ function main(): void {
       ? renderClaude(config, baseDomain, worker)
       : renderOpencode(config, baseDomain, worker);
 
-  const json = JSON.stringify(rendered, null, 2) + '\n';
-
   if (output) {
+    const merged = mergeIntoExisting(output, rendered);
     fs.mkdirSync(path.dirname(output), { recursive: true });
-    fs.writeFileSync(output, json);
+    fs.writeFileSync(output, JSON.stringify(merged, null, 2) + '\n');
     console.error(
       `[render-mcp-config] Wrote ${format} config → ${output}${worker ? ` (worker: ${worker}, ${filterEndpointKeys(config, worker).length} endpoints)` : ` (${filterEndpointKeys(config).length} endpoints)`}`,
     );
   } else {
-    process.stdout.write(json);
+    process.stdout.write(JSON.stringify(rendered, null, 2) + '\n');
   }
 }
 

@@ -4,6 +4,18 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-14 — Agent hooks were unwired in the variant image (silent, ~33h)
+
+Two yellow anomaly alerts ("Pencil-the-timeline reflex stalled", "Forward work (ping_later bookings) stalled") were **false positives**: the agent was penciling normally (`create_tickler` 3× on Jul-14). Both checks read `ll5_eval_moments`, and that index had been frozen since 2026-07-13 10:30Z (0 docs in 24h) — because **every Claude-Code hook stopped running** when the container moved to the unified variant image (`ghcr.io/arnonzamir/ll5-run-claude:latest`, built Jul-13 14:28).
+
+Cause, two bugs stacked: `docker/Dockerfile.ll5-run-claude` COPYed `variant-content/.claude/hooks/` (the hook scripts) but never the variant's `.claude/settings.json` (the `hooks` wiring), and `scripts/render-mcp-config.ts` then **overwrote** `/workspace/.claude/settings.json` with an `mcpServers`-only object. Result: 12 hooks across 7 events silently dead — eval-record, stop-mirror + cli-input-mirror (conversation unify), session-start/session-save, precompact-backup, memory-intercept/recall, narration-watchdog, repo-write-block, cron-block, and the **external-authority gate** (the DECISION-021 security hook).
+
+Fix: (1) `render-mcp-config.ts` now MERGES `mcpServers`/`mcp` into an existing output file, preserving every other top-level key (`hooks`, `permissions`, `channelsEnabled`); (2) the Dockerfile COPYs the variant's `settings.json` before the render step; (3) a build-time tripwire (`RUN node -e …`) fails the image if the rendered settings has no `hooks` or no `mcpServers`; (4) `docker-entrypoint.sh` (ll5-run-claude-code) strips `hooks` when it merges the rendered file into `$HOME/.claude/settings.json` — the rendered file doubles as the PROJECT settings (cwd `/workspace/ll5-run` → symlink → `/workspace`), and leaving hooks in both would fire every hook twice (two eval records, two mirrored messages per turn). The `$HOME` merge itself only landed 2026-07-13 (`59ec9eb`), which is what introduced the duplicate-hook hazard.
+
+Known gap (not fixed): no anomaly check watches `ll5_eval_moments` liveness itself, so a dead eval writer surfaces only sideways, as behavior alerts.
+
+---
+
 ## 2026-07-13 — GTD: actions can finally be linked to projects from the UI
 
 The backend always supported it (`project_id` FK on actions; `create_action`/`update_action` accept it; `list_actions` filters by it) but no UI surface exposed it, so the projects view was a read-only list of orphan cards. Now: a **Project picker** in the action create + edit dialogs (with a `none` sentinel that unlinks) and a **Project filter** in the actions filter bar; a new **`/projects/[id]` detail page** — header (status/category/description + Edit), the project's actions with complete-toggle, **New Action** (created pre-linked), **Link Existing** (picks from active actions with no project), and per-row **Unlink**; **New Project** button + status filter on the projects grid (cards now navigate to the detail page instead of opening an edit dialog).
