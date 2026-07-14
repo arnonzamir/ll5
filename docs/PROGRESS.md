@@ -12,7 +12,7 @@ Cause, two bugs stacked: `docker/Dockerfile.ll5-run-claude` COPYed `variant-cont
 
 Fix: (1) `render-mcp-config.ts` now MERGES `mcpServers`/`mcp` into an existing output file, preserving every other top-level key (`hooks`, `permissions`, `channelsEnabled`); (2) the Dockerfile COPYs the variant's `settings.json` before the render step; (3) a build-time tripwire (`RUN node -e …`) fails the image if the rendered settings has no `hooks` or no `mcpServers`; (4) `docker-entrypoint.sh` (ll5-run-claude-code) strips `hooks` when it merges the rendered file into `$HOME/.claude/settings.json` — the rendered file doubles as the PROJECT settings (cwd `/workspace/ll5-run` → symlink → `/workspace`), and leaving hooks in both would fire every hook twice (two eval records, two mirrored messages per turn). The `$HOME` merge itself only landed 2026-07-13 (`59ec9eb`), which is what introduced the duplicate-hook hazard.
 
-Known gap (not fixed): no anomaly check watches `ll5_eval_moments` liveness itself, so a dead eval writer surfaces only sideways, as behavior alerts.
+Gap closed in the same pass: new anomaly check **`telemetry.eval_moments_stale`** (12h staleness on `ll5_eval_moments`, unfiltered) watches the eval WRITER itself, and its suggestion says to distrust every `behavior.*` alert while it fires. Threshold picked from real data — over the 16 days before the outage the worst inter-arrival gap was 8.7h (p99 = 1h), so 12h clears every genuine quiet stretch. It would have caught this the same day instead of never.
 
 ---
 

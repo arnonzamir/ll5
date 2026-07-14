@@ -176,6 +176,33 @@ describe('AnomalyMonitor — behavior checks (DECISION-018/020)', () => {
     expect(await priv(empty).runStaleness(checkByKey(empty, 'behavior.pencil_reflex_stalled'))).toBe(false);
   });
 
+  it('eval_moments_stale: 12h liveness on the eval WRITER, unfiltered (catches a dead recorder that would make every behavior.* check lie)', async () => {
+    const reg = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    const check = checkByKey(reg, 'telemetry.eval_moments_stale');
+    expect(check.kind).toBe('staleness');
+    expect(check.maxMinutes).toBe(720);
+
+    // The 2026-07-13 outage shape: index frozen 33h (hooks unwired) while the agent was fine.
+    const staleTs = new Date(Date.now() - 33 * 3_600_000).toISOString();
+    const search = vi.fn(async () => ({ hits: { hits: [{ _source: { timestamp: staleTs } }] } }));
+    const stale = mk({ search } as unknown as Client);
+    expect(await priv(stale).runStaleness(checkByKey(stale, 'telemetry.eval_moments_stale'))).toBe(true);
+    expect(lastArg().key).toBe('telemetry.eval_moments_stale');
+    // Unfiltered: ANY eval moment counts as liveness (only user_id scoping).
+    const q = search.mock.calls[0][0] as { index: string; query: { bool: { filter: unknown[] } } };
+    expect(q.index).toBe('ll5_eval_moments');
+    expect(q.query.bool.filter).toEqual([{ term: { user_id: 'u1' } }]);
+
+    // A normal overnight quiet stretch (worst observed real gap was 8.7h) must NOT fire.
+    const quietTs = new Date(Date.now() - 9 * 3_600_000).toISOString();
+    const quiet = mk({ search: vi.fn(async () => ({ hits: { hits: [{ _source: { timestamp: quietTs } }] } })) } as unknown as Client);
+    expect(await priv(quiet).runStaleness(checkByKey(quiet, 'telemetry.eval_moments_stale'))).toBe(false);
+
+    // Empty index (never armed) → no alert.
+    const empty = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    expect(await priv(empty).runStaleness(checkByKey(empty, 'telemetry.eval_moments_stale'))).toBe(false);
+  });
+
   it('ungrounded_pings: alerts when zero-grounding pings double vs the same-weekday median', async () => {
     // count call order: current, then 3 baseline samples (1/2/3 weeks back).
     const es = esCount([20, 9, 8, 8]); // current=20 >= median(8,8,9)=8 * 2

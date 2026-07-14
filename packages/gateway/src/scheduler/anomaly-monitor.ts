@@ -512,6 +512,23 @@ function buildChecks(): Check[] {
       timestampField: 'timestamp',
       filter: [{ term: { decision_mismatch: true } }],
     },
+    // TELEMETRY LIVENESS — the eval WRITER itself (2026-07-14). Every behavior.* check below
+    // reads ll5_eval_moments, so a dead eval recorder makes them lie: they report "the agent
+    // stopped booking / stopped penciling" when the agent is fine and only the telemetry died.
+    // That is exactly what happened when the variant image shipped the hook scripts without
+    // their wiring — no eval moment for 33h, two false behavior alerts, no alert on the actual
+    // fault. Threshold: over the 16 days before that outage the worst inter-arrival gap was
+    // 8.7h (p99 = 1h), so 12h clears every real quiet stretch (nights included) with margin.
+    // Self-arming: index empty → null age → no alert.
+    {
+      kind: 'staleness',
+      key: 'telemetry.eval_moments_stale',
+      label: 'Eval-moment recorder',
+      maxMinutes: 12 * 60,
+      severity: 'warning',
+      suggestion: 'No ll5_eval_moments doc in 12h — the eval recorder (Stop hook eval-record.sh → eval_record.py) is not writing. While this fires, treat every behavior.* alert as UNRELIABLE (they read this index). Check the agent\'s hook wiring first: `docker exec <agent> node -e \'console.log(Object.keys(require("/workspace/.claude/settings.json").hooks))\'` — an empty/missing hooks block means the image lost it.',
+      ageMinutes: (m) => m.lastDocAgeMinutes('ll5_eval_moments', 'timestamp', []),
+    },
     // Forward work stalled (DECISION-018 §4): the daily loop should be BOOKING
     // prep (decision=ping_later, ground truth since 2026-07-01). No ping_later
     // moment for 48h means the calendar-review prep obligation isn't being
