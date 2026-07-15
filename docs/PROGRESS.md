@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-15 — Persona: concentrated by default (shorter messages to the user)
+
+User asked for less-lengthy, more concentrated agent messages. Shifted the persona default in `packages/ll5-run-shared/CLAUDE.md`: the temperament section's "Chatty is the default for direct chat" is replaced with "Concentrated by default — lead with the point, stop when it's made; length is earned, not default" (warmth is tone, not word count; extra lines only when the content needs them, and structured when used). Added a matching Emotional-Contract bullet ("Brevity is respect"). Live on the next agent image rebuild + re-provision.
+
+---
+
 ## 2026-07-14 — Agent hooks were unwired in the variant image (silent, ~33h)
 
 Two yellow anomaly alerts ("Pencil-the-timeline reflex stalled", "Forward work (ping_later bookings) stalled") were **false positives**: the agent was penciling normally (`create_tickler` 3× on Jul-14). Both checks read `ll5_eval_moments`, and that index had been frozen since 2026-07-13 10:30Z (0 docs in 24h) — because **every Claude-Code hook stopped running** when the container moved to the unified variant image (`ghcr.io/arnonzamir/ll5-run-claude:latest`, built Jul-13 14:28).

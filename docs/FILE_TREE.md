@@ -77,7 +77,7 @@ ll5/
 │   │   ├── mcp-messaging.md          # 8 tools, WhatsApp/Telegram
 │   │   ├── gateway.md                # Webhook receiver design
 │   │   ├── skills.md                 # Claude Code skill designs
-│   │   ├── claude-personality.md     # GTD coaching, autonomy, emotional contract
+│   │   ├── claude-personality.md     # GTD coaching, autonomy, emotional contract (SPEC only; live prompt is packages/ll5-run-shared/CLAUDE.md — 2026-07-15: default shifted chatty→concentrated/brief per user request)
 │   │   ├── ui-design.md             # Dashboard: user + admin pages
 │   │   ├── mcp-geo-search.md       # Geo-search MCP (POI, distance, context — separate service)
 │   │   ├── health-polling-scheduler.md  # Health event detection scheduler
