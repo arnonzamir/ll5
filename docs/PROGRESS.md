@@ -4,6 +4,22 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-07-19 — Authority requests could expire into a black hole (+ nameless approval cards)
+
+Four `permission_change_requests` filed 2026-07-17 20:28–20:43 (agent asking to downgrade its own authority `agent → input` on two people) were still `status='pending'` two days later, past their `expires_at`. Nothing ever reaped them.
+
+The bug is the interaction of three correct-looking pieces: both surfaces that render a request — `GET /approvals/pending` and the Needs You tray (`collectContactApprovalItems`) — filter `expires_at > now()`, and the only code that flips a row to `'expired'` is `approvals.ts:116`, which runs **when the user decides the request**. So at the deadline the card silently vanished from the UI while the row stayed `pending` forever: the user could no longer decide it (not shown) and the agent was never told it had lapsed. `TrayItemExpiry` already solved exactly this for `tray_items`; authority requests had no equivalent.
+
+Fix: new `scheduler/permission-request-expiry.ts` (`PermissionRequestExpiry`, knob `permission_request_expiry_minutes`, default 10), registered next to `TrayItemExpiry`. Same deliberately-dumb contract — flip lapsed `pending` rows to `'expired'` + `decided_at=now()`, then one `[Authority]` system message per row telling the agent the change was **NOT** applied and the prior authority stands. **Default is deny**: an unanswered request changes nothing, so `contact_settings.permission` is untouched. Authority is only ever granted by an explicit human decision through `POST /approvals/:id/decide`. 42P01-defensive like the tray sweep. 7 tests.
+
+Second bug found in the same trace, and the reason those cards were unanswerable in practice: `contact-settings.ts` `resolveTarget()` hardcoded `displayName: null` on the `person_id` branch. Every request the agent filed by person_id (all four) produced a card reading *"May I handle this conversation as 'input'?"* — no name. Now looks the name up from `messaging_contacts` by `person_id` (first row with a non-null `display_name`, still null-tolerant).
+
+Known gap, NOT fixed: there is **no permissions-history surface**. `permission_change_requests` has zero readers in the dashboard — Settings → Contacts shows current permission state only, and there is no audit-log UI anywhere, so a lapsed or rejected request leaves no trace a user can browse. Only the live tray and the FCM push ever showed it.
+
+Also this session: the gateway's `OPENCODE_SERVER_URL` was stale at `http://agent:4096` while the box runs the Claude Code variant (`ll5-run-claude`, no listener on 4096), so every scheduler/alert `triggerAgent` threw `fetch failed`. Delivery was unaffected (the agent pulls via `/chat/listen` SSE) but every alert logged a warn and burned sweep retries. Root cause was the GitHub secret `AGENT_VARIANT` still set to `opencode`; the compose/CI single-var contract derives the URL from it. Secret set to `claude`, redeployed, verified: `OPENCODE_SERVER_URL` empty, `[AgentTriggerListener] Not starting`, zero trigger warns, agent SSE reconnected.
+
+---
+
 ## 2026-07-15 — Persona: concentrated by default (shorter messages to the user)
 
 User asked for less-lengthy, more concentrated agent messages. Shifted the persona default in `packages/ll5-run-shared/CLAUDE.md`: the temperament section's "Chatty is the default for direct chat" is replaced with "Concentrated by default — lead with the point, stop when it's made; length is earned, not default" (warmth is tone, not word count; extra lines only when the content needs them, and structured when used). Added a matching Emotional-Contract bullet ("Brevity is respect"). Live on the next agent image rebuild + re-provision.

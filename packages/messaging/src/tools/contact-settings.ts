@@ -17,7 +17,24 @@ async function resolveTarget(
   args: { person_id?: string; platform?: string; conversation_id?: string },
 ): Promise<{ targetType: 'person' | 'group'; targetId: string; displayName: string | null } | { error: string }> {
   if (args.person_id) {
-    return { targetType: 'person', targetId: args.person_id, displayName: null };
+    // Look the name up rather than returning null: this display_name is what
+    // the authority-approval card shows the user ("May I handle <name> as
+    // ..."). Returning null here produced nameless, unanswerable cards for
+    // every request the agent filed by person_id. A person can have several
+    // contact rows (one per platform) — take the first that actually has a
+    // name, and fall back to null (the card then shows the target id).
+    const named = await pool.query<{ display_name: string | null }>(
+      `SELECT display_name
+       FROM messaging_contacts
+       WHERE user_id = $1 AND person_id = $2 AND display_name IS NOT NULL
+       LIMIT 1`,
+      [userId, args.person_id],
+    );
+    return {
+      targetType: 'person',
+      targetId: args.person_id,
+      displayName: named.rows[0]?.display_name ?? null,
+    };
   }
   if (args.platform && args.conversation_id) {
     const contact = await pool.query<{ is_group: boolean; person_id: string | null; display_name: string | null }>(

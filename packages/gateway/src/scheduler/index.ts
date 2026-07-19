@@ -20,6 +20,7 @@ import { JournalConsolidationScheduler } from './journal-consolidation.js';
 import { NarrativeConsolidationScheduler } from './narrative-consolidation.js';
 import { StuckMessageSweep } from './stuck-message-sweep.js';
 import { TrayItemExpiry } from './tray-item-expiry.js';
+import { PermissionRequestExpiry } from './permission-request-expiry.js';
 import { HealthPollingScheduler } from './health-polling.js';
 import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
@@ -258,6 +259,18 @@ async function startSchedulersForUser(
   });
   trayItemExpiry.start();
   schedulers.push(trayItemExpiry);
+
+  // Agent-filed conversation-AUTHORITY requests past expires_at: flip to
+  // 'expired' + tell the agent the change was NOT applied. Default is deny —
+  // an unanswered request leaves contact_settings.permission untouched. Without
+  // this the row stayed 'pending' forever while both surfaces that render it
+  // filter on `expires_at > now()`, so it silently became undecidable.
+  const permissionRequestExpiry = new PermissionRequestExpiry(pgPool, {
+    intervalMinutes: s('permission_request_expiry_minutes', 10),
+    userId,
+  });
+  permissionRequestExpiry.start();
+  schedulers.push(permissionRequestExpiry);
 
   // MCP health + tool-error-rate monitor — cluster-wide, not user-specific,
   // but tied to a user for FCM routing. Probes both /health (HTTP) and
