@@ -4,7 +4,7 @@ import { useState, useTransition, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, Search, Users, MessageSquare, User, Camera, CameraOff, ArrowUp, UserPlus, Link, X, Wand2, Check, SkipForward, Loader2 } from "lucide-react";
+import { RefreshCw, Search, Users, MessageSquare, User, Camera, CameraOff, ArrowUp, UserPlus, Link, X, Wand2, Check, SkipForward, Loader2, ShieldCheck } from "lucide-react";
 import {
   fetchPeopleWithPlatforms,
   fetchGroupsWithSettings,
@@ -17,6 +17,8 @@ import {
   linkContactToPerson,
   unlinkContactFromPerson,
   fetchNextMatchSuggestion,
+  fetchAuthorityHistory,
+  type AuthorityRequest,
   type PersonWithPlatforms,
   type GroupWithSettings,
   type ContactEntry,
@@ -103,7 +105,67 @@ function pairedAdjust(
   return null;
 }
 
-type TabId = "people" | "contacts" | "groups";
+type TabId = "people" | "contacts" | "groups" | "authority";
+
+// Authority-request states. `expired` is the fail-safe outcome: nobody
+// answered in time, so the requested permission was NOT applied and the
+// contact kept whatever authority it already had.
+const AUTHORITY_STATUS_STYLES: Record<string, string> = {
+  pending: "bg-amber-50 text-amber-700 border-amber-200",
+  applied: "bg-green-50 text-green-700 border-green-200",
+  rejected: "bg-gray-100 text-gray-600 border-gray-300",
+  expired: "bg-gray-50 text-gray-500 border-gray-200",
+};
+
+const AUTHORITY_STATUS_LABELS: Record<string, string> = {
+  pending: "Awaiting you",
+  applied: "Approved",
+  rejected: "Rejected",
+  expired: "Expired — not applied",
+};
+
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, {
+    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+/** One row of the authority audit trail. */
+function AuthorityRow({ req }: { req: AuthorityRequest }) {
+  const who = req.display_name ?? `${req.target_type} ${req.target_id.slice(0, 8)}…`;
+  const from = req.current_permission ?? "default";
+  // A pending row past its deadline has not been swept yet (the sweep runs
+  // every 10 min) — show it as the expiry it already is, not as actionable.
+  const lapsed = req.status === "pending" && new Date(req.expires_at).getTime() < Date.now();
+  const status = lapsed ? "expired" : req.status;
+
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5 text-sm">
+      <div className="flex-1 min-w-0">
+        <div className="truncate font-medium text-gray-800">{who}</div>
+        <div className="text-xs text-gray-400">
+          asked {formatWhen(req.created_at)}
+          {req.platform ? ` · ${req.platform}` : ""}
+        </div>
+      </div>
+      <div className="w-[150px] text-center text-xs text-gray-600 shrink-0">
+        <span className="text-gray-400">{PERMISSION_LABELS[from] ?? from}</span>
+        <span className="mx-1 text-gray-300">to</span>
+        <span className="font-medium">{PERMISSION_LABELS[req.requested_permission] ?? req.requested_permission}</span>
+      </div>
+      <div className="w-[170px] text-center shrink-0">
+        <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full border ${AUTHORITY_STATUS_STYLES[status] ?? AUTHORITY_STATUS_STYLES.expired}`}>
+          {AUTHORITY_STATUS_LABELS[status] ?? status}
+        </span>
+      </div>
+      <div className="w-[110px] text-right text-xs text-gray-400 shrink-0">
+        {req.decided_at ? formatWhen(req.decided_at) : status === "pending" ? `by ${formatWhen(req.expires_at)}` : "—"}
+      </div>
+    </div>
+  );
+}
 
 const CACHE_KEY = "ll5_contacts_cache";
 const CACHE_TTL = 5 * 60 * 1000; // 5 min — background refresh if stale
@@ -791,6 +853,8 @@ export function ContactSettingsView() {
   const [people, setPeople] = useState<PersonWithPlatforms[]>([]);
   const [contacts, setContacts] = useState<ContactEntry[]>([]);
   const [groups, setGroups] = useState<GroupWithSettings[]>([]);
+  const [authority, setAuthority] = useState<AuthorityRequest[]>([]);
+  const [authorityLoading, setAuthorityLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [namedOnly, setNamedOnly] = useState(false);
   const [platformFilter, setPlatformFilter] = useState<string>("all");
@@ -989,10 +1053,31 @@ export function ContactSettingsView() {
       g.conversation_id.toLowerCase().includes(searchLower))
   );
 
+  // Authority history is its own fetch — only pulled when the tab is opened,
+  // and re-pulled on the page's refresh button while that tab is active.
+  const loadAuthority = useCallback(async () => {
+    setAuthorityLoading(true);
+    try {
+      setAuthority(await fetchAuthorityHistory());
+    } finally {
+      setAuthorityLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "authority") void loadAuthority();
+  }, [activeTab, loadAuthority]);
+
+  // The count badge shows what still needs the user, not the whole log.
+  const authorityPendingCount = authority.filter(
+    (r) => r.status === "pending" && new Date(r.expires_at).getTime() >= Date.now(),
+  ).length;
+
   const tabs: { id: TabId; label: string; count: number; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: "people", label: "People", count: filteredPeople.length, icon: User },
     { id: "contacts", label: "Contacts", count: filteredContacts.length, icon: UserPlus },
     { id: "groups", label: "Groups", count: filteredGroups.length, icon: MessageSquare },
+    { id: "authority", label: "Authority log", count: authorityPendingCount, icon: ShieldCheck },
   ];
 
   return (
@@ -1002,8 +1087,17 @@ export function ContactSettingsView() {
           <h1 className="text-2xl font-bold">Contacts & Routing</h1>
           <p className="text-sm text-gray-500 mt-1">Control how messages are routed, who the agent can reply to, and media download</p>
         </div>
-        <Button variant="ghost" size="icon" onClick={() => { setLoading(true); refreshFromServer(); }} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => {
+            if (activeTab === "authority") { void loadAuthority(); return; }
+            setLoading(true);
+            refreshFromServer();
+          }}
+          disabled={activeTab === "authority" ? authorityLoading : loading}
+        >
+          <RefreshCw className={`h-4 w-4 ${(activeTab === "authority" ? authorityLoading : loading) ? "animate-spin" : ""}`} />
         </Button>
       </div>
 
@@ -1029,8 +1123,8 @@ export function ContactSettingsView() {
         })}
       </div>
 
-      {/* Search + Auto-match */}
-      <div className="flex items-center gap-2 mb-4">
+      {/* Search + Auto-match — contact tabs only; the authority log has its own header */}
+      <div className={`flex items-center gap-2 mb-4 ${activeTab === "authority" ? "hidden" : ""}`}>
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input
@@ -1062,7 +1156,7 @@ export function ContactSettingsView() {
       </div>
 
       {/* Source (platform) filter */}
-      {availablePlatforms.length > 1 && (
+      {activeTab !== "authority" && availablePlatforms.length > 1 && (
         <div className="flex items-center gap-1.5 mb-4 flex-wrap">
           <span className="text-[10px] text-gray-400 uppercase tracking-wide mr-1">Source</span>
           {["all", ...availablePlatforms].map((plat) => (
@@ -1081,7 +1175,15 @@ export function ContactSettingsView() {
         </div>
       )}
 
-      {/* Column headers */}
+      {/* Column headers — authority log has its own set */}
+      {activeTab === "authority" ? (
+        <div className="flex items-center gap-3 px-3 mb-1 text-[10px] text-gray-400 uppercase tracking-wide">
+          <div className="flex-1">Who the agent asked about</div>
+          <div className="w-[150px] text-center shrink-0" title="The authority change the agent requested">Requested change</div>
+          <div className="w-[170px] text-center shrink-0">Outcome</div>
+          <div className="w-[110px] text-right shrink-0">Decided</div>
+        </div>
+      ) : (
       <div className="flex items-center gap-3 px-2 mb-1 text-[10px] text-gray-400 uppercase tracking-wide">
         <div className="flex-1">Name</div>
         {activeTab === "contacts" && <div className="w-8 text-center" title="Link to KB person">Link</div>}
@@ -1100,9 +1202,22 @@ export function ContactSettingsView() {
           Delivery
         </div>
       </div>
+      )}
 
       {/* Content */}
       <div className="rounded-lg border border-gray-200 bg-white">
+        {activeTab === "authority" && (
+          authority.length === 0 ? (
+            <p className="p-6 text-sm text-gray-400 text-center">
+              {authorityLoading ? "Loading..." : "The agent has never asked to change a contact's authority"}
+            </p>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {authority.map((r) => <AuthorityRow key={r.id} req={r} />)}
+            </div>
+          )
+        )}
+
         {activeTab === "people" && (
           filteredPeople.length === 0 ? (
             <p className="p-6 text-sm text-gray-400 text-center">

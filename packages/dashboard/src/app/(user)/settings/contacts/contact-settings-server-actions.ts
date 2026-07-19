@@ -69,6 +69,48 @@ export async function fetchContactSettings(params?: {
   }
 }
 
+/** One authority (permission) request the agent filed, in any state. */
+export interface AuthorityRequest {
+  id: string;
+  platform: string | null;
+  conversation_id: string | null;
+  target_type: string;
+  target_id: string;
+  display_name: string | null;
+  current_permission: string | null;
+  requested_permission: string;
+  status: "pending" | "applied" | "rejected" | "expired";
+  created_at: string;
+  decided_at: string | null;
+  expires_at: string;
+}
+
+/**
+ * The authority-request audit trail (GET /approvals/history).
+ *
+ * The agent cannot change a conversation's authority itself — it files a
+ * request and the user decides. Before this existed nothing rendered the
+ * history: the only readers filtered to pending + non-expired, so an approved,
+ * rejected or lapsed request left no trace anyone could look up.
+ */
+export async function fetchAuthorityHistory(): Promise<AuthorityRequest[]> {
+  const token = await getToken();
+  if (!token) return [];
+
+  try {
+    const res = await fetch(`${env.GATEWAY_URL}/approvals/history?limit=200`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { history?: AuthorityRequest[] };
+    return body.history ?? [];
+  } catch (err) {
+    console.error("[contacts] fetchAuthorityHistory failed:", err instanceof Error ? err.message : String(err));
+    return [];
+  }
+}
+
 export async function upsertContactSetting(data: {
   target_type: string;
   target_id: string;

@@ -283,7 +283,7 @@ Dashboard (Next.js 15)
   ├── /calendar/settings — Google account connection + calendar source access modes
   ├── /calendar/ticklers — tickler list grouped by date (90 days), recurring badges
   ├── /phone-data — review phone-pushed data (locations, messages, calendar) with type/time filters
-  ├── /settings/contacts — 3 tabs: People (with unlink per platform), Contacts (with link popover + auto-match wizard), Groups. Authority (permission) / Delivery (routing) / media controls on all. SINGLE source of truth for all per-contact/per-chat settings (notification_rules dropped 2026-05-22).
+  ├── /settings/contacts — 4 tabs: People (with unlink per platform), Contacts (with link popover + auto-match wizard), Groups, and **Authority log** [2026-07-19]. Authority (permission) / Delivery (routing) / media controls on the first three. SINGLE source of truth for all per-contact/per-chat settings (notification_rules dropped 2026-05-22). The Authority log reads `GET /approvals/history` (fetched on tab open, not with the page) and is the ONLY browsable record of the approval gate: who the agent asked about, from→to, outcome (Awaiting you / Approved / Rejected / Expired — not applied), decided-at. A `pending` row already past `expires_at` renders as expired, so the ≤10-min window before PermissionRequestExpiry sweeps never looks actionable; the tab count badge counts only genuinely-live pending rows.
   ├── Chat: SSE real-time (PG NOTIFY on insert+update), status indicators, typing dots, 30s safety sweep
   ├── /media — media gallery (images, videos, files) with gallery/list views, source filter, search, detail dialog
   ├── /health — health data browsing: overview, sleep, HR, daily stats, activities, body comp (only visible when source connected)

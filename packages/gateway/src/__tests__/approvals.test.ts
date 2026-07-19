@@ -108,6 +108,64 @@ describe('approvals plane — authority (permission) gate', () => {
     });
   });
 
+  describe('GET /approvals/history', () => {
+    const historyMatcher: Matcher = (sql) =>
+      /FROM permission_change_requests[\s\S]*ORDER BY created_at DESC/.test(sql)
+        ? { rows: [{ id: 'req-1', status: 'expired' }] }
+        : undefined;
+
+    it("returns the caller's requests in every state, scoped to their user_id", async () => {
+      const { pool, calls } = makePool([historyMatcher]);
+      const router = createApprovalsRouter(pool, AUTH_SECRET);
+      const run = getChain(router, 'get', '/approvals/history');
+
+      const req = makeReq({ headers: authHeader(userToken('u1')) });
+      const res = makeRes();
+      await run(req, res);
+
+      expect(res._status).toBe(200);
+      expect((res._json as any).history).toEqual([{ id: 'req-1', status: 'expired' }]);
+
+      // No status filter — history shows applied/rejected/expired too — and the
+      // caller's id is always the first bound param (never a query param).
+      const [sql, params] = calls.find(([s]) => /FROM permission_change_requests/.test(s))!;
+      expect(sql).not.toMatch(/status = 'pending'/);
+      expect(params[0]).toBe('u1');
+    });
+
+    it('defaults the limit to 100 and clamps it to 500', async () => {
+      const router = (p: Pool) => getChain(createApprovalsRouter(p, AUTH_SECRET), 'get', '/approvals/history');
+
+      const a = makePool([historyMatcher]);
+      await router(a.pool)(makeReq({ headers: authHeader(userToken('u1')) }), makeRes());
+      expect(a.calls.find(([s]) => /FROM permission_change_requests/.test(s))![1][1]).toBe(100);
+
+      const b = makePool([historyMatcher]);
+      await router(b.pool)(
+        makeReq({ headers: authHeader(userToken('u1')), query: { limit: '9999' } as any }),
+        makeRes(),
+      );
+      expect(b.calls.find(([s]) => /FROM permission_change_requests/.test(s))![1][1]).toBe(500);
+
+      const c = makePool([historyMatcher]);
+      await router(c.pool)(
+        makeReq({ headers: authHeader(userToken('u1')), query: { limit: 'garbage' } as any }),
+        makeRes(),
+      );
+      expect(c.calls.find(([s]) => /FROM permission_change_requests/.test(s))![1][1]).toBe(100);
+    });
+
+    it('401s without a token', async () => {
+      const { pool } = makePool([]);
+      const router = createApprovalsRouter(pool, AUTH_SECRET);
+      const run = getChain(router, 'get', '/approvals/history');
+      const req = makeReq();
+      const res = makeRes();
+      await run(req, res);
+      expect(res._status).toBe(401);
+    });
+  });
+
   describe('POST /approvals/:id/decide', () => {
     const pendingRow = {
       id: 'req-1', platform: 'whatsapp', conversation_id: '123@g.us',

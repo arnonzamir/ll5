@@ -24,6 +24,41 @@ export interface PendingApprovalRow {
   created_at: string;
 }
 
+export interface ApprovalHistoryRow extends PendingApprovalRow {
+  target_type: string;
+  target_id: string;
+  status: string;
+  decided_at: string | null;
+  expires_at: string;
+}
+
+/**
+ * The caller's authority requests in EVERY state — the audit trail behind the
+ * approval gate.
+ *
+ * Until 2026-07-19 nothing rendered this table's history: both existing readers
+ * (GET /approvals/pending, the Needs You tray) filter to pending + non-expired,
+ * so an approved, rejected or lapsed request left no trace a user could look
+ * up. A request the user missed was indistinguishable from one never filed.
+ */
+export async function listApprovalHistory(
+  pool: Pool,
+  userId: string,
+  limit = 100,
+): Promise<ApprovalHistoryRow[]> {
+  const result = await pool.query<ApprovalHistoryRow>(
+    `SELECT id, platform, conversation_id, target_type, target_id, display_name,
+            current_permission, requested_permission, status,
+            created_at, decided_at, expires_at
+     FROM permission_change_requests
+     WHERE user_id = $1
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [userId, limit],
+  );
+  return result.rows;
+}
+
 /**
  * The caller's pending, non-expired authority requests — shared by
  * GET /approvals/pending and the Needs You tray (GET /me/tray), so both
@@ -52,6 +87,22 @@ export function createApprovalsRouter(pool: Pool, authSecret: string): Router {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[approvals][pending] Failed', { userId, error: message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /approvals/history — the caller's authority requests in every state.
+  // The browsable audit trail: what the agent asked for, what happened, when.
+  // `limit` is clamped to 1..500 (default 100).
+  router.get('/approvals/history', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const parsed = Number.parseInt(String(req.query.limit ?? ''), 10);
+    const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 100;
+    try {
+      res.json({ history: await listApprovalHistory(pool, userId, limit) });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[approvals][history] Failed', { userId, error: message });
       res.status(500).json({ error: 'Internal server error' });
     }
   });
