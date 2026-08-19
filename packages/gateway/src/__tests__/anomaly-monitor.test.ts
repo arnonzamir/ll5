@@ -105,6 +105,61 @@ describe('AnomalyMonitor — rate-shift detector (same window, same weekday, 3-w
   });
 });
 
+// A count-only rate shift cannot separate "the agent changed behavior" from "the
+// agent got twice the events and behaved identically". The share gate keeps BOTH
+// metrics: the count says something moved, the share says whether it was behavior.
+// count call order with a share gate: current numerator, then per baseline week
+// (numerator, denominator), then the current denominator.
+describe('AnomalyMonitor — rate-shift share gate', () => {
+  beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
+
+  const gated = { ...riseCheck, shareGate: { minPoints: 20, minDenominator: 12 } };
+
+  it('replays 2026-08-19: count 2.46x but the share barely moved → NO alert', async () => {
+    // Real numbers from ll5_eval_moments, window 09:10-12:10Z:
+    //   now      32 suppress / 37 moments = 86.5%
+    //   -1 week  13 / 18 = 72.2%
+    //   -2 weeks  2 /  5  → denominator 5 < 12, sample skipped
+    //   -3 weeks 23 / 28 = 82.1%
+    // count: 32 vs median(13,2,23)=13 → 2.46x, trips. share: 86.5% vs 77.2% median
+    // = +9.3pp < 20 → held. (ping_now was 5 on every one of those days.)
+    expect(await priv(mk(esCount([32, 13, 18, 2, 5, 23, 28, 37]))).runRateShift(gated)).toBe(false);
+    expect(raiseAlert).not.toHaveBeenCalled();
+  });
+
+  it('alerts when the share genuinely shifts, and reports both metrics', async () => {
+    // now 30/33 = 90.9%; baselines 13/26, 14/28, 12/24 = 50% each → +40.9pp.
+    expect(await priv(mk(esCount([30, 13, 26, 14, 28, 12, 24, 33]))).runRateShift(gated)).toBe(true);
+    const v = String(lastArg().value);
+    expect(v).toContain('30 in the last 180m');   // count metric kept
+    expect(v).toContain('13 median');
+    expect(v).toContain('90.9% of 33');           // share metric added
+    expect(v).toContain('50.0% median');
+    expect(v).toContain('+40.9pp');
+  });
+
+  it('does NOT alert when the current denominator query fails', async () => {
+    // Denominator -1 (ES hiccup) < minDenominator → self-arming skip rather than
+    // an alert computed off a share we could not measure.
+    expect(await priv(mk(esCount([30, 12, 60, 2, 5, 15, 50, -1]))).runRateShift(gated)).toBe(false);
+    expect(raiseAlert).not.toHaveBeenCalled();
+  });
+
+  it('does NOT alert when every baseline denominator query fails', async () => {
+    // No usable share history → no baseline to judge the share against → skip.
+    expect(await priv(mk(esCount([30, 12, -1, 13, -1, 14, -1, 50]))).runRateShift(gated)).toBe(false);
+    expect(raiseAlert).not.toHaveBeenCalled();
+  });
+
+  it('averages an even number of share samples without integer-rounding them', async () => {
+    // Two usable baselines at 20% and 30% → 25% median. The plain `median` helper
+    // rounds, which would collapse that to 0% and let a 60% share read as +60pp.
+    // now 30/50 = 60% vs 25% → +35pp → alert, and the median must print 25.0%.
+    expect(await priv(mk(esCount([30, 12, 60, 2, 5, 15, 50, 50]))).runRateShift(gated)).toBe(true);
+    expect(String(lastArg().value)).toContain('25.0% median');
+  });
+});
+
 describe('AnomalyMonitor — behavior checks (DECISION-018/020)', () => {
   beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
 
@@ -117,6 +172,8 @@ describe('AnomalyMonitor — behavior checks (DECISION-018/020)', () => {
     const stalled = checkByKey(m, 'behavior.forward_work_stalled');
     expect(stalled.kind).toBe('staleness');
     expect(stalled.maxMinutes).toBe(2880);
+    const suppress = checkByKey(m, 'behavior.suppress_spike');
+    expect(suppress.shareGate).toEqual({ minPoints: 20, minDenominator: 12 });
     const ungrounded = checkByKey(m, 'behavior.ungrounded_pings');
     expect(ungrounded.kind).toBe('rateShift');
     expect(ungrounded.direction).toBe('rise');

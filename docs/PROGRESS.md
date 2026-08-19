@@ -4,6 +4,27 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-08-19 — Suppression alert now keeps BOTH metrics (count + share)
+
+`behavior.suppress_spike` fired at 15:10 local claiming the agent was over-suppressing. It wasn't. Pulled the eval moments for the exact window the check measured (09:10–12:10Z) against its own three same-weekday baselines:
+
+| Date | moments | suppress | ping_now | share |
+|---|---|---|---|---|
+| **08-19** | **37** | **32** | 5 | **86.5%** |
+| 08-12 | 18 | 13 | 5 | 72.2% |
+| 08-05 | 5 | 2 | 3 | 40.0% |
+| 07-29 | 28 | 23 | 5 | 82.1% |
+
+Suppress **count** 32 vs a 13 median = 2.46× (tripped). Suppress **share** 86.5% vs 77.2% = +9.3pp. Total moments 2.06×. `ping_now` was **5 on every comparable day** — the agent delivered exactly as many proactive messages as usual, it just had twice the events (new-phone/eSIM provisioning burst) and declined the extra ones. Volume change, not behavior change.
+
+Fix: `RateShiftCheck` gains an optional `shareGate` — a rate-shift may now require the metric to move as a **share of a denominator population** as well as in absolute count, and the alert value reports both (`32 in the last 180m vs 13 median…; share 86.5% of 37 vs 77.2% median (+9.3pp)`). Wired onto `behavior.suppress_spike` with `minPoints: 20, minDenominator: 12`. Self-arming like every other check: failed denominator query, too-small denominator, or no usable share history → no alert.
+
+The margin is in absolute **percentage points**, not a multiplier — a share is capped at 100%, so "2× the baseline share" is unsatisfiable once the baseline passes 50% (72.2% × 2 = 144%) and a multiplicative gate would have silently never fired. Calibrated on the real data: today's false positive sits at +9.3pp; a genuine can't-act regime drives the share toward ~100% (+23pp or more from a 72% baseline).
+
+Landmine found while building it: the existing `median()` helper **rounds to an integer** (its callers compare doc counts). Feeding it shares would round a 0.72/0.82 two-sample median to 1.0 and make the gate unsatisfiable. Added `medianFraction()` and a test that locks the even-sample case. Gateway 802 tests green (+5), tsc clean.
+
+---
+
 ## 2026-08-19 — WhatsApp lifecycle status never persisted (silent, `.catch`-swallowed)
 
 Surfaced while verifying a live WhatsApp re-pair after a phone swap. Every connection-lifecycle transition logged `[whatsappLifecycle] status update failed — error: inconsistent types deduced for parameter $3` at `warn` and wrote nothing.

@@ -4,6 +4,15 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ---
 
+## 2026-08-19 — Reading `behavior.suppress_spike` (now count + share)
+
+- The alert value now carries **both metrics**: `<count> in the last 180m vs <median> median…; share <X>% of <N> vs <Y>% median (+Zpp)`. It only fires when the count at least doubles AND the suppression share rises ≥20 percentage points over the same-weekday median. A count spike alone (busy window, identical behavior) no longer alerts.
+- When triaging one, the fastest confirmation is `ping_now` per window: if delivered pings held steady while total moments rose, it's volume, not behavior. Query `ll5_eval_moments` with a `terms` agg on `decision` over the alert's 180m window and the same window 7/14/21 days back.
+- Still true: every `behavior.*` alert reads `ll5_eval_moments`, so check `telemetry.eval_moments_stale` first — if the recorder is dead the numbers are meaningless.
+- `shareGate` is generic and available to any `rateShift` check that needs the same separation; the margin is in absolute percentage points because shares cap at 100%.
+
+---
+
 ## 2026-08-19 — WhatsApp account `status` is only as good as the lifecycle write
 
 - `messaging_whatsapp_accounts.status` is written by `processors/whatsapp-lifecycle.ts` on Evolution connection events. That UPDATE binds `$3` twice (assignment + CASE); **both** sites need the `::text` cast or Postgres aborts with `inconsistent types deduced for parameter $3`, and the failure is `.catch`-swallowed to a `warn` — the row silently keeps a stale status. Locked by `whatsapp-lifecycle-status.test.ts`. If WA state ever looks stale again, grep the gateway log for `[whatsappLifecycle] status update failed` before trusting the row.

@@ -16,6 +16,18 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
 }
 
+/**
+ * Median WITHOUT the integer rounding `median` applies — for fractional values.
+ * `median` rounds because its callers compare document counts; feeding it shares
+ * would round a two-sample median of 0.72/0.82 to 1.0 and make every share gate
+ * unsatisfiable.
+ */
+function medianFraction(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
 /** Nearest-rank percentile (p in [0,100]) of a non-empty numeric list. */
 function percentile(xs: number[], p: number): number {
   const s = [...xs].sort((a, b) => a - b);
@@ -100,6 +112,30 @@ interface RateShiftCheck {
   index: string;
   timestampField: string;
   filter?: Record<string, unknown>[];
+  /**
+   * Optional SHARE gate: the metric must ALSO move as a fraction of a denominator
+   * population, not just in absolute count. Both metrics are then reported in the
+   * alert value.
+   *
+   * Why: a count-only rate shift cannot tell "the agent changed behavior" from
+   * "the agent got twice as many events and behaved identically". Measured on the
+   * 2026-08-19 `behavior.suppress_spike` firing: suppress count 32 vs a 13 median
+   * (2.46x — tripped) while the suppress SHARE was 86.5% vs a 72.2% median
+   * (+14.3pp) and `ping_now` was 5 on every comparable day. The agent's behavior
+   * barely moved; a new-phone provisioning burst had doubled the event volume.
+   *
+   * The margin is in absolute PERCENTAGE POINTS, not a multiplier: a share is
+   * bounded at 100%, so "2x" is unsatisfiable once the baseline share is past 50%
+   * (72.2% x 2 = 144%) — a multiplicative gate would silently never fire.
+   */
+  shareGate?: {
+    /** Filter selecting the denominator population (omit → every doc in the window). */
+    denominator?: Record<string, unknown>[];
+    /** Absolute percentage-point move required, in the check's direction. */
+    minPoints: number;
+    /** Don't judge a share computed off fewer than this many denominator docs. */
+    minDenominator: number;
+  };
 }
 
 /**
@@ -329,13 +365,19 @@ export class AnomalyMonitor {
     // samples is robust to a single anomalous week.
     const WEEK = 7 * 86_400_000;
     const samples: number[] = [];
+    const shareSamples: number[] = [];
     for (const weeksBack of [1, 2, 3]) {
       const off = weeksBack * WEEK;
-      const n = await this.countInWindow(
-        c.index, c.timestampField,
-        new Date(now - off - w).toISOString(), new Date(now - off).toISOString(), c.filter,
-      );
+      const gte = new Date(now - off - w).toISOString();
+      const lt = new Date(now - off).toISOString();
+      const n = await this.countInWindow(c.index, c.timestampField, gte, lt, c.filter);
       if (n >= 0) samples.push(n);
+      if (c.shareGate && n >= 0) {
+        const denom = await this.countInWindow(c.index, c.timestampField, gte, lt, c.shareGate.denominator);
+        // Skip a sample whose denominator is too small to carry a meaningful share
+        // (a near-empty window would otherwise contribute a wild 0% or 100%).
+        if (denom >= c.shareGate.minDenominator) shareSamples.push(n / denom);
+      }
     }
     if (samples.length === 0) return false;                 // no usable history → skip
     const baseline = median(samples);
@@ -345,10 +387,29 @@ export class AnomalyMonitor {
       ? current <= baseline * (1 - c.minChangePct)
       : current >= baseline * (1 + c.minChangePct);
     if (!tripped) return false;
+
+    // Share gate: the count moved, but did the RATE? Both metrics are kept — the
+    // count decides there is something to look at, the share decides whether it is
+    // a behavior change or just more input. Self-arming: any missing piece (failed
+    // query, denominator too small, no usable share history) → no alert, matching
+    // the rest of this monitor's "never alert without a baseline" discipline.
+    let shareNote = '';
+    if (c.shareGate) {
+      const curDenom = await this.countInWindow(c.index, c.timestampField, curGte, curLt, c.shareGate.denominator);
+      if (curDenom < c.shareGate.minDenominator) return false;
+      if (shareSamples.length === 0) return false;
+      const curShare = current / curDenom;
+      const baseShare = medianFraction(shareSamples);
+      const points = (curShare - baseShare) * 100;
+      const shareMoved = dir === 'drop' ? points <= -c.shareGate.minPoints : points >= c.shareGate.minPoints;
+      if (!shareMoved) return false;
+      shareNote = `; share ${(curShare * 100).toFixed(1)}% of ${curDenom} vs ${(baseShare * 100).toFixed(1)}% median (${points >= 0 ? '+' : ''}${points.toFixed(1)}pp)`;
+    }
+
     await raiseAlert(this.pool, {
       userId: this.config.userId, key: c.key, severity: c.severity,
       summary: `${c.label} ${dir === 'drop' ? 'dropped' : 'spiked'}`,
-      value: `${current} in the last ${c.windowMinutes}m vs ${baseline} median for this window over the last ${samples.length} same weekdays`,
+      value: `${current} in the last ${c.windowMinutes}m vs ${baseline} median for this window over the last ${samples.length} same weekdays${shareNote}`,
       expected: `≈ ${baseline}`,
       suggestion: c.suggestion,
     });
@@ -487,7 +548,7 @@ function buildChecks(): Check[] {
       key: 'behavior.suppress_spike',
       label: 'Proactive-turn suppression',
       severity: 'warning',
-      suggestion: 'The agent is suppressing far more proactive turns than the same time yesterday — often a downstream symptom of a broken tool (it can\'t act, so it suppresses). Check recent tool failures.',
+      suggestion: 'The agent is suppressing a far larger SHARE of its proactive moments than usual, on top of a raised count — a behavior change, not just a busier window. Often a downstream symptom of a broken tool (it can\'t act, so it suppresses): check recent tool failures first.',
       windowMinutes: 180,
       direction: 'rise',
       minBaseline: 12,
@@ -495,6 +556,12 @@ function buildChecks(): Check[] {
       index: 'll5_eval_moments',
       timestampField: 'timestamp',
       filter: [{ term: { decision: 'suppress' } }],
+      // Both metrics must move. 20 points is calibrated off real data: the
+      // 2026-08-19 false positive sat at +9.3pp against its usable baselines
+      // (86.5% vs a 77.2% median) while its COUNT was 2.46x, whereas a genuine
+      // can't-act regime drives the share toward ~100% (a 72% baseline → +23pp
+      // or more). Denominator = every eval moment in the window.
+      shareGate: { minPoints: 20, minDenominator: 12 },
     },
     // Self-consistency degrading: the agent's claimed decision disagrees with what
     // it actually did, far more than yesterday.
