@@ -109,7 +109,7 @@ export async function handleWhatsAppLifecycle(
     await pool
       .query(
         `UPDATE messaging_whatsapp_accounts
-            SET status = $3,
+            SET status = $3::text,
                 last_error = $4,
                 last_seen_at = CASE WHEN $3::text = 'open' THEN now() ELSE last_seen_at END,
                 updated_at = now()

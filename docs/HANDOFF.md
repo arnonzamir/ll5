@@ -4,6 +4,14 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ---
 
+## 2026-08-19 — WhatsApp account `status` is only as good as the lifecycle write
+
+- `messaging_whatsapp_accounts.status` is written by `processors/whatsapp-lifecycle.ts` on Evolution connection events. That UPDATE binds `$3` twice (assignment + CASE); **both** sites need the `::text` cast or Postgres aborts with `inconsistent types deduced for parameter $3`, and the failure is `.catch`-swallowed to a `warn` — the row silently keeps a stale status. Locked by `whatsapp-lifecycle-status.test.ts`. If WA state ever looks stale again, grep the gateway log for `[whatsappLifecycle] status update failed` before trusting the row.
+- **Verifying a re-pair:** `status='connected'` is NOT proof (the 2026-07-04 ghost-connect trap). Confirm on real traffic — a `[WhatsApp]` row in `chat_messages` newer than the re-pair, or webhook hits in the gateway log. The 2026-08-19 re-pair went `connected` 19:53Z, first genuine inbound 19:56Z.
+- **Login identifiers:** `auth_users` has one account, username `arnonzamir` (superadmin, PIN-only — no `password_hash`). The token endpoint matches `user_id::text = $1 OR username = $1`. PIN is bcrypt (12 rounds) — unrecoverable; reset via `POST /admin/users/:id/pin` (admin-authed) or a direct `pin_hash` write. Login rate limit is 5 failures per identifier per 15 min, in-memory (`auth.ts:37-39`) — a gateway restart clears it, and a lockout is indistinguishable from a wrong PIN at the UI.
+
+---
+
 ## 2026-07-12 — Turn cost telemetry + chat instrumentation
 
 - **Spend data:** `POST /telemetry/turn-cost` (gateway `server.ts`) → ES index `ll5_turn_costs` `{timestamp,user_id,session_id,agent,model,input_tokens,output_tokens,cached_tokens,cache_write_tokens,cost_usd,is_main}`. Written by the agent's `stop-mirror` on each main-session turn end. Query this for per-day/model spend. Cost = real opencode token counts × price table in `ll5-run-opencode/.opencode/lib/model-cost.js` (verified against Zen's own `cost` field). Provider also returns a real `cost` per call, not currently captured (proxy could).

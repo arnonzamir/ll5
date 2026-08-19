@@ -4,6 +4,20 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-08-19 — WhatsApp lifecycle status never persisted (silent, `.catch`-swallowed)
+
+Surfaced while verifying a live WhatsApp re-pair after a phone swap. Every connection-lifecycle transition logged `[whatsappLifecycle] status update failed — error: inconsistent types deduced for parameter $3` at `warn` and wrote nothing.
+
+Cause: the `UPDATE messaging_whatsapp_accounts` in `processors/whatsapp-lifecycle.ts` binds `$3` twice — as the assigned value (`SET status = $3`) and inside a CASE comparison (`$3::text = 'open'`). Only the comparison carried the cast, so Postgres deduced conflicting types for the parameter and aborted the whole statement. The code comment directly above already claimed the cast was there for exactly this reason — it had been applied to the wrong bind site, so the comment read as correct while the bug stayed live.
+
+Impact: the account row's `status`/`last_error`/`last_seen_at` froze at whatever was last written by another path. Observed live — the row read `reconnecting` with `updated_at` 11h stale while WhatsApp was actually logged out for 6h 48m. Anything reading that row for WA health (dashboard, agent) saw a lie; the `whatsapp_disconnected` alert was unaffected (separate path), which is why the outage was still caught.
+
+Fix: `SET status = $3::text`. New `whatsapp-lifecycle-status.test.ts` (2 tests) is a source-level tripwire asserting BOTH bind sites carry the cast — a live PG round-trip is the only thing that reproduces the type deduction, so a mock-pool test can't catch the failure itself, only the SQL shape that causes it. Gateway 797 tests green, tsc clean.
+
+Same session, no code change needed: `behavior.suppress_spike` fired 15:10–15:40 local (32 suppressed proactive turns in 180m vs a median of 13). Not a broken tool — a new-phone/eSIM provisioning burst (Google security alerts, carrier SMS) on top of a busy morning, which the agent correctly declined to ping about. Confirms a known limit of that check: it counts absolute `decision:suppress` docs, not a suppression *rate*, so a volume spike reads as a behavior regression. A ratio, or a gate on total eval moments in the window, would keep it quiet. It did lead the `whatsapp_disconnected` alert by ~55 min.
+
+---
+
 ## 2026-07-19 — Authority requests could expire into a black hole (+ nameless approval cards)
 
 Four `permission_change_requests` filed 2026-07-17 20:28–20:43 (agent asking to downgrade its own authority `agent → input` on two people) were still `status='pending'` two days later, past their `expires_at`. Nothing ever reaped them.
