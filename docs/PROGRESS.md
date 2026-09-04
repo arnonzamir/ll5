@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — Controlled restart verified live (ISS-016)
+
+Forced by hand at 17:00:53Z (`touch ~/.ll5/restart-requested`, `last-fresh-start` backdated past the 2h anti-flap gap): the watcher logged `FRESH RESTART (requested by consolidate (idle))` at 17:03:36Z, `ll5-server` relaunched without `--continue`, new session `df0836fc`, `session-restart` journal entry at 17:03:46Z, markers consumed, agent immediately working (inbox clarify). The earlier image roll also produced its own entry (16:59:58Z). Tonight's 02:00 consolidate is the first real hand-off. Note: the entry lands `status: open` (write_journal ignores `status` on create) — one per day, folded by the nightly pass.
+
 ## 2026-09-04 — Context pack: complete at session start, targeted per turn (DECISION-028 #4)
 
 Arnon's requirement for #4 was "all relevant context, all the time", not "fewer calls". Shipped in the agent repo: (A) `session-start.sh` loads **all** active lessons (68, was 12) and, on every start — not only after a compaction — the active narratives (12), open journal (15) and a last-day timeline from the session store (`recall_everything` mode timeline); the compaction block no longer duplicates them. (B) `memory-recall.sh` is now a per-turn **context pack** by trigger class: an inbound contact message gets that person's narrative + last observations (`recall` by `source_person_id`) and ≤3 lessons matched on the message text + name; a user prompt gets ≤3 lessons on its text + a compact `recall_everything` sweep; scheduler/system rows get nothing (the persona anchors them on `get_situation`). Replaces 269 random `recall_lessons` calls/day that queried the `<channel>` envelope attributes. (C) Every injection is logged to `~/.ll5/context-pack.log` so "are per-turn injections ever cited" becomes measurable before any further change. Character refresh untouched (#7).
