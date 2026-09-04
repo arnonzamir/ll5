@@ -20,7 +20,7 @@ Everything needed to continue working on the LL5 personal assistant system.
 - **Hook rule (from ISS-014):** never pass a payload to curl as an argument (`-d "$PAYLOAD"`). Linux caps one argv string at 128 KB (`MAX_ARG_STRLEN`); the exec fails with `Argument list too long`, and with `-sf` + swallowed stderr nothing is logged. Write to a temp file and use `--data-binary @"$FILE"` (or `-d @-` from stdin). This is what froze `ll5_session_history` at ~250 messages per session for months — the gateway's 1 MB cap was only the second wall.
 - **Telemetry writes are idempotent (2026-09-04):** `/telemetry/eval-moment` and `/telemetry/turn-cost` use id `${session_id}:${ts}` + `op_type:create`; a duplicate returns `{ok:true, duplicate:true}`. If a hook ever regenerates `ts` on retry it will double-count again — keep the ts stable across retries.
 - **`agent.session_save_stale`** (24h) now watches `ll5_session_history.indexed_at`. Filter is on `user_id.keyword` — that index is dynamic-mapped; any future check on it must do the same or it silently never arms.
-- **CI note (ISS-023):** a push that touches no `packages/<pkg>/` path (docs-only) rebuilds + redeploys all 10 infra services — `set-matrix` only narrows the package list when ≥1 package matched. Until the one-line fix lands, treat every push to main as a full redeploy and never push while a deploy is in flight.
+- **CI (ISS-023, fixed + verified 2026-09-04):** a push that touches no `packages/<pkg>/` path builds nothing and skips deploy (`build: skipped`, `deploy: skipped`). Docs-only commits are free to push. Still never push a *package* change while a deploy is in flight.
 
 ---
 

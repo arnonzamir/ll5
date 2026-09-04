@@ -36,7 +36,7 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-020 | behavior | med | Deferred tool schemas: knowledge-write tools absent from the post-compaction reflex set | fixed | core-tools block in `session-start.sh`, live 16:22Z; verify: `ToolSearch` for the core set on each startup/compact |
 | ISS-021 | knowledge | med | ~20 MCP `-32602` input-validation failures across 10 tools; `note_observation` 2 of 13 | open | |
 | ISS-022 | behavior | med | `record_moment` (a no-op) is 53% of main-session tool calls; with `write_journal` 86% | open | proposal: DECISION-028 |
-| ISS-023 | infra | med | CI: a push to main that touches **no** package (docs-only) rebuilds and redeploys all 10 infra services | fixed | 2026-09-04 with DECISION-027 (`else PACKAGES=()` + deploy gated on a non-empty push matrix) |
+| ISS-023 | infra | med | CI: a push to main that touches **no** package (docs-only) rebuilds and redeploys all 10 infra services | verified | docs-only push `f2ba560` → run 33895111679: `build: skipped`, `deploy: skipped` |
 | ISS-024 | scaffolding | high | Orchestrator had no `agentTokenResolver` (defaulted to `() => null`): the stale-heartbeat **restart path never once worked**, and the DECISION-027 image roll skipped with "no agent token" | verified | `a0e5deb` deployed; 16:22:14Z roll: `reprovisioned:1` — new container on the pinned image |
 
 ---

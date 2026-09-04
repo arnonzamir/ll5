@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — ISS-023 verified: a docs-only push no longer redeploys the stack
+
+Run 33895111679 for the docs-only merge `f2ba560`: `detect-changes` green, `build: skipped`, `deploy: skipped`. Every docs commit before today bounced all 10 services.
+
 ## 2026-09-04 — The agent rolled. Track A verified live.
 
 Second dispatch after the resolver fix: build (tripwire `2.1.204 == pin`) → deploy → `reprovision-running: reprovisioned:1` at 16:22:14Z → new container, `[entrypoint] claude version OK: 2.1.204 == pin 2.1.204`, fresh tmux session, new session id `75a982f2…`. Hooks wired in the image: `spill-read-block.sh` (PreToolUse) and `turn-cost.sh` (Stop) alongside the existing ones.
