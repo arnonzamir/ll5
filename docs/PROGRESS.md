@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — DECISION-028 proposed — scaffolding subtraction (Track C)
+
+Evidence-based proposal, no code changed: `docs/decisions/DECISION-028-scaffolding-subtraction.md` (status **proposed**). Re-measured every loop, scheduler, anomaly check and tool from the Aug 21–Sep 4 baseline against prod ES and a read-only Postgres look. Headline corrections to ISS-010: `list_narratives` 9,350 is the web chat's Active-topics rail polling `GET /narratives` every 45 s (`limit:150`, no `session_id`), not the narrative loop; the narrative loop wrote 1,028 "Refreshed 0, created 0" journal notes in 1,038 ticks; `recall_lessons` (4,033) fires on every injected system row with the `<channel>` envelope as the query and a relevance gate that cannot fail; the reconcile subsystem has had **zero input ever** (`gtd_horizons.conversation_id` NULL on all 493 rows — the selector exits at `reconcile.ts:62`); `[ALERT]` re-notify produced 845 `channel.gmail`/`channel.slack` turns; the live tool surface is 178, not 111 (118 uncalled). Proposes: retire reconcile (+5 checks, 2 tools, loop), `NarrativeConsolidationScheduler`, `JournalHealthScheduler`; merge the two expiry sweeps; gate health polling, `recall_lessons`, the loop's model spawn, response-timeout, GTD-health, character-refresh, the phone-mirror channel alerts; replace `record_moment` with a Stop-hook-parsed sentinel line; cut the agent tool surface to ~120. Net 32 → 27 schedulers, 17 → 12 checks, 2 → 1 loops. ISS-008/009/010/022 rows point at it. Nothing implemented; implementation order + per-step verification are in the document.
+
 ## 2026-09-04 — DECISION-027: one production image for the Claude agent, built by ll5 (+ ISS-023)
 
 ISS-007 turned out to be a split-brain deploy path, not a stale tag. Two images, two pipelines, and the one that shipped was not the one that ran:
