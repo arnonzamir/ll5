@@ -67,7 +67,9 @@ describe('TrayItemExpiry — decision-card deadline sweep', () => {
   it('is silent when nothing has expired', async () => {
     const { pool, calls } = poolCapture(() => ({ rowCount: 0, rows: [] }));
     await tick(mk(pool));
-    expect(calls).toHaveLength(1);
+    // One sweep, two tables (DECISION-028 #7): the tray flip + the authority-request flip.
+    expect(calls).toHaveLength(2);
+    expect(calls.some((c) => /UPDATE permission_change_requests/.test(c.sql))).toBe(true);
     expect(calls.some((c) => /INSERT INTO chat_messages/.test(c.sql))).toBe(false);
   });
 
@@ -79,6 +81,7 @@ describe('TrayItemExpiry — decision-card deadline sweep', () => {
     });
     const pool = { query } as unknown as Pool;
     await expect(tick(mk(pool))).resolves.toBeUndefined();
-    expect(query).toHaveBeenCalledTimes(1);
+    // Both halves of the sweep hit the missing-table path and skip quietly.
+    expect(query).toHaveBeenCalledTimes(2);
   });
 });

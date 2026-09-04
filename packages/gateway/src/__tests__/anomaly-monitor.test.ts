@@ -260,6 +260,20 @@ describe('AnomalyMonitor — behavior checks (DECISION-018/020)', () => {
     expect(await priv(empty).runStaleness(checkByKey(empty, 'telemetry.eval_moments_stale'))).toBe(false);
   });
 
+  it('turn_costs_stale (ISS-006): 12h liveness on ll5_turn_costs.timestamp, self-arming', async () => {
+    const reg = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    const check = checkByKey(reg, 'telemetry.turn_costs_stale');
+    expect(check.kind).toBe('staleness');
+    expect(check.maxMinutes).toBe(720);
+    const staleTs = new Date(Date.now() - 2 * 24 * 3_600_000).toISOString();
+    const search = vi.fn(async () => ({ hits: { hits: [{ _source: { timestamp: staleTs } }] } }));
+    const stale = mk({ search } as unknown as Client);
+    expect(await priv(stale).runStaleness(checkByKey(stale, 'telemetry.turn_costs_stale'))).toBe(true);
+    expect((search.mock.calls[0][0] as { index: string }).index).toBe('ll5_turn_costs');
+    const empty = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    expect(await priv(empty).runStaleness(checkByKey(empty, 'telemetry.turn_costs_stale'))).toBe(false);
+  });
+
   it('observations_stale (ISS-002) and daily_restart_missing (ISS-016): registered with the right index/filter and thresholds, self-arming', async () => {
     const reg = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
     const obs = checkByKey(reg, 'knowledge.observations_stale');

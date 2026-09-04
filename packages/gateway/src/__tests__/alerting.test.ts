@@ -59,9 +59,13 @@ describe('alerting spine — notification cadence', () => {
   });
 
   it('a long-firing critical re-pushes the phone after the 30m re-notify window', async () => {
+    // Agent cadence (DECISION-028 #7): the second agent notice comes at 6h into the
+    // episode, not every 20 min; the phone's critical re-push cadence is unchanged.
     const pool = poolReturning({
       ...base,
-      last_agent_notified_at: new Date(Date.now() - 25 * MIN).toISOString(), // >20m → re-notify agent
+      first_seen_at: new Date(Date.now() - 7 * 60 * MIN).toISOString(), // 7h episode → second notice due
+      notify_count: 1,
+      last_agent_notified_at: new Date(Date.now() - 7 * 60 * MIN).toISOString(),
       last_push_at: new Date(Date.now() - 35 * MIN).toISOString(),           // >30m → re-push (critical)
     });
     await raiseAlert(pool, { userId: USER, key: 'channel.whatsapp', severity: 'critical', summary: 'x' });
@@ -69,10 +73,33 @@ describe('alerting spine — notification cadence', () => {
     expect(sendFCMNotification).toHaveBeenCalledTimes(1);
   });
 
+  it('agent re-notify cadence: 20m→silent, 6h→second notice, then only every 24h (DECISION-028 #7)', async () => {
+    // 25 min into the episode, already notified once → NOT due (the old 20-min cadence would fire).
+    let pool = poolReturning({ ...base, notify_count: 1,
+      first_seen_at: new Date(Date.now() - 25 * MIN).toISOString(),
+      last_agent_notified_at: new Date(Date.now() - 25 * MIN).toISOString(), last_push_at: new Date().toISOString() });
+    await raiseAlert(pool, { userId: USER, key: 'channel.gmail', severity: 'warning', summary: 'x' });
+    expect(insertSystemMessage).not.toHaveBeenCalled();
+    // Second notice sent (notify_count 2) 10h ago, episode 20h old → not yet 24h since → NOT due.
+    pool = poolReturning({ ...base, notify_count: 2,
+      first_seen_at: new Date(Date.now() - 20 * 60 * MIN).toISOString(),
+      last_agent_notified_at: new Date(Date.now() - 10 * 60 * MIN).toISOString(), last_push_at: new Date().toISOString() });
+    await raiseAlert(pool, { userId: USER, key: 'channel.gmail', severity: 'warning', summary: 'x' });
+    expect(insertSystemMessage).not.toHaveBeenCalled();
+    // 25h since the second notice → third notice due.
+    pool = poolReturning({ ...base, notify_count: 2,
+      first_seen_at: new Date(Date.now() - 40 * 60 * MIN).toISOString(),
+      last_agent_notified_at: new Date(Date.now() - 25 * 60 * MIN).toISOString(), last_push_at: new Date().toISOString() });
+    await raiseAlert(pool, { userId: USER, key: 'channel.gmail', severity: 'warning', summary: 'x' });
+    expect(insertSystemMessage).toHaveBeenCalledTimes(1);
+  });
+
   it('a long-firing WARNING re-notifies the agent but does NOT re-push the phone', async () => {
     const pool = poolReturning({
       ...base, severity: 'warning',
-      last_agent_notified_at: new Date(Date.now() - 25 * MIN).toISOString(),
+      first_seen_at: new Date(Date.now() - 7 * 60 * MIN).toISOString(),
+      notify_count: 1,
+      last_agent_notified_at: new Date(Date.now() - 7 * 60 * MIN).toISOString(),
       last_push_at: new Date(Date.now() - 35 * MIN).toISOString(),
     });
     await raiseAlert(pool, { userId: USER, key: 'channel.slack', severity: 'warning', summary: 'x' });

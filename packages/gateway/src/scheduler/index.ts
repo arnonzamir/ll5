@@ -15,12 +15,9 @@ import { CoachScanScheduler } from './coach-scan.js';
 import { CompositeTriggerScheduler } from './composite-triggers.js';
 import { MessageBatchReviewScheduler } from './message-batch-review.js';
 import { HeartbeatScheduler } from './heartbeat.js';
-import { JournalHealthScheduler } from './journal-health.js';
 import { JournalConsolidationScheduler } from './journal-consolidation.js';
-import { NarrativeConsolidationScheduler } from './narrative-consolidation.js';
 import { StuckMessageSweep } from './stuck-message-sweep.js';
 import { TrayItemExpiry } from './tray-item-expiry.js';
-import { PermissionRequestExpiry } from './permission-request-expiry.js';
 import { HealthPollingScheduler } from './health-polling.js';
 import { ResponseTimeoutScheduler } from './response-timeout.js';
 import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
@@ -179,19 +176,21 @@ async function startSchedulersForUser(
   heartbeatScheduler.start();
   schedulers.push(heartbeatScheduler);
 
-  const journalHealthScheduler = new JournalHealthScheduler(es, pgPool, {
-    maxSilenceMinutes: s('journal_nudge_minutes', 60),
-    startHour, endHour, timezone, userId,
-  });
-  journalHealthScheduler.start();
-  schedulers.push(journalHealthScheduler);
 
-  const healthPollingScheduler = new HealthPollingScheduler(es, pgPool, {
-    intervalMinutes: s('health_polling_minutes', 20),
-    startHour, endHour, timezone, userId,
-  });
-  healthPollingScheduler.start();
-  schedulers.push(healthPollingScheduler);
+  // Health polling — GATED (DECISION-028 #7): no health source has synced since
+  // 2026-05-29 and the scheduler fired 0 messages in the Aug–Sep baseline window.
+  // Off unless user_settings.scheduler.health_polling_enabled = true (set it when
+  // Garmin / Health Connect is connected again).
+  if ((sched['health_polling_enabled'] as unknown as boolean) === true) {
+    const healthPollingScheduler = new HealthPollingScheduler(es, pgPool, {
+      intervalMinutes: s('health_polling_minutes', 20),
+      startHour, endHour, timezone, userId,
+    });
+    healthPollingScheduler.start();
+    schedulers.push(healthPollingScheduler);
+  } else {
+    logger.info('[scheduler] HealthPollingScheduler not started (health_polling_enabled != true)', { userId });
+  }
 
   const journalConsolidationScheduler = new JournalConsolidationScheduler(pgPool, {
     consolidationHour: s('consolidation_hour', config.journalConsolidationHour),
@@ -200,39 +199,6 @@ async function startSchedulersForUser(
   journalConsolidationScheduler.start();
   schedulers.push(journalConsolidationScheduler);
 
-  // Narrative freshness — now DEFAULT OFF (2026-06-24, DECISION-015).
-  // SUPERSEDED by the async narrative-maintenance loop in the agent container
-  // (ll5-run/scripts/narrative-loop.sh): an ephemeral `claude -p` worker drives
-  // consolidation off the live agent's thread, much more sensitively, so this
-  // gateway heartbeat — which nudged the LIVE agent and only got ~1-2
-  // consolidations per nudge — is no longer the driver. Kept as a RE-ARMABLE
-  // FALLBACK: set user_settings.scheduler.narrative_consolidation_enabled = true
-  // to restore the live-agent path (e.g. if the loop is down). When both run they
-  // are idempotent (last_consolidated_at dedups), but the loop is the intended
-  // sole driver — leaving this off keeps the live agent's thread clean.
-  const narrativeConsolidationScheduler = new NarrativeConsolidationScheduler(es, pgPool, {
-    enabled: (sched['narrative_consolidation_enabled'] as unknown as boolean) ?? false,
-    intervalHours: s('narrative_freshness_interval_hours', 3),
-    fireWithinMinutes: s('narrative_freshness_fire_within_minutes', 10),
-    // Around the clock (every intervalHours). Consolidation/promotion is SILENT
-    // (no push), and the agent reliably clears silent system work in the quiet
-    // overnight hours — during busy daytime it starves it behind real-time events.
-    // So the overnight ticks (0/3/6) are the dependable ones that clear the backlog.
-    activeStartHour: s('narrative_freshness_start_hour', 0),
-    activeEndHour: s('narrative_freshness_end_hour', 23),
-    debounceHours: s('narrative_freshness_debounce_hours', 6),
-    activeWindowDays: s('narrative_freshness_window_days', 14),
-    // Keep each nudge SMALL/digestible — a 24-item nudge (15 refresh + 10 create)
-    // made the agent balk and do nothing; the runs that worked were 2-5 items.
-    // The frequent around-the-clock cadence + debounce clears the backlog over
-    // many small ticks instead of one impossible one.
-    maxNarratives: s('narrative_freshness_max', 5),
-    promoteThreshold: s('narrative_freshness_promote_threshold', 3),
-    maxOrphans: s('narrative_freshness_max_orphans', 4),
-    timezone, userId,
-  });
-  narrativeConsolidationScheduler.start();
-  schedulers.push(narrativeConsolidationScheduler);
 
   // Stuck-message sweep — flips long-pending/processing system rows to
   // delivered so the table doesn't accumulate handled-but-unmarked rows.
@@ -253,6 +219,8 @@ async function startSchedulersForUser(
   // 'expired' + tell the agent which default now applies. The AGENT performs
   // the default action — this sweep only flips + notifies (model §3:
   // "expires with the agent's default applied AND disclosed").
+  // One sweep, one timer: TrayItemExpiry also expires lapsed authority requests
+  // (permission_change_requests) on its tick — DECISION-028 #7.
   const trayItemExpiry = new TrayItemExpiry(pgPool, {
     intervalMinutes: s('tray_item_expiry_minutes', 10),
     userId,
@@ -260,17 +228,6 @@ async function startSchedulersForUser(
   trayItemExpiry.start();
   schedulers.push(trayItemExpiry);
 
-  // Agent-filed conversation-AUTHORITY requests past expires_at: flip to
-  // 'expired' + tell the agent the change was NOT applied. Default is deny —
-  // an unanswered request leaves contact_settings.permission untouched. Without
-  // this the row stayed 'pending' forever while both surfaces that render it
-  // filter on `expires_at > now()`, so it silently became undecidable.
-  const permissionRequestExpiry = new PermissionRequestExpiry(pgPool, {
-    intervalMinutes: s('permission_request_expiry_minutes', 10),
-    userId,
-  });
-  permissionRequestExpiry.start();
-  schedulers.push(permissionRequestExpiry);
 
   // MCP health + tool-error-rate monitor — cluster-wide, not user-specific,
   // but tied to a user for FCM routing. Probes both /health (HTTP) and

@@ -34,7 +34,12 @@ const KIND_CHIPS: { key: KindFilter; label: string }[] = [
   { key: "person", label: "People" },
 ];
 
-const POLL_MS = 45_000;
+// DECISION-028 #6: this poll was 9,350 of the 27,055 tool calls in the Aug–Sep
+// baseline (one call every 45 s per open tab, limit 150) — more than the whole
+// narrative loop. 5 min + refresh when the tab becomes visible again is plenty for
+// a rail that re-ranks on a 20-minute consolidation cadence.
+const POLL_MS = 300_000;
+const RAIL_LIMIT = 60;
 
 /** Age of the latest activity → a freshness dot color + short relative label. */
 function freshness(iso?: string): { dot: string; label: string } {
@@ -68,7 +73,7 @@ export function ActiveTopicsRail({ activeRef, onSelect, onClose, refreshKey }: P
     async function load() {
       if (firstLoad.current) setLoading(true);
       try {
-        const data = await fetchNarratives({ status: "active", sort, limit: 150 });
+        const data = await fetchNarratives({ status: "active", sort, limit: RAIL_LIMIT });
         if (!cancelled) setItems(data);
       } catch {
         /* keep last good list */
@@ -78,6 +83,8 @@ export function ActiveTopicsRail({ activeRef, onSelect, onClose, refreshKey }: P
     }
     void load();
     const h = setInterval(load, POLL_MS);
+    const onVisible = () => { if (document.visibilityState === "visible") void load(); };
+    document.addEventListener("visibilitychange", onVisible);
     return () => { cancelled = true; clearInterval(h); };
   }, [sort, refreshKey]);
 

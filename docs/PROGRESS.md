@@ -4,6 +4,19 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 (evening) — DECISION-028 batch 1: the subtraction
+
+Everything Arnon approved this afternoon, each removal its own reviewable change:
+- **Reconcile subsystem retired** (gateway `reconcile.ts`/`reconcile-gate.ts`/`scheduler/reconcile-governor.ts` + 5 tests, the 5 `reconcile.*`/`loop.reconcile_*` anomaly checks, the `reconcile_confirm` tray kind, `POST /me/reconcile/confirm`, the `ll5_reconcile_metrics` mapping; GTD `list_reconcile_work`/`reconcile_loop` + 3 tests; agent repo worker/prompt/config/3 tests + entrypoint launch). Never had an input — `conversation_id` NULL on all 493 rows. Columns, migrations, index data kept.
+- **`NarrativeConsolidationScheduler` and `JournalHealthScheduler` retired**; **`PermissionRequestExpiry` folded into `TrayItemExpiry`** (one 10-min sweep); **`HealthPollingScheduler` gated** (`scheduler.health_polling_enabled`, default off — no source since May).
+- **Alert re-notify cadence** (`utils/alerting.ts`): agent gets the first notice, one at 6 h, then every 24 h — the flat 20-minute cadence produced 845 `[ALERT]` turns over one quiet weekend. Phone cadence unchanged. +1 test.
+- **Narrative loop gated** on real work (HTTP pre-check of `list_narrative_work`; empty runs no longer spawn Sonnet or journal). **Dashboard Active-topics rail**: poll 45 s → 5 min, limit 150 → 60, refresh on visibility — it was 9,350 of the 27,055 baseline tool calls.
+- **`telemetry.turn_costs_stale`** (12 h) added now that the writer is live (ISS-006).
+- **Health MCP removed from the agent's endpoint list** (`packages/ll5-run-shared/mcp-endpoints.json`); reconcile worker allowlist gone.
+- Zombie Coolify app's two orphan volumes pruned.
+- Net: schedulers 32 → 27, anomaly checks 17 → 14, in-container loops 2 → 1, agent MCP servers −1 (12 tools), −2 GTD tools. Tool-surface pass 2 (per-tool retirements) needs a dashboard-caller audit first.
+- Ships as: agent repo `[skip ci]` commit + one ll5 push (gateway, gtd, dashboard, run-claude) → roll.
+
 ## 2026-09-04 — Controlled restart verified live (ISS-016)
 
 Forced by hand at 17:00:53Z (`touch ~/.ll5/restart-requested`, `last-fresh-start` backdated past the 2h anti-flap gap): the watcher logged `FRESH RESTART (requested by consolidate (idle))` at 17:03:36Z, `ll5-server` relaunched without `--continue`, new session `df0836fc`, `session-restart` journal entry at 17:03:46Z, markers consumed, agent immediately working (inbox clarify). The earlier image roll also produced its own entry (16:59:58Z). Tonight's 02:00 consolidate is the first real hand-off. Note: the entry lands `status: open` (write_journal ignores `status` on create) — one per day, folded by the nightly pass.

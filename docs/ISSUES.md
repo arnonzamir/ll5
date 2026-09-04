@@ -19,11 +19,11 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-003 | knowledge | high | Narrative consolidation silent 12 days — starved by ISS-002, not a loop fault | open | |
 | ISS-004 | behavior | high | `ping_later` books nothing: 57 of 72 claims hollow | open | |
 | ISS-005 | telemetry | med | No idempotency on `/telemetry/eval-moment` and `/telemetry/turn-cost` writes | fixed | 2026-09-04 gateway Phase 1 commit |
-| ISS-006 | telemetry | med | `ll5_turn_costs` dead since 2026-07-13 | in-progress | writer live 16:23Z (first doc: cold-start turn $5.53 API-equiv, 495K cache-write); `telemetry.turn_costs_stale` check still to add |
+| ISS-006 | telemetry | med | `ll5_turn_costs` dead since 2026-07-13 | fixed | writer live 16:23Z + `telemetry.turn_costs_stale` (12h) shipped 2026-09-04 evening; verify: check quiet for 7 days |
 | ISS-007 | provenance | high | Live CLI 2.1.197 ≠ Dockerfile pin 2.1.204; running commit unverifiable | verified | 2026-09-04 16:22Z — rolled container: `claude version OK: 2.1.204 == pin 2.1.204` |
 | ISS-008 | scaffolding | med | Reconcile subsystem: 682 selector calls, 0 actions, `candidate_count:0` with 5 indistinguishable causes | open | proposal: DECISION-028 |
 | ISS-009 | scaffolding | med | Two divergent narrative-freshness policies; two copies of the reconcile selector + gate | open | proposal: DECISION-028 |
-| ISS-010 | scaffolding | med | 76.5% of tool calls are housekeeping; 32 gateway schedulers + 2 in-container loops | open | proposal: DECISION-028 |
+| ISS-010 | scaffolding | med | 76.5% of tool calls are housekeeping; 32 gateway schedulers + 2 in-container loops | in-progress | DECISION-028 batch 1 shipped 2026-09-04 evening: reconcile retired, NarrativeConsolidation + JournalHealth retired, expiry sweeps merged, HealthPolling gated, alert cadence 6h/24h, dashboard poll 5 min, narrative loop gated, health MCP out of the agent surface; re-measure at +7d |
 | ISS-011 | knowledge | med | Journal backlog: 1,229 `context` entries open over 7 days | open | |
 | ISS-012 | behavior | low | Learning flat: 3 lessons in 15 days; lessons/user-model history indices take no writes | open | |
 | ISS-013 | infra | med | Chronic unfixed: WA bridge stalls, Gmail/Slack mirror listeners, Google OAuth disconnects, TS_AUTHKEY lapsed, agent CI cold since Jul 14 | in-progress | deploy path rebuilt (DECISION-027); the infra stalls remain Phase 6 |
@@ -158,6 +158,7 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 ### ISS-022 — `record_moment` turn tax
 - **Evidence:** live transcript: `record_moment` 3,211, `write_journal` 2,032, `resolve_journal` 347, `push_to_user` 207, everything else ~350.
 - **Fix shape (Phase 4):** infer `decision_claimed` from a structured line in the assistant's final text instead of a tool round-trip.
+- **2026-09-04 (DECISION-028 #6 shipped):** the narrative loop no longer spawns a Sonnet worker on empty ticks (HTTP pre-check of `list_narrative_work`), and the prompt no longer journals empty runs; the dashboard Active-topics rail polls every 5 min (was 45 s) with limit 60 (was 150) and refreshes on tab visibility.
 
 ### ISS-023 — Docs-only pushes redeploy everything
 - **Where:** `.github/workflows/build-and-push.yml`, `detect-changes` → `set-matrix`, the push branch. `PACKAGES` starts as the full infra list; the per-package filter only replaces it when `${#FILTERED[@]} -gt 0`. A commit that touches no `packages/<pkg>/` path (docs, workflows, root files) matches nothing, the narrowing is skipped, and the full list goes to the build matrix and then to `deploy`.

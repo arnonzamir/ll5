@@ -41,8 +41,13 @@ export interface RaiseAlertInput {
   suggestion?: string;
 }
 
-// Re-notify the agent at most this often while an alert keeps firing.
-const AGENT_RENOTIFY_MS = 20 * 60 * 1000; // 20 min
+// Agent re-notify policy (DECISION-028 #7, 2026-09-04): first fire, then once at
+// 6 h, then once every 24 h while the alert keeps firing. The old flat 20-minute
+// cadence turned two phone-mirror feeds going quiet over a weekend into 845 [ALERT]
+// turns (79% of all alert traffic), each a full proactive turn the agent answered
+// with the same ineffective reflex. The PHONE cadence below is unchanged.
+const AGENT_RENOTIFY_AT_MS = 6 * 60 * 60 * 1000;      // second notice: 6 h into the episode
+const AGENT_RENOTIFY_EVERY_MS = 24 * 60 * 60 * 1000;  // then every 24 h
 // Re-push the phone for CRITICAL alerts at most this often while firing.
 const CRITICAL_PUSH_RENOTIFY_MS = 30 * 60 * 1000; // 30 min
 
@@ -105,8 +110,11 @@ export async function raiseAlert(pool: Pool, input: RaiseAlertInput): Promise<vo
   }
 
   const now = Date.now();
-  const agentDue = !row.last_agent_notified_at ||
-    now - new Date(row.last_agent_notified_at).getTime() >= AGENT_RENOTIFY_MS;
+  const firingMs = now - new Date(row.first_seen_at).getTime();
+  const sinceNotifyMs = row.last_agent_notified_at ? now - new Date(row.last_agent_notified_at).getTime() : Infinity;
+  const agentDue = !row.last_agent_notified_at
+    || (row.notify_count <= 1 && firingMs >= AGENT_RENOTIFY_AT_MS)
+    || (row.notify_count >= 2 && sinceNotifyMs >= AGENT_RENOTIFY_EVERY_MS);
 
   // --- AGENT: always, repeating ---
   if (agentDue) {

@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { defaultOptionOf, type TrayDecisionOption } from '../tray.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
+import { expirePermissionRequests } from './permission-request-expiry.js';
 import { logger } from '../utils/logger.js';
 
 interface TrayItemExpiryConfig {
@@ -45,7 +46,13 @@ export class TrayItemExpiry {
     }
   }
 
+  /** One 10-minute sweep for BOTH agent-filed deadline tables (DECISION-028 #7). */
   private async tick(): Promise<void> {
+    await this.tickTray();
+    await expirePermissionRequests(this.pool, this.config.userId);
+  }
+
+  private async tickTray(): Promise<void> {
     let expired: Array<{
       id: string;
       question: string;

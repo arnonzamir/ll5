@@ -649,6 +649,19 @@ function buildChecks(): Check[] {
       suggestion: 'No `session-restart` journal entry in 26h — the controlled daily restart did not happen. Check ~/.ll5/restart-requested (written by the consolidate skill), the watcher log ~/.ll5/mcp-autoheal-server.log (maybe_fresh_restart), and ~/.ll5/last-fresh-start in the agent container.',
       ageMinutes: (m) => m.lastDocAgeMinutes('ll5_agent_journal', 'created_at', [{ term: { 'topic.keyword': 'session-restart' } }]),
     },
+    // Turn-cost writer liveness (ISS-006). ll5_turn_costs went dark for seven weeks
+    // (2026-07-13 → 2026-09-04) when the runtime switched variants and nobody
+    // noticed. The Claude Code variant's turn-cost.sh writes one doc per main-session
+    // Stop; a quiet day still has hundreds of proactive turns, so 12h is generous.
+    {
+      kind: 'staleness',
+      key: 'telemetry.turn_costs_stale',
+      label: 'Turn-cost telemetry',
+      maxMinutes: 12 * 60,
+      severity: 'warning',
+      suggestion: 'No ll5_turn_costs doc in 12h — the agent\'s turn-cost.sh Stop hook is not writing (check ~/.ll5/turn-cost.log in the container and the hook wiring). Spend is invisible while this fires.',
+      ageMinutes: (m) => m.lastDocAgeMinutes('ll5_turn_costs', 'timestamp', []),
+    },
     // Forward work stalled (DECISION-018 §4): the daily loop should be BOOKING
     // prep (decision=ping_later, ground truth since 2026-07-01). No ping_later
     // moment for 48h means the calendar-review prep obligation isn't being

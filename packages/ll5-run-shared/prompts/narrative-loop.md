@@ -44,8 +44,10 @@ HARD RULES:
 - Do NOT use Bash, Write, or Edit. Your only tools are the personal-knowledge + awareness MCP tools.
 
 STEP 3 — Finish:
-Write ONE journal note for the whole batch (awareness MCP):
+ONLY IF you refreshed or created at least one narrative (N + M > 0), write ONE journal note for the
+whole batch (awareness MCP):
 `write_journal({ type: "context", topic: "Narrative freshness", content: "Refreshed N, created M (skipped K: <reason>)." })`
+An empty run writes NO journal note (1,028 "Refreshed 0, created 0" rows were pure noise).
 Then output exactly one final line and stop:
 `CONSOLIDATED: <N> refreshed, <M> created, <K> skipped — <one line: anything notable, or "clean">`
 

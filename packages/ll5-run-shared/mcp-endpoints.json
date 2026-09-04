@@ -26,12 +26,6 @@
       "auth": "agent-token",
       "correlationIds": true
     },
-    "health": {
-      "subdomain": "mcp-health",
-      "path": "/mcp",
-      "auth": "agent-token",
-      "correlationIds": true
-    },
     "messaging": {
       "subdomain": "mcp-messaging",
       "path": "/mcp",
@@ -40,11 +34,13 @@
     }
   },
   "workers": {
-    "reconcile": {
-      "allow": ["gtd", "personal-knowledge", "google", "messaging"]
-    },
     "narrate": {
-      "allow": ["personal-knowledge", "awareness", "gtd", "google"]
+      "allow": [
+        "personal-knowledge",
+        "awareness",
+        "gtd",
+        "google"
+      ]
     }
   }
 }

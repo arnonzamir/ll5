@@ -1,7 +1,7 @@
 # DECISION-028 — Scaffolding subtraction: fewer, load-bearing loops, checks and tools
 
 **Date:** 2026-09-04
-**Status:** reviewed 2026-09-04 — approved in part (see "Review" at the end); implementation pending
+**Status:** reviewed 2026-09-04 — approved in part; batch 1 implemented the same evening (see "Implementation" at the end)
 **Related:** ISS-008, ISS-009, ISS-010, ISS-017, ISS-020, ISS-022 (`docs/ISSUES.md`); DECISION-015 (narrative loop), DECISION-025 (active context / reconcile), DECISION-027 (single agent image — the deploy path every agent-side change here rides on); baseline `docs/reviews/2026-09-04/agent-baseline.md`.
 
 `docs/purpose.md`: *"No custom event systems, no internal message buses, no background processing pipelines. If Claude can do it in conversation, don't build infrastructure for it. The question for every component: does this need to exist, or can Claude handle it?"* This proposal asks that question of every loop, scheduler, check and tool the baseline measured, with evidence from the same 15-day window (2026-08-21 → 2026-09-04, prod ES + a read-only look at Postgres). It changes no code. Nothing here is a judgment on why the scaffolding was built — most of it was a correct response to a real silent outage — the bar is *fewer, load-bearing* checks, not none.
@@ -245,3 +245,16 @@ Expected baseline deltas after 1–8: tool calls in `ll5_audit_log` per 15 days 
 | 6 Narrative loop gate + UI poll fix | **Approved.** |
 | 7 Schedulers / alert spine | **Approved only for the clear retire/merge rows**: `JournalHealthScheduler` retire, `TrayItemExpiry`+`PermissionRequestExpiry` merge, `HealthPollingScheduler` gate, `ReconcileGovernorScheduler` retire (with #1), alert re-notify cadence. **Deferred, with data required first:** `CharacterRefreshScheduler` (CLAUDE.md survives compaction, but conversational drift over long sessions is real and narrative work will add long-horizon load — keep the 4h refresh until the daily restart + ~120K context cap are live and the eval's mismatch/suppress metrics per hour-since-refresh say otherwise) and `GTDHealthScheduler` (the mid-day overdue/inbox catch; candidate compromise when revisited: morning brief + evening close + a nudge gated on *change* since the last check). |
 | 8 Tool count | **Approved** — in two passes, the obvious ~40 first; re-measure deferral (ISS-020) after. |
+
+## Implementation — batch 1, 2026-09-04 evening
+
+| # | Done |
+|---|---|
+| 1 | Reconcile subsystem retired (gateway selector/gate/governor + 5 checks + tray kind + `/me/reconcile/confirm`; GTD tools; agent-repo worker/prompt/config/tests; entrypoint launch). GTD columns, migrations and the `ll5_reconcile_metrics` data stay. |
+| 2 | `NarrativeConsolidationScheduler` deleted (with its test and the 7 dead `narrative_freshness_*` settings). |
+| 3 | Collapsed with #1. |
+| 4 | Shipped earlier today as the context pack (see Review). |
+| 5 | Deferred to after ISS-001's verification window (unchanged). |
+| 6 | `narrative-loop.sh` pre-checks `list_narrative_work` over HTTP and spawns the worker only when work exists; `prompts/narrative-loop.md` journals only non-empty runs; dashboard rail poll 45 s → 5 min, limit 150 → 60, refresh on tab visibility. (The "don't write UI reads into the audit ledger" part is not done — it needs the knowledge MCP to know the caller; noted as a follow-up.) |
+| 7 | `JournalHealthScheduler` retired; `TrayItemExpiry` + `PermissionRequestExpiry` merged into one 10-min sweep (`expirePermissionRequests()` runs on the tray tick); `HealthPollingScheduler` gated behind `scheduler.health_polling_enabled` (default off); agent re-notify cadence first / 6 h / every 24 h (phone cadence unchanged). `CharacterRefresh` and `GTDHealth` untouched per the review. Net: schedulers 32 → 27, anomaly checks 17 → 14 (5 reconcile checks out; `turn_costs_stale`, `observations_stale`, `daily_restart_missing` in). |
+| 8 | Pass 1: the `health` MCP removed from the agent's endpoint list (no source since May; 12 tools) and the reconcile tools (2). Per-tool retirements inside the other servers need a dashboard-caller audit first (several "unused by the agent" tools are the dashboard's MCP path through the gateway) — pass 2. |
