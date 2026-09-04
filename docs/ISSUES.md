@@ -21,9 +21,9 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-005 | telemetry | med | No idempotency on `/telemetry/eval-moment` and `/telemetry/turn-cost` writes | fixed | 2026-09-04 gateway Phase 1 commit |
 | ISS-006 | telemetry | med | `ll5_turn_costs` dead since 2026-07-13 | in-progress | writer live 16:23Z (first doc: cold-start turn $5.53 API-equiv, 495K cache-write); `telemetry.turn_costs_stale` check still to add |
 | ISS-007 | provenance | high | Live CLI 2.1.197 ≠ Dockerfile pin 2.1.204; running commit unverifiable | verified | 2026-09-04 16:22Z — rolled container: `claude version OK: 2.1.204 == pin 2.1.204` |
-| ISS-008 | scaffolding | med | Reconcile subsystem: 682 selector calls, 0 actions, `candidate_count:0` with 5 indistinguishable causes | open | |
-| ISS-009 | scaffolding | med | Two divergent narrative-freshness policies; two copies of the reconcile selector + gate | open | |
-| ISS-010 | scaffolding | med | 76.5% of tool calls are housekeeping; 32 gateway schedulers + 2 in-container loops | open | |
+| ISS-008 | scaffolding | med | Reconcile subsystem: 682 selector calls, 0 actions, `candidate_count:0` with 5 indistinguishable causes | open | proposal: DECISION-028 |
+| ISS-009 | scaffolding | med | Two divergent narrative-freshness policies; two copies of the reconcile selector + gate | open | proposal: DECISION-028 |
+| ISS-010 | scaffolding | med | 76.5% of tool calls are housekeeping; 32 gateway schedulers + 2 in-container loops | open | proposal: DECISION-028 |
 | ISS-011 | knowledge | med | Journal backlog: 1,229 `context` entries open over 7 days | open | |
 | ISS-012 | behavior | low | Learning flat: 3 lessons in 15 days; lessons/user-model history indices take no writes | open | |
 | ISS-013 | infra | med | Chronic unfixed: WA bridge stalls, Gmail/Slack mirror listeners, Google OAuth disconnects, TS_AUTHKEY lapsed, agent CI cold since Jul 14 | in-progress | deploy path rebuilt (DECISION-027); the infra stalls remain Phase 6 |
@@ -35,7 +35,7 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-019 | knowledge | high | Unbounded MCP read results (`read_journal` ~60 KB, `recall_everything` up to 114 KB, one at 1.7 MB) cause the spill | in-progress | Track B (worktree agent) |
 | ISS-020 | behavior | med | Deferred tool schemas: knowledge-write tools absent from the post-compaction reflex set | fixed | core-tools block in `session-start.sh`, live 16:22Z; verify: `ToolSearch` for the core set on each startup/compact |
 | ISS-021 | knowledge | med | ~20 MCP `-32602` input-validation failures across 10 tools; `note_observation` 2 of 13 | open | |
-| ISS-022 | behavior | med | `record_moment` (a no-op) is 53% of main-session tool calls; with `write_journal` 86% | open | |
+| ISS-022 | behavior | med | `record_moment` (a no-op) is 53% of main-session tool calls; with `write_journal` 86% | open | proposal: DECISION-028 |
 | ISS-023 | infra | med | CI: a push to main that touches **no** package (docs-only) rebuilds and redeploys all 10 infra services | fixed | 2026-09-04 with DECISION-027 (`else PACKAGES=()` + deploy gated on a non-empty push matrix) |
 | ISS-024 | scaffolding | high | Orchestrator had no `agentTokenResolver` (defaulted to `() => null`): the stale-heartbeat **restart path never once worked**, and the DECISION-027 image roll skipped with "no agent token" | verified | `a0e5deb` deployed; 16:22:14Z roll: `reprovisioned:1` — new container on the pinned image |
 
