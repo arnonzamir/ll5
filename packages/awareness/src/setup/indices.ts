@@ -38,6 +38,26 @@ const AWARENESS_EXCLUSIVE_INDICES: IndexDefinition[] = [
       },
     },
   },
+  // Version history of ll5_agent_user_model — one doc per overwritten version, read
+  // by id (get_user_model_version) or listed by user_id+section+archived_at
+  // (list_user_model_versions); never searched by content. content is enabled:false
+  // like the live index. ISS-012: this index used to be dynamic-mapped, the free-form
+  // content.<person>.<key> paths hit ES's 1000-field limit on 2026-06-20, and every
+  // snapshot for 11 weeks was rejected inside a silent catch.
+  {
+    index: 'll5_agent_user_model_history',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        section: { type: 'keyword' },
+        content: { type: 'object', enabled: false },
+        last_updated: { type: 'date' },
+        created_at: { type: 'date' },
+        archived_at: { type: 'date' },
+        original_id: { type: 'keyword' },
+      },
+    },
+  },
   // Governed agent "lessons" — operational/world knowledge the agent learns about
   // operating itself and the tools (e.g. "create_tickler due_time is local"). GLOBAL
   // (scope=world, shared across tenants — a living runbook), reconciled on write, and

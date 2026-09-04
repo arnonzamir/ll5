@@ -819,9 +819,40 @@ describe('write_user_model tool handler', () => {
     });
   });
 
+  it('preserves created_at across overwrites and reports a failed snapshot instead of swallowing it (ISS-012)', async () => {
+    const existingSource = {
+      user_id: USER_ID,
+      section: 'active_context',
+      content: { hot_topics: ['x'] },
+      last_updated: '2026-06-19T23:00:00Z',
+      created_at: '2026-04-01T00:00:00Z',
+    };
+    const esClient = makeMockEsClient({
+      get: vi.fn().mockResolvedValue({ _source: existingSource }),
+      index: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Limit of total fields [1000] has been exceeded'))
+        .mockResolvedValue({ _id: 'whatever', result: 'updated' }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tools = captureTools((s) => registerJournalTools(s, esClient as any, getUserId));
+
+    const res = await tools.get('write_user_model')!({ section: 'active_context', content: { hot_topics: ['y'] } });
+
+    // The live write still happens, with the original created_at kept
+    expect(esClient.index).toHaveBeenCalledTimes(2);
+    const live = (esClient.index as ReturnType<typeof vi.fn>).mock.calls[1][0];
+    expect(live.index).toBe('ll5_agent_user_model');
+    expect(live.document.created_at).toBe('2026-04-01T00:00:00Z');
+    // ...and the failure is visible to the caller
+    const parsed = JSON.parse(res.content[0].text);
+    expect(parsed.updated).toBe(true);
+    expect(parsed.warning).toMatch(/Limit of total fields/);
+  });
+
   it('skips history snapshot when no existing version exists', async () => {
     const esClient = makeMockEsClient({
-      get: vi.fn().mockRejectedValue(new Error('Not found')),
+      get: vi.fn().mockRejectedValue(Object.assign(new Error('Not found'), { meta: { statusCode: 404 } })),
       index: vi.fn().mockResolvedValue({ _id: 'whatever', result: 'created' }),
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

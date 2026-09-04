@@ -75,8 +75,12 @@ async function snapshot(esClient: Client, id: string, now: string): Promise<void
         document: { ...existing._source, archived_at: now, original_id: id },
       });
     }
-  } catch {
-    // No existing doc — nothing to snapshot.
+  } catch (err) {
+    // 404 = no existing doc, nothing to snapshot. Anything else is a real failure
+    // and must not vanish (ISS-012: the user-model history died silently this way).
+    if ((err as { meta?: { statusCode?: number } }).meta?.statusCode !== 404) {
+      logger.error('lesson_history_snapshot_failed', { id, error: err instanceof Error ? err.message : String(err) });
+    }
   }
 }
 
@@ -384,8 +388,15 @@ export function registerLessonTools(
               document: { ...(existing._source as Record<string, unknown>), archived_at: now, original_id: docId },
             });
           }
-        } catch {
-          // first note — no snapshot
+        } catch (err) {
+          // 404 = first note, no snapshot. Any other failure on the GET must abort:
+          // proceeding with notes=[] would overwrite every learned note with this
+          // one (ISS-012 follow-up — the old bare catch did exactly that).
+          if ((err as { meta?: { statusCode?: number } }).meta?.statusCode !== 404) {
+            const message = err instanceof Error ? err.message : String(err);
+            logger.error('user_model_learned_notes_snapshot_failed', { error: message });
+            if (notes.length === 0) throw new Error(`learned_notes read/snapshot failed, refusing to overwrite: ${message}`);
+          }
         }
         const note = { note: fm.name || fm.body.slice(0, 200), detail: fm.description || null, source: provenance, at: now };
         notes.push(note);

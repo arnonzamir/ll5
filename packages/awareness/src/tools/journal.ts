@@ -339,10 +339,17 @@ export function registerJournalTools(
       const now = new Date().toISOString();
       const docId = `${userId}_${params.section}`;
 
-      // Snapshot current version to history before overwriting
+      // Snapshot current version to history before overwriting. A 404 on the get is
+      // the first write of this section; any other failure is logged and reported
+      // in the result (the live write still goes through — the model matters more
+      // than its history). ISS-012: for 11 weeks every snapshot failed on the
+      // history index's 1000-field mapping limit inside a bare `catch {}`.
+      let createdAt = now;
+      let snapshotWarning: string | undefined;
       try {
-        const existing = await esClient.get({ index: USER_MODEL_INDEX, id: docId });
+        const existing = await esClient.get<{ created_at?: string }>({ index: USER_MODEL_INDEX, id: docId });
         if (existing._source) {
+          createdAt = existing._source.created_at ?? now;
           await esClient.index({
             index: USER_MODEL_HISTORY_INDEX,
             document: {
@@ -352,8 +359,12 @@ export function registerJournalTools(
             },
           });
         }
-      } catch {
-        // No existing version — first write, no snapshot needed
+      } catch (err) {
+        if ((err as { meta?: { statusCode?: number } }).meta?.statusCode !== 404) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.error('user_model_history_snapshot_failed', { section: params.section, error: message });
+          snapshotWarning = `history snapshot failed, previous version NOT preserved: ${message}`;
+        }
       }
 
       await esClient.index({
@@ -364,7 +375,7 @@ export function registerJournalTools(
           section: params.section,
           content: params.content,
           last_updated: now,
-          created_at: now,
+          created_at: createdAt,
         },
         refresh: 'wait_for',
       });
@@ -383,7 +394,7 @@ export function registerJournalTools(
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({ section: params.section, updated: true }),
+            text: JSON.stringify({ section: params.section, updated: true, ...(snapshotWarning ? { warning: snapshotWarning } : {}) }),
           },
         ],
       };

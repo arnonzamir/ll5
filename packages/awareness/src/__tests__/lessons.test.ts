@@ -152,7 +152,7 @@ describe('ingest_memory — classify + route', () => {
 
   it('routes a user memory to the user_model learned_notes section (appended)', async () => {
     const es = esWithMatches([]);
-    es.get = vi.fn().mockRejectedValue(new Error('not found')); // first note
+    es.get = vi.fn().mockRejectedValue(Object.assign(new Error('not found'), { meta: { statusCode: 404 } })); // first note
     const tools = captureTools((s) => registerLessonTools(s, es as never, getUserId));
     const res = await tools.get('ingest_memory')!({ raw_content: userMd });
     const out = parseToolResponse<{ scope: string; action: string; section: string }>(res);
