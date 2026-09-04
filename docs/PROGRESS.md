@@ -4,6 +4,17 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — The agent rolled. Track A verified live.
+
+Second dispatch after the resolver fix: build (tripwire `2.1.204 == pin`) → deploy → `reprovision-running: reprovisioned:1` at 16:22:14Z → new container, `[entrypoint] claude version OK: 2.1.204 == pin 2.1.204`, fresh tmux session, new session id `75a982f2…`. Hooks wired in the image: `spill-read-block.sh` (PreToolUse) and `turn-cost.sh` (Stop) alongside the existing ones.
+
+Verified from the new container within two minutes:
+- **ISS-014/015 verified:** `session-save.log` → `ok http=201 append msgs=4/4`; `ll5_session_history` doc for the new session `indexed_at 16:23:55Z` and advancing each Stop. The re-ground now reads live data.
+- **ISS-006 writer live:** first `ll5_turn_costs` doc since Jul 13 — cold-start turn on `claude-opus-4-7`: 494,799 cache-write tokens (1h TTL) + 737,819 cache reads ≈ **$5.53 API-equivalent**. Steady-state turns will be ~$0.37 (reads only). This is the first time per-turn spend is visible on the Claude Code variant.
+- **ISS-001 fix live:** eval record carries `ts_end`; the wrapper floors the next record on it.
+- ISS-007 and ISS-024 → **verified**. ISS-018/020 → fixed (7-day verification windows).
+- Oddity noted, not blocking: the orchestrator logged two `reprovision-running` completions (a `0/0` at 16:22:02Z while the tenant row was `provisioning`, then the real `1/0`); the workflow has the roll block once. Idempotent either way.
+
 ## 2026-09-04 — First end-to-end agent dispatch; orchestrator gets a token resolver (ISS-024)
 
 The DECISION-027 path ran for real: agent-repo push → `trigger-ll5-rebuild` (with `LL5_DISPATCH_PAT`) → ll5 `repository_dispatch` → `build (run-claude)` green **with the pin tripwire** (`[verify] claude --version -> 2.1.204`) → pushed → deploy → host pulled the new `latest` (`CLAUDE_CODE_VERSION=2.1.204`). The last step failed honestly: the orchestrator answered the roll with `reprovision skipped, no agent token`.

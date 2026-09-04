@@ -14,30 +14,30 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 
 | ID | Class | Sev | Title | Status | Closed by |
 |---|---|---|---|---|---|
-| ISS-001 | telemetry | high | Eval recorder scores any `reply` as a delivered ping unless `channel:"system"` is passed explicitly | open | |
+| ISS-001 | telemetry | high | Eval recorder over-counts deliveries (root cause: span carry-over across quiet turns — see detail) | fixed | agent `b6c896f`, live 16:22Z; verify: no `ping_now` without a delivery tool over 7 days |
 | ISS-002 | knowledge | high | `note_observation` near-dead: 18 calls in 15 days, zero Aug 23–31; three-month drift 963 → 11/month | open | |
 | ISS-003 | knowledge | high | Narrative consolidation silent 12 days — starved by ISS-002, not a loop fault | open | |
 | ISS-004 | behavior | high | `ping_later` books nothing: 57 of 72 claims hollow | open | |
 | ISS-005 | telemetry | med | No idempotency on `/telemetry/eval-moment` and `/telemetry/turn-cost` writes | fixed | 2026-09-04 gateway Phase 1 commit |
-| ISS-006 | telemetry | med | `ll5_turn_costs` dead since 2026-07-13 | in-progress | mappings declared 2026-09-04; writer (agent-side) + stale check pending |
-| ISS-007 | provenance | high | Live CLI 2.1.197 ≠ Dockerfile pin 2.1.204; running commit unverifiable | fixed | DECISION-027, 2026-09-04 — verify inside the container after the first dispatch |
+| ISS-006 | telemetry | med | `ll5_turn_costs` dead since 2026-07-13 | in-progress | writer live 16:23Z (first doc: cold-start turn $5.53 API-equiv, 495K cache-write); `telemetry.turn_costs_stale` check still to add |
+| ISS-007 | provenance | high | Live CLI 2.1.197 ≠ Dockerfile pin 2.1.204; running commit unverifiable | verified | 2026-09-04 16:22Z — rolled container: `claude version OK: 2.1.204 == pin 2.1.204` |
 | ISS-008 | scaffolding | med | Reconcile subsystem: 682 selector calls, 0 actions, `candidate_count:0` with 5 indistinguishable causes | open | |
 | ISS-009 | scaffolding | med | Two divergent narrative-freshness policies; two copies of the reconcile selector + gate | open | |
 | ISS-010 | scaffolding | med | 76.5% of tool calls are housekeeping; 32 gateway schedulers + 2 in-container loops | open | |
 | ISS-011 | knowledge | med | Journal backlog: 1,229 `context` entries open over 7 days | open | |
 | ISS-012 | behavior | low | Learning flat: 3 lessons in 15 days; lessons/user-model history indices take no writes | open | |
 | ISS-013 | infra | med | Chronic unfixed: WA bridge stalls, Gmail/Slack mirror listeners, Google OAuth disconnects, TS_AUTHKEY lapsed, agent CI cold since Jul 14 | in-progress | deploy path rebuilt (DECISION-027); the infra stalls remain Phase 6 |
-| ISS-014 | telemetry | high | `POST /sessions` exceeds the gateway 1 MB body cap past ~250 messages → 413 swallowed → `ll5_session_history` frozen per session | in-progress | gateway side 2026-09-04 (10 MB route cap + `mode:"append"`); agent-side incremental send pending |
-| ISS-015 | behavior | high | Post-compaction re-ground reads the frozen session index | in-progress | unfreezes with ISS-014's gateway fix on the next Stop; verify `indexed_at` advances |
+| ISS-014 | telemetry | high | `POST /sessions` exceeds the gateway 1 MB body cap past ~250 messages → 413 swallowed → `ll5_session_history` frozen per session | verified | agent hook `b6c896f` live 16:22Z: `session-save.log` `ok http=201 append msgs=4/4`, new session doc advancing |
+| ISS-015 | behavior | high | Post-compaction re-ground reads the frozen session index | verified | session doc advances every Stop from the new container (16:23:55Z); re-ground now reads live data |
 | ISS-016 | scaffolding | med | Nothing monitors session age, compaction cadence, or session-save liveness; sessions roll only on container restart | in-progress | `agent.session_save_stale` check shipped 2026-09-04; session-age gauge + daily restart pending |
-| ISS-017 | knowledge | med | Governed memory-capture path idle: `ingest_memory` 0 since July, `upsert_lesson` 0 in Sep, `recall_lessons` 7,625 in Aug | open | |
-| ISS-018 | knowledge | high | Agent bypasses ES via `Bash` grep/python over spilled `tool-results/mcp-awareness-*.txt` files | open | |
-| ISS-019 | knowledge | high | Unbounded MCP read results (`read_journal` ~60 KB, `recall_everything` up to 114 KB, one at 1.7 MB) cause the spill | open | |
-| ISS-020 | behavior | med | Deferred tool schemas: knowledge-write tools absent from the post-compaction reflex set | open | |
+| ISS-017 | knowledge | med | Governed memory-capture path idle: `ingest_memory` 0 since July, `upsert_lesson` 0 in Sep, `recall_lessons` 7,625 in Aug | in-progress | fail-closed + outbox + autoheal drain live (`b6c896f`); the write-side (lessons in `consolidate`) is Phase 2 |
+| ISS-018 | knowledge | high | Agent bypasses ES via `Bash` grep/python over spilled `tool-results/mcp-awareness-*.txt` files | fixed | `spill-read-block.sh` wired (PreToolUse Bash\|Read\|Grep\|Glob), live 16:22Z; verify: zero spill reads over 7 days |
+| ISS-019 | knowledge | high | Unbounded MCP read results (`read_journal` ~60 KB, `recall_everything` up to 114 KB, one at 1.7 MB) cause the spill | in-progress | Track B (worktree agent) |
+| ISS-020 | behavior | med | Deferred tool schemas: knowledge-write tools absent from the post-compaction reflex set | fixed | core-tools block in `session-start.sh`, live 16:22Z; verify: `ToolSearch` for the core set on each startup/compact |
 | ISS-021 | knowledge | med | ~20 MCP `-32602` input-validation failures across 10 tools; `note_observation` 2 of 13 | open | |
 | ISS-022 | behavior | med | `record_moment` (a no-op) is 53% of main-session tool calls; with `write_journal` 86% | open | |
 | ISS-023 | infra | med | CI: a push to main that touches **no** package (docs-only) rebuilds and redeploys all 10 infra services | fixed | 2026-09-04 with DECISION-027 (`else PACKAGES=()` + deploy gated on a non-empty push matrix) |
-| ISS-024 | scaffolding | high | Orchestrator had no `agentTokenResolver` (defaulted to `() => null`): the stale-heartbeat **restart path never once worked**, and the DECISION-027 image roll skipped with "no agent token" | fixed | 2026-09-04 — `SecretsWriter.readAgentToken` + wiring in `index.ts` |
+| ISS-024 | scaffolding | high | Orchestrator had no `agentTokenResolver` (defaulted to `() => null`): the stale-heartbeat **restart path never once worked**, and the DECISION-027 image roll skipped with "no agent token" | verified | `a0e5deb` deployed; 16:22:14Z roll: `reprovisioned:1` — new container on the pinned image |
 
 ---
 
