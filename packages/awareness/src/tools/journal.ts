@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
-import { logAudit, formatTime, sessionTimezone } from '@ll5/shared';
+import { logAudit, formatTime, sessionTimezone, capItems, pageFields, resolveOffset } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
 const INDEX = 'll5_agent_journal';
@@ -17,10 +17,12 @@ export function registerJournalTools(
     'write_journal',
     'Write a micro-journal entry that persists across sessions — observations, feedback, decisions, context, thoughts, or commitments. Default to writing: entries are cheap, append-only, and silent, and uncaptured context is lost permanently. Recording is the expectation after any meaningful event, not a judgment call — skip only a purely mechanical exchange that reveals nothing. When in doubt, write.',
     {
-      type: z.enum(['observation', 'feedback', 'decision', 'context', 'thought', 'commitment']).describe('Category of the journal entry'),
+      type: z.enum(['observation', 'feedback', 'decision', 'context', 'thought', 'commitment']).describe('Category of the journal entry. Exactly one of observation | feedback | decision | context | thought | commitment — NOT a signal value ("confirmed" is a `signal`, not a type).'),
       topic: z.string().describe('Short topic or subject line'),
       content: z.string().describe('The journal entry content'),
-      signal: z.enum(['correction', 'pattern', 'mood', 'insight', 'confirmed', 'commitment']).optional().describe('Optional signal tag for the entry'),
+      // ISS-021: the consolidate skill writes signal:"consolidated" and the
+      // backfill skill signal:"completed"; both were rejected by the enum.
+      signal: z.enum(['correction', 'pattern', 'mood', 'insight', 'confirmed', 'commitment', 'consolidated', 'completed']).optional().describe('Optional signal tag for the entry (correction | pattern | mood | insight | confirmed | commitment | consolidated | completed)'),
       session_id: z.string().optional().describe('Optional session identifier'),
     },
     async (params) => {
@@ -73,16 +75,29 @@ export function registerJournalTools(
 
   server.tool(
     'read_journal',
-    'Read journal entries. Defaults to open entries, sorted by newest first.',
+    'Read journal entries. Defaults to open entries, sorted by newest first. ' +
+      'The result is capped at ~20 KB (truncated at entry boundaries, newest kept); when more exists the ' +
+      'response carries truncated:true + next_cursor + hint — narrow with since / topic / type / status, ' +
+      'lower limit, or pass cursor to continue from where the page stopped.',
     {
       status: z.string().optional().describe('Filter by status (default: open)'),
       type: z.string().optional().describe('Filter by entry type'),
       topic: z.string().optional().describe('Text search on topic field'),
-      limit: z.number().optional().describe('Max entries to return (default: 20)'),
+      limit: z.number().min(1).max(200).optional().describe('Max entries to return (default: 20). The ~20 KB result cap applies on top of this.'),
       since: z.string().optional().describe('Only return entries created after this ISO date'),
+      cursor: z.string().optional().describe('Opaque continuation cursor from a previous truncated response (next_cursor). Omit for the first page.'),
     },
     async (params) => {
       const userId = getUserId();
+      let offset: number;
+      try {
+        offset = resolveOffset({ cursor: params.cursor });
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],
+          isError: true,
+        };
+      }
       const must: Record<string, unknown>[] = [
         { term: { user_id: userId } },
         { term: { status: params.status ?? 'open' } },
@@ -100,15 +115,18 @@ export function registerJournalTools(
         must.push({ range: { created_at: { gte: params.since } } });
       }
 
+      const limit = params.limit ?? 20;
       const result = await esClient.search({
         index: INDEX,
-        size: params.limit ?? 20,
+        size: limit,
+        from: offset,
+        track_total_hits: true,
         sort: [{ created_at: { order: 'desc' } }],
         query: { bool: { must } },
       });
 
       const tz = sessionTimezone();
-      const entries = result.hits.hits.map((hit) => {
+      const allEntries = result.hits.hits.map((hit) => {
         const src = hit._source as Record<string, unknown>;
         const created = src.created_at as string | undefined;
         const updated = src.updated_at as string | undefined;
@@ -120,11 +138,28 @@ export function registerJournalTools(
         };
       });
 
+      // ISS-019: bound the payload. `matched` is the true ES total; `total` stays
+      // the returned count (its pre-cap meaning) so small results are unchanged.
+      const rawTotal = result.hits.total;
+      const matched = typeof rawTotal === 'number' ? rawTotal : rawTotal?.value ?? allEntries.length;
+      const page = capItems(allEntries, {
+        offset,
+        hasMore: offset + allEntries.length < matched,
+        hint: 'Narrow with `since`, `topic`, `type` or `status`.',
+      });
+      const entries = page.items;
+
       return {
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({ entries, total: entries.length, tz }),
+            text: JSON.stringify({
+              entries,
+              total: entries.length,
+              tz,
+              ...(page.truncated ? { matched } : {}),
+              ...pageFields(page),
+            }),
           },
         ],
       };

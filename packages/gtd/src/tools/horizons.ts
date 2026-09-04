@@ -59,16 +59,34 @@ export function registerHorizonTools(server: McpServer, repo: HorizonRepository,
   // -------------------------------------------------------------------------
   server.tool(
     'list_horizons',
-    'List GTD horizon items by level. For h=2 (areas), includes linked project counts.',
+    'List GTD horizon items by level. For h=2 (areas), includes linked project counts. Omit `horizon` to list every level (2–5) in one call.',
     {
-      horizon: z.number().min(2).max(5).describe('Horizon level: 2 (areas), 3 (goals), 4 (vision), 5 (purpose)'),
+      // ISS-021: `horizon` was required; the coach-scan skill calls it bare to see all levels.
+      horizon: z.number().min(2).max(5).optional().describe('Horizon level: 2 (areas), 3 (goals), 4 (vision), 5 (purpose). Omit for all levels.'),
       status: z.enum(['active', 'completed', 'on_hold', 'dropped']).optional().describe('Filter by status. Default: active'),
       query: z.string().optional().describe('Free-text search in title and description'),
-      limit: z.number().optional().describe('Max results. Default: 50'),
-      offset: z.number().optional().describe('Pagination offset. Default: 0'),
+      limit: z.number().optional().describe('Max results. Default: 50 (per level when horizon is omitted)'),
+      offset: z.number().optional().describe('Pagination offset. Default: 0 (ignored when horizon is omitted)'),
     },
     async (params) => {
       const userId = getUserId();
+      if (params.horizon === undefined) {
+        const levels = [2, 3, 4, 5] as const;
+        const perLevel = await Promise.all(
+          levels.map((horizon) =>
+            repo.listHorizons(userId, { horizon, status: params.status, query: params.query, limit: params.limit }),
+          ),
+        );
+        const horizons = perLevel.flatMap((r) => r.items);
+        const total = perLevel.reduce((n, r) => n + r.total, 0);
+        const byLevel = Object.fromEntries(levels.map((h, i) => [`h${h}`, perLevel[i].total]));
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ horizons, total, by_level: byLevel }, null, 2),
+          }],
+        };
+      }
       const result = await repo.listHorizons(userId, {
         horizon: params.horizon as 2 | 3 | 4 | 5,
         status: params.status,

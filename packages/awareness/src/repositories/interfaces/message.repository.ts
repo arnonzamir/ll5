@@ -10,6 +10,8 @@ export interface MessageQueryParams {
   conversation_id?: string;
   is_group?: boolean;
   limit?: number;
+  /** Absolute offset into the result set (cursor pagination, ISS-019). Default 0. */
+  offset?: number;
 }
 
 export interface MessageRepository {

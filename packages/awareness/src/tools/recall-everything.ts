@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
-import { logAudit } from '@ll5/shared';
+import { logAudit, capItems, pageFields, resolveOffset, clipText } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
 
 // recall_everything — the single, global "what do we know about X" entry point.
@@ -177,6 +177,27 @@ interface Hit {
   highlight?: Record<string, string[]>;
 }
 
+// ISS-019: a session_history doc carries the WHOLE transcript (`messages` +
+// `transcript_text`); returning it verbatim in `data` is what produced the 1.7 MB
+// result. Sessions are represented by their summary + highlight; the transcript
+// body is replaced by its size. Every other source keeps its doc, with any single
+// string field clipped so one verbose entry cannot blow the page on its own.
+const SESSION_BODY_FIELDS = ['messages', 'transcript_text'];
+const DATA_FIELD_CLIP = 4_000;
+
+function compactSource(label: string, src: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (label === 'session' && SESSION_BODY_FIELDS.includes(k)) {
+      if (k === 'messages' && Array.isArray(v)) out.message_count = out.message_count ?? v.length;
+      if (k === 'transcript_text' && typeof v === 'string') out.transcript_chars = v.length;
+      continue;
+    }
+    out[k] = clipText(v, DATA_FIELD_CLIP);
+  }
+  return out;
+}
+
 export function registerRecallEverythingTool(
   server: McpServer,
   esClient: Client,
@@ -195,10 +216,14 @@ export function registerRecallEverythingTool(
       'For a STATUS / "did X happen / what is the latest" question, pass mode:"timeline" — it returns EVERY ' +
       'match most-recent-first with no per-source cap. With an EMPTY query + mode:"timeline" it simply returns ' +
       'the most recent sessions/items in the window (use to read back the last week). ' +
-      'The response flags (more_available) when ranking hid more than it showed, and suggests widening when thin.',
+      'The response flags (more_available) when ranking hid more than it showed, and suggests widening when thin. ' +
+      'The result is capped at ~20 KB (cut at item boundaries; session transcripts are summarized, never inlined): when more exists it ' +
+      'carries truncated:true + next_cursor + hint — narrow with sources / a more specific query / smaller session_days, lower limit, ' +
+      'or pass cursor to continue.',
     {
       query: z.string().optional().describe('Topic / name / phrase to look up (Hebrew or English). Leave empty to just pull the most recent items in the window (pair with mode:"timeline").'),
-      limit: z.number().min(1).max(100).optional().describe('Max results returned. Default 30.'),
+      limit: z.number().min(1).max(100).optional().describe('Max results returned. Default 30. The ~20 KB result cap applies on top of this.'),
+      cursor: z.string().optional().describe('Opaque continuation cursor from a previous truncated response (next_cursor). Omit for the first page.'),
       per_source_cap: z
         .number()
         .min(1)
@@ -239,6 +264,15 @@ export function registerRecallEverythingTool(
       const queryText = (params.query ?? '').trim();
       const sessionDays = params.session_days ?? SESSION_DEFAULT_DAYS;
       const allSessions = params.all_sessions ?? false;
+      let offset: number;
+      try {
+        offset = resolveOffset({ cursor: params.cursor });
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],
+          isError: true,
+        };
+      }
 
       // Default sweep = ALL distilled stores + the recent session window. A sources filter
       // can narrow to specific stores (incl. "session"). Sessions are time-bounded below.
@@ -375,7 +409,7 @@ export function registerRecallEverythingTool(
               timestamp: pickTimestamp(h._source),
               summary: summarize(label, h._source),
               highlight: hl,
-              data: h._source,
+              data: compactSource(label, h._source),
             });
           }
         }
@@ -413,7 +447,7 @@ export function registerRecallEverythingTool(
               const hl = h.highlight ? Object.values(h.highlight).flat()[0] ?? null : null;
               flattened.push({
                 source: 'session', id: h._id, score: h._score, timestamp: pickTimestamp(h._source),
-                summary: summarize('session', h._source), highlight: hl, data: h._source,
+                summary: summarize('session', h._source), highlight: hl, data: compactSource('session', h._source),
               });
               bySource.session = (bySource.session ?? 0) + 1;
             }
@@ -442,7 +476,15 @@ export function registerRecallEverythingTool(
             (f.score || 0) / maxScore + RECENCY_WEIGHT * recency(f.timestamp);
           flattened.sort((a, b) => rank(b) - rank(a));
         }
-        const results = flattened.slice(0, limit);
+        // ISS-019: page the ranked list from the cursor offset, then bound the
+        // payload at item boundaries. `total` keeps its pre-cap meaning (returned count).
+        const window = flattened.slice(offset, offset + limit);
+        const page = capItems(window, {
+          offset,
+          hasMore: flattened.length > offset + limit,
+          hint: 'Narrow with `sources:[...]`, a more specific `query`, or a smaller `session_days`.',
+        });
+        const results = page.items;
         const total = results.length;
 
         // True matched-per-source (from the agg) vs what we actually returned → the cap signal.
@@ -513,6 +555,7 @@ export function registerRecallEverythingTool(
                 total,
                 by_source: bySource,
                 results,
+                ...pageFields(page),
                 ...(capped
                   ? {
                       more_available: moreAvailable,

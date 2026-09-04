@@ -260,11 +260,13 @@ describe('query_im_messages tool handler', () => {
       keyword: 'urgent',
       conversation_id: 'conv-1',
       is_group: false,
-      limit: 25,
+      // ISS-019: the handler asks for one probe row past the page (limit + 1)
+      // so `truncated`/`next_cursor` are exact; the probe row is never returned.
+      limit: 26,
     });
   });
 
-  it('omits missing keys as undefined (handler does not invent defaults)', async () => {
+  it('omits missing filter keys as undefined; only the page size (default 50 + 1 probe) is set', async () => {
     const query = vi.fn(async () => []);
     const repo = makeMessageRepo({ query });
     const tools = captureTools((s) => registerMessageTools(s, repo, getUserId));
@@ -276,7 +278,8 @@ describe('query_im_messages tool handler', () => {
     expect(params.sender).toBe('Alice');
     expect(params.app).toBeUndefined();
     expect(params.keyword).toBeUndefined();
-    expect(params.limit).toBeUndefined();
+    expect(params.limit).toBe(51); // ISS-019: default page 50 + 1 probe row
+    expect(params.offset).toBeUndefined(); // first page: no offset sent
   });
 
   it('returns messages and total in the response envelope', async () => {

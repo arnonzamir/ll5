@@ -71,18 +71,38 @@ export function registerFactTools(
     'Create a new fact or update an existing one. If id is provided, updates that fact.',
     {
       id: z.string().optional().describe('Fact ID to update. Omit to create new.'),
-      type: z.enum(FACT_TYPES).describe('Fact type'),
-      category: z.string().describe('Free-text category (e.g. food, work, family)'),
-      content: z.string().describe('The fact itself, in natural language'),
-      provenance: z.enum(PROVENANCE_VALUES).describe('How this fact was learned'),
-      confidence: z.number().min(0).max(1).describe('Confidence score 0.0-1.0'),
+      // ISS-021: type/category/provenance/confidence were all required and the
+      // agent sent {content, tags} or {key, value}. Only the fact text is
+      // required now (content, or `value`); the rest default and the applied
+      // defaults are echoed back as `defaults_applied`.
+      type: z.enum(FACT_TYPES).optional().describe('Fact type. Default: other'),
+      category: z.string().optional().describe('Free-text category (e.g. food, work, family). Default: general (or `key` when given)'),
+      content: z.string().optional().describe('The fact itself, in natural language. Required unless `value` is given.'),
+      key: z.string().optional().describe('Alias: a short slug for the fact; used as category when category is absent'),
+      value: z.string().optional().describe('Alias of content'),
+      provenance: z.enum(PROVENANCE_VALUES).optional().describe('How this fact was learned. Default: observed'),
+      confidence: z.number().min(0).max(1).optional().describe('Confidence score 0.0-1.0. Default: 0.7'),
       tags: z.array(z.string()).optional().describe('Tags for categorization'),
       source: z.string().optional().describe('Where this fact was learned'),
       valid_from: z.string().optional().describe('ISO 8601 date when this fact became true'),
       valid_until: z.string().optional().describe('ISO 8601 date when this fact expires'),
     },
-    async (params) => {
+    async (rawParams) => {
       const userId = getUserId();
+      const content = rawParams.content ?? rawParams.value;
+      if (!content || !content.trim()) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: '`content` (the fact text) is required; `value` is accepted as an alias' }) }],
+          isError: true,
+        };
+      }
+      const defaultsApplied: Record<string, unknown> = {};
+      const type = rawParams.type ?? (defaultsApplied.type = 'other');
+      const category = rawParams.category ?? rawParams.key ?? (defaultsApplied.category = 'general');
+      const provenance = rawParams.provenance ?? (defaultsApplied.provenance = 'observed');
+      const confidence = rawParams.confidence ?? (defaultsApplied.confidence = 0.7);
+      const params = { ...rawParams, type, category, content, provenance, confidence };
+
       const result = await factRepo.upsert(userId, {
         id: params.id,
         type: params.type,
@@ -110,7 +130,11 @@ export function registerFactTools(
         content: [
           {
             type: 'text' as const,
-            text: JSON.stringify({ fact: result.fact, created: result.created }),
+            text: JSON.stringify({
+              fact: result.fact,
+              created: result.created,
+              ...(Object.keys(defaultsApplied).length > 0 ? { defaults_applied: defaultsApplied } : {}),
+            }),
           },
         ],
       };
