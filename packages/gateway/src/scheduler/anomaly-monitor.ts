@@ -621,6 +621,34 @@ function buildChecks(): Check[] {
       suggestion: 'No ll5_session_history write in 24h — the session-save Stop hook (ll5-run .claude/hooks/session-save.sh → POST /sessions) is failing. Its curl -sf swallows errors: check the gateway log for POST /sessions 413/409/500, and the transcript size vs the route body cap. While this fires, recent_sessions / recall_everything(timeline) — the post-compaction re-ground sources — are STALE.',
       ageMinutes: (m) => m.lastDocAgeMinutes('ll5_session_history', 'indexed_at', [], 'user_id.keyword'),
     },
+    // Durable knowledge liveness (ISS-002). The narratives and the knowledge base are
+    // built ONLY from note_observation writes; they drifted 963 → 11 per month over
+    // Jun–Sep 2026 with no alert because nothing watched the write side. A full day
+    // with zero observations while the agent is alive is the signal. Self-arming.
+    {
+      kind: 'staleness',
+      key: 'knowledge.observations_stale',
+      label: 'Durable knowledge writes',
+      maxMinutes: 24 * 60,
+      severity: 'warning',
+      suggestion: 'No note_observation in 24h — the agent is journaling without writing observations, so narratives and the knowledge base are not growing (ISS-002). Check the CLAUDE.md default-write rule and the nightly consolidate tally (CONSOLIDATE-TALLY observations=…).',
+      ageMinutes: (m) => m.lastDocAgeMinutes('ll5_knowledge_observations', 'created_at', []),
+    },
+    // Controlled daily restart (ISS-016). session-start.sh journals a
+    // `session-restart` context entry on every fresh (non-continue) session; the
+    // nightly consolidate hands the day over with ~/.ll5/restart-requested and the
+    // in-container watcher restarts within minutes. No such entry for 26h means
+    // the hand-off or the watcher is broken and the session is aging again.
+    // Self-arming: arms after the first fresh start writes the entry.
+    {
+      kind: 'staleness',
+      key: 'agent.daily_restart_missing',
+      label: 'Daily session restart',
+      maxMinutes: 26 * 60,
+      severity: 'warning',
+      suggestion: 'No `session-restart` journal entry in 26h — the controlled daily restart did not happen. Check ~/.ll5/restart-requested (written by the consolidate skill), the watcher log ~/.ll5/mcp-autoheal-server.log (maybe_fresh_restart), and ~/.ll5/last-fresh-start in the agent container.',
+      ageMinutes: (m) => m.lastDocAgeMinutes('ll5_agent_journal', 'created_at', [{ term: { 'topic.keyword': 'session-restart' } }]),
+    },
     // Forward work stalled (DECISION-018 §4): the daily loop should be BOOKING
     // prep (decision=ping_later, ground truth since 2026-07-01). No ping_later
     // moment for 48h means the calendar-review prep obligation isn't being

@@ -260,6 +260,35 @@ describe('AnomalyMonitor — behavior checks (DECISION-018/020)', () => {
     expect(await priv(empty).runStaleness(checkByKey(empty, 'telemetry.eval_moments_stale'))).toBe(false);
   });
 
+  it('observations_stale (ISS-002) and daily_restart_missing (ISS-016): registered with the right index/filter and thresholds, self-arming', async () => {
+    const reg = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    const obs = checkByKey(reg, 'knowledge.observations_stale');
+    expect(obs.kind).toBe('staleness');
+    expect(obs.maxMinutes).toBe(1440);
+    const restart = checkByKey(reg, 'agent.daily_restart_missing');
+    expect(restart.kind).toBe('staleness');
+    expect(restart.maxMinutes).toBe(1560);
+
+    // A 3-day observation drought fires; the query is the knowledge observations index.
+    const oldTs = new Date(Date.now() - 3 * 24 * 3_600_000).toISOString();
+    const search = vi.fn(async () => ({ hits: { hits: [{ _source: { created_at: oldTs } }] } }));
+    const stale = mk({ search } as unknown as Client);
+    expect(await priv(stale).runStaleness(checkByKey(stale, 'knowledge.observations_stale'))).toBe(true);
+    expect((search.mock.calls[0][0] as { index: string }).index).toBe('ll5_knowledge_observations');
+
+    // Restart check filters the journal on topic.keyword = session-restart; a fresh entry is quiet.
+    const search2 = vi.fn(async () => ({ hits: { hits: [{ _source: { created_at: new Date(Date.now() - 3_600_000).toISOString() } }] } }));
+    const fresh = mk({ search: search2 } as unknown as Client);
+    expect(await priv(fresh).runStaleness(checkByKey(fresh, 'agent.daily_restart_missing'))).toBe(false);
+    const q = search2.mock.calls[0][0] as { index: string; query: { bool: { filter: unknown[] } } };
+    expect(q.index).toBe('ll5_agent_journal');
+    expect(q.query.bool.filter).toEqual([{ term: { user_id: 'u1' } }, { term: { 'topic.keyword': 'session-restart' } }]);
+
+    // Never restarted (no entry) → not armed → no alert.
+    const empty = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    expect(await priv(empty).runStaleness(checkByKey(empty, 'agent.daily_restart_missing'))).toBe(false);
+  });
+
   it('session_save_stale (ISS-014): 24h liveness on ll5_session_history.indexed_at, scoped on user_id.keyword (dynamic-mapped index)', async () => {
     const reg = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
     const check = checkByKey(reg, 'agent.session_save_stale');

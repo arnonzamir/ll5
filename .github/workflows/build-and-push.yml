@@ -102,12 +102,20 @@ jobs:
             CHANGED=$(git diff --name-only "$BASE" HEAD)
             # packages/shared/ OR packages/ll5-run-shared/ OR docker/ OR
             # scripts/render-mcp-config.ts → rebuild all infra packages
-            SHARED_CHANGED=$(echo "$CHANGED" | grep -cE "packages/(shared|ll5-run-shared)/" || true)
+            SHARED_CHANGED=$(echo "$CHANGED" | grep -c "packages/shared/" || true)
+            # packages/ll5-run-shared/ is the AGENT's content (CLAUDE.md, skills,
+            # prompts) baked into ll5-run-claude by docker/Dockerfile.ll5-run-claude —
+            # it must rebuild run-claude (and roll the agent), not the 10 MCPs.
+            RUNSHARED_CHANGED=$(echo "$CHANGED" | grep -c "packages/ll5-run-shared/" || true)
             DOCKER_CHANGED=$(echo "$CHANGED" | grep -c "docker/" || true)
             RENDER_CHANGED=$(echo "$CHANGED" | grep -c "scripts/render-mcp-config.ts" || true)
 
-            # Variants are never built on push — they have their own CI repos
+            # Variants are never built on push — EXCEPT run-claude when its content
+            # (packages/ll5-run-shared/) changed (DECISION-027: ll5 builds that image).
             PACKAGES=("${INFRA_PACKAGES[@]}")
+            if [[ "$RUNSHARED_CHANGED" -gt 0 && ( "$SHARED_CHANGED" -gt 0 || "$DOCKER_CHANGED" -gt 0 || "$RENDER_CHANGED" -gt 0 ) ]]; then
+              PACKAGES+=("run-claude")
+            fi
 
             if [[ "$SHARED_CHANGED" -eq 0 && "$DOCKER_CHANGED" -eq 0 && "$RENDER_CHANGED" -eq 0 ]]; then
               FILTERED=()
@@ -116,6 +124,9 @@ jobs:
                   FILTERED+=("$pkg")
                 fi
               done
+              if [[ "$RUNSHARED_CHANGED" -gt 0 ]]; then
+                FILTERED+=("run-claude")
+              fi
               if [[ ${#FILTERED[@]} -gt 0 ]]; then
                 PACKAGES=("${FILTERED[@]}")
               else

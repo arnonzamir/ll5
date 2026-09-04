@@ -1,7 +1,7 @@
 # DECISION-028 — Scaffolding subtraction: fewer, load-bearing loops, checks and tools
 
 **Date:** 2026-09-04
-**Status:** proposed
+**Status:** reviewed 2026-09-04 — approved in part (see "Review" at the end); implementation pending
 **Related:** ISS-008, ISS-009, ISS-010, ISS-017, ISS-020, ISS-022 (`docs/ISSUES.md`); DECISION-015 (narrative loop), DECISION-025 (active context / reconcile), DECISION-027 (single agent image — the deploy path every agent-side change here rides on); baseline `docs/reviews/2026-09-04/agent-baseline.md`.
 
 `docs/purpose.md`: *"No custom event systems, no internal message buses, no background processing pipelines. If Claude can do it in conversation, don't build infrastructure for it. The question for every component: does this need to exist, or can Claude handle it?"* This proposal asks that question of every loop, scheduler, check and tool the baseline measured, with evidence from the same 15-day window (2026-08-21 → 2026-09-04, prod ES + a read-only look at Postgres). It changes no code. Nothing here is a judgment on why the scaffolding was built — most of it was a correct response to a real silent outage — the bar is *fewer, load-bearing* checks, not none.
@@ -231,3 +231,17 @@ Expected baseline deltas after 1–8: tool calls in `ll5_audit_log` per 15 days 
 - The alert spine gets quieter for the agent without getting quieter for the phone.
 - `ll5_reconcile_metrics` and the reconcile columns remain as history; a future proposal can rebuild on them.
 - Every agent-side step (4, 5, 6, and the loop changes) depends on the DECISION-027 deploy path and should be sequenced after ISS-001/ISS-014's agent-side fixes, which share the same PR train.
+
+
+## Review — Arnon, 2026-09-04
+
+| # | Decision |
+|---|---|
+| 1 Reconcile subsystem | **Approved — retire.** |
+| 2 `NarrativeConsolidationScheduler` | **Approved — retire**, on the confirmation that the in-container `claude -p` narrative worker (DECISION-015) is the live driver and `loop.narrative_consolidation` alerts if it dies. |
+| 3 Duplicate selector + gate | **Approved** (goes with #1). |
+| 4 `recall_lessons` per prompt | **Not "remove".** Requirement restated: the agent must get **all relevant context, all the time**. Re-scoped: (a) SessionStart loads **all** active lessons (68 one-liners) + user model + active_context + recent sessions — refreshed daily by the controlled restart; (b) the per-turn hook stays but queries the envelope's *inner text* (and, for inbound contact messages, the sender/subject) so it surfaces the lesson about *that* person/topic, and skips non-user-facing scheduler rows; (c) measure whether per-turn injections are ever cited before any further change. "Drop later" is off the table. |
+| 5 `record_moment` → Stop-hook sentinel | **Approved**, with the mirror-strip test as a hard requirement; the offline proactivity eval dataset (`tools/eval/`, used for prompt improvement) keeps all four fields. Sequence after ISS-001's 7-day verification so the eval baseline isn't moved twice. |
+| 6 Narrative loop gate + UI poll fix | **Approved.** |
+| 7 Schedulers / alert spine | **Approved only for the clear retire/merge rows**: `JournalHealthScheduler` retire, `TrayItemExpiry`+`PermissionRequestExpiry` merge, `HealthPollingScheduler` gate, `ReconcileGovernorScheduler` retire (with #1), alert re-notify cadence. **Deferred, with data required first:** `CharacterRefreshScheduler` (CLAUDE.md survives compaction, but conversational drift over long sessions is real and narrative work will add long-horizon load — keep the 4h refresh until the daily restart + ~120K context cap are live and the eval's mismatch/suppress metrics per hour-since-refresh say otherwise) and `GTDHealthScheduler` (the mid-day overdue/inbox catch; candidate compromise when revisited: morning brief + evening close + a nudge gated on *change* since the last check). |
+| 8 Tool count | **Approved** — in two passes, the obvious ~40 first; re-measure deferral (ISS-020) after. |

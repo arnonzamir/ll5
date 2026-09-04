@@ -4,6 +4,14 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — Phase 2 (knowledge chain) + controlled daily restart (ISS-016) + DECISION-028 reviewed
+
+- **Phase 2 (ISS-002):** `packages/ll5-run-shared/CLAUDE.md` default-write rule split — journal **and** `note_observation` whenever a subject can be named (the `or` produced 4,952 journal entries and 18 observations in 15 days); `note_observation`/`upsert_fact`/`create_tickler` field names written into the persona (Track B's ISS-021 text); the `consolidate` skill gains Step 1.4 (write observations for every subject the day named that has none), a machine-readable `CONSOLIDATE-TALLY …` journal line, and the restart hand-off; `knowledge.observations_stale` (24h) added to the anomaly monitor.
+- **Controlled daily restart (ISS-016, agent repo `[skip ci]` commit):** `consolidate` ends with `touch ~/.ll5/restart-requested`; the in-container watcher restarts the agent into a **fresh session** at the next idle tick (forced after 30 min), or when no fresh start in 26h, or when the last turn's context ≥ 120K tokens (the live session was at ~530–740K cached tokens per turn); `ll5-server` relaunches without `--continue`; `session-start.sh` journals a `session-restart` entry and frames it as deliberate; `agent.daily_restart_missing` (26h) watches for it. Compaction becomes the exception.
+- **CI:** `packages/ll5-run-shared/` changes now rebuild **`run-claude`** (and roll the agent) instead of the 10 MCPs — the agent's content lives in ll5 but ships in the agent image.
+- **DECISION-028 reviewed by Arnon:** 1/2/3/6/8 approved; 4 re-scoped to "all relevant context, all the time" (load all lessons at SessionStart, per-turn recall on the inner text, measure before any drop); 5 approved with the mirror-strip test, after ISS-001's verification window; 7 approved for the clear retire/merge rows only, `CharacterRefresh` and `GTDHealth` deferred pending data. Recorded in the decision doc.
+- Tests: gateway 816/816 (anomaly +1), agent hook suites green, `bash -n` clean.
+
 ## 2026-09-04 — ISS-025: CI push diff now spans the whole push (was `HEAD~1`)
 
 The Track B push (`7100f4c` merge + `f81cc58` tip) rebuilt only `gateway`: `set-matrix` diffed `HEAD~1..HEAD`, which for a merge-tipped push is the tip's first-parent delta. The five MCP images with the caps/schema fixes were not rebuilt (the memory's multi-merge trap, hit again). Fix: `fetch-depth: 0` and `git diff "${{ github.event.before }}" HEAD` (fallback `HEAD~1` when `before` is zeros/unknown). The five were re-dispatched by hand (`-f packages=personal-knowledge,awareness,messaging,gtd,google`).

@@ -23,6 +23,7 @@ Everything durable you write here — promotions and pre-staged groundings — p
 1. **Load raw entries**: `read_journal(status: "open", limit: 100)`.
 2. **Consolidate by topic**: merge related entries into one concise `write_journal(type: "observation", topic, content, signal: "consolidated")` and `resolve_journal` the sources. Consolidate, don't append. Be shorter than the sum of sources.
 3. **Update stable user-model sections** with what was genuinely learned today (`communication`, `relationships`, `routines`, `goals`, `work`) — only the sections that changed; merge into existing content, don't rewrite.
+4. **Observations for every subject the day named (ISS-002).** For each consolidated topic that names a person, place, group or topic, check `recall({ subjects, since: <today> })`; if the day's events produced **no** `note_observation` for that subject, write one now from the consolidated entry (`subjects`, `text`, `source: "journal"`, `source_id: <journal id>`). The narratives and the knowledge base are built only from observations — a day that lives only in the journal is a day the system forgets.
 
 ## Step 2 — Promote on repetition
 
@@ -76,7 +77,12 @@ A DROP is a save, not a failure — it's a confabulation or a misattribution cau
    ```
    Keep it tight — the highest-value items for the next few days, not all 14 days of noise. Drop stale ones each pass.
 2. **Promotions → their durable stores** (the reviewer-approved versions), then `resolve_journal` the source entries that are now promoted.
-3. **Journal the pass**: one `write_journal(type: "context")` line — what you consolidated, what you promoted, how many items you pre-staged, and what the reviewer dropped/fixed (so the gate's work is visible).
+3. **Journal the pass**: one `write_journal(type: "context", topic: "consolidation-pass")` whose content STARTS with a machine-readable tally line, then the prose:
+   ```
+   CONSOLIDATE-TALLY consolidated=<n> resolved=<n> observations=<n> promoted_facts=<n> promoted_people=<n> user_model_sections=<n> prestaged=<n> reviewer_dropped=<n> reviewer_fixed=<n>
+   ```
+   The anomaly monitor and the baseline re-measure read this line — it is how "did the nightly pass actually promote anything" becomes a number instead of a feeling.
+4. **Hand the day over (controlled daily restart, ISS-016).** As the very last step, `Bash: touch ~/.ll5/restart-requested`. The in-container watcher then restarts you into a **fresh session** at the next idle moment (within minutes): the previous session's tail is in `recent_sessions`, `active_context` is what you just wrote, and SessionStart re-grounds from the stores. This is deliberate — it keeps the context small and the grounding fresh, instead of a 7-generation compaction chain. Do not skip it.
 
 ---
 
