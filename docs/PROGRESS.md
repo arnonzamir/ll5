@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — Track B verified live: MCP results capped, schemas tolerant (ISS-019/021)
+
+After the five-MCP dispatch (run 33897108176): `read_journal(status:open, limit:100)` returns 19,599 chars / 23 items with `truncated:true`, `next_cursor`, and a narrowing hint (it was ~60 KB); `list_horizons({})` is accepted; zero `tool-results/` spill files in the live session since the roll. ISS-019 and ISS-021 → verified.
+
 ## 2026-09-04 — Phase 2 (knowledge chain) + controlled daily restart (ISS-016) + DECISION-028 reviewed
 
 - **Phase 2 (ISS-002):** `packages/ll5-run-shared/CLAUDE.md` default-write rule split — journal **and** `note_observation` whenever a subject can be named (the `or` produced 4,952 journal entries and 18 observations in 15 days); `note_observation`/`upsert_fact`/`create_tickler` field names written into the persona (Track B's ISS-021 text); the `consolidate` skill gains Step 1.4 (write observations for every subject the day named that has none), a machine-readable `CONSOLIDATE-TALLY …` journal line, and the restart hand-off; `knowledge.observations_stale` (24h) added to the anomaly monitor.
