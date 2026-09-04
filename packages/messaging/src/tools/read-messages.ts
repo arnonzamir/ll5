@@ -5,7 +5,14 @@ import type { AccountRepository } from '../repositories/interfaces/account.repos
 import type { ConversationRepository } from '../repositories/interfaces/conversation.repository.js';
 import { EvolutionClient } from '../clients/evolution.client.js';
 import { getConversationPriority } from '../utils/permission-checker.js';
-import { formatTime, sessionTimezone } from '@ll5/shared';
+import { formatTime, sessionTimezone, capItems, pageFields, resolveOffset } from '@ll5/shared';
+
+const SUPPORTED_PLATFORMS = ['whatsapp', 'telegram'] as const;
+type SupportedPlatform = (typeof SUPPORTED_PLATFORMS)[number];
+
+function isSupportedPlatform(p: string): p is SupportedPlatform {
+  return (SUPPORTED_PLATFORMS as readonly string[]).includes(p);
+}
 
 export function registerReadMessagesTool(
   server: McpServer,
@@ -16,19 +23,53 @@ export function registerReadMessagesTool(
 ): void {
   server.tool(
     'read_messages',
-    'Read recent messages from a conversation. Only works for conversations in agent or input mode.',
+    'Read recent messages from a WhatsApp or Telegram conversation (the messaging MCP\'s own accounts). Only works for conversations in agent or input mode. ' +
+      'For Slack, SMS, email or any other app, use awareness query_im_messages({ app, conversation_id }) — those are phone-mirrored notifications, not messaging accounts. ' +
+      'The result is capped at ~20 KB (cut at message boundaries): when more exists it carries truncated:true + next_cursor + hint — ' +
+      'narrow with since, lower limit, or pass cursor to continue.',
     {
-      platform: z.enum(['whatsapp', 'telegram']).describe('Platform'),
+      // ISS-021: a free string, validated in the handler, so an unsupported
+      // platform ("slack") gets an actionable redirect instead of a bare -32602.
+      platform: z.string().describe('Platform: "whatsapp" or "telegram". Other apps (slack, sms, …) are NOT here — use awareness query_im_messages.'),
       conversation_id: z.string().describe('Platform-specific conversation ID'),
-      limit: z.number().optional().describe('Max messages to return (default: 20)'),
+      limit: z.number().optional().describe('Max messages to return (default: 20). The ~20 KB result cap applies on top of this.'),
       since: z.string().optional().describe('Only return messages after this ISO 8601 timestamp'),
+      cursor: z.string().optional().describe('Opaque continuation cursor from a previous truncated response (next_cursor). Omit for the first page.'),
     },
     async (params) => {
       const userId = getUserId();
       const limit = params.limit ?? 20;
+      const platform = params.platform.trim().toLowerCase();
+
+      if (!isSupportedPlatform(platform)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              error: 'UNSUPPORTED_PLATFORM',
+              platform: params.platform,
+              supported: SUPPORTED_PLATFORMS,
+              hint:
+                `"${params.platform}" is not a messaging-MCP account. Slack, SMS, email and other apps are mirrored from the phone as notifications — ` +
+                `read them with awareness query_im_messages({ app: "${platform}", conversation_id: "${params.conversation_id}", limit: ${limit} }).`,
+            }),
+          }],
+          isError: true,
+        };
+      }
+
+      let offset: number;
+      try {
+        offset = resolveOffset({ cursor: params.cursor });
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],
+          isError: true,
+        };
+      }
 
       // Check permission via unified notification rules
-      const priority = await getConversationPriority(pool, userId, params.platform, params.conversation_id);
+      const priority = await getConversationPriority(pool, userId, platform, params.conversation_id);
       if (priority === 'ignore') {
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ error: 'PERMISSION_DENIED', priority: 'ignore' }) }],
@@ -37,7 +78,7 @@ export function registerReadMessagesTool(
       }
 
       // Look up conversation for metadata (account_id, etc.)
-      const conversation = await conversationRepo.get(userId, params.platform, params.conversation_id);
+      const conversation = await conversationRepo.get(userId, platform, params.conversation_id);
       if (!conversation) {
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ error: 'CONVERSATION_NOT_FOUND' }) }],
@@ -47,8 +88,8 @@ export function registerReadMessagesTool(
 
       const sinceDate = params.since ? new Date(params.since) : undefined;
 
-      if (params.platform === 'whatsapp') {
-        return await readWhatsAppMessages(userId, conversation.account_id, params.conversation_id, limit, sinceDate, accountRepo);
+      if (platform === 'whatsapp') {
+        return await readWhatsAppMessages(userId, conversation.account_id, params.conversation_id, limit, offset, sinceDate, accountRepo);
       } else {
         return await readTelegramMessages(userId, conversation.account_id, params.conversation_id, limit, sinceDate, accountRepo);
       }
@@ -61,6 +102,7 @@ async function readWhatsAppMessages(
   accountId: string,
   conversationId: string,
   limit: number,
+  offset: number,
   since: Date | undefined,
   accountRepo: AccountRepository,
 ) {
@@ -80,12 +122,15 @@ async function readWhatsAppMessages(
   }
 
   const client = new EvolutionClient(account.api_url, account.instance_name, account.api_key);
-  const rawResult = await client.fetchMessages(conversationId, limit);
+  // ISS-019: Evolution has no offset — fetch through the requested page plus one
+  // probe row, then slice client-side. `since` is applied before paging so the
+  // cursor walks the filtered list.
+  const rawResult = await client.fetchMessages(conversationId, offset + limit + 1);
 
   // Defensive: ensure rawMessages is always an array
   const rawMessages = Array.isArray(rawResult) ? rawResult : [];
 
-  const messages = rawMessages
+  const filtered = rawMessages
     .map((msg) => {
       const text =
         msg.message?.conversation ||
@@ -111,11 +156,19 @@ async function readWhatsAppMessages(
     .filter((m) => {
       if (!since) return true;
       return new Date(m.timestamp) > since;
-    })
-    .slice(0, limit);
+    });
+
+  const hasMore = filtered.length > offset + limit;
+  const page = capItems(filtered.slice(offset, offset + limit), {
+    offset,
+    hasMore,
+    hint: 'Narrow with `since`.',
+    // The envelope is pretty-printed; measure the same way so the cap is real.
+    measure: (m) => JSON.stringify(m, null, 2).length,
+  });
 
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify({ messages, tz: sessionTimezone() }, null, 2) }],
+    content: [{ type: 'text' as const, text: JSON.stringify({ messages: page.items, tz: sessionTimezone(), ...pageFields(page) }, null, 2) }],
   };
 }
 

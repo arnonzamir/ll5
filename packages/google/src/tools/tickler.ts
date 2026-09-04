@@ -110,19 +110,57 @@ export function registerTicklerTools(
   // ---------------------------------------------------------------------------
   // create_tickler
   // ---------------------------------------------------------------------------
+  /**
+   * ISS-021: resolve the tickler date from `due_date` or one of its accepted
+   * aliases. An ISO datetime (`start`) contributes its wall-clock HH:MM as
+   * due_time when the caller did not pass one.
+   */
+  function resolveTicklerDue(p: {
+    due_date?: string;
+    date?: string;
+    start_date?: string;
+    start?: string;
+    due_time?: string;
+  }): { due_date: string; due_time?: string } | { error: string } {
+    const raw = p.due_date ?? p.date ?? p.start_date ?? p.start;
+    if (!raw || !raw.trim()) {
+      return { error: 'due_date is required (YYYY-MM-DD). Also accepted: date, start_date, or start (ISO date/datetime).' };
+    }
+    const m = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(raw.trim());
+    if (!m) {
+      return { error: `Invalid due_date ${JSON.stringify(raw)} — expected YYYY-MM-DD (optionally followed by THH:MM).` };
+    }
+    return { due_date: m[1], due_time: p.due_time ?? m[2] };
+  }
+
   server.tool(
     'create_tickler',
     'Create a tickler reminder on the LL5 System calendar. Use for temporal nudges — things to think about or prepare for at a certain time. NOT for meetings or appointments (use create_event for those).',
     {
       title: z.string().describe('What to be reminded about'),
-      due_date: z.string().describe('When this should surface (YYYY-MM-DD)'),
+      // ISS-021: `due_date` was the only accepted key; the agent sent `date`,
+      // `start_date` and `start` (ISO datetime) in the live transcript. All four
+      // are accepted; the handler reports a clear error when none is present.
+      due_date: z.string().optional().describe('When this should surface (YYYY-MM-DD). Required unless `date`, `start_date` or `start` is given.'),
+      date: z.string().optional().describe('Alias of due_date (YYYY-MM-DD)'),
+      start_date: z.string().optional().describe('Alias of due_date (YYYY-MM-DD)'),
+      start: z.string().optional().describe('Alias: ISO date or datetime (YYYY-MM-DD or YYYY-MM-DDTHH:MM…). The date part becomes due_date; the wall-clock HH:MM becomes due_time when due_time is not given.'),
       due_time: z.string().optional().describe('Specific time (HH:MM, 24h format). Default: 08:00. Pass "all_day" to create an all-day event.'),
       description: z.string().optional().describe('Additional context or notes'),
       category: z.string().optional().describe('Category: health, admin, planning, financial, social, errands'),
       recurrence: z.string().optional().describe('Recurrence pattern. Friendly names: "daily", "weekly", "weekdays", "monthly", "yearly". Or a raw RRULE string like "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR". Omit for one-off ticklers.'),
       kind: z.enum(['reminder', 'instruction']).optional().describe('"reminder" (default) = a user-facing nudge that surfaces to the user when due (a normal tickler). "instruction" = a private note to your FUTURE SELF that fires as an [Agent Instruction] system message — NO user popup, agent-private. Use it to schedule your own review/planning at a contextual lead time you choose ("consider summer plans — vacations, kids\' activities", "plan Itamar\'s gift, 2 weeks ahead"). An instruction\'s `description` MUST be complete and self-contained: WHAT to do, WHEN and WHY you scheduled it (and on what date), the anchor it relates to, and every bit of context a future session needs to act WITHOUT re-deriving.'),
     },
-    async ({ title, due_date, due_time, description, category, recurrence, kind }) => {
+    async (params) => {
+      const { title, description, category, recurrence, kind } = params;
+      const due = resolveTicklerDue(params);
+      if ('error' in due) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: due.error }) }],
+          isError: true,
+        };
+      }
+      const { due_date, due_time } = due;
       const ticklerKind = kind ?? 'reminder';
       const isInstruction = ticklerKind === 'instruction';
       const userId = getUserId();

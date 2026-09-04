@@ -48,6 +48,8 @@ export interface RecallFilters {
   query?: string;
   since?: string;
   limit?: number;
+  /** Absolute offset into the newest-first result set (cursor pagination, ISS-019). Default 0. */
+  offset?: number;
 }
 
 export type NarrativeStatus = 'active' | 'dormant' | 'closed';

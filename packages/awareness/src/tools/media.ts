@@ -148,12 +148,24 @@ export function registerMediaTools(
     'Link a media file to any entity (person, action, project, place, etc.). Uses a deterministic ID to prevent duplicate links.',
     {
       media_id: z.string().describe('ID of the media file'),
-      entity_type: z.string().describe('Type of entity (e.g. person, action, project, place)'),
-      entity_id: z.string().describe('ID of the entity to link to'),
+      // ISS-021: the agent sends link_type / link_id for the target; accept both spellings.
+      entity_type: z.string().optional().describe('Type of entity (e.g. person, action, project, place, journal_topic). Required unless link_type is given.'),
+      entity_id: z.string().optional().describe('ID of the entity to link to. Required unless link_id is given.'),
+      link_type: z.string().optional().describe('Alias of entity_type'),
+      link_id: z.string().optional().describe('Alias of entity_id'),
     },
-    async (params) => {
+    async (rawParams) => {
       const userId = getUserId();
       const now = new Date().toISOString();
+      const entityType = rawParams.entity_type ?? rawParams.link_type;
+      const entityId = rawParams.entity_id ?? rawParams.link_id;
+      if (!entityType || !entityId) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'entity_type and entity_id are required (link_type / link_id are accepted aliases)' }) }],
+          isError: true,
+        };
+      }
+      const params = { media_id: rawParams.media_id, entity_type: entityType, entity_id: entityId };
       const linkId = `${params.media_id}_${params.entity_type}_${params.entity_id}`;
 
       // Verify the media belongs to the caller before creating a link.

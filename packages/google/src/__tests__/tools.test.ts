@@ -532,6 +532,69 @@ describe('create_tickler tool handler', () => {
     expect(parsed.due_date).toBe('2026-04-10');
   });
 
+  // ISS-021: the live agent sent `date`, `start`/`end` and `start_date` instead of
+  // `due_date` (3 of 3 create_tickler failures). All are accepted now.
+  describe('ISS-021 due_date aliases', () => {
+    async function registerWithSchemas() {
+      const { calendarConfigRepo, esRepo, upsertFromGoogle } = setupTickler();
+      const { registerTicklerTools } = await import('../tools/tickler.js');
+      const { z } = await import('zod');
+      const captured = new Map<string, { schema: Record<string, import('zod').ZodTypeAny>; handler: (p: Record<string, unknown>) => Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> }>();
+      const fake = {
+        tool: (name: string, _d: string, schema: Record<string, import('zod').ZodTypeAny>, handler: never) => {
+          captured.set(name, { schema, handler });
+        },
+      } as unknown as import('@modelcontextprotocol/sdk/server/mcp.js').McpServer;
+      registerTicklerTools(fake, makeTokenRepo(), calendarConfigRepo, makeUserSettingsRepo(), esRepo, GOOGLE_CONFIG, getUserId);
+      const t = captured.get('create_tickler')!;
+      return { t, upsertFromGoogle, validate: (input: unknown) => z.object(t.schema).safeParse(input) };
+    }
+
+    it('live payload 1: `date` + due_time', async () => {
+      mockEventsInsert.mockResolvedValue({ data: { id: 'tk-a', htmlLink: '', status: 'confirmed', start: { dateTime: '2026-08-30T06:45:00' }, end: { dateTime: '2026-08-30T07:15:00' } } });
+      const { t, validate, upsertFromGoogle } = await registerWithSchemas();
+      const live = { title: 'Sun brief lead-with queue', kind: 'instruction', date: '2026-08-30', due_time: '06:45', timezone: 'Asia/Jerusalem', description: 'd' };
+      expect(validate(live).success).toBe(true);
+      const res = await t.handler(live);
+      expect(res.isError).toBeUndefined();
+      const parsed = parseToolResponse<{ due_date: string; due_time: string }>(res);
+      expect(parsed.due_date).toBe('2026-08-30');
+      expect(parsed.due_time).toBe('06:45');
+      const body = mockEventsInsert.mock.calls[0][0].requestBody;
+      expect(body.start).toEqual({ dateTime: '2026-08-30T06:45:00', timeZone: 'Asia/Jerusalem' });
+      expect(upsertFromGoogle.mock.calls[0][0]).toBe(USER_ID);
+    });
+
+    it('live payload 2: ISO `start`/`end` → date part + wall-clock time', async () => {
+      mockEventsInsert.mockResolvedValue({ data: { id: 'tk-b', htmlLink: '', status: 'confirmed', start: { dateTime: '2026-09-27T09:00:00' }, end: { dateTime: '2026-09-27T09:30:00' } } });
+      const { t, validate } = await registerWithSchemas();
+      const live = { title: '[coach] monthly deep-dive', start: '2026-09-27T09:00:00+03:00', end: '2026-09-27T09:30:00+03:00', kind: 'instruction', description: 'd' };
+      expect(validate(live).success).toBe(true);
+      const parsed = parseToolResponse<{ due_date: string; due_time: string }>(await t.handler(live));
+      expect(parsed.due_date).toBe('2026-09-27');
+      expect(parsed.due_time).toBe('09:00');
+      expect(mockEventsInsert.mock.calls[0][0].requestBody.start).toEqual({ dateTime: '2026-09-27T09:00:00', timeZone: 'Asia/Jerusalem' });
+    });
+
+    it('live payload 3: `start_date` + due_time', async () => {
+      mockEventsInsert.mockResolvedValue({ data: { id: 'tk-c', htmlLink: '', status: 'confirmed', start: { dateTime: '2026-09-06T09:00:00' }, end: { dateTime: '2026-09-06T09:30:00' } } });
+      const { t, validate } = await registerWithSchemas();
+      const live = { title: 'Call Amit about interviews', description: 'd', start_date: '2026-09-06', due_time: '09:00', kind: 'reminder' };
+      expect(validate(live).success).toBe(true);
+      const parsed = parseToolResponse<{ due_date: string }>(await t.handler(live));
+      expect(parsed.due_date).toBe('2026-09-06');
+    });
+
+    it('no date at all → structured error, no calendar write', async () => {
+      const { t, validate } = await registerWithSchemas();
+      expect(validate({ title: 'x' }).success).toBe(true); // reaches the handler…
+      const res = await t.handler({ title: 'x' });
+      expect(res.isError).toBe(true); // …which explains what is missing
+      expect(parseToolResponse<{ error: string }>(res).error).toMatch(/due_date is required/);
+      expect(mockEventsInsert).not.toHaveBeenCalled();
+    });
+  });
+
   it('creates an all-day tickler when due_time is "all_day"', async () => {
     mockEventsInsert.mockResolvedValue({
       data: { id: 'tickler-allday', htmlLink: '', status: 'confirmed', start: { date: '2026-04-10' }, end: { date: '2026-04-11' } },

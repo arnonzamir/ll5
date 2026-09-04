@@ -96,6 +96,7 @@ export class ElasticsearchMessageRepository
       filters,
       musts,
       size: params.limit ?? 50,
+      from: params.offset ?? 0,
       sort,
     });
 

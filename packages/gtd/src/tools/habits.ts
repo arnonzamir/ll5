@@ -153,11 +153,18 @@ export function registerHabitTools(server: McpServer, repo: HabitRepository, get
       habit_id: z.string().describe('Habit ID (UUID)'),
       due_date: z.string().optional().describe('Occurrence date (YYYY-MM-DD). Default: today in the habit\'s timezone'),
       due_time: z.string().optional().describe('Occurrence time (HH:MM, one of the habit\'s scheduled times). Default: the nearest scheduled time — required when ambiguous'),
-      outcome: z.enum(['done', 'missed', 'skipped_deliberate', 'excused']).describe('done = completed; missed = did not happen; skipped_deliberate = conscious skip (coaching signal); excused = legitimately prevented (neutral for streaks)'),
+      // ISS-021: "skipped" / "skip" are accepted as spellings of skipped_deliberate.
+      outcome: z.enum(['done', 'missed', 'skipped_deliberate', 'excused', 'skipped', 'skip']).describe('done = completed; missed = did not happen; skipped_deliberate = conscious skip (coaching signal; "skipped" is accepted as the same); excused = legitimately prevented (neutral for streaks)'),
       note: z.string().optional().describe('Context worth keeping, e.g. why it was skipped'),
     },
-    async (params) => {
+    async (rawParams) => {
       const userId = getUserId();
+      const params = {
+        ...rawParams,
+        outcome: (rawParams.outcome === 'skipped' || rawParams.outcome === 'skip'
+          ? 'skipped_deliberate'
+          : rawParams.outcome) as 'done' | 'missed' | 'skipped_deliberate' | 'excused',
+      };
 
       const habit = await repo.findById(userId, params.habit_id);
       if (!habit) {

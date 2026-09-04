@@ -120,12 +120,18 @@ export function registerLessonTools(
     'upsert_lesson',
     'Record an OPERATIONAL/world lesson — something learned about operating the system or its tools (e.g. "create_tickler due_time is the user\'s local effective timezone"). NOT for facts about a specific user (those go to write_user_model). Reconcile-on-write: if a near-duplicate or contradicting active lesson exists you MUST resolve it — pass supersede_id to replace that lesson, or force=true to insert as genuinely distinct. Without that, the write is blocked and the conflicts are returned so nothing contradictory can coexist.',
     {
-      claim: z.string().describe('The lesson/belief, stated plainly and self-contained.'),
-      trigger: z.string().describe('When this lesson is relevant — the recall key (e.g. "scheduling ticklers or calendar events").'),
+      // ISS-021: claim/trigger/durability were all required; the agent sent a
+      // single `content` body. `content` is accepted as an alias (claim = its first
+      // line, detail = the rest), trigger defaults to the claim, durability to
+      // durable. Applied defaults are echoed back as `defaults_applied`.
+      claim: z.string().optional().describe('The lesson/belief, stated plainly and self-contained. Required unless `content` is given.'),
+      content: z.string().optional().describe('Alias: a full lesson body. Its first line/sentence becomes `claim`, the whole text becomes `detail`.'),
+      trigger: z.string().optional().describe('When this lesson is relevant — the recall key (e.g. "scheduling ticklers or calendar events"). Defaults to the claim.'),
       detail: z.string().optional().describe('Optional fuller body — the why and how-to-apply.'),
       durability: z
         .enum(['durable', 'provisional'])
-        .describe('durable = a standing truth; provisional = a workaround for a current bug/limitation (must carry a falsification_test and depends_on).'),
+        .optional()
+        .describe('durable (default) = a standing truth; provisional = a workaround for a current bug/limitation (must carry a falsification_test and depends_on).'),
       falsification_test: z.string().optional().describe('Provisional only: the concrete check that, if it passes, retires this lesson.'),
       depends_on: z.string().optional().describe('Provisional only: the tool/code path this compensates for (so a deploy touching it flags re-verification).'),
       expires: z.string().optional().describe('Provisional only: optional ISO date after which this lesson should not be trusted.'),
@@ -133,9 +139,28 @@ export function registerLessonTools(
       supersede_id: z.string().optional().describe('Retire this existing lesson id and replace it with the new one (the reconcile action).'),
       force: z.boolean().optional().describe('Insert as a genuinely distinct lesson despite near-matches (use only when it truly does not contradict them).'),
     },
-    async (params) => {
+    async (rawParams) => {
       const userId = getUserId();
       const now = new Date().toISOString();
+
+      // ISS-021: derive claim/trigger/durability when the agent sent a bare body.
+      const defaultsApplied: Record<string, unknown> = {};
+      let claim = rawParams.claim?.trim();
+      let detail = rawParams.detail;
+      if (!claim && rawParams.content?.trim()) {
+        const body = rawParams.content.trim();
+        const firstLine = body.split(/\r?\n/).find((l) => l.trim()) ?? body;
+        claim = firstLine.replace(/^[\s#*>-]+|[\s*]+$/g, '').trim().slice(0, 300);
+        detail = detail ?? body;
+        defaultsApplied.claim = 'first line of content';
+        if (!rawParams.detail) defaultsApplied.detail = 'content';
+      }
+      if (!claim) {
+        return text({ ok: false, error: '`claim` is required (or pass `content`, whose first line becomes the claim).' });
+      }
+      const trigger = rawParams.trigger?.trim() || (defaultsApplied.trigger = 'claim', claim);
+      const durability = rawParams.durability ?? (defaultsApplied.durability = 'durable', 'durable' as const);
+      const params = { ...rawParams, claim, trigger, detail, durability };
 
       if (params.durability === 'provisional' && !params.falsification_test) {
         return text({
@@ -230,6 +255,7 @@ export function registerLessonTools(
         durability: params.durability,
         superseded: params.supersede_id ? { id: params.supersede_id, claim: supersededClaim } : null,
         forced_over_conflicts: params.force ? conflicts.map((c) => c.id) : [],
+        ...(Object.keys(defaultsApplied).length > 0 ? { defaults_applied: defaultsApplied } : {}),
       });
     },
   );

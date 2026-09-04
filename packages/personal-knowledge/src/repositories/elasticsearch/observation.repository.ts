@@ -121,6 +121,7 @@ export class ElasticsearchObservationRepository
       filters: filterClauses,
       musts: mustClauses,
       size: filters.limit ?? 30,
+      from: filters.offset ?? 0,
       sort: [{ observed_at: { order: 'desc' } }],
     });
 

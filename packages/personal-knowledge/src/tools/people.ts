@@ -42,13 +42,22 @@ export function registerPeopleTools(
 
   server.tool(
     'get_person',
-    'Retrieve a single person by ID.',
+    'Retrieve a single person by ID (pass `id`; `person_id` is accepted as an alias).',
     {
-      id: z.string().describe('Person ID'),
+      // ISS-021: the agent sends `person_id` about as often as `id`; accept both.
+      id: z.string().optional().describe('Person ID'),
+      person_id: z.string().optional().describe('Alias of `id`'),
     },
     async (params) => {
       const userId = getUserId();
-      const person = await personRepo.get(userId, params.id);
+      const id = params.id ?? params.person_id;
+      if (!id) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: '`id` (person ID) is required' }) }],
+          isError: true,
+        };
+      }
+      const person = await personRepo.get(userId, id);
       if (!person) {
         return {
           content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Person not found' }) }],

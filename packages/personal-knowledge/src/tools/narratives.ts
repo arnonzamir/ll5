@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { logAudit } from '@ll5/shared';
+import { logAudit, capItems, pageFields, resolveOffset, resolveCap } from '@ll5/shared';
 import type { ObservationRepository } from '../repositories/interfaces/observation.repository.js';
 import type { NarrativeRepository } from '../repositories/interfaces/narrative.repository.js';
 import type { PersonRepository } from '../repositories/interfaces/person.repository.js';
@@ -58,6 +58,63 @@ async function validateSubjects(
   return { ok: true };
 }
 
+/**
+ * ISS-021: accept `subjects` (array) or the `subject` alias — one object, an
+ * array, or a JSON string of either (the live agent sent a stringified object).
+ */
+export function resolveSubjects(
+  subjects: SubjectRef[] | undefined,
+  subject: SubjectRef | SubjectRef[] | string | undefined,
+): { subjects: SubjectRef[] } | { error: string } {
+  let candidate: unknown = subjects && subjects.length > 0 ? subjects : subject;
+  if (typeof candidate === 'string') {
+    try {
+      candidate = JSON.parse(candidate);
+    } catch {
+      return { error: '`subject` string is not valid JSON — pass subjects: [{ kind, ref }]' };
+    }
+  }
+  const arr = Array.isArray(candidate) ? candidate : candidate != null ? [candidate] : [];
+  const parsed = z.array(subjectSchema).min(1).safeParse(arr);
+  if (!parsed.success) {
+    return { error: '`subjects` is required: 1+ of { kind: person|place|group|topic, ref } (`subject` is accepted as an alias)' };
+  }
+  return { subjects: parsed.data };
+}
+
+const SOURCE_ALIASES: Record<string, ObservationSource> = {
+  user: 'user_statement',
+  'user-statement': 'user_statement',
+  user_said: 'user_statement',
+  stated: 'user_statement',
+  observation: 'inference',
+  observed: 'inference',
+  inferred: 'inference',
+  photo: 'inference',
+  image: 'inference',
+  media: 'inference',
+  message: 'chat',
+  im: 'chat',
+  sms: 'chat',
+  slack: 'chat',
+  signal: 'chat',
+  email: 'chat',
+  agent: 'system',
+  wa: 'whatsapp',
+  tg: 'telegram',
+};
+
+/** ISS-021: map any source spelling onto the stored enum; report what changed. */
+export function normalizeSource(raw: string | undefined): { source: ObservationSource; normalized?: string } {
+  if (raw == null || !raw.trim()) return { source: 'inference', normalized: '(missing) → inference' };
+  const key = raw.trim().toLowerCase();
+  if ((sourceSchema.options as readonly string[]).includes(key)) {
+    return { source: key as ObservationSource, ...(key !== raw ? { normalized: `${raw} → ${key}` } : {}) };
+  }
+  const mapped = SOURCE_ALIASES[key] ?? 'inference';
+  return { source: mapped, normalized: `${raw} → ${mapped}` };
+}
+
 export function registerNarrativeTools(
   server: McpServer,
   observationRepo: ObservationRepository,
@@ -81,9 +138,15 @@ export function registerNarrativeTools(
       'for tender topics (mood, self-esteem, kids, marital, money worry); flag is informational, not gating.',
     ].join(' '),
     {
-      subjects: z.array(subjectSchema).min(1).describe('1+ subjects this observation is about'),
-      text: z.string().min(1).describe('Your phrasing of what was observed'),
-      source: sourceSchema.describe('Where this observation came from'),
+      // ISS-021: this is the tool the whole knowledge chain depends on, and the
+      // live agent lost observations to shape slips (`subject` for `subjects`,
+      // `content` for `text`, source:"observation"). Aliases are accepted and
+      // `source` is normalized; anything normalized is echoed back.
+      subjects: z.array(subjectSchema).min(1).optional().describe('1+ subjects this observation is about. Required unless `subject` is given.'),
+      subject: z.union([subjectSchema, z.array(subjectSchema), z.string()]).optional().describe('Alias of subjects: one subject object, an array, or a JSON string of either.'),
+      text: z.string().min(1).optional().describe('Your phrasing of what was observed. Required unless `content` is given.'),
+      content: z.string().min(1).optional().describe('Alias of text'),
+      source: z.string().optional().describe(`Where this observation came from: ${sourceSchema.options.join(' | ')}. Other spellings are normalized (e.g. "observation"/"photo" → inference, "user" → user_statement). Default: inference.`),
       source_id: z.string().optional().describe('ID of the source record (chat message id, journal id, etc.)'),
       source_excerpt: z.string().optional().describe('The actual line that triggered this'),
       confidence: confidenceSchema.optional().describe('Default medium'),
@@ -93,7 +156,32 @@ export function registerNarrativeTools(
     },
     async (params) => {
       const userId = getUserId();
-      const subjects: SubjectRef[] = params.subjects;
+
+      const resolvedSubjects = resolveSubjects(params.subjects, params.subject);
+      if ('error' in resolvedSubjects) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: resolvedSubjects.error }) }],
+          isError: true,
+        };
+      }
+      const subjects: SubjectRef[] = resolvedSubjects.subjects;
+
+      const text = params.text ?? params.content;
+      if (!text || !text.trim()) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: '`text` is required (`content` is accepted as an alias)' }) }],
+          isError: true,
+        };
+      }
+
+      const { source, normalized: sourceNormalized } = normalizeSource(params.source);
+      const normalized: Record<string, unknown> = {};
+      if (sourceNormalized) normalized.source = sourceNormalized;
+      if (params.text == null && params.content != null) normalized.text = 'content';
+      if (params.subjects == null && params.subject != null) normalized.subjects = 'subject';
+      if (Object.keys(normalized).length > 0) {
+        logger.warn('[note_observation] normalized input shape', { userId, normalized });
+      }
 
       const v = await validateSubjects(subjects, { personRepo, placeRepo, userId });
       if (!v.ok) {
@@ -105,8 +193,8 @@ export function registerNarrativeTools(
 
       const obs = await observationRepo.create(userId, {
         subjects,
-        text: params.text,
-        source: params.source as ObservationSource,
+        text,
+        source,
         sourceId: params.source_id,
         sourceExcerpt: params.source_excerpt,
         confidence: params.confidence as Confidence | undefined,
@@ -131,7 +219,13 @@ export function registerNarrativeTools(
       });
 
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ observation: obs }) }],
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            observation: obs,
+            ...(Object.keys(normalized).length > 0 ? { normalized } : {}),
+          }),
+        }],
       };
     },
   );
@@ -146,13 +240,16 @@ export function registerNarrativeTools(
       'conversation (a person speaks, a place is mentioned, a topic comes up). Returns the rolled-up',
       'narrative if one exists + chronological observations, newest-first. Combine subjects+query for',
       'topical scoping ("what do I know about Tamar regarding the baby?"). Cheap; call freely.',
+      'The result is capped at ~20 KB (cut at observation boundaries, newest kept): when more exists it carries',
+      'truncated:true + next_cursor + hint — narrow with since / query / fewer subjects, lower limit, or pass cursor to continue.',
     ].join(' '),
     {
       subjects: z.array(subjectSchema).optional().describe('Subjects to recall about. At least one of subjects/query required'),
       query: z.string().optional().describe('Free-text search across observation text'),
       since: z.string().optional().describe('ISO 8601 — only observations on/after this date'),
-      limit: z.number().min(1).max(200).optional().describe('Default 30'),
+      limit: z.number().min(1).max(200).optional().describe('Default 30. The ~20 KB result cap applies on top of this.'),
       include_narrative: z.boolean().optional().describe('Default true. Include rolled-up narrative summary if one exists'),
+      cursor: z.string().optional().describe('Opaque continuation cursor from a previous truncated response (next_cursor). Omit for the first page.'),
     },
     async (params) => {
       const userId = getUserId();
@@ -166,14 +263,27 @@ export function registerNarrativeTools(
           isError: true,
         };
       }
+      let offset: number;
+      try {
+        offset = resolveOffset({ cursor: params.cursor });
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],
+          isError: true,
+        };
+      }
+      const limit = params.limit ?? 30;
 
       const subjects: SubjectRef[] = params.subjects ?? [];
-      const observations = await observationRepo.recall(userId, {
+      // ISS-019: one probe row past the page tells us whether more exists.
+      const fetched = await observationRepo.recall(userId, {
         subjects: subjects.length > 0 ? subjects : undefined,
         query: params.query,
         since: params.since,
-        limit: params.limit,
+        limit: limit + 1,
+        ...(offset > 0 ? { offset } : {}),
       });
+      const hasMore = fetched.length > limit;
 
       const includeNarrative = params.include_narrative ?? true;
       const narratives = [];
@@ -184,10 +294,17 @@ export function registerNarrativeTools(
         }
       }
 
+      const page = capItems(hasMore ? fetched.slice(0, limit) : fetched, {
+        offset,
+        hasMore,
+        reserve: JSON.stringify(narratives).length + 400,
+        hint: 'Narrow with `since`, `query`, or fewer `subjects`.',
+      });
+
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({ narratives, observations }),
+          text: JSON.stringify({ narratives, observations: page.items, ...pageFields(page) }),
         }],
       };
     },
@@ -198,7 +315,9 @@ export function registerNarrativeTools(
   // -------------------------------------------------------------------------
   server.tool(
     'list_narratives',
-    'List narratives. Use for review skills and dashboard. Default returns active narratives sorted by recency. Pass sort="relevance" for the "what matters now" ordering (recency-dominant, boosted by active status / open threads / volume).',
+    'List narratives. Use for review skills and dashboard. Default returns active narratives sorted by recency. Pass sort="relevance" for the "what matters now" ordering (recency-dominant, boosted by active status / open threads / volume). ' +
+      'The result is capped at ~20 KB (cut at narrative boundaries): when more exists it carries truncated:true + next_cursor + hint — ' +
+      'narrow with query / subject_kind / status / stale_for_days, lower limit, or pass cursor to continue.',
     {
       status: statusSchema.optional().describe('active / dormant / closed. Default active'),
       subject_kind: subjectKindSchema.optional().describe('Filter by subject kind'),
@@ -207,11 +326,22 @@ export function registerNarrativeTools(
       stale_for_days: z.number().min(1).optional().describe('Active narratives untouched for N+ days'),
       query: z.string().optional().describe('Free-text search title + summary + open threads'),
       sort: z.enum(['relevance', 'recency']).optional().describe('Ordering. Default recency (last activity). "relevance" = currently-relevant composite score.'),
-      limit: z.number().min(1).max(200).optional().describe('Default 50'),
-      offset: z.number().min(0).optional().describe('Pagination offset'),
+      limit: z.number().min(1).max(200).optional().describe('Default 50. The ~20 KB result cap applies on top of this.'),
+      offset: z.number().min(0).optional().describe('Pagination offset (legacy; `cursor` wins when both are given)'),
+      cursor: z.string().optional().describe('Opaque continuation cursor from a previous truncated response (next_cursor). Omit for the first page.'),
+      max_chars: z.number().min(1000).max(500000).optional().describe('Programmatic consumers only (gateway/dashboard): raise the result cap. Agents must NOT use this — narrow the query or follow cursor instead.'),
     },
     async (params) => {
       const userId = getUserId();
+      let offset: number;
+      try {
+        offset = resolveOffset({ cursor: params.cursor, offset: params.offset });
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],
+          isError: true,
+        };
+      }
       const result = await narrativeRepo.list(userId, {
         status: (params.status ?? 'active') as NarrativeStatus,
         subjectKind: params.subject_kind,
@@ -221,12 +351,18 @@ export function registerNarrativeTools(
         query: params.query,
         sort: params.sort,
         limit: params.limit,
-        offset: params.offset,
+        offset,
+      });
+      const page = capItems(result.items, {
+        offset,
+        hasMore: offset + result.items.length < result.total,
+        cap: resolveCap(params.max_chars),
+        hint: 'Narrow with `query`, `subject_kind`, `status` or `stale_for_days`.',
       });
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({ narratives: result.items, total: result.total }),
+          text: JSON.stringify({ narratives: page.items, total: result.total, ...pageFields(page) }),
         }],
       };
     },
@@ -237,22 +373,39 @@ export function registerNarrativeTools(
   // -------------------------------------------------------------------------
   server.tool(
     'get_narrative',
-    'Full retrieval for one subject — narrative summary + recent observations timeline.',
+    'Full retrieval for one subject — narrative summary + recent observations timeline. ' +
+      'The result is capped at ~20 KB (the narrative always comes whole; observations are cut at item boundaries, newest kept): ' +
+      'when more exists it carries truncated:true + next_cursor + hint — lower observation_limit, or pass cursor to continue.',
     {
       subject: subjectSchema.describe('The subject to load'),
-      observation_limit: z.number().min(1).max(500).optional().describe('Default 30, most recent first'),
+      observation_limit: z.number().min(1).max(500).optional().describe('Default 30, most recent first. The ~20 KB result cap applies on top of this.'),
+      cursor: z.string().optional().describe('Opaque continuation cursor from a previous truncated response (next_cursor). Omit for the first page.'),
+      max_chars: z.number().min(1000).max(500000).optional().describe('Programmatic consumers only (gateway/dashboard): raise the result cap. Agents must NOT use this — lower observation_limit or follow cursor instead.'),
     },
     async (params) => {
       const userId = getUserId();
       const subject: SubjectRef = params.subject;
+      let offset: number;
+      try {
+        offset = resolveOffset({ cursor: params.cursor });
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err instanceof Error ? err.message : String(err) }) }],
+          isError: true,
+        };
+      }
+      const limit = params.observation_limit ?? 30;
 
       const narrative = await narrativeRepo.getBySubject(userId, subject);
-      const observations = await observationRepo.recall(userId, {
+      // ISS-019: one probe row past the page tells us whether more exists.
+      const fetched = await observationRepo.recall(userId, {
         subjects: [subject],
-        limit: params.observation_limit ?? 30,
+        limit: limit + 1,
+        ...(offset > 0 ? { offset } : {}),
       });
+      const hasMore = fetched.length > limit;
 
-      if (!narrative && observations.length === 0) {
+      if (!narrative && fetched.length === 0 && offset === 0) {
         return {
           content: [{
             type: 'text' as const,
@@ -261,10 +414,18 @@ export function registerNarrativeTools(
         };
       }
 
+      const page = capItems(hasMore ? fetched.slice(0, limit) : fetched, {
+        offset,
+        hasMore,
+        cap: resolveCap(params.max_chars),
+        reserve: JSON.stringify(narrative ?? null).length + 400,
+        hint: 'Lower `observation_limit`.',
+      });
+
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({ narrative, observations }),
+          text: JSON.stringify({ narrative, observations: page.items, ...pageFields(page) }),
         }],
       };
     },
