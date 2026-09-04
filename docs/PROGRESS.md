@@ -4,6 +4,17 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — Phase 1 (gateway side): session-save unfrozen, idempotent telemetry, declared mappings
+
+Gateway-only pieces of the remediation plan's Phase 1 (`docs/ISSUES.md` ISS-005/006/014/015/016). The agent-repo halves wait on its deploy path (ISS-007/013).
+
+- **ISS-014 `/sessions`:** route-scoped `express.json({limit:'10mb'})` (the live 9-day session's full payload measured **3.87 MB for 7,807 messages**, so the existing hook resumes saving on its next Stop with no agent change — the freeze since Aug 27 ends on deploy). New **`mode:"append"`** for the durable fix: caller sends only a tail, gateway keeps stored messages and appends those newer than the stored `last_message`, optimistic-concurrency guard (`if_seq_no`/`if_primary_term`, 409 = retryable), 403 on a cross-tenant doc. Both modes cap stored messages at 5,000 (`messages_dropped` counted) and project `transcript_text` from the **newest** 200k chars — it was the oldest 200k, so a long session's recent turns were never searchable by `recall_everything`.
+- **ISS-016 (partial):** `agent.session_save_stale` anomaly check — 24h on `ll5_session_history.indexed_at`. Scoped on `user_id.keyword`: the index is dynamic-mapped, and a `term` on the analyzed `user_id` matches nothing, so the check would have silently never armed. `lastDocAgeMinutes` gained an optional `userField` for exactly this.
+- **ISS-005 fixed:** `indexOnce()` — `/telemetry/eval-moment` and `/telemetry/turn-cost` now write with id `${session_id}:${ts}` + `op_type:'create'`; a retried/double-fired Stop hook lands as a 409 → `{ok:true, duplicate:true}` instead of a second doc feeding the rate-shift baselines.
+- **ISS-006 (partial):** declared mappings for `ll5_turn_costs` and `ll5_reconcile_metrics`. `ensureIndices` is create-if-missing, so prod's existing indices stay dynamic; this protects fresh deploys. The `turn_costs_stale` check is held until the writer ships (it would fire immediately and stay red).
+- Tests: +13 (`eval-moment-route.test.ts` idempotency ×5, `/sessions` ×7; `anomaly-monitor.test.ts` ×1). Gateway suite 815/815, typecheck clean.
+- **Expected side effect, not a regression:** once ISS-001 (agent-side) lands, recorded `ping_now` will drop sharply — that is the over-count being removed.
+
 ## 2026-09-04 — Agent review (Aug 21–Sep 4): issue register + frozen baseline
 
 First look at the agent in 2+ weeks (nothing shipped to either repo in the window). Chat and rituals healthy: 58/58 user messages answered (p50 22 s), morning brief / evening close / nightly consolidation 15/15. The memory layer is not — and it failed silently (1.57M `ll5_app_log` docs, 1 error, no alert).

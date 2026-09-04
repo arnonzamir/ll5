@@ -483,3 +483,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 ## 2026-07-13 — worker panel heartbeats
 
 ## 2026-07-13 — claude faster-whisper
+2026-09-04: gateway src/server.ts — /sessions: route-scoped 10mb body limit + mode:"append" (tail-only saves, if_seq_no guard, 5,000-message cap, transcript_text from the NEWEST 200k chars); indexOnce() makes /telemetry/eval-moment + /telemetry/turn-cost idempotent (id session_id:ts, op_type:create, 409→duplicate); GATEWAY_INFRA_INDICES declares ll5_turn_costs + ll5_reconcile_metrics. scheduler/anomaly-monitor.ts — agent.session_save_stale (24h, user_id.keyword) + lastDocAgeMinutes(userField). Tests: eval-moment-route.test.ts +12, anomaly-monitor.test.ts +1. ISS-005/006/014/015/016 in docs/ISSUES.md.

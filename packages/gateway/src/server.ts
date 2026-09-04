@@ -139,6 +139,43 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
     },
   },
   {
+    // Per-turn LLM cost/usage (POST /telemetry/turn-cost). Declared so a fresh deploy
+    // can't lock a field to a surprising dynamic type (ISS-006). NOTE: ensureIndices is
+    // create-if-missing — an index that already exists keeps its dynamic mapping.
+    index: 'll5_turn_costs',
+    mappings: {
+      properties: {
+        timestamp: { type: 'date' },
+        user_id: { type: 'keyword' },
+        session_id: { type: 'keyword' },
+        agent: { type: 'keyword' },
+        model: { type: 'keyword' },
+        input_tokens: { type: 'long' },
+        output_tokens: { type: 'long' },
+        cached_tokens: { type: 'long' },
+        cache_write_tokens: { type: 'long' },
+        cost_usd: { type: 'double' },
+        is_main: { type: 'boolean' },
+      },
+    },
+  },
+  {
+    // ReconcileGovernorScheduler's per-cycle metrics doc — the contract the anomaly
+    // monitor's reconcile.* gauges read (`ReconcileMetricsDoc` in scheduler/reconcile-governor.ts).
+    index: 'll5_reconcile_metrics',
+    mappings: {
+      properties: {
+        timestamp: { type: 'date' },
+        user_id: { type: 'keyword' },
+        missed_close_count: { type: 'integer' },
+        wrong_close_count: { type: 'integer' },
+        reconciliation_coverage: { type: 'float' },   // null when candidate_count is 0
+        candidate_count: { type: 'integer' },
+        window_minutes: { type: 'integer' },
+      },
+    },
+  },
+  {
     index: 'll5_audit_log',
     mappings: {
       properties: {
@@ -358,6 +395,13 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // this route with a higher limit BEFORE the global 1MB parser runs. express.json
   // marks the body read, so the global parser below is a no-op for this path.
   app.use('/webhook/whatsapp', express.json({ limit: '10mb' }));
+
+  // Session-history saves (ISS-014): the agent's session-save hook has always POSTed the
+  // whole session every turn, and the global 1MB cap silently 413'd it past ~250 messages
+  // (curl -sf swallowed the failure; every session's doc froze at 174/241/264 messages).
+  // A 9-day session measured 3.9MB. Same route-scoped pattern as the webhook above; the
+  // durable fix is `mode:"append"` on the route (bounded tail per turn).
+  app.use('/sessions', express.json({ limit: '10mb' }));
 
   // Parse JSON bodies (global default; 1MB DoS guard for everything else)
   app.use(express.json({ limit: '1mb' }));
@@ -941,25 +985,23 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     const bool = (v: unknown) => (v == null ? undefined : Boolean(v));
     const int = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : undefined);
     try {
-      await esClient.index({
-        index: 'll5_eval_moments',
-        document: {
-          timestamp: ts,
-          user_id: userId,
-          decision: str(b.decision),
-          decision_claimed: str(b.decision_claimed),
-          decision_mismatch: bool(b.decision_mismatch),
-          trigger_class: str(b.trigger_class),
-          source: str(b.source),
-          message_sent: bool(b.message_sent),
-          cold_start: bool(b.cold_start),
-          grounding_calls: int(b.grounding_calls),
-          close_count: int(b.close_count),
-          pencil_count: int(b.pencil_count),
-          session_id: str(b.session_id),
-        },
+      const sessionId = str(b.session_id);
+      const outcome = await indexOnce('ll5_eval_moments', sessionId ? `${sessionId}:${ts}` : undefined, {
+        timestamp: ts,
+        user_id: userId,
+        decision: str(b.decision),
+        decision_claimed: str(b.decision_claimed),
+        decision_mismatch: bool(b.decision_mismatch),
+        trigger_class: str(b.trigger_class),
+        source: str(b.source),
+        message_sent: bool(b.message_sent),
+        cold_start: bool(b.cold_start),
+        grounding_calls: int(b.grounding_calls),
+        close_count: int(b.close_count),
+        pencil_count: int(b.pencil_count),
+        session_id: sessionId,
       });
-      res.json({ ok: true });
+      res.json(outcome === 'duplicate' ? { ok: true, duplicate: true } : { ok: true });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'index failed' });
     }
@@ -982,27 +1024,56 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
     const bool = (v: unknown) => (v == null ? undefined : Boolean(v));
     try {
-      await esClient.index({
-        index: 'll5_turn_costs',
-        document: {
-          timestamp: ts,
-          user_id: userId,
-          session_id: str(b.session_id),
-          agent: str(b.agent),
-          model: str(b.model),
-          input_tokens: num(b.input_tokens),
-          output_tokens: num(b.output_tokens),
-          cached_tokens: num(b.cached_tokens),
-          cache_write_tokens: num(b.cache_write_tokens),
-          cost_usd: num(b.cost_usd),
-          is_main: bool(b.is_main),
-        },
+      const sessionId = str(b.session_id);
+      const outcome = await indexOnce('ll5_turn_costs', sessionId ? `${sessionId}:${ts}` : undefined, {
+        timestamp: ts,
+        user_id: userId,
+        session_id: sessionId,
+        agent: str(b.agent),
+        model: str(b.model),
+        input_tokens: num(b.input_tokens),
+        output_tokens: num(b.output_tokens),
+        cached_tokens: num(b.cached_tokens),
+        cache_write_tokens: num(b.cache_write_tokens),
+        cost_usd: num(b.cost_usd),
+        is_main: bool(b.is_main),
       });
-      res.json({ ok: true });
+      res.json(outcome === 'duplicate' ? { ok: true, duplicate: true } : { ok: true });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'index failed' });
     }
   });
+
+  /** HTTP status off an @elastic/elasticsearch ResponseError (or anything shaped like one). */
+  function esStatus(err: unknown): number | undefined {
+    return (err as { meta?: { statusCode?: number } })?.meta?.statusCode
+      ?? (err as { statusCode?: number })?.statusCode;
+  }
+
+  /**
+   * Idempotent telemetry write (ISS-005). With a deterministic id + op_type:create, a
+   * retried / double-fired Stop hook lands as a 409 instead of a second doc — so it can't
+   * double-count into the anomaly monitor's rate-shift baselines. Without an id (no
+   * session_id in the body) it degrades to the old auto-id append. Hoisted; used by the
+   * two /telemetry routes above.
+   */
+  async function indexOnce(
+    index: string,
+    id: string | undefined,
+    document: Record<string, unknown>,
+  ): Promise<'created' | 'duplicate'> {
+    if (!id) {
+      await esClient.index({ index, document });
+      return 'created';
+    }
+    try {
+      await esClient.index({ index, id, op_type: 'create', document });
+      return 'created';
+    } catch (err) {
+      if (esStatus(err) === 409) return 'duplicate';
+      throw err;
+    }
+  }
 
   // --- Contact settings (unified routing/permission/media) ---
 
@@ -1465,42 +1536,114 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   });
 
   // --- Sessions API ---
+  // Two write modes (ISS-014):
+  //  - replace (default — what session-save.sh has always sent): full overwrite keyed on
+  //    session_id.
+  //  - append: the caller sends only the TAIL of the transcript; we keep what is stored
+  //    and add the messages whose timestamp is newer than the stored last_message.
+  //    Bounded payload every turn, idempotent on retry (older/duplicate messages are
+  //    filtered by timestamp), optimistic concurrency on the doc (if_seq_no).
+  // Both keep at most MAX_STORED_MESSAGES (oldest dropped — the PreCompact transcript
+  // backup holds the rest, and `messages_dropped` records the count) and project the
+  // searchable transcript_text from the NEWEST 200k chars — it used to be the OLDEST
+  // 200k, so a long session's recent turns were never searchable.
+  const MAX_STORED_MESSAGES = 5000;
+  const TRANSCRIPT_TEXT_CHARS = 200_000;
+  type SessionMsg = { role?: unknown; text?: unknown; timestamp?: unknown };
+  const projectTranscript = (msgs: SessionMsg[]): string =>
+    msgs
+      .map((m) => (typeof m?.text === 'string' ? m.text : ''))
+      .filter(Boolean)
+      .join('\n')
+      .slice(-TRANSCRIPT_TEXT_CHARS);
+  const isoStr = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+
   app.post('/sessions', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
     try {
-      const { session_id, messages, message_count, first_message, last_message, workspace } = req.body;
-      if (!session_id) {
+      const { session_id, messages, message_count, first_message, last_message, workspace, mode } = (req.body ?? {}) as Record<string, unknown>;
+      if (!session_id || typeof session_id !== 'string') {
         res.status(400).json({ error: 'session_id required' });
         return;
       }
-      // Searchable projection: concatenate every message's text so recall_everything's
-      // opt-in session source can match transcript content (the structured `messages`
-      // array is store-only / not indexed). Bounded so a very long session can't bloat
-      // the analyzed field unreasonably.
-      const transcriptText = Array.isArray(messages)
-        ? messages
-            .map((m: { text?: unknown }) => (typeof m?.text === 'string' ? m.text : ''))
-            .filter(Boolean)
-            .join('\n')
-            .slice(0, 200_000)
-        : '';
+      const incoming: SessionMsg[] = Array.isArray(messages) ? (messages as SessionMsg[]) : [];
+      const now = new Date().toISOString();
+
+      if (mode === 'append') {
+        let existing: Record<string, unknown> | undefined;
+        let seqNo: number | undefined;
+        let primaryTerm: number | undefined;
+        try {
+          const got = await esClient.get<Record<string, unknown>>({ index: 'll5_session_history', id: session_id });
+          existing = got._source;
+          seqNo = got._seq_no;
+          primaryTerm = got._primary_term;
+        } catch (err) {
+          if (esStatus(err) !== 404) throw err;
+        }
+        if (existing && existing.user_id !== userId) {
+          res.status(403).json({ error: 'session belongs to another user' });
+          return;
+        }
+        const stored = Array.isArray(existing?.messages) ? (existing!.messages as SessionMsg[]) : [];
+        const storedLast = isoStr(existing?.last_message) ?? '';
+        // ISO-8601 Z timestamps from one transcript compare correctly as strings.
+        const fresh = incoming.filter((m) => typeof m?.timestamp === 'string' && m.timestamp > storedLast);
+        const combined = [...stored, ...fresh];
+        const dropped = Math.max(0, combined.length - MAX_STORED_MESSAGES);
+        const kept = dropped ? combined.slice(dropped) : combined;
+        const priorCount = typeof existing?.message_count === 'number' ? existing.message_count : stored.length;
+        const priorDropped = typeof existing?.messages_dropped === 'number' ? existing.messages_dropped : 0;
+        const newLast = fresh.length ? (fresh[fresh.length - 1].timestamp as string) : (storedLast || null);
+        await esClient.index({
+          index: 'll5_session_history',
+          id: session_id,
+          ...(seqNo != null && primaryTerm != null ? { if_seq_no: seqNo, if_primary_term: primaryTerm } : {}),
+          document: {
+            user_id: userId,
+            session_id,
+            message_count: typeof message_count === 'number' ? message_count : priorCount + fresh.length,
+            first_message: isoStr(existing?.first_message) ?? isoStr(first_message) ?? isoStr(kept[0]?.timestamp),
+            last_message: isoStr(last_message) ?? newLast,
+            messages: kept,
+            messages_dropped: priorDropped + dropped,
+            transcript_text: projectTranscript(kept),
+            workspace: workspace ?? existing?.workspace ?? 'll5-run',
+            indexed_at: now,
+          },
+        });
+        res.status(201).json({ indexed: true, session_id, mode: 'append', appended: fresh.length, stored: kept.length, dropped });
+        return;
+      }
+
+      // replace (default)
+      const dropped = Math.max(0, incoming.length - MAX_STORED_MESSAGES);
+      const kept = dropped ? incoming.slice(dropped) : incoming;
       await esClient.index({
         index: 'll5_session_history',
         id: session_id,
         document: {
-          user_id: (req as any).userId,
+          user_id: userId,
           session_id,
-          message_count: message_count ?? 0,
-          first_message: first_message ?? null,
-          last_message: last_message ?? null,
-          messages: messages ?? [],
-          transcript_text: transcriptText,
+          message_count: typeof message_count === 'number' ? message_count : incoming.length,
+          first_message: isoStr(first_message),
+          last_message: isoStr(last_message),
+          messages: kept,
+          messages_dropped: dropped,
+          transcript_text: projectTranscript(kept),
           workspace: workspace ?? 'll5-run',
-          indexed_at: new Date().toISOString(),
+          indexed_at: now,
         },
       });
-      res.status(201).json({ indexed: true, session_id });
+      res.status(201).json({ indexed: true, session_id, mode: 'replace', stored: kept.length, dropped });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (esStatus(err) === 409) {
+        // Lost an optimistic-concurrency race with a concurrent save; the next turn's
+        // append re-sends the tail, so this is safe to surface as a retryable conflict.
+        res.status(409).json({ error: 'concurrent session write — retry', session_id: (req.body ?? {}).session_id });
+        return;
+      }
       logger.error('[server][indexSession] Failed to index session', { error: message });
       res.status(500).json({ error: message });
     }

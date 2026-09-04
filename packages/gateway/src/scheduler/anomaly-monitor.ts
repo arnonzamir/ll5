@@ -225,15 +225,25 @@ export class AnomalyMonitor {
     ]);
   }
 
-  /** Minutes since the newest doc matching the filter, or null if none. */
-  async lastDocAgeMinutes(index: string, tsField: string, filter: Record<string, unknown>[]): Promise<number | null> {
+  /**
+   * Minutes since the newest doc matching the filter, or null if none.
+   * `userField` defaults to the declared-keyword `user_id`; pass `'user_id.keyword'` for
+   * a dynamic-mapped index (text + keyword subfield — e.g. ll5_session_history), where a
+   * term on the analyzed `user_id` matches nothing and the check would silently never arm.
+   */
+  async lastDocAgeMinutes(
+    index: string,
+    tsField: string,
+    filter: Record<string, unknown>[],
+    userField: 'user_id' | 'user_id.keyword' = 'user_id',
+  ): Promise<number | null> {
     try {
       const res = await this.es.search<Record<string, unknown>>({
         index,
         size: 1,
         _source: [tsField],
         sort: [{ [tsField]: { order: 'desc' } }],
-        query: { bool: { filter: [{ term: { user_id: this.config.userId } }, ...filter] } },
+        query: { bool: { filter: [{ term: { [userField]: this.config.userId } }, ...filter] } },
       });
       const src = res.hits.hits?.[0]?._source as Record<string, unknown> | undefined;
       const ts = src?.[tsField] as string | undefined;
@@ -595,6 +605,21 @@ function buildChecks(): Check[] {
       severity: 'warning',
       suggestion: 'No ll5_eval_moments doc in 12h — the eval recorder (Stop hook eval-record.sh → eval_record.py) is not writing. While this fires, treat every behavior.* alert as UNRELIABLE (they read this index). Check the agent\'s hook wiring first: `docker exec <agent> node -e \'console.log(Object.keys(require("/workspace/.claude/settings.json").hooks))\'` — an empty/missing hooks block means the image lost it.',
       ageMinutes: (m) => m.lastDocAgeMinutes('ll5_eval_moments', 'timestamp', []),
+    },
+    // Session-save liveness (ISS-014). The agent's Stop hook re-saves the session doc
+    // every turn, so `indexed_at` should never be a day old while the agent is alive.
+    // It froze silently for 8+ days in Aug 2026 (413 on the body cap, curl -sf swallowed
+    // it) and every post-compaction re-ground read that stale doc — this is the check
+    // that would have caught it. Dynamic-mapped index → filter on user_id.keyword.
+    // Self-arming: no doc → null age → no alert.
+    {
+      kind: 'staleness',
+      key: 'agent.session_save_stale',
+      label: 'Session-history saver',
+      maxMinutes: 24 * 60,
+      severity: 'warning',
+      suggestion: 'No ll5_session_history write in 24h — the session-save Stop hook (ll5-run .claude/hooks/session-save.sh → POST /sessions) is failing. Its curl -sf swallows errors: check the gateway log for POST /sessions 413/409/500, and the transcript size vs the route body cap. While this fires, recent_sessions / recall_everything(timeline) — the post-compaction re-ground sources — are STALE.',
+      ageMinutes: (m) => m.lastDocAgeMinutes('ll5_session_history', 'indexed_at', [], 'user_id.keyword'),
     },
     // Forward work stalled (DECISION-018 §4): the daily loop should be BOOKING
     // prep (decision=ping_later, ground truth since 2026-07-01). No ping_later

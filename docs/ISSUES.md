@@ -18,8 +18,8 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-002 | knowledge | high | `note_observation` near-dead: 18 calls in 15 days, zero Aug 23–31; three-month drift 963 → 11/month | open | |
 | ISS-003 | knowledge | high | Narrative consolidation silent 12 days — starved by ISS-002, not a loop fault | open | |
 | ISS-004 | behavior | high | `ping_later` books nothing: 57 of 72 claims hollow | open | |
-| ISS-005 | telemetry | med | No idempotency on `/telemetry/eval-moment` and `/telemetry/turn-cost` writes | open | |
-| ISS-006 | telemetry | med | `ll5_turn_costs` dead since 2026-07-13 | open | |
+| ISS-005 | telemetry | med | No idempotency on `/telemetry/eval-moment` and `/telemetry/turn-cost` writes | fixed | 2026-09-04 gateway Phase 1 commit |
+| ISS-006 | telemetry | med | `ll5_turn_costs` dead since 2026-07-13 | in-progress | mappings declared 2026-09-04; writer (agent-side) + stale check pending |
 | ISS-007 | provenance | high | Live CLI 2.1.197 ≠ Dockerfile pin 2.1.204; running commit unverifiable | open | |
 | ISS-008 | scaffolding | med | Reconcile subsystem: 682 selector calls, 0 actions, `candidate_count:0` with 5 indistinguishable causes | open | |
 | ISS-009 | scaffolding | med | Two divergent narrative-freshness policies; two copies of the reconcile selector + gate | open | |
@@ -27,15 +27,16 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-011 | knowledge | med | Journal backlog: 1,229 `context` entries open over 7 days | open | |
 | ISS-012 | behavior | low | Learning flat: 3 lessons in 15 days; lessons/user-model history indices take no writes | open | |
 | ISS-013 | infra | med | Chronic unfixed: WA bridge stalls, Gmail/Slack mirror listeners, Google OAuth disconnects, TS_AUTHKEY lapsed, agent CI cold since Jul 14 | open | |
-| ISS-014 | telemetry | high | `POST /sessions` exceeds the gateway 1 MB body cap past ~250 messages → 413 swallowed → `ll5_session_history` frozen per session | open | |
-| ISS-015 | behavior | high | Post-compaction re-ground reads the frozen session index | open | |
-| ISS-016 | scaffolding | med | Nothing monitors session age, compaction cadence, or session-save liveness; sessions roll only on container restart | open | |
+| ISS-014 | telemetry | high | `POST /sessions` exceeds the gateway 1 MB body cap past ~250 messages → 413 swallowed → `ll5_session_history` frozen per session | in-progress | gateway side 2026-09-04 (10 MB route cap + `mode:"append"`); agent-side incremental send pending |
+| ISS-015 | behavior | high | Post-compaction re-ground reads the frozen session index | in-progress | unfreezes with ISS-014's gateway fix on the next Stop; verify `indexed_at` advances |
+| ISS-016 | scaffolding | med | Nothing monitors session age, compaction cadence, or session-save liveness; sessions roll only on container restart | in-progress | `agent.session_save_stale` check shipped 2026-09-04; session-age gauge + daily restart pending |
 | ISS-017 | knowledge | med | Governed memory-capture path idle: `ingest_memory` 0 since July, `upsert_lesson` 0 in Sep, `recall_lessons` 7,625 in Aug | open | |
 | ISS-018 | knowledge | high | Agent bypasses ES via `Bash` grep/python over spilled `tool-results/mcp-awareness-*.txt` files | open | |
 | ISS-019 | knowledge | high | Unbounded MCP read results (`read_journal` ~60 KB, `recall_everything` up to 114 KB, one at 1.7 MB) cause the spill | open | |
 | ISS-020 | behavior | med | Deferred tool schemas: knowledge-write tools absent from the post-compaction reflex set | open | |
 | ISS-021 | knowledge | med | ~20 MCP `-32602` input-validation failures across 10 tools; `note_observation` 2 of 13 | open | |
 | ISS-022 | behavior | med | `record_moment` (a no-op) is 53% of main-session tool calls; with `write_journal` 86% | open | |
+| ISS-023 | infra | med | CI: a push to main that touches **no** package (docs-only) rebuilds and redeploys all 10 infra services | open | |
 
 ---
 
@@ -66,11 +67,13 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 - **Where:** `packages/gateway/src/server.ts:944` (eval-moment) and `:985` (turn-cost) — bare `esClient.index({ document })`, no `id`, no `op_type`.
 - **Consequence:** a retried or double-fired Stop hook double-counts into every rate-shift baseline.
 - **Fix shape:** deterministic `_id = ${session_id}:${ts}`, `op_type:'create'`; tests in `__tests__/eval-moment-route.test.ts`.
+- **2026-09-04 fixed:** `indexOnce()` in `server.ts` — id `${session_id}:${ts}` + `op_type:'create'`; a 409 returns `{ok:true, duplicate:true}`; no `session_id` → old auto-id append. 5 tests. Caveat: a retry that regenerates `ts` is not deduped (documented, acceptable).
 
 ### ISS-006 — `ll5_turn_costs` dead since 2026-07-13
 - **Evidence:** index max `timestamp` 2026-07-13T10:18Z; 68 docs total. Writer was the opencode `stop-mirror`; runtime is now the Claude Code variant.
 - **Also:** `ll5_turn_costs` and `ll5_reconcile_metrics` have no declared mapping (only `ll5_eval_moments` does, `server.ts:110`).
 - **Fix shape:** turn-cost writer for the Claude Code variant; declared mappings; `telemetry.turn_costs_stale` check.
+- **2026-09-04 partial:** mappings for `ll5_turn_costs` and `ll5_reconcile_metrics` declared in `GATEWAY_INFRA_INDICES`. Note `ensureIndices` is create-if-missing, so the **existing prod indices keep their dynamic mappings** — this protects fresh deploys/tenants only. The stale check is deliberately **not** added yet: with no writer it would fire immediately and stay red until the agent-repo change ships; it lands together with the writer.
 
 ### ISS-007 — Live CLI ≠ pin
 - **Evidence:** container `ll5-agent-f08f46b3-…` runs image `ghcr.io/arnonzamir/ll5-run-claude:latest` created 2026-07-15T05:37Z; `/usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json` = **2.1.197**; `ll5-run-claude-code:Dockerfile:70` pins **2.1.204** (bumped 2026-07-08, `ec9f45f6`). Model hard-coded `--model claude-opus-4-7` in `ll5-server:85`.
@@ -101,6 +104,7 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 - **Where:** `packages/gateway/src/server.ts:363` `express.json({ limit: '1mb' })` (global); `/sessions` handler `:1470`; `ll5-run-claude-code:.claude/hooks/session-save.sh` sends the whole session on every Stop with `curl -sf` (swallows non-2xx); `lib/session_payload.py` caps per-message text at 2,000 chars but not message count.
 - **Evidence:** every session freezes at the same point — `2f145954` 174 msgs, `cb38209f` 241, live `6ec9fd1c` 264 (frozen 2026-08-27T06:21Z; transcript now 74,370 lines / 91.8 MB). `ll5_session_history` docs: Jul 1,836, Aug 3.
 - **Fix shape:** incremental send (messages after stored `last_message`); log non-2xx to `~/.ll5/`; `agent.session_save_stale` check.
+- **2026-09-04 (gateway side shipped):** `/sessions` gets a route-scoped `express.json({limit:'10mb'})` (the live 9-day session's full payload measured 3.87 MB / 7,807 messages, so the existing full-overwrite hook resumes saving on its next Stop with no agent change); new `mode:"append"` — caller sends only the tail, gateway keeps stored messages and appends those with `timestamp > stored last_message`, `if_seq_no`/`if_primary_term` guard (409 = retryable), 403 if the stored doc belongs to another tenant. Both modes cap stored messages at 5,000 (oldest dropped, `messages_dropped` counted) and project `transcript_text` from the **newest** 200k chars (it was the oldest 200k — recent turns were never searchable). `agent.session_save_stale` (24h on `indexed_at`, scoped on `user_id.keyword` because the index is dynamic-mapped) added to `anomaly-monitor.ts`. **Remaining (agent repo):** `session-save.sh` sends `mode:"append"` with a bounded tail and logs non-2xx to `~/.ll5/session-save.log`.
 
 ### ISS-015 — Re-ground reads the frozen index
 - **Where:** `session-start.sh:136` (compact branch) instructs `recent_sessions(days:7)` / `recall_everything({mode:"timeline"})`; both read `ll5_session_history` (`packages/awareness/src/tools/recall-everything.ts:92`).
@@ -135,6 +139,11 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 ### ISS-022 — `record_moment` turn tax
 - **Evidence:** live transcript: `record_moment` 3,211, `write_journal` 2,032, `resolve_journal` 347, `push_to_user` 207, everything else ~350.
 - **Fix shape (Phase 4):** infer `decision_claimed` from a structured line in the assistant's final text instead of a tool round-trip.
+
+### ISS-023 — Docs-only pushes redeploy everything
+- **Where:** `.github/workflows/build-and-push.yml`, `detect-changes` → `set-matrix`, the push branch. `PACKAGES` starts as the full infra list; the per-package filter only replaces it when `${#FILTERED[@]} -gt 0`. A commit that touches no `packages/<pkg>/` path (docs, workflows, root files) matches nothing, the narrowing is skipped, and the full list goes to the build matrix and then to `deploy`.
+- **Evidence:** run `33886995650` for `7dbf725` (docs only: `docs/ISSUES.md`, `docs/reviews/…`, PROGRESS/HANDOFF/FILE_TREE) — `build (…)` ran for all 10 packages and `deploy` ran, all green. Every docs-only commit since this logic landed has done the same: a full-stack restart per doc edit.
+- **Fix shape (one line):** `else PACKAGES=(); fi` after the `-gt 0` check, so nothing-matched → empty matrix. Then confirm the `deploy` job's `if:`/`needs:` skips cleanly on an empty matrix for a push (it already does for `repository_dispatch`, whose comment explains the empty-string convention) — a docs-only push should build nothing **and deploy nothing**. Not applied in the 2026-09-04 gateway commit (outside the approved plan's scope); until it is, treat every push to main as a full redeploy and never push while a deploy is in flight.
 
 ---
 

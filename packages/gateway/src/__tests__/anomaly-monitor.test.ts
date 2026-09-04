@@ -260,6 +260,35 @@ describe('AnomalyMonitor — behavior checks (DECISION-018/020)', () => {
     expect(await priv(empty).runStaleness(checkByKey(empty, 'telemetry.eval_moments_stale'))).toBe(false);
   });
 
+  it('session_save_stale (ISS-014): 24h liveness on ll5_session_history.indexed_at, scoped on user_id.keyword (dynamic-mapped index)', async () => {
+    const reg = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    const check = checkByKey(reg, 'agent.session_save_stale');
+    expect(check.kind).toBe('staleness');
+    expect(check.maxMinutes).toBe(1440);
+
+    // The Aug 2026 shape: the live session's doc frozen for 8 days while the agent kept running.
+    const staleTs = new Date(Date.now() - 8 * 24 * 3_600_000).toISOString();
+    const search = vi.fn(async () => ({ hits: { hits: [{ _source: { indexed_at: staleTs } }] } }));
+    const stale = mk({ search } as unknown as Client);
+    expect(await priv(stale).runStaleness(checkByKey(stale, 'agent.session_save_stale'))).toBe(true);
+    expect(lastArg().key).toBe('agent.session_save_stale');
+    // Must query the keyword subfield — a term on the analyzed `user_id` never matches a
+    // uuid on this index, which would make the check silently never arm.
+    const q = search.mock.calls[0][0] as { index: string; sort: unknown[]; query: { bool: { filter: unknown[] } } };
+    expect(q.index).toBe('ll5_session_history');
+    expect(q.sort).toEqual([{ indexed_at: { order: 'desc' } }]);
+    expect(q.query.bool.filter).toEqual([{ term: { 'user_id.keyword': 'u1' } }]);
+
+    // A save within the last day → quiet.
+    const freshTs = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const fresh = mk({ search: vi.fn(async () => ({ hits: { hits: [{ _source: { indexed_at: freshTs } }] } })) } as unknown as Client);
+    expect(await priv(fresh).runStaleness(checkByKey(fresh, 'agent.session_save_stale'))).toBe(false);
+
+    // No doc at all (fresh tenant) → not armed → no alert.
+    const empty = mk({ search: vi.fn(async () => ({ hits: { hits: [] } })) } as unknown as Client);
+    expect(await priv(empty).runStaleness(checkByKey(empty, 'agent.session_save_stale'))).toBe(false);
+  });
+
   it('ungrounded_pings: alerts when zero-grounding pings double vs the same-weekday median', async () => {
     // count call order: current, then 3 baseline samples (1/2/3 weeks back).
     const es = esCount([20, 9, 8, 8]); // current=20 >= median(8,8,9)=8 * 2

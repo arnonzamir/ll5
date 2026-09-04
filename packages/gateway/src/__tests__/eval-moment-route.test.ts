@@ -201,3 +201,188 @@ describe('POST /telemetry/eval-moment — close_count + F5 whitelist', () => {
     expect(esMock.index).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// ISS-005 — idempotent telemetry writes (deterministic id + op_type:create)
+// ---------------------------------------------------------------------------
+describe('telemetry writes are idempotent (ISS-005)', () => {
+  const conflict = () => Object.assign(new Error('version_conflict_engine_exception'), { meta: { statusCode: 409 } });
+
+  it('eval-moment: id = `${session_id}:${ts}` with op_type:create', async () => {
+    const handler = getHandler(app, 'post', '/telemetry/eval-moment');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { ts: '2026-09-04T10:00:00.000Z', decision: 'suppress', session_id: 'sess-9' }), res);
+    const arg = esMock.index.mock.calls[0][0] as any;
+    expect(arg.index).toBe('ll5_eval_moments');
+    expect(arg.id).toBe('sess-9:2026-09-04T10:00:00.000Z');
+    expect(arg.op_type).toBe('create');
+    expect(res._json).toEqual({ ok: true });
+  });
+
+  it('eval-moment: a retried hook (409) is acknowledged as a duplicate, not a 500, and writes nothing new', async () => {
+    esMock.index.mockRejectedValueOnce(conflict());
+    const handler = getHandler(app, 'post', '/telemetry/eval-moment');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { ts: '2026-09-04T10:00:00.000Z', decision: 'suppress', session_id: 'sess-9' }), res);
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ ok: true, duplicate: true });
+    expect(esMock.index).toHaveBeenCalledTimes(1);
+  });
+
+  it('eval-moment: without a session_id it degrades to the old auto-id append (no id, no op_type)', async () => {
+    const handler = getHandler(app, 'post', '/telemetry/eval-moment');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { ts: '2026-09-04T10:00:00.000Z', decision: 'suppress' }), res);
+    const arg = esMock.index.mock.calls[0][0] as any;
+    expect(arg.id).toBeUndefined();
+    expect(arg.op_type).toBeUndefined();
+    expect(res._json).toEqual({ ok: true });
+  });
+
+  it('eval-moment: a non-409 ES failure is still a 500', async () => {
+    esMock.index.mockRejectedValueOnce(Object.assign(new Error('boom'), { meta: { statusCode: 503 } }));
+    const handler = getHandler(app, 'post', '/telemetry/eval-moment');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { ts: '2026-09-04T10:00:00.000Z', session_id: 'sess-9' }), res);
+    expect(res._status).toBe(500);
+  });
+
+  it('turn-cost: same id scheme, same duplicate handling, user_id from auth', async () => {
+    const handler = getHandler(app, 'post', '/telemetry/turn-cost');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { ts: '2026-09-04T10:00:00.000Z', session_id: 'sess-9', model: 'claude-opus-5', cost_usd: 0.12, is_main: true, user_id: 'attacker' }), res);
+    const arg = esMock.index.mock.calls[0][0] as any;
+    expect(arg.index).toBe('ll5_turn_costs');
+    expect(arg.id).toBe('sess-9:2026-09-04T10:00:00.000Z');
+    expect(arg.op_type).toBe('create');
+    expect(arg.document.user_id).toBe('owner-1');
+    expect(arg.document.cost_usd).toBe(0.12);
+
+    esMock.index.mockRejectedValueOnce(conflict());
+    const res2 = makeRes();
+    await handler(reqAs('owner-1', { ts: '2026-09-04T10:00:00.000Z', session_id: 'sess-9' }), res2);
+    expect(res2._json).toEqual({ ok: true, duplicate: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ISS-014 — POST /sessions: replace vs append, bounded, tenant-scoped
+// ---------------------------------------------------------------------------
+describe('POST /sessions (ISS-014)', () => {
+  const notFound = () => Object.assign(new Error('not_found'), { meta: { statusCode: 404 } });
+  const msg = (i: number, text = `m${i}`) => ({ role: 'human', text, timestamp: `2026-09-04T10:00:${String(i).padStart(2, '0')}.000Z` });
+
+  it('replace (default): full overwrite keyed on session_id, user_id from auth, transcript_text projected from the NEWEST text', async () => {
+    const handler = getHandler(app, 'post', '/sessions');
+    const res = makeRes();
+    await handler(reqAs('owner-1', {
+      session_id: 'S1',
+      messages: [msg(1, 'alpha'), msg(2, 'beta')],
+      message_count: 2,
+      first_message: msg(1).timestamp,
+      last_message: msg(2).timestamp,
+      user_id: 'attacker',
+    }), res);
+    expect(esMock.get).not.toHaveBeenCalled();
+    const arg = esMock.index.mock.calls[0][0] as any;
+    expect(arg.index).toBe('ll5_session_history');
+    expect(arg.id).toBe('S1');
+    expect(arg.if_seq_no).toBeUndefined();
+    expect(arg.document.user_id).toBe('owner-1');
+    expect(arg.document.messages).toHaveLength(2);
+    expect(arg.document.messages_dropped).toBe(0);
+    expect(arg.document.transcript_text).toBe('alpha\nbeta');
+    expect(res._status).toBe(201);
+    expect(res._json).toMatchObject({ indexed: true, session_id: 'S1', mode: 'replace', stored: 2, dropped: 0 });
+  });
+
+  it('append: keeps the stored messages, adds only those newer than the stored last_message, carries seq_no/primary_term', async () => {
+    esMock.get.mockResolvedValueOnce({
+      _seq_no: 7,
+      _primary_term: 2,
+      _source: {
+        user_id: 'owner-1',
+        session_id: 'S1',
+        messages: [msg(1), msg(2)],
+        message_count: 2,
+        first_message: msg(1).timestamp,
+        last_message: msg(2).timestamp,
+        messages_dropped: 0,
+        workspace: 'll5-run',
+      },
+    });
+    const handler = getHandler(app, 'post', '/sessions');
+    const res = makeRes();
+    // The tail overlaps the stored doc (m2 again) — the retry/overlap case.
+    await handler(reqAs('owner-1', {
+      session_id: 'S1',
+      mode: 'append',
+      messages: [msg(2), msg(3), msg(4)],
+      message_count: 4,
+      last_message: msg(4).timestamp,
+    }), res);
+    const arg = esMock.index.mock.calls[0][0] as any;
+    expect(arg.id).toBe('S1');
+    expect(arg.if_seq_no).toBe(7);
+    expect(arg.if_primary_term).toBe(2);
+    expect(arg.document.messages.map((m: any) => m.text)).toEqual(['m1', 'm2', 'm3', 'm4']);
+    expect(arg.document.message_count).toBe(4);
+    expect(arg.document.first_message).toBe(msg(1).timestamp);
+    expect(arg.document.last_message).toBe(msg(4).timestamp);
+    expect(arg.document.transcript_text).toBe('m1\nm2\nm3\nm4');
+    expect(res._json).toMatchObject({ mode: 'append', appended: 2, stored: 4, dropped: 0 });
+  });
+
+  it('append on a session with no stored doc (404) creates it without a concurrency guard', async () => {
+    esMock.get.mockRejectedValueOnce(notFound());
+    const handler = getHandler(app, 'post', '/sessions');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { session_id: 'S2', mode: 'append', messages: [msg(1), msg(2)] }), res);
+    const arg = esMock.index.mock.calls[0][0] as any;
+    expect(arg.if_seq_no).toBeUndefined();
+    expect(arg.document.messages).toHaveLength(2);
+    expect(arg.document.message_count).toBe(2);
+    expect(arg.document.first_message).toBe(msg(1).timestamp);
+    expect(arg.document.last_message).toBe(msg(2).timestamp);
+    expect(res._status).toBe(201);
+  });
+
+  it('append: a stored doc owned by another tenant is refused (403) and never overwritten', async () => {
+    esMock.get.mockResolvedValueOnce({ _seq_no: 1, _primary_term: 1, _source: { user_id: 'owner-2', session_id: 'S1', messages: [msg(1)] } });
+    const handler = getHandler(app, 'post', '/sessions');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { session_id: 'S1', mode: 'append', messages: [msg(2)] }), res);
+    expect(res._status).toBe(403);
+    expect(esMock.index).not.toHaveBeenCalled();
+  });
+
+  it('append: losing the optimistic-concurrency race is a retryable 409, not a 500', async () => {
+    esMock.get.mockResolvedValueOnce({ _seq_no: 1, _primary_term: 1, _source: { user_id: 'owner-1', session_id: 'S1', messages: [msg(1)], last_message: msg(1).timestamp } });
+    esMock.index.mockRejectedValueOnce(Object.assign(new Error('version_conflict_engine_exception'), { meta: { statusCode: 409 } }));
+    const handler = getHandler(app, 'post', '/sessions');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { session_id: 'S1', mode: 'append', messages: [msg(2)] }), res);
+    expect(res._status).toBe(409);
+  });
+
+  it('both modes cap the stored array at 5000 (oldest dropped) and count the drop', async () => {
+    const many = Array.from({ length: 5003 }, (_, i) => ({ role: 'human', text: `t${i}`, timestamp: `2026-09-04T${String(Math.floor(i / 3600)).padStart(2, '0')}:${String(Math.floor(i / 60) % 60).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.000Z` }));
+    const handler = getHandler(app, 'post', '/sessions');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { session_id: 'S3', messages: many, message_count: 5003 }), res);
+    const arg = esMock.index.mock.calls[0][0] as any;
+    expect(arg.document.messages).toHaveLength(5000);
+    expect(arg.document.messages[0].text).toBe('t3');
+    expect(arg.document.messages_dropped).toBe(3);
+    expect(arg.document.message_count).toBe(5003);
+    expect(res._json).toMatchObject({ stored: 5000, dropped: 3 });
+  });
+
+  it('rejects a body with no session_id (400)', async () => {
+    const handler = getHandler(app, 'post', '/sessions');
+    const res = makeRes();
+    await handler(reqAs('owner-1', { messages: [msg(1)] }), res);
+    expect(res._status).toBe(400);
+    expect(esMock.index).not.toHaveBeenCalled();
+  });
+});
