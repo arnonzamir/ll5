@@ -37,6 +37,7 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-021 | knowledge | med | ~20 MCP `-32602` input-validation failures across 10 tools; `note_observation` 2 of 13 | fixed | 2026-09-04: 19 failures / 10 tools reproduced from the transcript; 9 schemas loosened with tests; 2 persona/skill text changes proposed (create_tickler `due_date`, upsert_fact fields) |
 | ISS-022 | behavior | med | `record_moment` (a no-op) is 53% of main-session tool calls; with `write_journal` 86% | open | proposal: DECISION-028 |
 | ISS-023 | infra | med | CI: a push to main that touches **no** package (docs-only) rebuilds and redeploys all 10 infra services | verified | docs-only push `f2ba560` → run 33895111679: `build: skipped`, `deploy: skipped` |
+| ISS-025 | infra | high | CI push diff used `HEAD~1..HEAD`: a push whose tip is a merge commit rebuilt only the tip's first-parent delta — Track B's five MCP changes deployed only `gateway` | fixed | 2026-09-04 — diff against `github.event.before` (fetch-depth 0), fallback HEAD~1; the skipped five re-dispatched by hand |
 | ISS-024 | scaffolding | high | Orchestrator had no `agentTokenResolver` (defaulted to `() => null`): the stale-heartbeat **restart path never once worked**, and the DECISION-027 image roll skipped with "no agent token" | verified | `a0e5deb` deployed; 16:22:14Z roll: `reprovisioned:1` — new container on the pinned image |
 
 ---

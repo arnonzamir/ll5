@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — ISS-025: CI push diff now spans the whole push (was `HEAD~1`)
+
+The Track B push (`7100f4c` merge + `f81cc58` tip) rebuilt only `gateway`: `set-matrix` diffed `HEAD~1..HEAD`, which for a merge-tipped push is the tip's first-parent delta. The five MCP images with the caps/schema fixes were not rebuilt (the memory's multi-merge trap, hit again). Fix: `fetch-depth: 0` and `git diff "${{ github.event.before }}" HEAD` (fallback `HEAD~1` when `before` is zeros/unknown). The five were re-dispatched by hand (`-f packages=personal-knowledge,awareness,messaging,gtd,google`).
+
 ## 2026-09-04 — Track B merged: MCP result caps + cursors (ISS-019), tolerant schemas for 9 tools (ISS-021)
 
 Merged `worktree-agent-a3f693f464e523b8b` (`26e4e79`). New `packages/shared/src/mcp/result-cap.ts` (`MCP_RESULT_CAP_CHARS = 20_000`, item-boundary cut newest-first, opaque cursor, `truncated`/`next_cursor`/`hint` only when cut, `max_chars` override ≤500 KB). Applied to awareness `recall_everything` (the 1.7 MB / 700 KB results were `all_sessions:true` carrying whole session docs — now `message_count`/`transcript_chars` + 4 KB clips), `read_journal`, `query_im_messages`; personal-knowledge `recall`/`list_narratives`/`get_narrative`; messaging `read_messages`. Nine schemas now accept what the agent actually sends (`note_observation` string `subject`/`content`, `write_journal` signal `consolidated`, `upsert_fact` free shapes, `get_person` `person_id`, `create_tickler` `date`/`start`, `upsert_lesson` bare `content`, `log_habit_outcome` `skipped`, `link_media` aliases, `list_horizons` no-arg) — each locked by a test on the live failing payload; `read_messages` with `platform:"slack"` returns a structured redirect to `query_im_messages`. `write_user_model` never failed (the ISS-021 list was wrong there).

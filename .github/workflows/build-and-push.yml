@@ -35,7 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          # Full history: the push diff below runs against github.event.before (the
+          # previous tip), not HEAD~1 — see the comment there.
+          fetch-depth: 0
 
       - id: set-matrix
         run: |
@@ -87,7 +89,17 @@ jobs:
 
           # On push, check which packages changed (shared changes trigger ALL infra)
           if [[ "${{ github.event_name }}" == "push" ]]; then
-            CHANGED=$(git diff --name-only HEAD~1 HEAD)
+            # ISS-025: diff against the PREVIOUS PUSHED TIP, not HEAD~1. A push whose
+            # tip is a merge commit (or several commits) only showed the tip's
+            # first-parent delta, so packages changed in the merged branch were
+            # silently not rebuilt (2026-09-04: Track B's five MCP changes shipped
+            # only gateway). github.event.before is the ref before this push; on a
+            # force-push/new-branch it can be all zeros — fall back to HEAD~1 then.
+            BASE="${{ github.event.before }}"
+            if [[ -z "$BASE" || "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+              BASE="HEAD~1"
+            fi
+            CHANGED=$(git diff --name-only "$BASE" HEAD)
             # packages/shared/ OR packages/ll5-run-shared/ OR docker/ OR
             # scripts/render-mcp-config.ts → rebuild all infra packages
             SHARED_CHANGED=$(echo "$CHANGED" | grep -cE "packages/(shared|ll5-run-shared)/" || true)
