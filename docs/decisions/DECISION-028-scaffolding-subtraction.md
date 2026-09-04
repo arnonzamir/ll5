@@ -250,7 +250,7 @@ Expected baseline deltas after 1–8: tool calls in `ll5_audit_log` per 15 days 
 
 | # | Done |
 |---|---|
-| 1 | Reconcile subsystem retired (gateway selector/gate/governor + 5 checks + tray kind + `/me/reconcile/confirm`; GTD tools; agent-repo worker/prompt/config/tests; entrypoint launch). GTD columns, migrations and the `ll5_reconcile_metrics` data stay. |
+| 1 | Reconcile subsystem retired — ll5 `1e563e3`, agent repo `08f170b` (gateway selector/gate/governor + 5 checks + tray kind + `/me/reconcile/confirm`; GTD tools; agent-repo worker/prompt/config/tests; entrypoint launch). GTD columns, migrations and the `ll5_reconcile_metrics` data stay. |
 | 2 | `NarrativeConsolidationScheduler` deleted (with its test and the 7 dead `narrative_freshness_*` settings). |
 | 3 | Collapsed with #1. |
 | 4 | Shipped earlier today as the context pack (see Review). |

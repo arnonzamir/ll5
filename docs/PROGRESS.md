@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 (evening) — batch 1 merged and shipped
+
+Merged the reconcile-retirement branch (`1e563e3`: 26 files, −2,654 lines; gateway 816 → 757 tests, gtd 148 → 118) and the baseline re-measure script (`15d8b29`: `scripts/agent-baseline.sh`, reproduces the frozen window within same-day drift; today's numbers already show 5 session ids, $45 of visible turn cost, 14 observations) on top of the scheduler/alert/poll batch (`b587329`). Full suites green with no concurrent load: gateway 759/759, gtd 118/118, dashboard + gateway typecheck clean. Pushed as `4f4a2ad` → builds gateway, gtd, dashboard, run-claude → roll. Leftovers flagged by the retirement (not removed, cross-repo contracts): the `reconcile` per-tool model slot in `agent.ts`/`agent-models.ts` + dashboard dropdown, `'reconcile-loop'` in `/internal/agent-session` `validTypes`, `@elastic/elasticsearch` still in `gtd/package.json`.
+
 ## 2026-09-04 (evening) — DECISION-028 batch 1: the subtraction
 
 Everything Arnon approved this afternoon, each removal its own reviewable change:
