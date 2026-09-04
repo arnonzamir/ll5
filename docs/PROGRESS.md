@@ -4,6 +4,16 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — Agent review (Aug 21–Sep 4): issue register + frozen baseline
+
+First look at the agent in 2+ weeks (nothing shipped to either repo in the window). Chat and rituals healthy: 58/58 user messages answered (p50 22 s), morning brief / evening close / nightly consolidation 15/15. The memory layer is not — and it failed silently (1.57M `ll5_app_log` docs, 1 error, no alert).
+
+- **New `docs/ISSUES.md`** — the single living issue register, 22 issues seeded (ISS-001..022) + the 3 old Known Issues folded in as ISS-K01..K03. `## Known Issues` below now points at it.
+- **New `docs/reviews/2026-09-04/agent-baseline.md`** — the 15-day numbers frozen as the control for the remediation plan; re-run after each phase.
+- Headline findings: `note_observation` drifted 963 → 11/month over three months while `write_journal` tripled (the CLAUDE.md "journal **or** observation" rule let the cheap half win — ISS-002); narrative consolidation silent 12 days as a consequence (ISS-003); `POST /sessions` 413s silently past ~250 messages on the gateway's 1 MB body cap, so `ll5_session_history` is frozen per session and every post-compaction re-ground read an 8-day-old snapshot (ISS-014/015); eval recorder still over-counts `reply` as delivery (ISS-001 — Aug 21: 183 recorded pings vs 24 real); agent greps spilled `tool-results/*.txt` files instead of narrowing ES queries (ISS-018/019); live CLI 2.1.197 ≠ Dockerfile pin 2.1.204 (ISS-007); `ll5_turn_costs` dead since Jul 13 (ISS-006); reconcile subsystem 0 actions in 15 days (ISS-008); 76.5% of tool calls are housekeeping (ISS-010).
+- Memory governance verified **working**: `memory-intercept.sh` denies markdown memory writes and routes to `ingest_memory`; container memory dirs empty. Nothing goes to disk as a read source — but `ingest_memory` hasn't been fed since July (ISS-017).
+- Decisions taken: fix telemetry + knowledge first, runtime upgrade **last** against the baseline; scaffolding subtraction is on the table (DECISION-027 to come); one controlled session restart per day, event-triggered after nightly `consolidate` (ISS-016); memory-intercept goes fail-closed + outbox (ISS-017); core tool set pre-loaded at SessionStart (ISS-020). Plan phases 0–6 are in the session plan; Phase 0 is this commit.
+
 ## 2026-08-19 — Suppression alert now keeps BOTH metrics (count + share)
 
 `behavior.suppress_spike` fired at 15:10 local claiming the agent was over-suppressing. It wasn't. Pulled the eval moments for the exact window the check measured (09:10–12:10Z) against its own three same-weekday baselines:
@@ -2007,9 +2017,7 @@ Last audited (2026-04-07): 111 tools, 33 pages, 10 schedulers, ~39 REST endpoint
 
 ## Known Issues
 
-- Evolution API `findContacts({where:{}})` times out on 2913 contacts — single-JID queries work fine
-- Most messaging contacts lack display names — Evolution API only provides WhatsApp `pushName`. Fix deployed: Android phone contacts push enriches from address book (needs READ_CONTACTS permission grant + first sync).
-- Dashboard MCP client sometimes gets stale responses (needs cache-busting)
+Moved to **[docs/ISSUES.md](ISSUES.md)** (2026-09-04) — the single living register. The three bullets that lived here are ISS-K01..K03 there. Closing an issue = flip its row there + a dated entry here, same commit.
 
 
 

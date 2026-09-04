@@ -4,6 +4,18 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — Agent review: how to reach the agent, how to read it, what is currently lying
+
+- **Issue register:** `docs/ISSUES.md` is the only Known Issues list. Baseline numbers: `docs/reviews/2026-09-04/agent-baseline.md`.
+- **Container naming changed.** The user's agent is `ll5-agent-<user-uuid>` (currently `ll5-agent-f08f46b3-0a9c-41ae-9e6a-294c697424e4`); the old stable prefix `js8owk0g…` is gone. Resolve with `sess me` on the host (`/usr/local/bin/sess {agent|me|box|ll5-agent-<uid>}`; `agent` = shared compose agent, excludes `agent-orchestrator`). From a laptop: `ssh -t root@95.216.23.208 sess me` works (not firewalled). Read without attaching: `docker exec <c> tmux capture-pane -p -t ll5 | tail -30`.
+- **Query prod ES from a laptop without the password:** `docker exec awareness-<id> node -e '…fetch(process.env.ELASTICSEARCH_URL…)'` — the container already holds the creds; nothing leaves the box. Basic-auth header must be derived from the URL (Node fetch ignores inline creds — the 2026-06-13 lesson).
+- **Session facts live in the container, not ES:** transcript `/data/home/.claude/projects/-workspace/<session-id>.jsonl` (live id in `~/.ll5/agent-session-id`); `grep -c isCompactSummary` = compaction count; `tool-results/` under the session dir holds every MCP result that overflowed context (these are what the agent has been grepping — ISS-018). Hooks are wired in `/workspace/ll5-run/.claude/settings.json` (7 events); memory dirs `~/.claude/projects/*/memory` should stay **empty** — non-empty means `memory-intercept.sh` fail-opened.
+- **Do not trust, until fixed:** `ll5_session_history` (frozen per session at ~250 messages — ISS-014; `recent_sessions`/`recall_everything` read it, so the post-compaction re-ground is stale — ISS-015); `ping_now`/`decision_mismatch`/`grounding_calls` in `ll5_eval_moments` (reply-as-delivery over-count — ISS-001); `ll5_turn_costs` (no writer since Jul 13 — ISS-006); `ll5_reconcile_metrics` (`candidate_count:0` is indistinguishable from five failure paths — ISS-008).
+- **Runtime provenance:** container reports Claude Code 2.1.197, Dockerfile pins 2.1.204, image dated 2026-07-15 — unresolved (ISS-007). Model is hard-coded in `ll5-run-claude-code:ll5-server:85`, not env-driven. Agent repo CI last green 2026-07-14; `TS_AUTHKEY` lapsed ~Aug 23 (its reminder wake was cancelled). **Nothing can ship to the agent until this is fixed.**
+- **Nightly jobs, for the record:** exactly one — `JournalConsolidationScheduler` at 02:00 local → `consolidate` skill (~6 min incl. `grounding-reviewer`). Narrative work is the in-container 20-min loop; the gateway `NarrativeConsolidationScheduler` is default OFF. Reconcile loop 30 min. Coach-scan weekly.
+
+---
+
 ## 2026-08-19 — Reading `behavior.suppress_spike` (now count + share)
 
 - The alert value now carries **both metrics**: `<count> in the last 180m vs <median> median…; share <X>% of <N> vs <Y>% median (+Zpp)`. It only fires when the count at least doubles AND the suppression share rises ≥20 percentage points over the same-weekday median. A count spike alone (busy window, identical behavior) no longer alerts.
