@@ -20,13 +20,13 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-004 | behavior | high | `ping_later` books nothing: 57 of 72 claims hollow | open | |
 | ISS-005 | telemetry | med | No idempotency on `/telemetry/eval-moment` and `/telemetry/turn-cost` writes | fixed | 2026-09-04 gateway Phase 1 commit |
 | ISS-006 | telemetry | med | `ll5_turn_costs` dead since 2026-07-13 | in-progress | mappings declared 2026-09-04; writer (agent-side) + stale check pending |
-| ISS-007 | provenance | high | Live CLI 2.1.197 ≠ Dockerfile pin 2.1.204; running commit unverifiable | open | |
+| ISS-007 | provenance | high | Live CLI 2.1.197 ≠ Dockerfile pin 2.1.204; running commit unverifiable | fixed | DECISION-027, 2026-09-04 — verify inside the container after the first dispatch |
 | ISS-008 | scaffolding | med | Reconcile subsystem: 682 selector calls, 0 actions, `candidate_count:0` with 5 indistinguishable causes | open | |
 | ISS-009 | scaffolding | med | Two divergent narrative-freshness policies; two copies of the reconcile selector + gate | open | |
 | ISS-010 | scaffolding | med | 76.5% of tool calls are housekeeping; 32 gateway schedulers + 2 in-container loops | open | |
 | ISS-011 | knowledge | med | Journal backlog: 1,229 `context` entries open over 7 days | open | |
 | ISS-012 | behavior | low | Learning flat: 3 lessons in 15 days; lessons/user-model history indices take no writes | open | |
-| ISS-013 | infra | med | Chronic unfixed: WA bridge stalls, Gmail/Slack mirror listeners, Google OAuth disconnects, TS_AUTHKEY lapsed, agent CI cold since Jul 14 | open | |
+| ISS-013 | infra | med | Chronic unfixed: WA bridge stalls, Gmail/Slack mirror listeners, Google OAuth disconnects, TS_AUTHKEY lapsed, agent CI cold since Jul 14 | in-progress | deploy path rebuilt (DECISION-027); the infra stalls remain Phase 6 |
 | ISS-014 | telemetry | high | `POST /sessions` exceeds the gateway 1 MB body cap past ~250 messages → 413 swallowed → `ll5_session_history` frozen per session | in-progress | gateway side 2026-09-04 (10 MB route cap + `mode:"append"`); agent-side incremental send pending |
 | ISS-015 | behavior | high | Post-compaction re-ground reads the frozen session index | in-progress | unfreezes with ISS-014's gateway fix on the next Stop; verify `indexed_at` advances |
 | ISS-016 | scaffolding | med | Nothing monitors session age, compaction cadence, or session-save liveness; sessions roll only on container restart | in-progress | `agent.session_save_stale` check shipped 2026-09-04; session-age gauge + daily restart pending |
@@ -36,7 +36,7 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-020 | behavior | med | Deferred tool schemas: knowledge-write tools absent from the post-compaction reflex set | open | |
 | ISS-021 | knowledge | med | ~20 MCP `-32602` input-validation failures across 10 tools; `note_observation` 2 of 13 | open | |
 | ISS-022 | behavior | med | `record_moment` (a no-op) is 53% of main-session tool calls; with `write_journal` 86% | open | |
-| ISS-023 | infra | med | CI: a push to main that touches **no** package (docs-only) rebuilds and redeploys all 10 infra services | open | |
+| ISS-023 | infra | med | CI: a push to main that touches **no** package (docs-only) rebuilds and redeploys all 10 infra services | fixed | 2026-09-04 with DECISION-027 (`else PACKAGES=()` + deploy gated on a non-empty push matrix) |
 
 ---
 
@@ -78,11 +78,12 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 ### ISS-007 — Live CLI ≠ pin
 - **Evidence:** container `ll5-agent-f08f46b3-…` runs image `ghcr.io/arnonzamir/ll5-run-claude:latest` created 2026-07-15T05:37Z; `/usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json` = **2.1.197**; `ll5-run-claude-code:Dockerfile:70` pins **2.1.204** (bumped 2026-07-08, `ec9f45f6`). Model hard-coded `--model claude-opus-4-7` in `ll5-server:85`.
 - **Fix shape:** identify the workflow that builds `ll5-run-claude:latest`; make `docker-entrypoint.sh:186`'s version log an assertion; rotate `TS_AUTHKEY`; one green CI run.
+- **2026-09-04 ROOT CAUSE + FIX (DECISION-027):** two images, two pipelines. `ll5-run-claude-code` CI built `ghcr.io/arnonzamir/ll5-agent` (pinned 2.1.204) and deployed it to Coolify app `js8owk0g…` — a zombie (`exited:unhealthy`, 20,026 restarts). The **live** container runs `ll5-run-claude`, built by **ll5** CI from `docker/Dockerfile.ll5-run-claude` with an **unpinned** `npm install -g @anthropic-ai/claude-code` (→ 2.1.197 on Jul 15), only on manual dispatch (last Jul 19) or the weekly schedule — which failed 7/7 since Jul 20 because `build (run-opencode)` 403s on GHCR and fail-fast cancelled `build (run-claude)`. Fix: the ll5 Dockerfile pins the CLI (`ARG CLAUDE_CODE_VERSION`, build-time `claude --version` assertion, `ENV` exported), the agent repo becomes a trigger (`trigger-ll5-rebuild.yml`; its Dockerfile + builder workflow deleted), ll5 builds `run-claude` on that dispatch and on the weekly schedule (opencode dropped from the schedule), the deploy job calls the new orchestrator `POST /runtimes/reprovision-running` so the image actually reaches the per-user containers, the entrypoint asserts the version at boot (critical alert on mismatch), and the zombie Coolify app is deleted. `TS_AUTHKEY` (rotated today) only ever served the deleted path. **Verify:** first dispatch green → `docker exec <agent> claude --version` = 2.1.204 → entrypoint log `claude version OK`. Remaining: delete the `ll5-agent` GHCR package (needs an owner token with `delete:packages`); set `LL5_DISPATCH_PAT` on the agent repo.
 
 ### ISS-008 — Reconcile subsystem is a no-op
 - **Where:** selector `packages/gateway/src/reconcile.ts:46` (zero-paths at `:57`, `:62`, `:94`, `:103`, `:105`), GTD copy `packages/gtd/src/tools/reconcile.ts:54` (`:79` es-null degrade); governor `scheduler/reconcile-governor.ts:76`.
 - **Evidence:** `list_reconcile_work` 682 calls, `reconcile_loop` 0, every `ll5_reconcile_metrics` doc `candidate_count:0`, `reconciliation_coverage:null`, 15 days.
-- **Fix shape:** make the zero-paths distinguishable, then fix or retire (DECISION-027).
+- **Fix shape:** make the zero-paths distinguishable, then fix or retire (DECISION-028).
 
 ### ISS-009 — Duplicate policies and selectors
 - `scheduler/narrative-consolidation.ts` (default OFF, `promoteThreshold 3 / debounce 6h`) vs `narrative.repository.ts:420` (`1 / 45m`); reconcile selector and gate each exist twice (gateway + gtd).
@@ -144,7 +145,8 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 ### ISS-023 — Docs-only pushes redeploy everything
 - **Where:** `.github/workflows/build-and-push.yml`, `detect-changes` → `set-matrix`, the push branch. `PACKAGES` starts as the full infra list; the per-package filter only replaces it when `${#FILTERED[@]} -gt 0`. A commit that touches no `packages/<pkg>/` path (docs, workflows, root files) matches nothing, the narrowing is skipped, and the full list goes to the build matrix and then to `deploy`.
 - **Evidence:** run `33886995650` for `7dbf725` (docs only: `docs/ISSUES.md`, `docs/reviews/…`, PROGRESS/HANDOFF/FILE_TREE) — `build (…)` ran for all 10 packages and `deploy` ran, all green. Every docs-only commit since this logic landed has done the same: a full-stack restart per doc edit.
-- **Fix shape (one line):** `else PACKAGES=(); fi` after the `-gt 0` check, so nothing-matched → empty matrix. Then confirm the `deploy` job's `if:`/`needs:` skips cleanly on an empty matrix for a push (it already does for `repository_dispatch`, whose comment explains the empty-string convention) — a docs-only push should build nothing **and deploy nothing**. Not applied in the 2026-09-04 gateway commit (outside the approved plan's scope); until it is, treat every push to main as a full redeploy and never push while a deploy is in flight.
+- **Fix shape (one line):** `else PACKAGES=(); fi` after the `-gt 0` check, so nothing-matched → empty matrix. Then confirm the `deploy` job's `if:`/`needs:` skips cleanly on an empty matrix for a push (it already does for `repository_dispatch`, whose comment explains the empty-string convention) — a docs-only push should build nothing **and deploy nothing**.
+- **2026-09-04 fixed** (bundled with DECISION-027): `else PACKAGES=()` in `set-matrix`, and the deploy job's `if:` gains `(github.event_name != 'push' || needs.detect-changes.outputs.matrix != '')`. Verify: the next docs-only push shows `detect-changes` green, no `build (…)` jobs, `deploy` skipped.
 
 ---
 

@@ -85,6 +85,22 @@ export function createApp(deps: ServerDeps): Express {
     },
   );
 
+  // Deploy-time image roll (DECISION-027): re-provision every running agent onto
+  // the current image. Called by the ll5 deploy job right after it rebuilt
+  // run-claude (and by an operator via the same bearer). Per-user failures are
+  // reported in the body, not as an HTTP failure.
+  app.post('/runtimes/reprovision-running', auth, async (_req: Request, res: Response) => {
+    try {
+      const result = await deps.orchestrator.reprovisionRunning();
+      res.json(result);
+    } catch (err) {
+      logger.error('[orchestrator-http] reprovision-running failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'reprovision_failed' });
+    }
+  });
+
   app.post(
     '/runtimes/:userId/stop',
     auth,

@@ -218,6 +218,34 @@ describe('Orchestrator', () => {
     expect(runtime.provisionCalls).toHaveLength(1);
   });
 
+  it('reprovisionRunning re-provisions EVERY running row regardless of heartbeat or cooldown (DECISION-027 image roll)', async () => {
+    const fresh = new Date(); // fresh heartbeat — reconcile would leave it alone
+    const rows = new Map<string, Partial<AgentRuntimeRow>>([
+      ['user-1', { user_id: 'user-1', status: 'running', last_seen_at: fresh, container_id: 'c1' }],
+      ['user-2', { user_id: 'user-2', status: 'running', last_seen_at: fresh, container_id: 'c2' }],
+      ['user-3', { user_id: 'user-3', status: 'stopped', last_seen_at: fresh, container_id: null }],
+    ]);
+    const db = makeRuntimesDb({ ciphertext: encrypt(API_KEY, KEY), rows });
+    const { runtime, orch } = build(db, baseConfig({ restartCooldownSec: 600 }), {
+      agentTokenResolver: async (userId: string) => (userId === 'user-2' ? null : AGENT_TOKEN),
+    });
+
+    const res = await orch.reprovisionRunning();
+
+    // user-1: rolled. user-2: no agent token → reported failed, not thrown. user-3: not running → untouched.
+    expect(res.reprovisioned).toEqual(['user-1']);
+    expect(res.failed).toEqual(['user-2']);
+    expect(runtime.provisionCalls).toHaveLength(1);
+    expect(runtime.provisionCalls[0].userId).toBe('user-1');
+    expect(db.rows.get('user-1')?.status).toBe('running');
+    expect(db.rows.get('user-3')?.status).toBe('stopped');
+
+    // No cooldown: a second roll immediately re-provisions again.
+    const again = await orch.reprovisionRunning();
+    expect(again.reprovisioned).toEqual(['user-1']);
+    expect(runtime.provisionCalls).toHaveLength(2);
+  });
+
   it('reconcile honors the restart cooldown (anti-flap)', async () => {
     const old = new Date(Date.now() - 10 * 60 * 1000);
     const rows = new Map<string, Partial<AgentRuntimeRow>>([

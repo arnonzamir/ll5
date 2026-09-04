@@ -54,6 +54,9 @@ describe('orchestrator HTTP server', () => {
         return hasCred ? [{ ciphertext: encrypt(API_KEY, KEY) }] : [];
       }
       if (/count\(\*\)/.test(text)) return [{ n: '0' }];
+      if (/FROM agent_runtimes WHERE status = 'running'/.test(text)) {
+        return [...store.values()].filter((r) => r.status === 'running');
+      }
       if (/FROM agent_runtimes WHERE user_id = \$1/.test(text)) {
         const r = store.get(values[0] as string);
         return r ? [r] : [];
@@ -79,6 +82,7 @@ describe('orchestrator HTTP server', () => {
       encryptor: { encrypt, decrypt },
       secrets: new SecretsWriter({ dir: secretsDir }),
       config: config(),
+      agentTokenResolver: async () => 'll5.tok',
     });
 
     const app = createApp({ orchestrator, orchestratorSecret: SECRET });
@@ -147,6 +151,29 @@ describe('orchestrator HTTP server', () => {
     );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toBe('no_llm_credential');
+  });
+
+  it('POST /runtimes/reprovision-running requires the bearer (401)', async () => {
+    const res = await fetch(`${baseUrl}/runtimes/reprovision-running`, { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /runtimes/reprovision-running rolls every running agent and reports per-user outcome (DECISION-027)', async () => {
+    // Nothing running yet → empty roll.
+    const empty = await fetch(`${baseUrl}/runtimes/reprovision-running`, authed({ method: 'POST' }));
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ reprovisioned: [], failed: [] });
+
+    await fetch(
+      `${baseUrl}/runtimes/user-1/provision`,
+      authed({ method: 'POST', body: JSON.stringify({ agent_token: 'll5.tok' }) }),
+    );
+    const res = await fetch(`${baseUrl}/runtimes/reprovision-running`, authed({ method: 'POST' }));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { reprovisioned: string[]; failed: string[] };
+    expect(body.reprovisioned).toEqual(['user-1']);
+    expect(body.failed).toEqual([]);
+    expect(store.get('user-1')?.status).toBe('running');
   });
 
   it('POST stop returns stopped', async () => {

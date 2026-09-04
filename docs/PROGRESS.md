@@ -4,6 +4,22 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — DECISION-027: one production image for the Claude agent, built by ll5 (+ ISS-023)
+
+ISS-007 turned out to be a split-brain deploy path, not a stale tag. Two images, two pipelines, and the one that shipped was not the one that ran:
+
+- `ll5-run-claude-code` CI built `ghcr.io/arnonzamir/ll5-agent` (CLI pinned 2.1.204) and deployed it to Coolify app `js8owk0g…` — a **zombie** (`exited:unhealthy`, 20,026 restarts, last online Aug 31). Every push there since Jul 14 built an image nobody ran.
+- The **live** per-user container runs `ll5-run-claude`, built by **ll5** CI from `docker/Dockerfile.ll5-run-claude` with an **unpinned** `npm install -g @anthropic-ai/claude-code` — hence 2.1.197. Rebuilt only on manual dispatch (last Jul 19) or the Monday schedule, which **failed 7 of 7 runs since Jul 20**: `build (run-opencode)` 403s pushing a package the opencode repo owns, and matrix fail-fast cancelled `build (run-claude)`. Silent for seven weeks.
+- `docker compose up` never touches per-user containers; a good build still needed an explicit re-provision to land.
+
+Shipped (see `docs/decisions/DECISION-027-claude-variant-single-image.md`):
+- `docker/Dockerfile.ll5-run-claude`: `ARG CLAUDE_CODE_VERSION` (default 2.1.204; repo var `CLAUDE_CODE_VERSION` overrides), exported as `ENV`, build fails if `claude --version` disagrees; `en_US.UTF-8` locale + `openpyxl` ported from the retired Dockerfile.
+- `.github/workflows/build-and-push.yml`: `repository_dispatch` with `package=run-claude` now **builds** it (opencode stays deploy-only); schedule builds `run-claude` only; run-claude build-args carry the pin; after `docker compose up`, when this run rebuilt run-claude, the deploy job calls the orchestrator's new **`POST /runtimes/reprovision-running`** to roll every running per-user agent (`provision()` force-pulls + force-removes by name). **ISS-023 bundled:** a push touching no package now builds nothing and the deploy job is skipped (`else PACKAGES=()` + matrix gate on the deploy `if`).
+- `packages/agent-orchestrator`: `Orchestrator.reprovisionRunning()` (every `running` row, no heartbeat gate, no cooldown, per-user failures collected) + the authed route. Tests +3.
+- Agent repo (`ll5-run-claude-code`): `Dockerfile` and `build-and-push.yml` **deleted**; new `trigger-ll5-rebuild.yml` (push → `repository_dispatch(rebuild-agent, package=run-claude)`, needs `LL5_DISPATCH_PAT`); `docker-entrypoint.sh` asserts the CLI version against the baked pin at boot — mismatch = `critical` alert via `POST /alerts` + `~/.ll5/version-mismatch`, not a crash loop; `docker/README.md` rewritten.
+- Coolify app `js8owk0g…` deleted (volumes kept — nothing mounts them). The `ll5-agent` GHCR package still needs an owner token to delete. `TS_AUTHKEY` (rotated earlier today) and `COOLIFY_API_TOKEN` on the agent repo are now unused.
+- Follow-up noted in the decision: the ll5 image runs as root; the retired one ran as `node`.
+
 ## 2026-09-04 — Phase 1 (gateway side): session-save unfrozen, idempotent telemetry, declared mappings
 
 Gateway-only pieces of the remediation plan's Phase 1 (`docs/ISSUES.md` ISS-005/006/014/015/016). The agent-repo halves wait on its deploy path (ISS-007/013).
@@ -24,7 +40,7 @@ First look at the agent in 2+ weeks (nothing shipped to either repo in the windo
 - **New `docs/reviews/2026-09-04/agent-baseline.md`** — the 15-day numbers frozen as the control for the remediation plan; re-run after each phase.
 - Headline findings: `note_observation` drifted 963 → 11/month over three months while `write_journal` tripled (the CLAUDE.md "journal **or** observation" rule let the cheap half win — ISS-002); narrative consolidation silent 12 days as a consequence (ISS-003); `POST /sessions` 413s silently past ~250 messages on the gateway's 1 MB body cap, so `ll5_session_history` is frozen per session and every post-compaction re-ground read an 8-day-old snapshot (ISS-014/015); eval recorder still over-counts `reply` as delivery (ISS-001 — Aug 21: 183 recorded pings vs 24 real); agent greps spilled `tool-results/*.txt` files instead of narrowing ES queries (ISS-018/019); live CLI 2.1.197 ≠ Dockerfile pin 2.1.204 (ISS-007); `ll5_turn_costs` dead since Jul 13 (ISS-006); reconcile subsystem 0 actions in 15 days (ISS-008); 76.5% of tool calls are housekeeping (ISS-010).
 - Memory governance verified **working**: `memory-intercept.sh` denies markdown memory writes and routes to `ingest_memory`; container memory dirs empty. Nothing goes to disk as a read source — but `ingest_memory` hasn't been fed since July (ISS-017).
-- Decisions taken: fix telemetry + knowledge first, runtime upgrade **last** against the baseline; scaffolding subtraction is on the table (DECISION-027 to come); one controlled session restart per day, event-triggered after nightly `consolidate` (ISS-016); memory-intercept goes fail-closed + outbox (ISS-017); core tool set pre-loaded at SessionStart (ISS-020). Plan phases 0–6 are in the session plan; Phase 0 is this commit.
+- Decisions taken: fix telemetry + knowledge first, runtime upgrade **last** against the baseline; scaffolding subtraction is on the table (DECISION-028 to come; 027 became the deploy-path decision); one controlled session restart per day, event-triggered after nightly `consolidate` (ISS-016); memory-intercept goes fail-closed + outbox (ISS-017); core tool set pre-loaded at SessionStart (ISS-020). Plan phases 0–6 are in the session plan; Phase 0 is this commit.
 
 ## 2026-08-19 — Suppression alert now keeps BOTH metrics (count + share)
 

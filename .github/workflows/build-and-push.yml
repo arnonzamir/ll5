@@ -63,13 +63,26 @@ jobs:
           # package (403 Forbidden). Deploy-only — empty build matrix; the deploy
           # job pulls the variant's freshly-built :latest. (client_payload.package
           # is informational; the active AGENT_VARIANT selects which image runs.)
+          # EXCEPT run-claude (DECISION-027): the Claude variant's production image
+          # is ll5-run-claude, built HERE from docker/Dockerfile.ll5-run-claude
+          # (ll5 owns that GHCR package, so the push succeeds). The variant repo is
+          # a trigger, not a builder — its push dispatches package=run-claude and
+          # we build + deploy + roll the running per-user agents.
           if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
-            PACKAGES=()
+            if [[ "${{ github.event.client_payload.package }}" == "run-claude" ]]; then
+              PACKAGES=("run-claude")
+            else
+              PACKAGES=()
+            fi
           fi
 
-          # On schedule (weekly fallback), rebuild both variants
+          # On schedule (weekly fallback), rebuild run-claude only. run-opencode is
+          # built by its own repo's CI; building it here 403s on the GHCR push
+          # (permission_denied: read_package) and, with matrix fail-fast, that
+          # failure CANCELLED the run-claude build every Monday from 2026-07-20 to
+          # 2026-08-31 — the live claude image silently never refreshed.
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            PACKAGES=("run-claude" "run-opencode")
+            PACKAGES=("run-claude")
           fi
 
           # On push, check which packages changed (shared changes trigger ALL infra)
@@ -93,6 +106,13 @@ jobs:
               done
               if [[ ${#FILTERED[@]} -gt 0 ]]; then
                 PACKAGES=("${FILTERED[@]}")
+              else
+                # ISS-023: a push that touches NO package (docs, workflows, root
+                # files) used to fall through with the FULL infra list — every
+                # docs-only commit rebuilt and redeployed all 10 services. Nothing
+                # matched → build nothing → (deploy is gated on a non-empty matrix
+                # for pushes, below) deploy nothing.
+                PACKAGES=()
               fi
             fi
           fi
@@ -262,7 +282,12 @@ jobs:
               echo "build_args=" >> "$GITHUB_OUTPUT" ;;
             run-claude)
               echo "file=docker/Dockerfile.ll5-run-claude" >> "$GITHUB_OUTPUT"
-              echo "build_args=MCP_BASE_DOMAIN=${{ vars.MCP_BASE_DOMAIN || 'noninoni.click' }}" >> "$GITHUB_OUTPUT" ;;
+              # CLAUDE_CODE_VERSION: the CLI pin (DECISION-027). Repo var overrides
+              # the Dockerfile default so a bump is a deliberate, visible act.
+              echo "build_args<<EOF" >> "$GITHUB_OUTPUT"
+              echo "MCP_BASE_DOMAIN=${{ vars.MCP_BASE_DOMAIN || 'noninoni.click' }}" >> "$GITHUB_OUTPUT"
+              echo "CLAUDE_CODE_VERSION=${{ vars.CLAUDE_CODE_VERSION || '2.1.204' }}" >> "$GITHUB_OUTPUT"
+              echo "EOF" >> "$GITHUB_OUTPUT" ;;
             run-opencode)
               echo "file=docker/Dockerfile.ll5-run-opencode" >> "$GITHUB_OUTPUT"
               echo "build_args<<EOF" >> "$GITHUB_OUTPUT"
@@ -294,12 +319,17 @@ jobs:
     # even when `build` is SKIPPED (repository_dispatch builds nothing — deploy
     # pulls the variant's already-built :latest), but NOT when build actually
     # failed. always() lets us evaluate the skipped case; guard on the results.
+    # ISS-023: on a PUSH, an empty matrix means nothing changed that we deploy —
+    # skip the deploy entirely (a docs-only commit must not bounce the stack).
+    # repository_dispatch keeps its deploy-only semantics (empty matrix, pull
+    # the variant's :latest); schedule/dispatch always built something.
     if: |
       always() &&
       (github.ref == 'refs/heads/main' || github.event_name == 'repository_dispatch') &&
       needs.detect-changes.result == 'success' &&
       needs.build.result != 'failure' &&
-      needs.build.result != 'cancelled'
+      needs.build.result != 'cancelled' &&
+      (github.event_name != 'push' || needs.detect-changes.outputs.matrix != '')
     steps:
       - uses: actions/checkout@v4
 
@@ -368,11 +398,14 @@ jobs:
           OPENCODE_PROVIDER_ID: ${{ vars.OPENCODE_PROVIDER_ID || 'opencode' }}
           # Variant selection: "claude" or "opencode". Default: claude.
           AGENT_VARIANT: ${{ secrets.AGENT_VARIANT || 'claude' }}
+          # What this run built (JSON matrix or empty). The deploy script rolls the
+          # running per-user agents only when run-claude was rebuilt (DECISION-027).
+          BUILT_MATRIX: ${{ needs.detect-changes.outputs.matrix }}
         with:
           host: ${{ vars.SERVER_HOST }}
           username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES,ELASTIC_PASSWORD,ORCHESTRATOR_SECRET,BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD,RABBITMQ_PASSWORD,EVOLUTION_GLOBAL_KEY,CLAUDE_CODE_OAUTH_TOKEN,OPENCODE_ZEN_API_KEY,GROQ_API_KEY,AGENT_VARIANT
+          envs: GHCR_TOKEN,FINDHUB_WEBHOOK_TOKEN,FINDHUB_SECRETS_B64,FINDHUB_DEVICE_TYPES,ELASTIC_PASSWORD,ORCHESTRATOR_SECRET,BW_CLIENTID,BW_CLIENTSECRET,BW_PASSWORD,RABBITMQ_PASSWORD,EVOLUTION_GLOBAL_KEY,CLAUDE_CODE_OAUTH_TOKEN,OPENCODE_ZEN_API_KEY,GROQ_API_KEY,AGENT_VARIANT,BUILT_MATRIX
           command_timeout: 15m
           script: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u arnonzamir --password-stdin
@@ -528,6 +561,30 @@ jobs:
             # If you genuinely need to remove an unwanted container, do it explicitly
             # by name (docker rm <name>) — not via this flag.
             docker compose up -d
+
+            # ===== Roll the running per-user agents onto the new image =====
+            # (DECISION-027) `docker compose up` only touches compose services; the
+            # per-user agents (ll5-agent-<uid>) are provisioned by the orchestrator
+            # and keep running the OLD image until re-provisioned — provision()
+            # force-pulls + force-removes by name, so this is the one path by which
+            # a fresh ll5-run-claude:latest reaches a live agent. Only when this
+            # run actually rebuilt run-claude; an MCP-only deploy leaves agents alone.
+            if echo "$BUILT_MATRIX" | grep -q '"run-claude"'; then
+              echo "run-claude rebuilt — re-provisioning running per-user agents"
+              sleep 5
+              docker compose exec -T agent-orchestrator node -e '
+                const port = process.env.PORT || 3100;
+                const r = await fetch("http://localhost:" + port + "/runtimes/reprovision-running", {
+                  method: "POST",
+                  headers: { authorization: "Bearer " + process.env.ORCHESTRATOR_SECRET },
+                });
+                const body = await r.text();
+                console.log("reprovision-running:", r.status, body);
+                if (!r.ok) process.exit(1);
+              ' || echo "WARNING: reprovision-running failed — running agents are still on the previous image (POST /me/agent/provision to roll by hand)"
+            else
+              echo "run-claude not in this build — running agents untouched"
+            fi
 
             # ===== Agent health check =====
             # The legacy shared "agent" service is gated behind the "shared-agent"

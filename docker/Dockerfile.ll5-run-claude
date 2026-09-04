@@ -24,8 +24,14 @@ FROM node:20-slim
 # python3 backs transcribe.py + misc tooling. (These were missing → ll5-server
 # error-looped on `curl: command not found` and never launched claude.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      tmux wget curl ca-certificates jq git procps less python3 python3-pip \
+      tmux wget curl ca-certificates jq git procps less python3 python3-pip locales \
     && rm -rf /var/lib/apt/lists/*
+
+# UTF-8 locale: the agent lives in Hebrew; a C/POSIX locale garbles tmux + Python
+# output. (Ported from the retired ll5-run-claude-code Dockerfile, DECISION-027.)
+RUN sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen && locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8
 
 # On-box (private) voice-note transcription: scripts/transcribe.py uses
 # faster-whisper. Install it + pre-download the default 'small' model at build so
@@ -35,11 +41,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # finds the baked-in model. Without this transcribe.py fails "faster-whisper not
 # installed" and voice notes go untranscribed.
 ENV HF_HOME=/opt/hf-cache
-RUN pip3 install --no-cache-dir --break-system-packages faster-whisper \
+RUN pip3 install --no-cache-dir --break-system-packages faster-whisper openpyxl \
     && python3 -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
 
-# Claude Code CLI (subscription OAuth, not API key)
-RUN npm install -g @anthropic-ai/claude-code
+# Claude Code CLI (subscription OAuth, not API key).
+#
+# PINNED (DECISION-027 / ISS-007). This Dockerfile builds the image that actually
+# runs (ghcr.io/arnonzamir/ll5-run-claude); an unpinned `npm install -g` here is
+# how the live agent ended up on 2.1.197 while the agent repo "pinned" 2.1.204 in
+# a Dockerfile nobody deployed. The pin is a build-arg so the ll5 workflow (and a
+# manual dispatch) can bump it deliberately; it is exported as an ENV so the
+# entrypoint can assert the installed CLI matches at boot. The npm fetch timeouts
+# are from the old agent-repo Dockerfile: @latest installs hung silently on a slow
+# CDN (2026-05-11/12), so fail fast instead.
+ARG CLAUDE_CODE_VERSION=2.1.204
+ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}
+RUN npm config set fetch-timeout 120000 \
+ && npm config set fetch-retry-mintimeout 5000 \
+ && npm config set fetch-retry-maxtimeout 30000 \
+ && npm config set fetch-retries 2 \
+ && npm install -g --no-audit --no-fund --no-progress "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+# Build-time tripwire: the installed CLI must be the pinned one. A silent mismatch
+# here is exactly the provenance gap this pin exists to close.
+RUN INSTALLED="$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" \
+ && echo "[verify] claude --version -> ${INSTALLED} (pin ${CLAUDE_CODE_VERSION})" \
+ && test "${INSTALLED}" = "${CLAUDE_CODE_VERSION}"
 
 # tsx for render-mcp-config.ts build step
 RUN npm install -g tsx

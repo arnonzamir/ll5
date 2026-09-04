@@ -313,6 +313,44 @@ export class Orchestrator {
     return { status: 'stopped' };
   }
 
+  /**
+   * Re-provision EVERY 'running' agent onto the current image — the deploy-time
+   * image roll (DECISION-027). provision() force-pulls the image and force-removes
+   * the existing container by name, so this is the one path by which a freshly
+   * built ll5-run-claude:latest actually reaches a live per-user container. No
+   * staleness gate and no restart cooldown: it is explicit, rare, and driven by a
+   * deploy that just built the image. Per-user failures are collected, not fatal.
+   */
+  async reprovisionRunning(): Promise<{ reprovisioned: string[]; failed: string[] }> {
+    const res = await this.pool.query<AgentRuntimeRow>(
+      `SELECT user_id, container_id, host, status, last_seen_at, last_error, updated_at
+         FROM agent_runtimes WHERE status = 'running'`,
+    );
+    const reprovisioned: string[] = [];
+    const failed: string[] = [];
+    for (const row of res.rows) {
+      try {
+        const token = await this.agentTokenResolver(row.user_id);
+        if (token === null) {
+          logger.warn('[orchestrator] reprovision skipped, no agent token', { userId: row.user_id });
+          failed.push(row.user_id);
+          continue;
+        }
+        await this.provisionForUser(row.user_id, token);
+        reprovisioned.push(row.user_id);
+        logger.info('[orchestrator] reprovisioned onto current image', { userId: row.user_id });
+      } catch (err) {
+        failed.push(row.user_id);
+        logger.error('[orchestrator] reprovision failed', {
+          userId: row.user_id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    logger.info('[orchestrator] reprovision-running done', { reprovisioned: reprovisioned.length, failed: failed.length });
+    return { reprovisioned, failed };
+  }
+
   // --- reconciliation ---------------------------------------------------
 
   /**
