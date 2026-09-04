@@ -501,3 +501,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-04: DECISION-028 batch 1 merged (ll5 b587329 + 1e563e3 + 15d8b29 → 4f4a2ad); scripts/agent-baseline.{sh,py} + agent-baseline-esq.js from the baseline-script branch.
 2026-09-04: docker/Dockerfile.ll5-run-claude — `.mcp.reconcile.json` COPY removed (file deleted by DECISION-028 #1).
 2026-09-04: packages/awareness/src/setup/indices.ts — `ll5_agent_user_model_history` declared (content enabled:false); tools/journal.ts + tools/lessons.ts snapshot catches log non-404 failures (ISS-012).
+2026-09-04: docs/implementation/agent-remediation-2026-09-04.md — repo copy of the approved remediation plan + status table; scripts/esq.sh + scripts/esq.js — ad-hoc prod-ES query helper (runs inside the awareness container over SSH).

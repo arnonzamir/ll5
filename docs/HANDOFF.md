@@ -4,6 +4,30 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ---
 
+## START HERE — agent remediation, state as of 2026-09-04 night
+
+**Read first:** `docs/implementation/agent-remediation-2026-09-04.md` (the approved plan + a phase-by-phase status table), then `docs/ISSUES.md` (per-issue status, evidence, verification line). Frozen control: `docs/reviews/2026-09-04/agent-baseline.md`. Decisions: DECISION-027 (one agent image), DECISION-028 (scaffolding subtraction, reviewed row by row by Arnon).
+
+**What is live (all verified inside the container, image built from ll5 `1cc003a`, agent repo `1417673`, awareness `2052349`):** session record advancing per turn; eval recorder span fix; turn-cost writer; MCP result caps + cursors; spill-read block; memory outbox; core-tool pre-load; context pack (all lessons + narratives + open journal + last-day timeline at start, targeted per turn, `~/.ll5/context-pack.log`); persona "journal AND note_observation"; consolidate tally + restart hand-off; controlled daily restart; reconcile retired; 26 gateway schedulers; user-model history index fixed. `main` = `2052349`, everything pushed.
+
+**Waiting on time — verify these, in this order, next session:**
+1. Nightly hand-off (first real one 2026-09-05 02:00 local): `scripts/esq.sh '/ll5_agent_journal/_search' '{"size":3,"query":{"term":{"topic.keyword":"session-restart"}},"sort":[{"timestamp":"desc"}]}'` must show an entry after 02:00; container: `grep "FRESH RESTART" /data/home/.ll5/mcp-autoheal-server.log`. If missing, `agent.daily_restart_missing` fires at 26h — check `~/.ll5/restart-requested` (consolidate Step 5.4 touches it) and the watcher log.
+2. Consolidate tally: `scripts/esq.sh '/ll5_agent_journal/_search' '{"size":1,"query":{"match_phrase":{"content":"CONSOLIDATE-TALLY"}},"sort":[{"timestamp":"desc"}]}'` — `observations=` must be > 0 and `resolved=` tells you whether ISS-011 needs the budget raised.
+3. User-model history (ISS-012): `scripts/esq.sh '/ll5_agent_user_model_history/_search' '{"size":1,"sort":[{"archived_at":"desc"}]}'` — `archived_at` after 2026-09-04T20:00Z (the 23:00 local `write_user_model`).
+4. Turn costs: `scripts/esq.sh '/ll5_turn_costs/_count'` growing daily; `telemetry.turn_costs_stale` quiet.
+5. Observations daily: `scripts/esq.sh '/ll5_knowledge_observations/_count' '{"query":{"range":{"observed_at":{"gte":"now-1d"}}}}'` > 0 every day (ISS-002); `knowledge.observations_stale` quiet.
+6. On **2026-09-11**: `scripts/agent-baseline.sh --since 2026-09-04 --until 2026-09-11 > docs/reviews/2026-09-11/agent-baseline.md` and diff row by row against the frozen table. Expected: fewer `ping_now` (ISS-001 correction — not a regression), zero spill files, housekeeping share down, observations up.
+
+**Next persona batch (one agent roll, do together, not before the 09-11 readout unless something is broken):** DECISION-028 #5 `record_moment` → text sentinel (ISS-022) **with** ISS-004 (`ping_later` must carry a `wake_id`/`tickler_id`); ISS-017 lesson-promotion step in `skills/consolidate/SKILL.md`; ISS-011 resolve budget if the tally shows the backlog not converging. Every persona change = `packages/ll5-run-shared/` push → run-claude rebuild → roll → fresh session (~$5.5 cold start), so batch them.
+
+**Then:** Phase 5 runtime upgrade (bump `CLAUDE_CODE_VERSION` in `docker/Dockerfile.ll5-run-claude` + `--model` in the agent repo's `ll5-server`; verify `claude --version` inside the container; 7-day diff). Phase 6 (ISS-013 chronic infra: per source, fix or stop alerting) after that.
+
+**Small leftovers (no deploy urgency):** `reconcile` model slot in `packages/gateway/src/agent.ts`/`agent-models.ts` + dashboard dropdown; `'reconcile-loop'` in `/internal/agent-session` `validTypes`; `@elastic/elasticsearch` in `packages/gtd/package.json`; the consolidate tally as a whitelisted `/telemetry/eval-moment` field (only if a dashboard KPI needs it); CI nit — a push touching only `docker/` rebuilds all infra and still skips run-claude (needs `RUNSHARED_CHANGED`); use `[skip ci]` + `gh workflow run build-and-push.yml -f packages=…` meanwhile. **Arnon only:** delete the `ll5-agent` GHCR package; delete the dead `TS_AUTHKEY` / `COOLIFY_API_TOKEN` secrets on `ll5-run-claude-code`.
+
+**Rules that bit today:** "deploy: success" ≠ agent rolled — always check `docker logs ll5-agent-<uid> | grep "claude version OK"`; a run-claude build failure fail-fasts the other builds (nothing rolls — re-dispatch all packages); `/data/home` in the agent container is wiped on every reprovision (no volume prune needed, but nothing there is durable); never push a package change while a deploy is in flight; ES is internal-only — query with `scripts/esq.sh`.
+
+---
+
 ## 2026-09-04 — Reconcile subsystem retired (DECISION-028 #1)
 
 - The reconcile subsystem is gone from ll5: no `ReconcileGovernorScheduler` (scheduler count per user drops by 1), no `reconcile.*`/`loop.reconcile_*` anomaly checks (12 remain), no `list_reconcile_work`/`reconcile_loop` GTD tools, no `reconcile-loop.md` prompt. The tray kind `reconcile_confirm` and `POST /me/reconcile/confirm` are gone; the Android/web renderers for `reconcile_confirm` render nothing and can be removed later. Any still-open `tray_items` row with `kind='reconcile_confirm'` is simply not listed (prod had 0).
