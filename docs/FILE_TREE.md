@@ -13,6 +13,9 @@ ll5/
 ├── tsconfig.json                      # Base TypeScript config
 ├── .env.example                       # All environment variables documented
 ├── scripts/
+│   ├── agent-baseline.sh              # One-command re-measure of docs/reviews/2026-09-04/agent-baseline.md (Markdown on stdout, [--since|--until|--user]); transport only: ships the ES request list + agent-baseline-esq.js base64 into the awareness container over SSH, runs the GTD SQL via psql in the postgres container [2026-09-04]
+│   ├── agent-baseline.py              # All the baseline logic: `queries` builds the ES aggregations / SQL for the window, `render` turns the raw responses into the table + "Delta vs frozen baseline" section
+│   ├── agent-baseline-esq.js          # Runs INSIDE the awareness container: executes a JSON list of ES requests against ELASTICSEARCH_URL with an explicit Basic-auth header (Node fetch ignores inline URL creds); prints only response bodies
 │   └── render-mcp-config.ts           # Renders mcp-endpoints.json → Claude Code .claude/settings.json or opencode opencode-mcp-fragment.json (--format claude|opencode, --config, --output, --worker). MERGES into an existing output file, preserving other top-level keys (hooks/permissions) — a plain overwrite killed the agent's hook wiring for 33h [2026-07-14]
 │
 ├── packages/ll5-run-shared/            # Shared content for both agent variants (dual run-variant Phase 1)
