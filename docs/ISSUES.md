@@ -21,8 +21,8 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 | ISS-005 | telemetry | med | No idempotency on `/telemetry/eval-moment` and `/telemetry/turn-cost` writes | fixed | 2026-09-04 gateway Phase 1 commit |
 | ISS-006 | telemetry | med | `ll5_turn_costs` dead since 2026-07-13 | fixed | writer live 16:23Z + `telemetry.turn_costs_stale` (12h) shipped 2026-09-04 evening; verify: check quiet for 7 days |
 | ISS-007 | provenance | high | Live CLI 2.1.197 ≠ Dockerfile pin 2.1.204; running commit unverifiable | verified | 2026-09-04 16:22Z — rolled container: `claude version OK: 2.1.204 == pin 2.1.204` |
-| ISS-008 | scaffolding | med | Reconcile subsystem: 682 selector calls, 0 actions, `candidate_count:0` with 5 indistinguishable causes | open | proposal: DECISION-028 |
-| ISS-009 | scaffolding | med | Two divergent narrative-freshness policies; two copies of the reconcile selector + gate | open | proposal: DECISION-028 |
+| ISS-008 | scaffolding | med | Reconcile subsystem: 682 selector calls, 0 actions, `candidate_count:0` with 5 indistinguishable causes | fixed | retired, DECISION-028 #1 (2026-09-04, commit `refactor(scaffolding): retire the reconcile subsystem (DECISION-028 #1)`); agent-repo half (`reconcile-loop.sh`, `.mcp.reconcile.json`, entrypoint launch) is the agent PR |
+| ISS-009 | scaffolding | med | Two divergent narrative-freshness policies; two copies of the reconcile selector + gate | fixed | both halves 2026-09-04: reconcile copies retired (DECISION-028 #1), `NarrativeConsolidationScheduler` + its policy deleted (#2) |
 | ISS-010 | scaffolding | med | 76.5% of tool calls are housekeeping; 32 gateway schedulers + 2 in-container loops | in-progress | DECISION-028 batch 1 shipped 2026-09-04 evening: reconcile retired, NarrativeConsolidation + JournalHealth retired, expiry sweeps merged, HealthPolling gated, alert cadence 6h/24h, dashboard poll 5 min, narrative loop gated, health MCP out of the agent surface; re-measure at +7d |
 | ISS-011 | knowledge | med | Journal backlog: 1,229 `context` entries open over 7 days | open | |
 | ISS-012 | behavior | low | Learning flat: 3 lessons in 15 days; lessons/user-model history indices take no writes | open | |
@@ -97,9 +97,11 @@ Origin: the 2026-09-04 agent review (`docs/reviews/2026-09-04/agent-baseline.md`
 - **Where:** selector `packages/gateway/src/reconcile.ts:46` (zero-paths at `:57`, `:62`, `:94`, `:103`, `:105`), GTD copy `packages/gtd/src/tools/reconcile.ts:54` (`:79` es-null degrade); governor `scheduler/reconcile-governor.ts:76`.
 - **Evidence:** `list_reconcile_work` 682 calls, `reconcile_loop` 0, every `ll5_reconcile_metrics` doc `candidate_count:0`, `reconciliation_coverage:null`, 15 days.
 - **Fix shape:** make the zero-paths distinguishable, then fix or retire (DECISION-028).
+- **Closed (2026-09-04):** retired under DECISION-028 #1 — gateway selector/gate/governor, GTD tools, the five `reconcile.*`/`loop.reconcile_*` anomaly checks, the `reconcile_confirm` tray kind and `POST /me/reconcile/confirm` are gone from the ll5 repo. GTD columns/migrations and the `ll5_reconcile_metrics` index data stay. The in-container worker is removed by the agent-repo PR.
 
 ### ISS-009 — Duplicate policies and selectors
 - `scheduler/narrative-consolidation.ts` (default OFF, `promoteThreshold 3 / debounce 6h`) vs `narrative.repository.ts:420` (`1 / 45m`); reconcile selector and gate each exist twice (gateway + gtd).
+- **Reconcile half closed (2026-09-04):** both selector+gate copies retired with DECISION-028 #1. The narrative-policy half (retire `NarrativeConsolidationScheduler`, DECISION-028 #2) is another track's.
 
 ### ISS-010 — Housekeeping dominates
 - **Evidence:** `ll5_audit_log` Aug 21–Sep 4: 27,055 tool calls, 20,700 housekeeping (`list_narratives` 9,350, `write_journal` 4,952, `recall_lessons` 4,009, `list_narrative_work` 1,031, `list_reconcile_work` 682). 32 schedulers in `scheduler/index.ts`.

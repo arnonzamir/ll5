@@ -4,7 +4,6 @@ import type { Request, Response } from 'express';
 import { tokenAuthMiddleware, initAudit, initAppLog, withToolLogging } from '@ll5/shared';
 import type { AuthenticatedRequest } from '@ll5/shared';
 import pg from 'pg';
-import { Client as EsClient } from '@elastic/elasticsearch';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { loadEnv } from './utils/env.js';
@@ -80,22 +79,7 @@ export async function startServer(): Promise<void> {
   const inboxRepo = new PostgresInboxRepository(pool);
   const habitRepo = new PostgresHabitRepository(pool);
 
-  // -------------------------------------------------------------------------
-  // Read-only awareness ES client (DECISION-025 A1 — reconcile selector).
-  // ONLY `.search` is ever called on it. The `@elastic/elasticsearch` client
-  // correctly honors inline URL credentials (unlike raw Node fetch — see
-  // shared/es-auth.ts), so no manual Basic-auth stripping is needed here. If
-  // ELASTICSEARCH_URL is unset, we pass null and the selector degrades to an
-  // empty best-effort result (never crashes).
-  // -------------------------------------------------------------------------
-  const esClient: EsClient | null = env.elasticsearchUrl
-    ? new EsClient({ node: env.elasticsearchUrl })
-    : null;
-  if (!esClient) {
-    logger.warn('[startServer] ELASTICSEARCH_URL unset — reconcile selector will return empty');
-  }
-
-  const deps = { horizonRepo, inboxRepo, habitRepo, gatewayUrl: env.gatewayUrl, authSecret: env.authSecret || '', pool, esClient };
+  const deps = { horizonRepo, inboxRepo, habitRepo, gatewayUrl: env.gatewayUrl, authSecret: env.authSecret || '' };
 
   // -------------------------------------------------------------------------
   // Express app with auth middleware
