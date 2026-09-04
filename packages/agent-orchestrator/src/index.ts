@@ -30,6 +30,9 @@ async function main(): Promise<void> {
     pool,
     encryptor: { encrypt, decrypt },
     secrets,
+    // Re-provision (image roll, stale-heartbeat restart) needs the tenant's agent
+    // token; the last minted one lives in the secrets env-file we wrote.
+    agentTokenResolver: (userId) => secrets.readAgentToken(userId),
     config: {
       encryptionKey: env.encryptionKey,
       image: env.image,

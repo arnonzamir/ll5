@@ -4,6 +4,14 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — First end-to-end agent dispatch; orchestrator gets a token resolver (ISS-024)
+
+The DECISION-027 path ran for real: agent-repo push → `trigger-ll5-rebuild` (with `LL5_DISPATCH_PAT`) → ll5 `repository_dispatch` → `build (run-claude)` green **with the pin tripwire** (`[verify] claude --version -> 2.1.204`) → pushed → deploy → host pulled the new `latest` (`CLAUDE_CODE_VERSION=2.1.204`). The last step failed honestly: the orchestrator answered the roll with `reprovision skipped, no agent token`.
+
+- **ISS-024 (new, fixed):** `index.ts` never passed an `agentTokenResolver`, so the orchestrator defaulted to `() => null` — which means its stale-heartbeat restart path (`reconcile()`) has never once restarted an agent either. `SecretsWriter.readAgentToken(userId)` now reads `LL5_AGENT_TOKEN` back from the tenant's own `/run/ll5/<uid>.env`, and `index.ts` wires it. Test: write → read round-trip incl. escaped quotes; missing file → null.
+- Lesson recorded in HANDOFF: the roll step is deliberately non-fatal, so **"deploy: success" ≠ "agent rolled"** — verify `claude --version` inside the container every time.
+- Agent repo Track A (`b6c896f`, held until this deploys so its rebuild's roll lands): ISS-014 hook (`--data-binary @file`, `mode:"append"` tail, `session-save.log`), ISS-001 corrected root cause + fix (span carry-over — see ISSUES), ISS-006 turn-cost writer, ISS-020 core tool pre-load, ISS-017 memory outbox + drain, ISS-018 spill-read block hook.
+
 ## 2026-09-04 — DECISION-027: one production image for the Claude agent, built by ll5 (+ ISS-023)
 
 ISS-007 turned out to be a split-brain deploy path, not a stale tag. Two images, two pipelines, and the one that shipped was not the one that ran:

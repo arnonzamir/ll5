@@ -1,4 +1,4 @@
-import { mkdir, writeFile, chmod, rm } from 'node:fs/promises';
+import { mkdir, writeFile, chmod, rm, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /**
@@ -155,4 +155,38 @@ export class SecretsWriter {
   async remove(userId: string): Promise<void> {
     await rm(this.hostPathFor(userId), { force: true });
   }
+
+  /**
+   * Read the agent token back from the tenant's env-file (DECISION-027 follow-up).
+   * The orchestrator can't MINT a token — the gateway does that at provision time —
+   * but it already holds the last minted one on disk, and that is exactly what a
+   * deploy-time image roll or a stale-heartbeat restart needs to re-provision the
+   * same tenant. Until this existed, `agentTokenResolver` defaulted to `() => null`
+   * and BOTH of those paths silently no-op'd ("no agent token"). Returns null when
+   * there is no env-file (never provisioned / stopped) or no token line.
+   */
+  async readAgentToken(userId: string): Promise<string | null> {
+    let text: string;
+    try {
+      text = await readFile(this.hostPathFor(userId), 'utf8');
+    } catch {
+      return null;
+    }
+    for (const line of text.split('\n')) {
+      if (!line.startsWith('LL5_AGENT_TOKEN=')) continue;
+      const raw = line.slice('LL5_AGENT_TOKEN='.length);
+      const v = unescapeValue(raw);
+      return v || null;
+    }
+    return null;
+  }
+}
+
+/** Inverse of escapeValue: strip the single quotes and un-escape embedded ones. */
+function unescapeValue(v: string): string {
+  const t = v.trim();
+  if (t.length >= 2 && t.startsWith("'") && t.endsWith("'")) {
+    return t.slice(1, -1).replace(/'\\''/g, "'");
+  }
+  return t;
 }

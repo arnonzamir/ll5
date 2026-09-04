@@ -119,6 +119,25 @@ describe('SecretsWriter', () => {
     expect(content).toContain(`LL5_AGENT_TOKEN='tok'\\''with'\\''quote'`);
   });
 
+  it('readAgentToken round-trips the token written at provision (ISS-024), incl. escaped quotes; null when absent', async () => {
+    const dir = await tmpDir();
+    const w = new SecretsWriter({ dir });
+    expect(await w.readAgentToken('nobody')).toBeNull();
+    const tok = "ll5.agent.it's-a-'quoted'-token";
+    await w.write({
+      userId: 'user-rt',
+      agentToken: tok,
+      gatewayUrl: 'https://ll5.noninoni.click',
+      mcpBaseDomain: 'noninoni.click',
+      provider: 'anthropic',
+      keys: { 'claude-code': 'oauth-tok' },
+      config: cfg({ default: { provider: 'anthropic', model: 'default' } }),
+    });
+    expect(await w.readAgentToken('user-rt')).toBe(tok);
+    await w.remove('user-rt');
+    expect(await w.readAgentToken('user-rt')).toBeNull();
+  });
+
   it('removes the env-file', async () => {
     const dir = await tmpDir();
     const w = new SecretsWriter({ dir });
