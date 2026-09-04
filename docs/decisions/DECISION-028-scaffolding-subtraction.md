@@ -237,7 +237,7 @@ Expected baseline deltas after 1–8: tool calls in `ll5_audit_log` per 15 days 
 
 | # | Decision |
 |---|---|
-| 1 Reconcile subsystem | **Approved — retire.** |
+| 1 Reconcile subsystem | **Approved — retire.** Implemented 2026-09-04, ll5 commit `refactor(scaffolding): retire the reconcile subsystem (DECISION-028 #1)` (gateway + GTD + shared prompt; the agent-repo half — `reconcile-loop.sh`, `.mcp.reconcile.json`, entrypoint launch, Python security tests — is the agent PR). |
 | 2 `NarrativeConsolidationScheduler` | **Approved — retire**, on the confirmation that the in-container `claude -p` narrative worker (DECISION-015) is the live driver and `loop.narrative_consolidation` alerts if it dies. |
 | 3 Duplicate selector + gate | **Approved** (goes with #1). |
 | 4 `recall_lessons` per prompt | **Not "remove".** Requirement restated: the agent must get **all relevant context, all the time**. Re-scoped: (a) SessionStart loads **all** active lessons (68 one-liners) + user model + active_context + recent sessions — refreshed daily by the controlled restart; (b) the per-turn hook stays but queries the envelope's *inner text* (and, for inbound contact messages, the sender/subject) so it surfaces the lesson about *that* person/topic, and skips non-user-facing scheduler rows; (c) measure whether per-turn injections are ever cited before any further change. "Drop later" is off the table. **Shipped 2026-09-04** (agent repo): session-start loads all lessons + narratives + open journal + last-day timeline on every start; `memory-recall.sh` is a per-turn context pack by trigger class (contact → person recall + matched lessons; user → matched lessons + compact sweep; system rows → nothing); injections logged to `~/.ll5/context-pack.log`. |

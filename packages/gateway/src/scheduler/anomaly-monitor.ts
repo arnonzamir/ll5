@@ -35,28 +35,6 @@ function percentile(xs: number[], p: number): number {
   return s[Math.min(s.length - 1, Math.max(0, rank - 1))];
 }
 
-/** Compare a numeric value against a bound with a small op set (for gauge gates). */
-function cmp(v: number, op: '>' | '<' | '>=' | '<=', bound: number): boolean {
-  switch (op) {
-    case '>': return v > bound;
-    case '<': return v < bound;
-    case '>=': return v >= bound;
-    case '<=': return v <= bound;
-  }
-}
-
-// --- DECISION-025 B3 reconcile-gauge thresholds (named + defensible) ----------
-/** missed_close is designed to settle to 0 each ~15-min cycle, so a single LATEST doc
- *  > 0 is an acceptable trip (no multi-cycle sustain needed given the cadence): it means
- *  the worker isn't keeping up / a loop's inbound isn't being reviewed. */
-const MISSED_CLOSE_MAX = 0;
-/** Any wrong_close (a close with ZERO grounding on its thread) is a real problem. */
-const WRONG_CLOSE_MAX = 0;
-/** Coverage target: below this, too many candidate closes went ungrounded. */
-const MIN_COVERAGE = 0.8;
-/** Don't judge coverage on a tiny denominator (null coverage / few candidates = noise). */
-const MIN_CANDIDATES_FOR_COVERAGE = 3;
-
 // --- DECISION-025 B3 narrative non-degradation (ALIVE but SLOW) ---------------
 // The ~20-min narrative loop's healthy p95 inter-arrival gap is ~20–25m. We trip when the
 // RECENT p95 gap materially exceeds the trailing BASELINE p95 — a regression the plain
@@ -139,27 +117,6 @@ interface RateShiftCheck {
 }
 
 /**
- * A GAUGE on the newest doc of an index (user-scoped, sorted by `timestampField` desc,
- * size 1): read one numeric `field` and alert when it breaches `bound` under `op`. An
- * optional `gate` (a second numeric field/op/bound) must hold for the alert to fire (e.g.
- * "coverage < 0.8 AND candidate_count >= 3" — never judge a tiny denominator). Self-arming:
- * absent doc / absent-or-non-numeric field (incl. `null` coverage) / unmet gate → NO alert.
- */
-interface LatestGaugeCheck {
-  kind: 'latestGauge';
-  key: string;
-  label: string;
-  severity: AlertSeverity;
-  suggestion: string;
-  index: string;
-  timestampField: string;
-  field: string;
-  op: '>' | '<';
-  bound: number;
-  gate?: { field: string; op: '>' | '<' | '>=' | '<='; bound: number };
-}
-
-/**
  * A NON-DEGRADATION regression: the loop is ALIVE but SLOWER. Over a RECENT window and a
  * longer BASELINE window, take a percentile of a per-call signal — either the inter-arrival
  * GAP (minutes between consecutive tool_call rows) or a numeric FIELD on each row (e.g.
@@ -186,7 +143,7 @@ interface PercentileRegressionCheck {
   minSamples: number;
 }
 
-type Check = StalenessCheck | RateShiftCheck | LatestGaugeCheck | PercentileRegressionCheck;
+type Check = StalenessCheck | RateShiftCheck | PercentileRegressionCheck;
 
 export class AnomalyMonitor {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -255,22 +212,6 @@ export class AnomalyMonitor {
     }
   }
 
-  /** Newest doc's _source (user-scoped, sorted by tsField desc), or null if none / on failure. */
-  async latestDoc(index: string, tsField: string, fields: string[]): Promise<Record<string, unknown> | null> {
-    try {
-      const res = await this.es.search<Record<string, unknown>>({
-        index,
-        size: 1,
-        _source: fields,
-        sort: [{ [tsField]: { order: 'desc' } }],
-        query: { bool: { filter: [{ term: { user_id: this.config.userId } }] } },
-      });
-      return (res.hits.hits?.[0]?._source as Record<string, unknown> | undefined) ?? null;
-    } catch (err) {
-      logger.debug('[AnomalyMonitor] latestDoc query failed', { index, error: err instanceof Error ? err.message : String(err) });
-      return null;
-    }
-  }
 
   /** Ascending timestamps (ms) of a tool's tool_call rows in the last window (user-scoped),
    *  or null on query failure. Empty array when there are simply no calls. */
@@ -426,30 +367,6 @@ export class AnomalyMonitor {
     return true;
   }
 
-  /** Gauge on the newest doc: absent doc / non-numeric (incl. null) field / unmet gate → no alert. */
-  private async runLatestGauge(c: LatestGaugeCheck): Promise<boolean> {
-    const fields = c.gate ? [c.field, c.gate.field] : [c.field];
-    const doc = await this.latestDoc(c.index, c.timestampField, fields);
-    if (!doc) return false; // no baseline doc yet (index empty / not created) → never alert
-    const v = doc[c.field];
-    if (typeof v !== 'number' || Number.isNaN(v)) return false; // absent / null coverage → never alert
-    if (c.gate) {
-      const g = doc[c.gate.field];
-      if (typeof g !== 'number' || Number.isNaN(g)) return false; // gate field absent → never alert
-      if (!cmp(g, c.gate.op, c.gate.bound)) return false;         // gate not satisfied (tiny denominator)
-    }
-    if (!cmp(v, c.op, c.bound)) return false;
-    await raiseAlert(this.pool, {
-      userId: this.config.userId, key: c.key, severity: c.severity,
-      summary: `${c.label} out of bounds`,
-      value: `${c.field}=${v}`,
-      expected: `${c.op === '>' ? `<= ${c.bound}` : `>= ${c.bound}`}`,
-      suggestion: c.suggestion,
-    });
-    return true;
-  }
-
-  /** Non-degradation regression: recent pXX of the signal (gap|field) materially exceeds baseline. */
   private async runPercentileRegression(c: PercentileRegressionCheck): Promise<boolean> {
     const load = (win: number): Promise<number[] | null> => c.signal === 'gap'
       ? this.toolCallGapsMinutes(c.toolName, win)
@@ -476,7 +393,6 @@ export class AnomalyMonitor {
     switch (c.kind) {
       case 'staleness': return this.runStaleness(c);
       case 'rateShift': return this.runRateShift(c);
-      case 'latestGauge': return this.runLatestGauge(c);
       case 'percentileRegression': return this.runPercentileRegression(c);
     }
   }
@@ -698,83 +614,6 @@ function buildChecks(): Check[] {
       index: 'll5_eval_moments',
       timestampField: 'timestamp',
       filter: [{ term: { decision: 'ping_now' } }, { term: { grounding_calls: 0 } }],
-    },
-    // ---- RECONCILIATION (DECISION-025 B3) --------------------------------------
-    // Observe the reconcile subsystem via the governor's ll5_reconcile_metrics docs and
-    // the worker's list_reconcile_work tool calls. EVERY check here is self-arming: null/
-    // absent → NO alert, so nothing fires before the (not-yet-deployed) worker/governor live.
-
-    // Reconcile-worker liveness: the worker calls list_reconcile_work each tick; >45m with
-    // no call → the loop (or agent) is dead. Same null-age convention as forward_work_stalled:
-    // the tool was NEVER called yet (worker not deployed) → toolCallAgeMinutes returns null →
-    // runStaleness returns false → NO alert. Arms itself once the worker first runs.
-    // maxMinutes=90 accommodates the opencode variant's ~60-min cadence (sleep 3520s after each
-    // cycle) while still catching a double-missed cycle.
-    {
-      kind: 'staleness',
-      key: 'loop.reconcile_worker',
-      label: 'Reconciliation worker loop',
-      maxMinutes: 90,
-      severity: 'warning',
-      suggestion: 'The reconcile worker stopped calling list_reconcile_work — check the reconcile loop / the agent container.',
-      ageMinutes: (m) => m.toolCallAgeMinutes('list_reconcile_work'),
-    },
-    // Governor freshness: the governor writes one ll5_reconcile_metrics doc every ~15m;
-    // >45m stale → the governor scheduler died. No docs yet (index empty / not created) →
-    // null age → NO alert.
-    {
-      kind: 'staleness',
-      key: 'loop.reconcile_governor',
-      label: 'Reconciliation governor',
-      maxMinutes: 45,
-      severity: 'warning',
-      suggestion: 'No new ll5_reconcile_metrics doc in 45m — the reconcile governor scheduler stopped writing metrics.',
-      ageMinutes: (m) => m.lastDocAgeMinutes('ll5_reconcile_metrics', 'timestamp', []),
-    },
-    // GAUGES on the LATEST ll5_reconcile_metrics doc. Absent doc / null field → never alert.
-    // missed_close is designed to settle to 0 each ~15-min cycle → a single latest doc > 0
-    // is an acceptable trip (the 15-min cadence makes a one-cycle read non-flappy).
-    {
-      kind: 'latestGauge',
-      key: 'reconcile.missed_close_elevated',
-      label: 'Missed-close backlog',
-      severity: 'warning',
-      suggestion: 'missed_close is not settling to 0 — the reconcile worker isn\'t keeping up, or a loop\'s inbound isn\'t being reviewed. Check the worker loop.',
-      index: 'll5_reconcile_metrics',
-      timestampField: 'timestamp',
-      field: 'missed_close_count',
-      op: '>',
-      bound: MISSED_CLOSE_MAX,
-    },
-    // Any wrong_close is a real problem: a message-linked loop CLOSED with zero grounding
-    // on its thread (a close nobody actually checked the conversation for).
-    {
-      kind: 'latestGauge',
-      key: 'reconcile.wrong_close',
-      label: 'Ungrounded closes',
-      severity: 'warning',
-      suggestion: 'A loop was closed with ZERO grounding on its thread this cycle — a close with no evidence it was actually reviewed. Inspect recent completions.',
-      index: 'll5_reconcile_metrics',
-      timestampField: 'timestamp',
-      field: 'wrong_close_count',
-      op: '>',
-      bound: WRONG_CLOSE_MAX,
-    },
-    // Low coverage: too many candidate loops went ungrounded — but ONLY when there are
-    // enough candidates to judge (gate: candidate_count >= 3; null coverage is non-numeric
-    // → skipped by the gauge; a tiny denominator is skipped by the gate).
-    {
-      kind: 'latestGauge',
-      key: 'reconcile.low_coverage',
-      label: 'Reconciliation coverage',
-      severity: 'warning',
-      suggestion: 'Reconciliation coverage is low with enough candidates to judge — many candidate loops are going ungrounded. Check that the worker is grounding (query_im_messages) before closing.',
-      index: 'll5_reconcile_metrics',
-      timestampField: 'timestamp',
-      field: 'reconciliation_coverage',
-      op: '<',
-      bound: MIN_COVERAGE,
-      gate: { field: 'candidate_count', op: '>=', bound: MIN_CANDIDATES_FOR_COVERAGE },
     },
     // NARRATIVE NON-DEGRADATION (DECISION-025 B3): the loop is ALIVE but SLOW — the plain
     // liveness check (dead-at-45m) can't see this. CADENCE: recent p95 inter-arrival gap of

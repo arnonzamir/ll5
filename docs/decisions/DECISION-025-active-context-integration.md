@@ -1,6 +1,7 @@
 # DECISION-025 — Active context integration: situate every signal, fulfill by any means, verify before delivery
 
 Status: **accepted, design-complete** — 2026-07-07 (v6 — v5 + the final confirmation's four pinned fixes: deterministic **stakes-stamp gate** (fail-safe `consequential`), **`pgrep`-only coordination** (no shared lock — narrative untouched), **sole *reconciliation* writer** wording + commit-on-confirm, and the **five new §7 tests folded into the BRD**. Ready for a phased implementation plan. FR-9 scope = option (a); provisional, 1-week checkpoint 2026-07-14. Vetted by 8 review agents across two triple-reviews + two confirmations.)
+Superseded in part: **D3–D6 (reconcile selector, gate, governor, worker, `reconcile_confirm` card) retired by DECISION-028 #1 on 2026-09-04** — the subsystem never received an input (`conversation_id` was never stamped). D1/D2 (reactive grounding, open-loops read model) and the GTD columns/migrations stand.
 Requirements: `docs/requirements/BRD-active-context-integration.md` (FR-1…FR-9)
 Builds on: DECISION-020 (grounded action — the rule+guard+governor pattern this extends), DECISION-018/019 (companion program), DECISION-022 (injection-defense discipline), DECISION-023 (sandbox — treated as implemented per the BRD, **with an egress amendment required, see D7**)
 

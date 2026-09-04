@@ -32,7 +32,6 @@ import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MetricsMonitor } from './metrics-monitor.js';
 import { ToolFailureMonitor } from './tool-failure-monitor.js';
 import { AnomalyMonitor } from './anomaly-monitor.js';
-import { ReconcileGovernorScheduler } from './reconcile-governor.js';
 import { ChatSearchIndexer } from './chat-search-indexer.js';
 import { logger } from '../utils/logger.js';
 
@@ -383,19 +382,6 @@ async function startSchedulersForUser(
   });
   anomalyMonitor.start();
   schedulers.push(anomalyMonitor);
-
-  // Reconciliation governor / observability (DECISION-025 B1/B2) — a cheap, rare tick
-  // that computes missed_close_count (reused deterministic selector), coverage
-  // (query_im_messages grounding evidence / candidates), and wrong_close_count
-  // (closed message-linked loops with zero grounding), writing ONE counts-only doc per
-  // cycle to ll5_reconcile_metrics for the anomaly-monitor (B3) to read.
-  const reconcileGovernor = new ReconcileGovernorScheduler(pgPool, es, {
-    intervalMinutes: s('reconcile_governor_minutes', 15),
-    userId,
-  });
-  reconcileGovernor.start();
-  schedulers.push(reconcileGovernor);
-
   // Phone liveness — Android notification/location service dying is invisible
   // from the server side until the heartbeat message happens to notice.
   const phoneLivenessMonitor = new PhoneLivenessMonitor(pgPool, es, {

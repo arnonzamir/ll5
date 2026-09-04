@@ -160,22 +160,6 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
     },
   },
   {
-    // ReconcileGovernorScheduler's per-cycle metrics doc — the contract the anomaly
-    // monitor's reconcile.* gauges read (`ReconcileMetricsDoc` in scheduler/reconcile-governor.ts).
-    index: 'll5_reconcile_metrics',
-    mappings: {
-      properties: {
-        timestamp: { type: 'date' },
-        user_id: { type: 'keyword' },
-        missed_close_count: { type: 'integer' },
-        wrong_close_count: { type: 'integer' },
-        reconciliation_coverage: { type: 'float' },   // null when candidate_count is 0
-        candidate_count: { type: 'integer' },
-        window_minutes: { type: 'integer' },
-      },
-    },
-  },
-  {
     index: 'll5_audit_log',
     mappings: {
       properties: {
