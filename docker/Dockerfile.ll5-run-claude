@@ -100,7 +100,6 @@ COPY variant-content/ll5-server /workspace/ll5-server
 # tmux.conf must exist in variant repo; if absent, generate a minimal default
 RUN test -f /workspace/tmux.conf || printf 'set -g mouse on\nset -g status off\n' > /workspace/tmux.conf
 COPY variant-content/.claude/agents/ /workspace/.claude/agents/
-COPY variant-content/.mcp.reconcile.json /workspace/.mcp.reconcile.json
 COPY variant-content/.mcp.narrate.json /workspace/.mcp.narrate.json
 COPY variant-content/docker-entrypoint.sh /workspace/docker-entrypoint.sh
 COPY variant-content/scripts/get-mcp-auth.sh /workspace/scripts/get-mcp-auth.sh

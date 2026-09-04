@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 (evening) — run-claude build fix after the reconcile retirement
+
+The `4f4a2ad` run failed in `build (run-claude)`: `docker/Dockerfile.ll5-run-claude:103` still COPYd `variant-content/.mcp.reconcile.json`, deleted from the agent repo by the retirement. Fail-fast cancelled the gateway/gtd/dashboard builds and skipped deploy, so nothing rolled. Line removed; rebuilt via `workflow_dispatch packages=gateway,gtd,dashboard,run-claude` (a `docker/`-touching push would rebuild all infra and still skip run-claude — the detect-changes rule needs `RUNSHARED_CHANGED` for run-claude; noted as a follow-up, not changed here).
+
 ## 2026-09-04 (evening) — batch 1 merged and shipped
 
 Merged the reconcile-retirement branch (`1e563e3`: 26 files, −2,654 lines; gateway 816 → 757 tests, gtd 148 → 118) and the baseline re-measure script (`15d8b29`: `scripts/agent-baseline.sh`, reproduces the frozen window within same-day drift; today's numbers already show 5 session ids, $45 of visible turn cost, 14 observations) on top of the scheduler/alert/poll batch (`b587329`). Full suites green with no concurrent load: gateway 759/759, gtd 118/118, dashboard + gateway typecheck clean. Pushed as `4f4a2ad` → builds gateway, gtd, dashboard, run-claude → roll. Leftovers flagged by the retirement (not removed, cross-repo contracts): the `reconcile` per-tool model slot in `agent.ts`/`agent-models.ts` + dashboard dropdown, `'reconcile-loop'` in `/internal/agent-session` `validTypes`, `@elastic/elasticsearch` still in `gtd/package.json`.
