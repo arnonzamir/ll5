@@ -14,6 +14,7 @@ Gateway-only pieces of the remediation plan's Phase 1 (`docs/ISSUES.md` ISS-005/
 - **ISS-006 (partial):** declared mappings for `ll5_turn_costs` and `ll5_reconcile_metrics`. `ensureIndices` is create-if-missing, so prod's existing indices stay dynamic; this protects fresh deploys. The `turn_costs_stale` check is held until the writer ships (it would fire immediately and stay red).
 - Tests: +13 (`eval-moment-route.test.ts` idempotency ×5, `/sessions` ×7; `anomaly-monitor.test.ts` ×1). Gateway suite 815/815, typecheck clean.
 - **Expected side effect, not a regression:** once ISS-001 (agent-side) lands, recorded `ping_now` will drop sharply — that is the over-count being removed.
+- **Post-deploy verification corrected the root cause.** The gateway came up healthy on the new image, a manual POST of the real 3.87 MB payload returned 201 — but the hook itself still fails on every Stop: `session-save.sh` passes the payload as one argv string (`curl -d "$PAYLOAD"`) and Linux caps a single argument at 128 KB → `curl: Argument list too long` (exit 126), reproduced in the container. 128 KB ≈ 250 messages — the exact freeze point. The gateway cap was the second wall. Agent-side fix (`--data-binary @file` + append mode + error logging) is now the blocking item, gated on the agent deploy path (ISS-007). Live doc unfrozen once by hand (15:25Z, 7,818 messages); `agent.session_save_stale` will fire again in 24h, correctly, until the hook ships.
 
 ## 2026-09-04 — Agent review (Aug 21–Sep 4): issue register + frozen baseline
 
