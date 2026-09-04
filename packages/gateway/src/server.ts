@@ -860,7 +860,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
     try {
       const [sessions, narratives, lessons] = await Promise.all([
         callMcpTool(config.mcpHealthUrls.awareness, auth, 'recent_sessions', { days: 7 }).catch(() => null),
-        callMcpTool(config.mcpHealthUrls.knowledge, auth, 'list_narratives', { status: 'active', limit: 20 }).catch(() => null),
+        callMcpTool(config.mcpHealthUrls.knowledge, auth, 'list_narratives', { status: 'active', limit: 20, max_chars: 100_000 }).catch(() => null), // ISS-019: regrounding wants all 20
         callMcpTool(config.mcpHealthUrls.awareness, auth, 'recall_lessons', { query }).catch(() => null),
       ]);
       res.json({ sessions, narratives, lessons });

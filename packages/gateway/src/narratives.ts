@@ -294,6 +294,10 @@ export function createNarrativesRouter(
         query: typeof q === 'string' && q ? q : undefined,
         subject_kind: typeof subject_kind === 'string' ? subject_kind : undefined,
         limit: wantNow ? NOW_FETCH_LIMIT : limit ? Math.min(Number(limit) || 50, 200) : 50,
+        // ISS-019: MCP read results are capped at ~20 KB by default (the agent's
+        // context budget). The dashboard rail/list is a UI consumer — ask for the
+        // full page so a 100-narrative list isn't silently cut to the first ~30.
+        max_chars: 250_000,
         offset: wantNow ? 0 : offset ? Number(offset) || 0 : 0,
       });
       const narratives = (out?.narratives ?? []) as NowRankableNarrative[];
@@ -327,7 +331,7 @@ export function createNarrativesRouter(
     const subject = { kind, ref };
     try {
       const [detail, connections] = await Promise.all([
-        callKnowledge(knowledgeMcpUrl, auth, 'get_narrative', { subject, observation_limit: 60 }),
+        callKnowledge(knowledgeMcpUrl, auth, 'get_narrative', { subject, observation_limit: 60, max_chars: 200_000 }), // ISS-019: UI consumer, uncapped page
         callKnowledge(knowledgeMcpUrl, auth, 'get_narrative_connections', { subject }),
       ]);
       res.json({

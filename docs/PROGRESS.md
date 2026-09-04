@@ -4,6 +4,14 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 — Track B merged: MCP result caps + cursors (ISS-019), tolerant schemas for 9 tools (ISS-021)
+
+Merged `worktree-agent-a3f693f464e523b8b` (`26e4e79`). New `packages/shared/src/mcp/result-cap.ts` (`MCP_RESULT_CAP_CHARS = 20_000`, item-boundary cut newest-first, opaque cursor, `truncated`/`next_cursor`/`hint` only when cut, `max_chars` override ≤500 KB). Applied to awareness `recall_everything` (the 1.7 MB / 700 KB results were `all_sessions:true` carrying whole session docs — now `message_count`/`transcript_chars` + 4 KB clips), `read_journal`, `query_im_messages`; personal-knowledge `recall`/`list_narratives`/`get_narrative`; messaging `read_messages`. Nine schemas now accept what the agent actually sends (`note_observation` string `subject`/`content`, `write_journal` signal `consolidated`, `upsert_fact` free shapes, `get_person` `person_id`, `create_tickler` `date`/`start`, `upsert_lesson` bare `content`, `log_habit_outcome` `skipped`, `link_media` aliases, `list_horizons` no-arg) — each locked by a test on the live failing payload; `read_messages` with `platform:"slack"` returns a structured redirect to `query_im_messages`. `write_user_model` never failed (the ISS-021 list was wrong there).
+
+Gateway follow-up in this commit: UI/regrounding consumers pass `max_chars` (`narratives.ts` list 250 KB + `get_narrative` 200 KB, `server.ts` regrounding list 100 KB) so dashboards aren't cut to the first ~20 KB page. Tests: shared 127, awareness 229, personal-knowledge 122, gtd 148, google 49, gateway 815 — all green after `npm run build` in `packages/shared` (a stale `shared/dist` on main made 52 tests + 3 typechecks fail until rebuilt — see HANDOFF). Messaging: 84/87, the 3 `contact-settings-tools` failures pre-date today.
+
+Proposed persona text for `packages/ll5-run-shared/CLAUDE.md` (`create_tickler` field names, `upsert_fact` shape, `note_observation` fields, Slack via `query_im_messages`) is recorded in ISSUES under ISS-021 for Phase 2.
+
 ## 2026-09-04 — ISS-023 verified: a docs-only push no longer redeploys the stack
 
 Run 33895111679 for the docs-only merge `f2ba560`: `detect-changes` green, `build: skipped`, `deploy: skipped`. Every docs commit before today bounced all 10 services.
