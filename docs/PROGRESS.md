@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-04 (late) — autonomous checkpoint scheduled
+
+Arnon authorized the night run to decide on its own: all fine → Phase 5 upgrade with no further approval; minor/mid findings → calculated decision, reviewed by one subagent, documented, continue; critical → stop and wait. The runbook is `docs/runbooks/post-nightly-checkpoint.md`; the trigger is a one-shot scheduled prompt at 03:12 IDT (after the 02:00 consolidate pass and the hand-off's worst-case forced restart at ~02:45).
+
 ## 2026-09-04 (close) — hand-off written for a clean session
 
 Audit of the day against the approved plan: everything doable without new data or a second agent roll is shipped and verified; the rest is time-gated (7-day window to 2026-09-11, first nightly hand-off 2026-09-05 02:00), batched into one "next persona batch" (DECISION-028 #5 + ISS-004, ISS-017 lesson step, ISS-011 budget if needed), or sequenced last by decision (Phase 5 upgrade, Phase 6 infra). The plan now lives in the repo — `docs/implementation/agent-remediation-2026-09-04.md` — with a phase-by-phase status table on top; `docs/HANDOFF.md` opens with a START HERE block (what is live, the exact verification queries in order, the next batch, the leftovers, the rules that bit today); `docs/ISSUES.md` rows ISS-003/004/011/017/022 now say what unblocks them. `scripts/esq.sh` + `scripts/esq.js` (ad-hoc prod-ES query through the awareness container) moved from the session scratchpad into the repo.

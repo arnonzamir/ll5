@@ -6,6 +6,8 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## START HERE — agent remediation, state as of 2026-09-04 night
 
+**Scheduled:** a one-shot checkpoint fires 2026-09-05 03:12 IDT in Arnon's Claude Code session running `docs/runbooks/post-nightly-checkpoint.md` (verify the hand-off → decide by severity → Phase 5 upgrade if clean, authorized by Arnon). If that session is gone, run the runbook by hand.
+
 **Read first:** `docs/implementation/agent-remediation-2026-09-04.md` (the approved plan + a phase-by-phase status table), then `docs/ISSUES.md` (per-issue status, evidence, verification line). Frozen control: `docs/reviews/2026-09-04/agent-baseline.md`. Decisions: DECISION-027 (one agent image), DECISION-028 (scaffolding subtraction, reviewed row by row by Arnon).
 
 **What is live (all verified inside the container, image built from ll5 `1cc003a`, agent repo `1417673`, awareness `2052349`):** session record advancing per turn; eval recorder span fix; turn-cost writer; MCP result caps + cursors; spill-read block; memory outbox; core-tool pre-load; context pack (all lessons + narratives + open journal + last-day timeline at start, targeted per turn, `~/.ll5/context-pack.log`); persona "journal AND note_observation"; consolidate tally + restart hand-off; controlled daily restart; reconcile retired; 26 gateway schedulers; user-model history index fixed. `main` = `2052349`, everything pushed.
