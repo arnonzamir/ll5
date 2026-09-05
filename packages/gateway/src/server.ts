@@ -119,6 +119,7 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         user_id: { type: 'keyword' },
         decision: { type: 'keyword' },          // ground truth: 'ping_now' | 'ping_later' (booked a wake/tickler) | 'suppress'
         decision_claimed: { type: 'keyword' },   // what record_moment said
+        deferral_ref: { type: 'keyword' },       // ISS-004: the wake/tickler id a ping_later was booked against
         decision_mismatch: { type: 'boolean' },  // claimed vs actual disagreement
         trigger_class: { type: 'keyword' },
         source: { type: 'keyword' },
@@ -976,6 +977,7 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         user_id: userId,
         decision: str(b.decision),
         decision_claimed: str(b.decision_claimed),
+        deferral_ref: str(b.deferral_ref),
         decision_mismatch: bool(b.decision_mismatch),
         trigger_class: str(b.trigger_class),
         source: str(b.source),
