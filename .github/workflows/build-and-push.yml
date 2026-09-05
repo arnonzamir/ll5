@@ -247,7 +247,9 @@ jobs:
           set -e
           for pkg in shared ll5-auth personal-knowledge gtd awareness google messaging health system vault gateway agent-orchestrator dashboard; do
             echo "== $pkg =="
-            npm test --workspace=packages/$pkg --if-present
+            # --passWithNoTests: a package whose tests are all purged (or not yet
+            # written) must not fail the gate; a package with a failing test must.
+            npx vitest run --root packages/$pkg --passWithNoTests
           done
 
   build:

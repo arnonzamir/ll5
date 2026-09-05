@@ -511,3 +511,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: packages/messaging/src/clients/evolution.client.ts fetchMessages unwraps the v2 `{messages:{records}}` envelope (ISS-028); docker-compose.prod.yml messaging ELASTICSEARCH_URL; shared audit.ts loud empty-URL warning.
 2026-09-05: ISS-028 verified live (read_messages returns rows).
 2026-09-05: packages/e2e/ (workspace, no image) — src/mcp-contracts.test.ts (live read-only MCP contracts), src/compose-lint.mjs; docs/decisions/DECISION-029-test-strategy-fewer-units-live-contracts.md; 55 mock-assertion test files removed (see the decision).
+2026-09-05: packages/ll5-auth/src/__tests__/ + vitest.config.ts, packages/system/src/collectors.test.ts + vitest.config.ts — previously untracked test scaffolding, committed so the CI gate can run them.
