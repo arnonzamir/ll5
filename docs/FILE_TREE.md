@@ -508,3 +508,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: agent repo scripts/narrative-loop.sh + scripts/continuity-probe.sh default model claude-sonnet-5.
 2026-09-05: runbook second-run item 5 — first Sonnet-5 narrative run check.
 2026-09-05: packages/gateway/src/utils/agent-liveness.ts (+ __tests__/agent-liveness.test.ts) — heartbeat process liveness → agent.process_down / agent.launch_loop; migrations/045_agent_runtime_health.sql; anomaly-monitor `suppressedBy`.
+2026-09-05: packages/messaging/src/clients/evolution.client.ts fetchMessages unwraps the v2 `{messages:{records}}` envelope (ISS-028); docker-compose.prod.yml messaging ELASTICSEARCH_URL; shared audit.ts loud empty-URL warning.

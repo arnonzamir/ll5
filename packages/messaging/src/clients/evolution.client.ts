@@ -392,9 +392,19 @@ export class EvolutionClient {
       },
     );
 
-    // Evolution API v2 may return { messages: [...] } or a raw array or other shapes
+    // Evolution API v2 returns { messages: { total, pages, currentPage, records: [...] } }
+    // (the live instance does — see fetchMessagesPaginated, which already reads
+    // `.records`). Older builds returned { messages: [...] } or a raw array. Treating
+    // the v2 envelope as the array made read_messages return [] for every WhatsApp
+    // conversation while the instance was open and 300K messages were stored
+    // (ISS-028, 2026-09-05).
+    const raw = (result as { messages?: unknown })?.messages ?? result;
+    const messages = Array.isArray(raw)
+      ? raw
+      : Array.isArray((raw as { records?: unknown })?.records)
+        ? (raw as { records: unknown[] }).records
+        : [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const messages = result?.messages ?? (Array.isArray(result) ? result : []);
     return messages as any;
   }
 }

@@ -340,6 +340,9 @@ services:
       # Dedicated in-stack Evolution (DECISION-024): reached internally, so the
       # dashboard's WhatsApp management actually works (the public URL pointed at
       # ll4's Evolution, which had no ll5 instance → every button 404'd).
+      # ISS-028 (2026-09-05): was missing here — initAudit('') silently disabled the
+      # messaging MCP's audit rows (zero `source: messaging` docs in ll5_audit_log).
+      ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
       EVOLUTION_API_URL: http://evolution:8080
       EVOLUTION_GLOBAL_API_KEY: ${EVOLUTION_GLOBAL_KEY:-}
       GATEWAY_URL: ${GATEWAY_URL:-}

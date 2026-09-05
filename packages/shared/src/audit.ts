@@ -28,6 +28,12 @@ let esHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
 
 /** Initialize the audit logger with an ES URL. Call once at startup. */
 export function initAudit(elasticsearchUrl: string): void {
+  if (!elasticsearchUrl) {
+    // Loud, once, at boot: an MCP started without ELASTICSEARCH_URL writes no
+    // audit rows at all and nothing downstream notices (the messaging MCP ran
+    // this way until 2026-09-05 — ISS-028). Keep going: audit is best-effort.
+    console.error('[audit] ELASTICSEARCH_URL is empty — audit logging is DISABLED for this process');
+  }
   // Derive base + Basic-auth header (Node fetch ignores inline URL creds — es-auth.ts).
   const t = esFetchTarget(elasticsearchUrl);
   esBase = t.base;

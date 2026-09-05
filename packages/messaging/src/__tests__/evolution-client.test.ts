@@ -95,3 +95,27 @@ describe('EvolutionClient.connectionState', () => {
     expect(warnSpy.mock.calls.some((c) => JSON.stringify(c).includes('transient'))).toBe(true);
   });
 });
+
+describe('EvolutionClient.fetchMessages — response envelopes (ISS-028)', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const mockFetch = (payload: unknown) =>
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, status: 200, json: async () => payload } as unknown as Response);
+
+  it('unwraps the v2 envelope { messages: { total, pages, records } } — the live shape that used to read as []', async () => {
+    mockFetch({ messages: { total: 11451, pages: 229, currentPage: 1, records: [{ key: { id: 'm1', fromMe: false, remoteJid: 'g@g.us' }, messageTimestamp: 1788593922 }] } });
+    const c = new EvolutionClient('https://evo.example', 'll5', 'k');
+    const out = await c.fetchMessages('g@g.us', 3);
+    expect(out).toHaveLength(1);
+    expect(out[0].key.id).toBe('m1');
+  });
+
+  it('still accepts the legacy { messages: [...] } and raw-array shapes, and returns [] for anything else', async () => {
+    mockFetch({ messages: [{ key: { id: 'a', fromMe: true, remoteJid: 'x' } }] });
+    expect(await new EvolutionClient('https://evo.example', 'll5', 'k').fetchMessages('x')).toHaveLength(1);
+    mockFetch([{ key: { id: 'b', fromMe: true, remoteJid: 'x' } }]);
+    expect(await new EvolutionClient('https://evo.example', 'll5', 'k').fetchMessages('x')).toHaveLength(1);
+    mockFetch({ messages: { total: 0 } });
+    expect(await new EvolutionClient('https://evo.example', 'll5', 'k').fetchMessages('x')).toEqual([]);
+  });
+});

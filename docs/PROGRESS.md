@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (10:45) — ISS-028: WhatsApp read was always empty; messaging audit was disabled
+
+The agent reported (via Arnon) that messaging `read_messages` for WhatsApp returns "disconnected-then-empty" while ingestion is fine. Evolution is healthy (state open, 307K messages); the bug is `EvolutionClient.fetchMessages` treating the v2 `{messages:{records}}` envelope as an array → `[]` for every conversation. Fixed with tests. While tracing it: the messaging service had no `ELASTICSEARCH_URL` in `docker-compose.prod.yml`, so its audit logging has been silently off (no `source: messaging` rows in `ll5_audit_log`); added, and `initAudit('')` now shouts at boot. ISS-027 liveness verified live at 07:41Z (`claude_alive: true` heartbeats, `launches.log`). Pre-existing: 3 failing tests in `messaging/__tests__/contact-settings-tools.test.ts`, unrelated.
+
 ## 2026-09-05 (10:15) — INCIDENT ISS-027: 3h40m agent outage from the 2.1.260 startup picker; process liveness added
 
 Arnon's phone showed three alerts at 10:14 local (agent unresponsive, narrative loop stalled, inbound volume dropped). All three were real and had one cause: since the 03:43Z context-cap relaunch the agent had been in a restart loop — on Claude Code 2.1.260 the dev-channels picker defaults to the good option, so the blind `Down Enter` in both dismissers picked "2. Exit"; claude exited, the container restarted, and the container heartbeat kept the orchestrator convinced everything was running. Hot-patched the pointer-aware dismissal into the live container (agent back 07:20:43Z), then rolled the fixed image (07:23Z, `picker dismissal done after 3 polls`). Full timeline and mechanism in `docs/ISSUES.md` ISS-027.
