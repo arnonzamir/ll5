@@ -492,7 +492,12 @@ function buildChecks(): Check[] {
       skipIf: async (userId) => {
         const b = getBridgeLiveness(userId);
         const age = b?.last_event_at ? (Date.now() - new Date(b.last_event_at).getTime()) / 60_000 : null;
-        return age !== null && age <= 30 ? `bridge alive (last Evolution event ${Math.round(age)}m ago)` : null;
+        if (age !== null && age <= 30) return `bridge alive (last Evolution event ${Math.round(age)}m ago)`;
+        // Bridge liveness is in-memory: right after a gateway restart nothing has
+        // been observed yet and the monitor's first tick runs at start. Judging
+        // on "no evidence" re-raised this alert on every deploy (14:13Z).
+        if (age === null && process.uptime() < 15 * 60) return `bridge liveness not observed yet (gateway up ${Math.round(process.uptime() / 60)}m)`;
+        return null;
       },
       label: 'Inbound message volume',
       severity: 'warning',
