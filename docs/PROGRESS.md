@@ -6,7 +6,7 @@ Current state of the LL5 personal assistant system.
 
 ## 2026-09-05 (04:00) — background workers on claude-sonnet-5
 
-Arnon asked for the loop too: `scripts/narrative-loop.sh` `NARRATIVE_LOOP_MODEL` default and `scripts/continuity-probe.sh` `PROBE_MODEL` default `claude-sonnet-4-6` → `claude-sonnet-5` (agent repo `8506d23`, one more roll). Verify: `~/.ll5/narrative-loop.log` `narrative loop started (… model=claude-sonnet-5 …)` and a completed tick after the 150 s startup delay.
+Arnon asked for the loop too: `scripts/narrative-loop.sh` `NARRATIVE_LOOP_MODEL` default and `scripts/continuity-probe.sh` `PROBE_MODEL` default `claude-sonnet-4-6` → `claude-sonnet-5` (agent repo `8506d23`, one more roll). Verified 01:30:58Z: `narrative loop started (interval=1200s, model=claude-sonnet-5, …)`; first tick 01:33:28Z `nothing due (refresh 0, create 0) — no worker spawned` (gate working; the model gets exercised on the first tick with due narrative work — the 09-06 checkpoint checks for a `CONSOLIDATED:` line). Live agent back on a fresh `claude-opus-5` session after the roll.
 
 ## 2026-09-05 (03:40) — Phase 5 roll verified inside the container
 
