@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { raiseAlert, clearAlert, type AlertSeverity } from '../utils/alerting.js';
 import { firingAlertKeys } from '../utils/agent-liveness.js';
+import { getBridgeLiveness } from '../utils/whatsapp-bridge-liveness.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface AnomalyMonitorConfig {
@@ -84,6 +85,8 @@ interface RateShiftCheck {
   suggestion: string;
   /** Skip this check while one of these cause-level alerts is firing — one root cause, one alert (ISS-027). */
   suppressedBy?: string[];
+  /** Skip this tick when a ground-truth signal says the feed is fine; returns the reason, or null to run. */
+  skipIf?: (userId: string) => Promise<string | null>;
   windowMinutes: number;
   /** 'drop' (a feed went quiet) or 'rise' (a spike, e.g. over-suppressing). Default 'drop'. */
   direction?: 'drop' | 'rise';
@@ -414,6 +417,10 @@ export class AnomalyMonitor {
         logger.info('[AnomalyMonitor][check] suppressed by a firing cause', { key: c.key, causes: c.suppressedBy.filter((k) => causes.has(k)) });
         continue;
       }
+      if (c.kind === 'rateShift' && c.skipIf) {
+        const why = await c.skipIf(this.config.userId).catch(() => null);
+        if (why) { logger.info('[AnomalyMonitor][check] skipped — ground truth says fine', { key: c.key, why }); continue; }
+      }
       const tripped = await this.runCheck(c);
       if (tripped) { firing.add(c.key); this.active.add(c.key); }
     }
@@ -473,6 +480,15 @@ function buildChecks(): Check[] {
       key: 'throughput.inbound_messages',
       // A dead bridge/listener is the cause; the volume drop is its symptom.
       suppressedBy: ['channel.whatsapp', 'channel.phone', 'channel.mirror'],
+      // 2026-09-05 (Sat 16:47 local): "6 in 120m vs 65 median" while every
+      // undelivered message in Evolution was a group emoji reaction and the
+      // bridge was live — a quiet afternoon read as an outage. If Evolution
+      // delivered ANY event recently, a low count is people, not plumbing.
+      skipIf: async (userId) => {
+        const b = getBridgeLiveness(userId);
+        const age = b?.last_event_at ? (Date.now() - new Date(b.last_event_at).getTime()) / 60_000 : null;
+        return age !== null && age <= 30 ? `bridge alive (last Evolution event ${Math.round(age)}m ago)` : null;
+      },
       label: 'Inbound message volume',
       severity: 'warning',
       suggestion: 'Far fewer inbound messages than the same time yesterday — a phone listener / channel may be down.',

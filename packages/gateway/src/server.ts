@@ -25,6 +25,7 @@ import { createAuthRouter } from './auth.js';
 import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
 import { computeDeliveryMode } from './utils/delivery-mode.js';
+import { getBridgeLiveness } from './utils/whatsapp-bridge-liveness.js';
 import { createAgentRouter } from './agent.js';
 import { createApprovalsRouter } from './approvals.js';
 import { createVaultRouter } from './vault.js';
@@ -1496,6 +1497,13 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // DECISION-030: the user's current delivery mode (sleep / quiet_hours / driving /
   // meeting / sick / normal). The channel MCP stamps it on every inbound envelope;
   // the apps can show it. Cached 60s per user inside computeDeliveryMode.
+  // ISS-013/031: what the Evolution → gateway bridge last delivered (any event),
+  // the ground truth the WhatsApp flow and inbound-volume checks now consult.
+  app.get('/me/bridge-liveness', authMw, (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    res.json(getBridgeLiveness(userId) ?? { last_event_at: null, last_event: null, last_message_event_at: null, connection_state: null, connection_state_at: null });
+  });
+
   app.get('/me/delivery-mode', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     try {

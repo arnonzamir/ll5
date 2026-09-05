@@ -453,3 +453,22 @@ describe('suppressedBy — symptom checks stay quiet while their cause fires (IS
     expect(raiseAlert).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('skipIf — a rate-shift check stands down when ground truth says the feed is fine', () => {
+  beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
+  type Chk = { checks: unknown[]; check: () => Promise<void> };
+
+  it('skips (and clears) when skipIf returns a reason; runs when it returns null', async () => {
+    const quietPool = { query: vi.fn(async () => ({ rows: [] })) } as unknown as Pool;
+    const tripping = { ...rsCheck, key: 'tp.skip' };
+    const m = new AnomalyMonitor(quietPool, esCount([2, 60, 70, 80]), { intervalMinutes: 15, userId: 'u1' });
+    (m as unknown as Chk).checks = [{ ...tripping, skipIf: async () => 'bridge alive (last Evolution event 3m ago)' }];
+    await (m as unknown as Chk).check();
+    expect(raiseAlert).not.toHaveBeenCalled();
+
+    const m2 = new AnomalyMonitor(quietPool, esCount([2, 60, 70, 80]), { intervalMinutes: 15, userId: 'u1' });
+    (m2 as unknown as Chk).checks = [{ ...tripping, skipIf: async () => null }];
+    await (m2 as unknown as Chk).check();
+    expect(raiseAlert).toHaveBeenCalledTimes(1);
+  });
+});
