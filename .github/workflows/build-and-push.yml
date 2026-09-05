@@ -652,6 +652,8 @@ jobs:
                 C=$(docker ps --format '{{.Names}}' | grep '^ll5-agent-' | head -1)
                 [ -n "$C" ] || return 1
                 docker exec "$C" sh -c 'ps -eo args | grep -E "claude --model" | grep -qv grep' 2>/dev/null || return 1
+                # A visible picker means NOT up, whatever else the (possibly stale) pane shows.
+                docker exec "$C" sh -c 'tmux capture-pane -t ll5 -p 2>/dev/null | grep -qE "Enter to confirm|Enter to continue"' 2>/dev/null && return 1
                 docker exec "$C" sh -c 'tmux capture-pane -t ll5 -p 2>/dev/null | grep -qE "shift\+tab to cycle|esc to interrupt"' 2>/dev/null
               }
               wait_up() {  # $1 = label, up to 5 min

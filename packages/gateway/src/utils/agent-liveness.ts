@@ -20,12 +20,15 @@ export interface HeartbeatHealth {
   claude_alive: boolean;
   claude_uptime_s: number;
   launches_10m: number;
+  /** A startup picker ("Enter to confirm") is on the tmux pane: alive but not working (ISS-029). */
+  picker_visible: boolean;
   session_id: string | null;
 }
 
 export const PROCESS_DOWN_AFTER_MS = 3 * 60 * 1000;
+export const PICKER_STUCK_AFTER_MS = 3 * 60 * 1000;
 export const LAUNCH_LOOP_MIN = 3;
-export const LIVENESS_ALERT_KEYS = ['agent.process_down', 'agent.launch_loop'] as const;
+export const LIVENESS_ALERT_KEYS = ['agent.process_down', 'agent.launch_loop', 'agent.picker_stuck'] as const;
 
 /** Accepts the heartbeat body; returns null for the legacy empty `{}` heartbeat. */
 export function parseHeartbeatHealth(body: unknown): HeartbeatHealth | null {
@@ -37,6 +40,7 @@ export function parseHeartbeatHealth(body: unknown): HeartbeatHealth | null {
     claude_alive: b.claude_alive,
     claude_uptime_s: int(b.claude_uptime_s),
     launches_10m: int(b.launches_10m),
+    picker_visible: b.picker_visible === true,
     session_id: typeof b.session_id === 'string' && b.session_id ? b.session_id.slice(0, 64) : null,
   };
 }
@@ -46,7 +50,7 @@ export function parseHeartbeatHealth(body: unknown): HeartbeatHealth | null {
  * handler upserts it first) and raise/clear the two liveness alerts.
  */
 export async function recordHeartbeatHealth(pool: Pool, userId: string, h: HeartbeatHealth, now = Date.now()): Promise<void> {
-  const res = await pool.query<{ claude_down_since: Date | null }>(
+  const res = await pool.query<{ claude_down_since: Date | null; picker_since: Date | null }>(
     `UPDATE agent_runtimes SET
        health = $2::jsonb,
        health_at = now(),
@@ -54,12 +58,36 @@ export async function recordHeartbeatHealth(pool: Pool, userId: string, h: Heart
          WHEN $3::boolean THEN NULL
          WHEN claude_down_since IS NULL THEN now()
          ELSE claude_down_since END,
+       picker_since = CASE
+         WHEN NOT $4::boolean THEN NULL
+         WHEN picker_since IS NULL THEN now()
+         ELSE picker_since END,
        updated_at = now()
      WHERE user_id = $1
-     RETURNING claude_down_since`,
-    [userId, JSON.stringify(h), h.claude_alive],
+     RETURNING claude_down_since, picker_since`,
+    [userId, JSON.stringify(h), h.claude_alive, h.picker_visible],
   );
   const downSince = res.rows[0]?.claude_down_since ?? null;
+  const pickerSince = res.rows[0]?.picker_since ?? null;
+
+  // ISS-029: alive but parked on a startup picker — the process check cannot see it.
+  if (h.picker_visible) {
+    const stuckMs = pickerSince ? now - new Date(pickerSince).getTime() : 0;
+    if (stuckMs >= PICKER_STUCK_AFTER_MS) {
+      logger.error('[agent][liveness] claude stuck on a startup picker', { userId, stuckMinutes: Math.round(stuckMs / 60000) });
+      await raiseAlert(pool, {
+        userId,
+        key: 'agent.picker_stuck',
+        severity: 'critical',
+        summary: 'Agent is parked on a startup picker (alive, not working)',
+        value: `picker visible ${Math.round(stuckMs / 60000)}m`,
+        expected: 'chat input within 2 minutes of launch',
+        suggestion: 'tmux capture-pane -t ll5 -p in the ll5-agent container shows the prompt; move the pointer off any Exit option and press Enter (the dismisser in ll5-server / docker-entrypoint.sh should have — check "picker dismissal done" in the logs).',
+      });
+    }
+  } else {
+    await clearAlert(pool, userId, 'agent.picker_stuck');
+  }
 
   if (h.claude_alive) {
     await clearAlert(pool, userId, 'agent.process_down');

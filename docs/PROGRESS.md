@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (20:15) — ISS-029: parked on a picker after the smoke's forced relaunch; DECISION-030 first evidence
+
+The new deploy smoke's forced relaunch exposed a second picker bug: the dismisser exited after one poll on the dead instance's stale pane text and the agent sat on the dev-channels picker for 40 minutes (a user message waited 4 minutes until a manual Enter). Fixed in both dismissers (clear screen first, picker-before-readiness, two clean polls), the smoke now treats a visible picker as not-up, and the heartbeat carries `picker_visible` → `agent.picker_stuck` after 3 min (migration 047). First evidence of DECISION-030 in the live transcript: every envelope carries `[delivery mode: sick]`; the agent's replies since the roll are one-liners ("37.0 — that's back down to normal-ish…"). Refusals/holds: none yet (daytime, short replies).
+
 ## 2026-09-05 (19:30) — delivery mode: two false positives caught before the agent rolled
 
 First live read of `GET /me/delivery-mode` said `sleep` at 14:03 local: the Sleep API confidence is an integer 0–100 (afternoon readings 0–27) and the code compared against 0.7; and the "meeting in progress" was the agent's own `[agent] … Wine tasting` timeline note. Fixed (`SLEEP_CONFIDENCE_MIN = 70`; `[agent]`-titled and cancelled events ignored). The agent-repo dispatch had failed `unit-tests` on the F5 whitelist test (it pins the exact indexed field set — `deferral_ref` added), so no agent rolled while the gateway would have held daytime pushes. Re-shipped gateway + run-claude together.

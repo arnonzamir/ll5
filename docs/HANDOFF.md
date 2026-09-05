@@ -6,6 +6,8 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## START HERE — agent remediation, state as of 2026-09-04 night
 
+**Picker checks (ISS-029):** anything that reads the tmux pane must test for `Enter to confirm` BEFORE `shift+tab to cycle` — the pane keeps the previous instance's screen for a while after a relaunch. `agent.picker_stuck` fires after 3 min of a visible picker.
+
 **Deferral (ISS-004, 2026-09-05):** `record_moment(decision: ping_later)` requires `deferral_ref`; `ll5_eval_moments.deferral_ref` is the field to count real deferrals at the 09-12 readout.
 
 **Style + proactivity (DECISION-030, 2026-09-05):** message caps live in `channel/ll5-channel.mjs` (`MESSAGE_CAPS`); quiet hours in `gateway/src/utils/delivery-mode.ts` (defaults 23:30–06:30, override `user_settings.settings.quiet_hours_start/end`), held pushes in `held_messages`, digest by `QuietHoursReleaseScheduler` (every 5 min); `GET /me/delivery-mode` shows the current mode and reasons (sleep = Sleep API confidence ≥ 70 of 100 within 20 min; meeting = a non-all-day event not titled `[agent] …`). If the agent complains a message was "NOT SENT", that is the cap working. Android draft-card rendering is a follow-up in the app repo (the block syntax is `[[draft to="…" via="whatsapp"]]…[[/draft]]`).
