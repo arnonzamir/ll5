@@ -4,6 +4,12 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (10:15) — INCIDENT ISS-027: 3h40m agent outage from the 2.1.260 startup picker; process liveness added
+
+Arnon's phone showed three alerts at 10:14 local (agent unresponsive, narrative loop stalled, inbound volume dropped). All three were real and had one cause: since the 03:43Z context-cap relaunch the agent had been in a restart loop — on Claude Code 2.1.260 the dev-channels picker defaults to the good option, so the blind `Down Enter` in both dismissers picked "2. Exit"; claude exited, the container restarted, and the container heartbeat kept the orchestrator convinced everything was running. Hot-patched the pointer-aware dismissal into the live container (agent back 07:20:43Z), then rolled the fixed image (07:23Z, `picker dismissal done after 3 polls`). Full timeline and mechanism in `docs/ISSUES.md` ISS-027.
+
+The "response identification" fix: the heartbeat now reports process liveness (`claude_alive`, `claude_uptime_s`, `launches_10m`, `session_id`), the gateway keeps it on `agent_runtimes` (migration 045) and raises `agent.process_down` after 3 minutes down and `agent.launch_loop` at ≥3 launches in 10 minutes — from the heartbeat handler itself, no scheduler tick to wait for. Symptom checks now carry `suppressedBy` (`packages/gateway/src/scheduler/anomaly-monitor.ts`) and `AgentOutputMonitor` stays quiet while a liveness alert fires, so one root cause produces one alert instead of three. New module `utils/agent-liveness.ts` with tests; gateway suites green.
+
 ## 2026-09-05 (04:00) — background workers on claude-sonnet-5
 
 Arnon asked for the loop too: `scripts/narrative-loop.sh` `NARRATIVE_LOOP_MODEL` default and `scripts/continuity-probe.sh` `PROBE_MODEL` default `claude-sonnet-4-6` → `claude-sonnet-5` (agent repo `8506d23`, one more roll). Verified 01:30:58Z: `narrative loop started (interval=1200s, model=claude-sonnet-5, …)`; first tick 01:33:28Z `nothing due (refresh 0, create 0) — no worker spawned` (gate working; the model gets exercised on the first tick with due narrative work — the 09-06 checkpoint checks for a `CONSOLIDATED:` line). Live agent back on a fresh `claude-opus-5` session after the roll.

@@ -2,6 +2,7 @@ import type { Client } from '@elastic/elasticsearch';
 import type { Pool } from 'pg';
 import { logger } from '../utils/logger.js';
 import { raiseAlert, clearAlert, type AlertSeverity } from '../utils/alerting.js';
+import { firingAlertKeys } from '../utils/agent-liveness.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface AnomalyMonitorConfig {
@@ -63,6 +64,8 @@ interface StalenessCheck {
   maxMinutes: number;
   severity: AlertSeverity;
   suggestion: string;
+  /** Skip this check while one of these cause-level alerts is firing — one root cause, one alert (ISS-027). */
+  suppressedBy?: string[];
   /** How to read the age (minutes since the newest relevant event), or null if there's no baseline. */
   ageMinutes: (m: AnomalyMonitor) => Promise<number | null>;
 }
@@ -79,6 +82,8 @@ interface RateShiftCheck {
   label: string;
   severity: AlertSeverity;
   suggestion: string;
+  /** Skip this check while one of these cause-level alerts is firing — one root cause, one alert (ISS-027). */
+  suppressedBy?: string[];
   windowMinutes: number;
   /** 'drop' (a feed went quiet) or 'rise' (a spike, e.g. over-suppressing). Default 'drop'. */
   direction?: 'drop' | 'rise';
@@ -130,6 +135,8 @@ interface PercentileRegressionCheck {
   label: string;
   severity: AlertSeverity;
   suggestion: string;
+  /** Skip this check while one of these cause-level alerts is firing — one root cause, one alert (ISS-027). */
+  suppressedBy?: string[];
   toolName: string;
   /** 'gap' → inter-arrival minutes between calls; 'field' → a numeric field on each call row. */
   signal: 'gap' | 'field';
@@ -399,7 +406,14 @@ export class AnomalyMonitor {
 
   private async check(): Promise<void> {
     const firing = new Set<string>();
+    // Cause-level alerts (agent.process_down, channel.*) already firing: the
+    // symptom checks that name them in `suppressedBy` stay quiet this tick.
+    const causes = await firingAlertKeys(this.pool, this.config.userId);
     for (const c of this.checks) {
+      if (c.suppressedBy?.some((k) => causes.has(k))) {
+        logger.info('[AnomalyMonitor][check] suppressed by a firing cause', { key: c.key, causes: c.suppressedBy.filter((k) => causes.has(k)) });
+        continue;
+      }
       const tripped = await this.runCheck(c);
       if (tripped) { firing.add(c.key); this.active.add(c.key); }
     }
@@ -433,6 +447,7 @@ function buildChecks(): Check[] {
     {
       kind: 'staleness',
       key: 'loop.narrative_consolidation',
+      suppressedBy: ['agent.process_down', 'agent.launch_loop'],
       label: 'Narrative-maintenance loop',
       maxMinutes: 90,
       severity: 'warning',
@@ -443,6 +458,7 @@ function buildChecks(): Check[] {
     {
       kind: 'staleness',
       key: 'agent.journaling',
+      suppressedBy: ['agent.process_down', 'agent.launch_loop'],
       label: 'Agent journaling',
       maxMinutes: 18 * 60,
       severity: 'warning',
@@ -455,6 +471,8 @@ function buildChecks(): Check[] {
     {
       kind: 'rateShift',
       key: 'throughput.inbound_messages',
+      // A dead bridge/listener is the cause; the volume drop is its symptom.
+      suppressedBy: ['channel.whatsapp', 'channel.phone', 'channel.slack'],
       label: 'Inbound message volume',
       severity: 'warning',
       suggestion: 'Far fewer inbound messages than the same time yesterday — a phone listener / channel may be down.',
@@ -559,6 +577,7 @@ function buildChecks(): Check[] {
     {
       kind: 'staleness',
       key: 'agent.daily_restart_missing',
+      suppressedBy: ['agent.process_down', 'agent.launch_loop'],
       label: 'Daily session restart',
       maxMinutes: 26 * 60,
       severity: 'warning',

@@ -102,3 +102,17 @@ describe('AgentOutputMonitor — journal-aware liveness window', () => {
     expect(raiseAlert).not.toHaveBeenCalled();
   });
 });
+
+describe('AgentOutputMonitor — cause-level suppression (ISS-027)', () => {
+  beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
+
+  it('stays quiet when agent.process_down is already firing — one root cause, one alert', async () => {
+    const base = makePool(8, 3 * HOUR_MS) as unknown as { query: (sql: string, p?: unknown[]) => Promise<unknown> };
+    const inner = base.query;
+    base.query = vi.fn(async (sql: string, p?: unknown[]) =>
+      sql.includes('system_alerts') ? { rows: [{ alert_key: 'agent.process_down' }] } : inner(sql, p));
+    const monitor = new AgentOutputMonitor(base as unknown as Pool, makeEs(3 * HOUR_MS), makeConfig());
+    await runTick(monitor);
+    expect(raiseAlert).not.toHaveBeenCalled();
+  });
+});

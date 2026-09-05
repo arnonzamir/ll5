@@ -7,6 +7,7 @@ import { chatAuthMiddleware } from './chat.js';
 import { registerConsoleRoutes } from './console.js';
 import { encryptSecret } from './utils/encryption.js';
 import { logger } from './utils/logger.js';
+import { parseHeartbeatHealth, recordHeartbeatHealth } from './utils/agent-liveness.js';
 import {
   AGENT_PROVIDERS, PROVIDER_CATALOG, MODEL_SLOTS, SLOT_IDS,
   sanitizeModelConfig, keyOkForProvider, isProvider,
@@ -845,7 +846,11 @@ export function createAgentRouter(
          WHERE user_id = $1`,
         [userId, new Date().toISOString()],
       );
-      logger.info('[agent][heartbeat]', { userId, status: 'running' });
+      // Process liveness (ISS-027): the entrypoint reports whether claude itself
+      // is up. Legacy empty `{}` heartbeats carry nothing and change nothing.
+      const health = parseHeartbeatHealth(req.body);
+      if (health) await recordHeartbeatHealth(pool, userId, health);
+      logger.info('[agent][heartbeat]', { userId, status: 'running', claude_alive: health?.claude_alive ?? null });
       res.json({ ok: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -434,3 +434,22 @@ describe('AnomalyMonitor — DECISION-025 narrative non-degradation (percentileR
     }
   });
 });
+
+describe('suppressedBy — symptom checks stay quiet while their cause fires (ISS-027)', () => {
+  beforeEach(() => { raiseAlert.mockClear(); clearAlert.mockClear(); });
+  type Chk = { checks: unknown[]; check: () => Promise<void> };
+
+  it('skips a check whose suppressedBy key is firing, runs it otherwise', async () => {
+    const firingPool = { query: vi.fn(async () => ({ rows: [{ alert_key: 'agent.process_down' }] })) } as unknown as Pool;
+    const m = new AnomalyMonitor(firingPool, {} as Client, { intervalMinutes: 15, userId: 'u1' });
+    (m as unknown as Chk).checks = [{ ...staleCheck(999), suppressedBy: ['agent.process_down'] }];
+    await (m as unknown as Chk).check();
+    expect(raiseAlert).not.toHaveBeenCalled();
+
+    const quietPool = { query: vi.fn(async () => ({ rows: [] })) } as unknown as Pool;
+    const m2 = new AnomalyMonitor(quietPool, {} as Client, { intervalMinutes: 15, userId: 'u1' });
+    (m2 as unknown as Chk).checks = [{ ...staleCheck(999), suppressedBy: ['agent.process_down'] }];
+    await (m2 as unknown as Chk).check();
+    expect(raiseAlert).toHaveBeenCalledTimes(1);
+  });
+});

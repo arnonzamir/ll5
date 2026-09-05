@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { Client } from '@elastic/elasticsearch';
 import { logger } from '../utils/logger.js';
 import { raiseAlert, clearAlert } from '../utils/alerting.js';
+import { firingAlertKeys, LIVENESS_ALERT_KEYS } from '../utils/agent-liveness.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
 
 interface AgentOutputConfig {
@@ -217,6 +218,16 @@ export class AgentOutputMonitor {
       if (!stale) {
         await clearAlert(this.pool, this.config.userId, 'agent.output');
         logger.debug('[AgentOutputMonitor][tick] Agent output healthy', snapshotCtx);
+        return;
+      }
+
+      // The cause is already alerted at process level (agent.process_down /
+      // agent.launch_loop from the heartbeat, ISS-027): silence is its symptom,
+      // not a second finding. Stay quiet rather than stack a third alert.
+      const causes = await firingAlertKeys(this.pool, this.config.userId);
+      const cause = LIVENESS_ALERT_KEYS.find((k) => causes.has(k));
+      if (cause) {
+        logger.info('[AgentOutputMonitor][tick] Agent silent — suppressed, cause already firing', { ...snapshotCtx, cause });
         return;
       }
 
