@@ -11,6 +11,13 @@ vi.mock('../utils/system-message.js', () => ({
 vi.mock('../utils/fcm-sender.js', () => ({
   sendFCMNotification: (...a: unknown[]) => sendFCMNotification(...a),
 }));
+// DECISION-030 quiet hours skip the phone push at night. These tests are about
+// the push policy itself, so pin "not quiet" — otherwise they fail after 23:30
+// Asia/Jerusalem (which is when the first CI run after the change happened).
+vi.mock('../utils/delivery-mode.js', () => ({
+  inQuietHours: () => false,
+  readQuietHours: async () => ({ start: '23:30', end: '06:30' }),
+}));
 
 import { raiseAlert, clearAlert } from '../utils/alerting.js';
 

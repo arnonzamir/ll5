@@ -532,3 +532,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: docs/reviews/2026-09-05/android-review.md — subagent code review of the Android app (13 bugs, 9 inconsistencies, 8 ranked improvements).
 2026-09-05: docs/implementation/android-fix-batch-2026-09-05.md — parallel subagent plan for the Android fix batch (A1 DND/critical, A2 permissions, B chat, C topics/draft/nav, D listener liveness).
 2026-09-06: gateway processors/phone-status.ts + types/push-data.ts store notification_listener_{enabled,connected}; scheduler/metrics-monitor.ts decideMirrorFromListener (+ __tests__/mirror-listener-decision.test.ts) — package D.
+2026-09-06: alerting.test.ts pins inQuietHours=false (the push-policy tests are time-independent again).
