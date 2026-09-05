@@ -525,3 +525,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: narrative-loop.sh gate restored to promote_threshold 2 (matches the worker prompt).
 2026-09-05: anomaly-monitor.ts clears pre-restart alerts (DB firing set, not only in-memory active).
 2026-09-05: throughput skipIf — stand down while bridge liveness is unobserved during the first 15 min after a gateway start.
+2026-09-05: packages/personal-knowledge/src/tools/subject-link.ts (+ __tests__/subject-link.test.ts) — topic-slug → existing-narrative linking in note_observation (ISS-032); ll5-run-shared CLAUDE.md reuse rule; agent session-start.sh shows [kind: ref].

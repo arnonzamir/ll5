@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { chooseLinkedNarrative, significantWords } from './subject-link.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { logAudit, capItems, pageFields, resolveOffset, resolveCap } from '@ll5/shared';
 import type { ObservationRepository } from '../repositories/interfaces/observation.repository.js';
@@ -191,6 +192,28 @@ export function registerNarrativeTools(
         };
       }
 
+      // ISS-032: a fresh topic slug that already has a narrative under another
+      // slug is ALSO tagged with that narrative's subject, so the existing story
+      // refreshes instead of a duplicate queueing as a "new subject". Reported
+      // back as `linked` so the agent learns the canonical ref.
+      const linked: Array<{ from: string; to: string; title: string; shared: string[] }> = [];
+      for (const s of subjects.filter((x) => x.kind === 'topic')) {
+        try {
+          if (await narrativeRepo.getBySubject(userId, s)) continue;
+          const words = significantWords(s.ref);
+          if (words.length < 2) continue;
+          const { items } = await narrativeRepo.list(userId, { status: 'active', subjectKind: 'topic', query: words.join(' '), limit: 5 });
+          const pick = chooseLinkedNarrative(s.ref, items);
+          if (pick && !subjects.some((x) => x.kind === pick.narrative.subject.kind && x.ref === pick.narrative.subject.ref)) {
+            subjects.push({ kind: pick.narrative.subject.kind, ref: pick.narrative.subject.ref });
+            linked.push({ from: s.ref, to: pick.narrative.subject.ref, title: pick.narrative.title, shared: pick.shared });
+          }
+        } catch (err) {
+          logger.warn('[note_observation] subject link lookup failed', { userId, ref: s.ref, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+      if (linked.length > 0) logger.info('[note_observation] linked new topic slug(s) to existing narratives', { userId, linked });
+
       const obs = await observationRepo.create(userId, {
         subjects,
         text,
@@ -224,6 +247,7 @@ export function registerNarrativeTools(
           text: JSON.stringify({
             observation: obs,
             ...(Object.keys(normalized).length > 0 ? { normalized } : {}),
+            ...(linked.length > 0 ? { linked, hint: `Also tagged to the existing narrative subject(s) ${linked.map((l) => `\`${l.to}\``).join(', ')} — use that ref next time instead of inventing a new slug.` } : {}),
           }),
         }],
       };
