@@ -23,24 +23,27 @@ interface MetricsMonitorConfig {
  */
 interface ChannelCheck {
   key: string;            // alert key, e.g. 'channel.slack'
-  app: string;            // ll5_awareness_messages app value
+  app: string;            // ll5_awareness_messages `source` value (the delivery path, e.g. 'phone')
   label: string;          // human label
   staleMinutes: number;   // expected-max age during active hours
   severity: AlertSeverity;
   suggestion: string;
 }
 
-// WhatsApp + phone are covered by their dedicated monitors. These are the
-// remaining message channels — defaults are deliberately lax (low-volume
-// channels) to avoid false positives; override via user_settings later.
+// WhatsApp + phone are covered by their dedicated monitors. Slack, Gmail and SMS
+// all arrive through ONE path — the Android notification-mirror listener — and
+// the failure this check exists for is that listener dying (Slack dead ~29h,
+// Gmail ~4.5 days in August). Per-app silence was the wrong signal: Slack is
+// legitimately silent for whole days (0 on 4 of the last 14, ISS-031) and
+// "Slack channel quiet" fired 10× in one evening. The mirror as a whole is not:
+// in 14 healthy days the longest gap between ANY mirrored message was 16.8h.
+// So: one check, on source=phone, 24h, active hours only.
 const CHANNEL_CHECKS: ChannelCheck[] = [
-  { key: 'channel.slack', app: 'slack', label: 'Slack', staleMinutes: 8 * 60, severity: 'warning',
-    suggestion: 'Check the phone notification-mirror (Slack) — Android may have killed the listener.' },
-  { key: 'channel.gmail', app: 'gmail', label: 'Gmail', staleMinutes: 24 * 60, severity: 'warning',
-    suggestion: 'Check the phone notification-mirror (Gmail).' },
-  { key: 'channel.sms', app: 'sms', label: 'SMS', staleMinutes: 48 * 60, severity: 'warning',
-    suggestion: 'Check the phone SMS listener.' },
+  { key: 'channel.mirror', app: 'phone', label: 'Phone notification mirror (Slack / Gmail / SMS)', staleMinutes: 24 * 60, severity: 'warning',
+    suggestion: 'No mirrored notification from ANY app in 24h during active hours — the Android notification-listener is probably dead. Open the LL5 app (it re-arms the listener), then check the permission banner.' },
 ];
+/** Alert keys of the retired per-app checks — cleared once so no stale row keeps firing. */
+const RETIRED_CHANNEL_KEYS = ['channel.slack', 'channel.gmail', 'channel.sms'];
 
 /**
  * Metrics watchdog — the declarative companion to the dedicated monitors.
@@ -90,7 +93,7 @@ export class MetricsMonitor {
           bool: {
             filter: [
               { term: { user_id: this.config.userId } },
-              { term: { app } },
+              { term: { 'source.keyword': app } },
               { term: { from_me: false } },
               { range: { timestamp: { gte: `now-${this.config.baselineDays}d` } } },
             ],
@@ -107,8 +110,14 @@ export class MetricsMonitor {
     }
   }
 
+  private retiredCleared = false;
+
   private async checkChannels(): Promise<void> {
     const active = this.inActiveHours();
+    if (!this.retiredCleared) {
+      for (const key of RETIRED_CHANNEL_KEYS) await clearAlert(this.pool, this.config.userId, key);
+      this.retiredCleared = true;
+    }
     for (const c of CHANNEL_CHECKS) {
       const { ageHours, hasBaseline } = await this.channelState(c.app);
       // No baseline → channel unused; clear any stale alert and skip.

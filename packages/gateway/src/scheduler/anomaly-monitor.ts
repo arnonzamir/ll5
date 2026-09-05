@@ -472,7 +472,7 @@ function buildChecks(): Check[] {
       kind: 'rateShift',
       key: 'throughput.inbound_messages',
       // A dead bridge/listener is the cause; the volume drop is its symptom.
-      suppressedBy: ['channel.whatsapp', 'channel.phone', 'channel.slack'],
+      suppressedBy: ['channel.whatsapp', 'channel.phone', 'channel.mirror'],
       label: 'Inbound message volume',
       severity: 'warning',
       suggestion: 'Far fewer inbound messages than the same time yesterday — a phone listener / channel may be down.',

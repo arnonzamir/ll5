@@ -18,8 +18,6 @@ interface TicklerAlertConfig {
  */
 export class TicklerAlertScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
-  private alertedIds: Set<string> = new Set();
-  private lastAlertDate: string | null = null;
   // Effective timezone resolved fresh at the top of each tick (current GPS zone
   // if recent, else home). Seeded with the static config tz until the first tick.
   private tz: string;
@@ -82,12 +80,11 @@ export class TicklerAlertScheduler {
     if (!this.isWithinActiveHours()) return;
 
     try {
-      // Reset alerted IDs when date changes
+      // The "already alerted today" set lives in tickler_alerts_sent (migration
+      // 048), keyed by the LOCAL date: an in-memory set was reset by every gateway
+      // deploy and re-announced the same daily ticklers after each restart
+      // (2026-09-05: five deploys, "Ritalin 10mg 17:00" twice in 22 minutes).
       const currentDate = this.getCurrentDate();
-      if (this.lastAlertDate !== currentDate) {
-        this.alertedIds.clear();
-        this.lastAlertDate = currentDate;
-      }
 
       const now = new Date();
       const twoHoursLater = new Date(now.getTime() + 2 * 60 * 60 * 1000);
@@ -96,11 +93,21 @@ export class TicklerAlertScheduler {
         now.toISOString(),
         twoHoursLater.toISOString(),
       );
+      if (ticklers.length === 0) return;
 
-      // Filter out already-alerted ticklers, then mark all as alerted.
-      const newTicklers = ticklers.filter((t) => !this.alertedIds.has(t.event_id));
+      const sent = await this.pool.query<{ event_id: string }>(
+        `SELECT event_id FROM tickler_alerts_sent WHERE user_id = $1 AND alert_date = $2 AND event_id = ANY($3::text[])`,
+        [this.config.userId, currentDate, ticklers.map((t) => t.event_id)],
+      );
+      const alreadySent = new Set(sent.rows.map((r) => r.event_id));
+      const newTicklers = ticklers.filter((t) => !alreadySent.has(t.event_id));
       if (newTicklers.length === 0) return;
-      for (const t of newTicklers) this.alertedIds.add(t.event_id);
+      // Mark BEFORE sending so a crash mid-send cannot double-announce.
+      await this.pool.query(
+        `INSERT INTO tickler_alerts_sent (user_id, event_id, alert_date)
+         SELECT $1, unnest($2::text[]), $3 ON CONFLICT DO NOTHING`,
+        [this.config.userId, newTicklers.map((t) => t.event_id), currentDate],
+      );
 
       // Route by kind: user-facing reminders vs agent-private instructions.
       const reminders = newTicklers.filter((t) => (t.kind ?? 'reminder') !== 'instruction');

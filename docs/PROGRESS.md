@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (21:00) — Tickler alert reviewed (ISS-030); Android draft cards
+
+Arnon asked whether `[Tickler Alert]` was a leftover debugging tool. It is the delivery path for `create_tickler` reminders and the agent's `kind: instruction` self-scheduled reviews — core, not debug — but its per-day dedupe lived in memory and every gateway deploy re-announced the same daily health ticklers (40 alerts in 7 days, 26/29 suppressed by the agent, twice in 22 minutes today). Persisted in `tickler_alerts_sent` (migration 048), written before send. Android: `DraftCard.kt` renders `[[draft to= via=]]` blocks as Copy / "Copy & open WhatsApp" (ACTION_SEND into com.whatsapp, chooser fallback); `AssistantContent` wraps `MarkdownBody` in `ChatScreen`; debug APK built from `feat/phone-activity-awareness` (the branch the installed app runs from) and handed to Arnon. Slack warnings (ISS-031): per-app silence checks on the mirror channels replaced by one `channel.mirror` check on `source=phone` at 24h — Slack is silent for whole days; the listener as a whole never was for more than 16.8h.
+
 ## 2026-09-05 (20:15) — ISS-029: parked on a picker after the smoke's forced relaunch; DECISION-030 first evidence
 
 The new deploy smoke's forced relaunch exposed a second picker bug: the dismisser exited after one poll on the dead instance's stale pane text and the agent sat on the dev-channels picker for 40 minutes (a user message waited 4 minutes until a manual Enter). Fixed in both dismissers (clear screen first, picker-before-readiness, two clean polls), the smoke now treats a visible picker as not-up, and the heartbeat carries `picker_visible` → `agent.picker_stuck` after 3 min (migration 047). First evidence of DECISION-030 in the live transcript: every envelope carries `[delivery mode: sick]`; the agent's replies since the roll are one-liners ("37.0 — that's back down to normal-ish…"). Refusals/holds: none yet (daytime, short replies). ISS-029 fix rolled and verified 12:13Z (both smoke boots OK with the picker-aware check; first turn 2 min after the roll).

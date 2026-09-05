@@ -6,6 +6,8 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## START HERE — agent remediation, state as of 2026-09-04 night
 
+**Mirror channels:** `channel.mirror` (24h, source=phone) replaced `channel.slack/gmail/sms` (ISS-031). **Tickler alerts:** `[Tickler Alert]` / `[Agent Instruction]` come from `TicklerAlertScheduler` reading the LL5 System calendar; dedupe is `tickler_alerts_sent` per local date. Android draft cards: `ui/chat/DraftCard.kt`; build with `./gradlew assembleDebug` on `feat/phone-activity-awareness`, install by sideload (no CI/releases in that repo).
+
 **Picker checks (ISS-029):** anything that reads the tmux pane must test for `Enter to confirm` BEFORE `shift+tab to cycle` — the pane keeps the previous instance's screen for a while after a relaunch. `agent.picker_stuck` fires after 3 min of a visible picker. Fix verified live 12:13Z.
 
 **Deferral (ISS-004, 2026-09-05):** `record_moment(decision: ping_later)` requires `deferral_ref`; `ll5_eval_moments.deferral_ref` is the field to count real deferrals at the 09-12 readout.

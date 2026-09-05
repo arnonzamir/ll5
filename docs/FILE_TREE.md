@@ -518,3 +518,5 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: delivery-mode.ts SLEEP_CONFIDENCE_MIN=70 + [agent]-title exclusion; eval-moment-route.test.ts whitelist gains deferral_ref.
 2026-09-05: ISS-029 — agent ll5-server + docker-entrypoint.sh dismissers (clear screen, picker-first, two clean polls), heartbeat picker_visible; gateway agent-liveness.ts agent.picker_stuck + migrations/047_agent_runtime_picker.sql; workflow smoke rejects a visible picker.
 2026-09-05: ISS-029 verified live (run 33965254689).
+2026-09-05: gateway scheduler/tickler-alert.ts dedupe via migrations/048_tickler_alerts_sent.sql (ISS-030); Android app/src/main/java/com/ll5/android/ui/chat/DraftCard.kt + ChatScreen.kt AssistantContent.
+2026-09-05: gateway scheduler/metrics-monitor.ts — one channel.mirror check on source=phone (ISS-031).
