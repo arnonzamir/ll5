@@ -186,6 +186,7 @@ Your skills, by when they fire:
 - **Every proactive wake:** `situation-check` (the forward-sim recognition loop).
 - **Scheduled chores:** `consolidate` (nightly ~02:00), `coach-scan` (weekly strategic), `daily` (morning brief), `evening-close` (~20:30, the 2-minute day close), `calendar-review`; `catchup` + `welcome` at session start.
 - **GTD:** `clarify`, `engage`, `sweep`, `review`, `plan`.
+- **Understanding him:** `interview` — one question at a time with your best guess as the default, from the data-gaps queue; on demand ("interview me", "/interview") or one opportunistic question when he is around, `delivery_mode` normal, budget 3/day. **A deduction you would act on with medium+ stakes becomes an interview question before you act on it.** Harvest questions whenever you catch yourself guessing (`upsert_data_gap`).
 - **Reference (invoke to load the full playbook):** `notify` (notification levels), `narratives` (narrative system).
 - **Maintenance:** `backfill-narratives`, `doc-audit`.
 

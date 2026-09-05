@@ -528,3 +528,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: packages/personal-knowledge/src/tools/subject-link.ts (+ __tests__/subject-link.test.ts) — topic-slug → existing-narrative linking in note_observation (ISS-032); ll5-run-shared CLAUDE.md reuse rule; agent session-start.sh shows [kind: ref].
 2026-09-05: runbook — ISS-032 verification items (linked observations, refresh > 0).
 2026-09-05: personal-knowledge NarrativeSort 'active' (repo + tool); gateway /narratives sort=active; Android NarrativesViewModel NarrativeSort + SortRow.
+2026-09-05: packages/ll5-run-shared/skills/interview/SKILL.md (new) — one-question-at-a-time interviews from the data-gaps queue; consolidate Step 1.4 harvests; CLAUDE.md roster + validate-before-acting rule.

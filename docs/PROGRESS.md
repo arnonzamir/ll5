@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (23:30) — New skill: `interview`
+
+Arnon asked for a skill that initiates interviews with him to clarify topics, surface tasks and validate deductions. `packages/ll5-run-shared/skills/interview/SKILL.md`: the question queue is the (previously unused) personal-knowledge data-gaps store; questions are harvested in `consolidate` (Step 1.4) and whenever the agent catches itself guessing; the skill spends them one at a time with the agent's best guess as the default, ≤200 chars, only in `delivery_mode: normal`, max 3/day, never while one is unanswered; on demand it runs a 5-question session. Answers land the same turn as `user_statement` observations, gap `answered`, narrative thread closed, user-model updated, task captured; a wrong deduction becomes a correction + a lesson. Persona rule: a deduction the agent would act on with medium+ stakes becomes an interview question first.
+
 ## 2026-09-05 (23:00) — Topics ordering: newest by default, most active, most significant
 
 Arnon wants the app's Topics list to open on the newest topics and to sort by most active or most significant. Knowledge MCP `list_narratives` gains `sort: "active"` (live observation count in the window, recency breaks ties) next to `recency` (newest activity — now the app's default) and `relevance` (the "what matters now" composite, shown as "Most significant"); gateway `GET /narratives?sort=active` passes through. Android: `NarrativeSort` in `NarrativesViewModel`, a chip row under the kind filter, repository/API carry `sort`. New APK built from `feat/phone-activity-awareness`.

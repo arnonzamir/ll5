@@ -40,6 +40,7 @@ For every h2+ goal and every live thread, ask three questions:
 1. **Is it DRIFTING?** A stated goal stalling while energy goes elsewhere — the horizon says "dissertation is the priority this quarter", but `list_projects` / the calendar / the journal show the last weeks were all client work. Drift = a gap between the *declared should* and where the *energy actually went*. (This is the partner-disagrees move in CLAUDE.md, applied across weeks instead of a moment.)
 2. **Is there a FUTURE MOMENT that warrants a scheduled review?** A birthday or anniversary (plan the gift N weeks ahead), a deadline (start prep with lead time), a season turning (summer → vacations / kids' activities), a commitment window closing, a trip to organize, a follow-up whose time hasn't come yet. Anything you'd want a future session to act on *without re-deriving it from scratch*.
 3. **Is there an OPPORTUNITY worth surfacing?** A someday item that the calendar/season just made timely; a free stretch ahead that a stalled goal could fill; a convergence (two people in the same city next month) the user hasn't connected.
+4. **Is there a QUESTION only he can answer?** A goal whose status the record cannot tell you, a thread that has been "pending his call" for weeks, a deduction you keep acting on without ever checking — file it: `upsert_data_gap({ question, priority: 5–8, context: "<subject ref> — why it matters" })`. The `interview` skill asks it at a good moment; do not ask it here.
 
 Most threads yield nothing this week. That's expected — write the skip line and move on.
 
