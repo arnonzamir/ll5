@@ -6,7 +6,7 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## START HERE — agent remediation, state as of 2026-09-04 night
 
-**Picker checks (ISS-029):** anything that reads the tmux pane must test for `Enter to confirm` BEFORE `shift+tab to cycle` — the pane keeps the previous instance's screen for a while after a relaunch. `agent.picker_stuck` fires after 3 min of a visible picker.
+**Picker checks (ISS-029):** anything that reads the tmux pane must test for `Enter to confirm` BEFORE `shift+tab to cycle` — the pane keeps the previous instance's screen for a while after a relaunch. `agent.picker_stuck` fires after 3 min of a visible picker. Fix verified live 12:13Z.
 
 **Deferral (ISS-004, 2026-09-05):** `record_moment(decision: ping_later)` requires `deferral_ref`; `ll5_eval_moments.deferral_ref` is the field to count real deferrals at the 09-12 readout.
 

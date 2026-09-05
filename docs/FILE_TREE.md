@@ -517,3 +517,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: DECISION-030 batch B — agent repo channel/ll5-channel.mjs record_moment deferral_ref gate; .claude/hooks/lib/eval_record.py ships deferral_ref; gateway server.ts eval-moment whitelist + mapping deferral_ref.
 2026-09-05: delivery-mode.ts SLEEP_CONFIDENCE_MIN=70 + [agent]-title exclusion; eval-moment-route.test.ts whitelist gains deferral_ref.
 2026-09-05: ISS-029 — agent ll5-server + docker-entrypoint.sh dismissers (clear screen, picker-first, two clean polls), heartbeat picker_visible; gateway agent-liveness.ts agent.picker_stuck + migrations/047_agent_runtime_picker.sql; workflow smoke rejects a visible picker.
+2026-09-05: ISS-029 verified live (run 33965254689).
