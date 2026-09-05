@@ -73,14 +73,11 @@ export class PhoneLivenessMonitor {
   }
 
   private getCurrentHour(): number {
-    return parseInt(
-      new Intl.DateTimeFormat('en-US', {
+    return (parseInt(new Intl.DateTimeFormat('en-US', {
         timeZone: this.config.timezone,
         hour: 'numeric',
         hour12: false,
-      }).format(new Date()),
-      10,
-    );
+      }).format(new Date()), 10) % 24);
   }
 
   private async lastTimestamp(index: string): Promise<string | null> {

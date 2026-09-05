@@ -65,7 +65,7 @@ export class CalendarReviewScheduler {
       hour: 'numeric',
       hour12: false,
     });
-    return parseInt(formatter.format(new Date()), 10);
+    return (parseInt(formatter.format(new Date()), 10) % 24);
   }
 
   private getCurrentMinute(): number {
@@ -73,7 +73,7 @@ export class CalendarReviewScheduler {
       timeZone: this.tz,
       minute: 'numeric',
     });
-    return parseInt(formatter.format(new Date()), 10);
+    return (parseInt(formatter.format(new Date()), 10) % 24);
   }
 
   private isWithinActiveHours(): boolean {

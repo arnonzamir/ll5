@@ -57,7 +57,7 @@ export class DailyReviewScheduler {
       hour: 'numeric',
       hour12: false,
     });
-    return parseInt(formatter.format(new Date()), 10);
+    return (parseInt(formatter.format(new Date()), 10) % 24);
   }
 
   private getCurrentDate(): string {

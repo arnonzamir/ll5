@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (00:45) — Midnight-hour bug in every active-hours gate
+
+CI failed `agent-output-monitor`'s "genuinely dead" test at 00:16 local: ICU prints midnight as hour "24" with `hour12: false` on the CI runner (local Node printed "00"), so every `hour >= start && hour < end` gate treated 00:00–00:59 as hour 24 = outside active hours — 17 schedulers/monitors silently skipped the midnight hour every night. Every `parseInt(Intl…format(new Date()), 10)` hour read is now `% 24` (17 files). Also `alerting.test.ts` now pins quiet hours off — the phone-push policy tests were time-dependent after DECISION-030.
+
 ## 2026-09-06 (00:30) — Package D merged: notification-listener liveness end to end
 
 The app's phone-status push now carries `notification_listener_enabled` / `notification_listener_connected` (stamped at push time on every status push; `false` after 60 s of process life without the listener binding); the gateway stores them on `ll5_awareness_phone_statuses` and `channel.mirror` decides from them first (`decideMirrorFromListener`, 7 tests): access not granted → warning; enabled but disconnected → "Android killed the mirror" warning within one tick; connected → healthy, silence rule skipped; absent (old app) → the 24 h silence rule unchanged. Gateway merged from `fix/listener-liveness` (the first CI run failed on two `alerting` tests that assumed "not quiet hours" — pinned in the test); the Android half is on the base branch and ships with the batch APK.

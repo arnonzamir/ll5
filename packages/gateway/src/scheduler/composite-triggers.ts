@@ -95,10 +95,7 @@ export class CompositeTriggerScheduler {
   }
 
   private getCurrentHour(): number {
-    return parseInt(
-      new Intl.DateTimeFormat('en-US', { timeZone: this.tz, hour: 'numeric', hour12: false }).format(new Date()),
-      10,
-    );
+    return (parseInt(new Intl.DateTimeFormat('en-US', { timeZone: this.tz, hour: 'numeric', hour12: false }).format(new Date()), 10) % 24);
   }
 
   private getCurrentDate(): string {

@@ -128,10 +128,7 @@ export class MetricsMonitor {
   }
 
   private inActiveHours(): boolean {
-    const hour = parseInt(
-      new Intl.DateTimeFormat('en-US', { timeZone: this.config.timezone, hour: 'numeric', hour12: false }).format(new Date()),
-      10,
-    );
+    const hour = (parseInt(new Intl.DateTimeFormat('en-US', { timeZone: this.config.timezone, hour: 'numeric', hour12: false }).format(new Date()), 10) % 24);
     return hour >= this.config.startHour && hour < this.config.endHour;
   }
 

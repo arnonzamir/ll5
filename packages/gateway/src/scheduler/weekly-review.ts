@@ -64,7 +64,7 @@ export class WeeklyReviewReminder {
       hour: 'numeric',
       hour12: false,
     });
-    return parseInt(formatter.format(new Date()), 10);
+    return (parseInt(formatter.format(new Date()), 10) % 24);
   }
 
   private getCurrentDayOfWeek(): number {
