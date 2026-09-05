@@ -30,3 +30,13 @@ e. Schedule the next checkpoint: 2026-09-06 03:12 local, Step 1 again (post-upgr
 ## Rules
 
 No emojis. Never print secrets. Report outcomes faithfully — a failed check is stated with its decisive line. Verify inside the container, never trust `deploy: success`. Each agent roll starts a fresh session (~$5.5 cold start): at most **one** roll tonight. Finish with a short status table: each Step 1 check (pass/fail + evidence), the decision class, what was upgraded, and what — only if critical — waits for Arnon.
+
+## Second run — 2026-09-06 03:12 IDT (post-upgrade first night)
+
+Same authorization, same Step 1 and Step 2. Step 3 is replaced by the post-upgrade checks (no roll expected tonight — at most one only if something is broken):
+1. Hooks still firing on 2.1.260 across a full day: `session-save.log` entries after every Stop, `context-pack.log` per user turn, a new `ll5_eval_moments` doc and a new `ll5_turn_costs` doc after 2026-09-05T01:00Z, `ll5_session_history` `indexed_at` recent.
+2. Session length: `mcp-autoheal-server.log` — cap restarts (`context … >= cap 150000`) should be ≥4h apart; the nightly `requested by consolidate` restart consumed within 1h of the 02:00 pass.
+3. `grep -c isCompactSummary /data/home/.claude/projects/-workspace/*.jsonl` = 0 (auto-compaction stayed the exception under the 150K cap on 2.1.260). If > 0: lower the cap (140K) — mid-level, reviewer, document.
+4. Model: every assistant message `"model":"claude-opus-5"`; zero `is_error:true` tool results tied to the model or to permissions; no "auto mode classifier" denials in the transcript.
+5. Behaviour sanity on Opus 5: `CONSOLIDATE-TALLY` from the 02:00 pass (observations > 0), `note_observation` count for the day, replies to Arnon's messages (latency from `ll5_chat_messages`), no `behavior.*` alert.
+6. Write the dated PROGRESS entry + update ISSUES rows; schedule the third run for 2026-09-07 03:12 only if something needed a fix, otherwise the next fixed date is the 7-day readout on 2026-09-12 (`scripts/agent-baseline.sh --since 2026-09-05 --until 2026-09-12`, control `docs/reviews/2026-09-05/agent-baseline-pre-upgrade.md`).

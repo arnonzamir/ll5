@@ -6,7 +6,7 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## START HERE — agent remediation, state as of 2026-09-04 night
 
-**2026-09-05 03:12 checkpoint ran:** hand-off verified (00:32:38Z, delayed by the anti-flap gap → ISS-026), Phase 5 rolled: image pin 2.1.260, model `claude-opus-5`, watcher cap 150K / gap 1h. Next checkpoint 2026-09-06 03:12 IDT (post-upgrade first night: hooks fire, sessions ≥4h, `isCompactSummary` = 0, `--model claude-opus-5` resolved). 7-day diff on 2026-09-12: `scripts/agent-baseline.sh --since 2026-09-05 --until 2026-09-12`, control = `docs/reviews/2026-09-05/agent-baseline-pre-upgrade.md`.
+**2026-09-05 03:12 checkpoint ran:** hand-off verified (00:32:38Z, delayed by the anti-flap gap → ISS-026), Phase 5 rolled: image pin 2.1.260, model `claude-opus-5`, watcher cap 150K / gap 1h. Roll verified inside the container 00:37Z (2.1.260, `claude-opus-5` on every assistant message, hooks firing, 0 denials). Next checkpoint 2026-09-06 03:12 IDT runs the runbook's "Second run" section (hooks over a full day, sessions ≥4h, `isCompactSummary` = 0, model, behaviour sanity). 7-day diff on 2026-09-12: `scripts/agent-baseline.sh --since 2026-09-05 --until 2026-09-12`, control = `docs/reviews/2026-09-05/agent-baseline-pre-upgrade.md`.
 
 **Scheduled (history):** a one-shot checkpoint fired 2026-09-05 03:12 IDT in Arnon's Claude Code session running `docs/runbooks/post-nightly-checkpoint.md` (verify the hand-off → decide by severity → Phase 5 upgrade if clean, authorized by Arnon). If that session is gone, run the runbook by hand.
 
