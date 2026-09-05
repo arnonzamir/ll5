@@ -34,6 +34,8 @@ export interface DeliveryModeResult {
 export interface QuietHours { start: string; end: string } // "HH:MM" local, may wrap midnight
 export const DEFAULT_QUIET_HOURS: QuietHours = { start: '23:30', end: '06:30' };
 export const SICK_PATTERN = /\b(sick|fever|ill|flu|migraine|unwell|nauseous)\b|חולה|חום|שפעת/i;
+/** Sleep API classify confidence is 0–100. */
+export const SLEEP_CONFIDENCE_MIN = 70;
 
 function localHM(now: Date, tz: string): { h: number; m: number } {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(now);
@@ -122,7 +124,10 @@ export async function computeDeliveryMode(pool: Pool, es: Client, userId: string
       query: { bool: { filter: [{ term: { user_id: userId } }, { term: { kind: 'classify' } }, { range: { timestamp: { gte: 'now-20m' } } }] } },
     });
     const src = r.hits?.hits?.[0]?._source;
-    asleep = typeof src?.confidence === 'number' && src.confidence >= 0.7;
+    // Sleep API confidence is an INTEGER 0–100 (PushSleepClassifySchema); the live
+    // afternoon readings are 0–27. First deploy compared against 0.7 and classed
+    // 14:00 as asleep — caught by GET /me/delivery-mode before the agent rolled.
+    asleep = typeof src?.confidence === 'number' && src.confidence >= SLEEP_CONFIDENCE_MIN;
   } catch (err) { logger.debug('[deliveryMode] sleep probe failed', { error: String(err) }); }
 
   let driving = false;
@@ -133,14 +138,21 @@ export async function computeDeliveryMode(pool: Pool, es: Client, userId: string
 
   let meeting = false;
   try {
-    const r = await es.count({
+    const r = await es.search<{ title?: string; status?: string }>({
       index: 'll5_awareness_calendar_events',
+      size: 10,
+      _source: ['title', 'status'],
       query: { bool: {
         filter: [{ term: { user_id: userId } }, { range: { start_time: { lte: now.toISOString() } } }, { range: { end_time: { gte: now.toISOString() } } }],
         must_not: [{ term: { all_day: true } }, { term: { kind: 'instruction' } }],
       } },
     });
-    meeting = (r.count ?? 0) > 0;
+    // The agent's own timeline entries ("[agent] …" titles on the LL5 System
+    // calendar) are notes to itself, not meetings the user is sitting in.
+    meeting = (r.hits?.hits ?? []).some((h) => {
+      const t = String(h._source?.title ?? '');
+      return !t.startsWith('[agent]') && h._source?.status !== 'cancelled';
+    });
   } catch (err) { logger.debug('[deliveryMode] calendar probe failed', { error: String(err) }); }
 
   let sick = false;

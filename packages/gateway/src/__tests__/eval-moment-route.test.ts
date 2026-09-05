@@ -173,7 +173,7 @@ describe('POST /telemetry/eval-moment — close_count + F5 whitelist', () => {
 
     // Only the whitelist keys are present.
     expect(new Set(Object.keys(doc))).toEqual(new Set([
-      'timestamp', 'user_id', 'decision', 'decision_claimed', 'decision_mismatch',
+      'timestamp', 'user_id', 'decision', 'decision_claimed', 'deferral_ref', 'decision_mismatch',
       'trigger_class', 'source', 'message_sent', 'cold_start', 'grounding_calls',
       'close_count', 'pencil_count', 'session_id',
     ]));

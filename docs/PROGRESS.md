@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (19:30) — delivery mode: two false positives caught before the agent rolled
+
+First live read of `GET /me/delivery-mode` said `sleep` at 14:03 local: the Sleep API confidence is an integer 0–100 (afternoon readings 0–27) and the code compared against 0.7; and the "meeting in progress" was the agent's own `[agent] … Wine tasting` timeline note. Fixed (`SLEEP_CONFIDENCE_MIN = 70`; `[agent]`-titled and cancelled events ignored). The agent-repo dispatch had failed `unit-tests` on the F5 whitelist test (it pins the exact indexed field set — `deferral_ref` added), so no agent rolled while the gateway would have held daytime pushes. Re-shipped gateway + run-claude together.
+
 ## 2026-09-05 (19:00) — DECISION-030 batch B: deferral is structural (ISS-004), DECISION-028 #5 superseded
 
 `record_moment` now refuses `decision: "ping_later"` without `deferral_ref` — the id returned by the `create_wake`/`create_tickler` booked this turn — so a hollow deferral cannot be recorded; the eval recorder ships `deferral_ref` in `ll5_eval_moments` (gateway whitelist + mapping) and the persona's frozen Eval rule names it. DECISION-028 #5 (replace the tool with a text sentinel) is superseded: the tool is the only place the claim can be checked before it lands, the call is local and free, and ISS-022 is re-rated low/wontfix. Hook tests: the canonical-field list gained `deferral_ref`.
