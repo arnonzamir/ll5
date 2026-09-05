@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (04:00) — background workers on claude-sonnet-5
+
+Arnon asked for the loop too: `scripts/narrative-loop.sh` `NARRATIVE_LOOP_MODEL` default and `scripts/continuity-probe.sh` `PROBE_MODEL` default `claude-sonnet-4-6` → `claude-sonnet-5` (agent repo `8506d23`, one more roll). Verify: `~/.ll5/narrative-loop.log` `narrative loop started (… model=claude-sonnet-5 …)` and a completed tick after the 150 s startup delay.
+
 ## 2026-09-05 (03:40) — Phase 5 roll verified inside the container
 
 Run `33933392119` (dispatch from agent `fd1cd7d`, ll5 `faad7d9`): build verify `claude --version -> 2.1.260 (pin 2.1.260)`, 7 hook events wired, deploy + `reprovision-running: 200`, container up 00:37Z. Inside: entrypoint `claude version OK: 2.1.260 == pin 2.1.260`; process `claude --model claude-opus-5 --strict-mcp-config …`; transcript of session `c9323d8f` shows `"model":"claude-opus-5"` on all 11 assistant messages; first turn completed at 03:38 local; hooks firing (session-save `http=201 append`, context-pack, turn-cost payload written); watcher defaults shipped (`CONTEXT_CAP_TOKENS` 150000, `MIN_GAP_SECS` 3600, cache-creation counted); `permissions.defaultMode: "auto"` unchanged from before the upgrade; 0 classifier denials, 0 tool errors. Open for the 09-06 checkpoint: session length ≥4h, `isCompactSummary` absent from the transcript (the 2.1.260 auto-compaction threshold is unknown), the nightly flag consumed within 1h. The narrative loop stays on `claude-sonnet-4-6` — deliberate, revisit with the 09-12 readout.
