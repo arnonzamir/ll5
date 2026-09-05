@@ -105,7 +105,8 @@ export interface UpsertNarrativeInput {
  *   (see `narrativeRelevance`), so it reflects the LIVE observation count, not the
  *   stale stored one.
  */
-export type NarrativeSort = 'relevance' | 'recency';
+/** recency = newest activity first; active = most observations in the window; relevance = composite "what matters now". */
+export type NarrativeSort = 'relevance' | 'recency' | 'active';
 
 export interface NarrativeFilters {
   status?: NarrativeStatus;

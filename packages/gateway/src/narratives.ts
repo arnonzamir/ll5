@@ -290,7 +290,7 @@ export function createNarrativesRouter(
       const wantNow = sort === 'now';
       const out = await callKnowledge(knowledgeMcpUrl, auth, 'list_narratives', {
         status: typeof status === 'string' ? status : 'active',
-        sort: wantNow ? 'relevance' : sort === 'recency' ? 'recency' : 'relevance',
+        sort: wantNow ? 'relevance' : sort === 'recency' ? 'recency' : sort === 'active' ? 'active' : 'relevance',
         query: typeof q === 'string' && q ? q : undefined,
         subject_kind: typeof subject_kind === 'string' ? subject_kind : undefined,
         limit: wantNow ? NOW_FETCH_LIMIT : limit ? Math.min(Number(limit) || 50, 200) : 50,

@@ -527,3 +527,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: throughput skipIf — stand down while bridge liveness is unobserved during the first 15 min after a gateway start.
 2026-09-05: packages/personal-knowledge/src/tools/subject-link.ts (+ __tests__/subject-link.test.ts) — topic-slug → existing-narrative linking in note_observation (ISS-032); ll5-run-shared CLAUDE.md reuse rule; agent session-start.sh shows [kind: ref].
 2026-09-05: runbook — ISS-032 verification items (linked observations, refresh > 0).
+2026-09-05: personal-knowledge NarrativeSort 'active' (repo + tool); gateway /narratives sort=active; Android NarrativesViewModel NarrativeSort + SortRow.

@@ -227,7 +227,8 @@ export class ElasticsearchNarrativeRepository
     // doc). Pull a bounded candidate window by recency, attach live counts, then
     // score + sort + page in-app. Working sets are dozens, so this is cheap and
     // exact. Recency sort stays a pure ES sort (the default, unchanged path).
-    if ((filters.sort ?? 'recency') === 'relevance') {
+    const sortMode = filters.sort ?? 'recency';
+    if (sortMode === 'relevance' || sortMode === 'active') {
       const CANDIDATE_CAP = 200;
       const { hits, total } = await this.searchDocs<NarrativeDoc>(userId, {
         filters: filterClauses,
@@ -241,7 +242,13 @@ export class ElasticsearchNarrativeRepository
         .map((h) => docToNarrative(h._source!, h._id!));
       await this.withLiveCounts(userId, candidates);
       const now = Date.now();
-      candidates.sort((a, b) => narrativeRelevance(b, now) - narrativeRelevance(a, now));
+      if (sortMode === 'active') {
+        // "Most active": live observation volume in the window, recency breaks ties.
+        const ts = (n: Narrative): number => (n.lastObservedAt ? new Date(n.lastObservedAt).getTime() : 0);
+        candidates.sort((a, b) => (b.observationCount - a.observationCount) || (ts(b) - ts(a)));
+      } else {
+        candidates.sort((a, b) => narrativeRelevance(b, now) - narrativeRelevance(a, now));
+      }
       return { items: candidates.slice(offset, offset + limit), total };
     }
 

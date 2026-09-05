@@ -349,7 +349,7 @@ export function registerNarrativeTools(
       place_id: z.string().optional().describe('Place ID involved in the narrative'),
       stale_for_days: z.number().min(1).optional().describe('Active narratives untouched for N+ days'),
       query: z.string().optional().describe('Free-text search title + summary + open threads'),
-      sort: z.enum(['relevance', 'recency']).optional().describe('Ordering. Default recency (last activity). "relevance" = currently-relevant composite score.'),
+      sort: z.enum(['relevance', 'recency', 'active']).optional().describe('Ordering. Default recency (newest activity first). "active" = most observations in the window first. "relevance" = currently-relevant composite score (recency + volume + status).'),
       limit: z.number().min(1).max(200).optional().describe('Default 50. The ~20 KB result cap applies on top of this.'),
       offset: z.number().min(0).optional().describe('Pagination offset (legacy; `cursor` wins when both are given)'),
       cursor: z.string().optional().describe('Opaque continuation cursor from a previous truncated response (next_cursor). Omit for the first page.'),
