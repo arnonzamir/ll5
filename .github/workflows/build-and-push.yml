@@ -223,10 +223,37 @@ jobs:
           echo "-------------------------------------------------------------------"
           exit 1
 
-  build:
+  # DECISION-029 (2026-09-05): the kept unit tests + the compose lint gate every
+  # build. Until this job existed no test ran in CI at all — 1,700 unit tests
+  # only ran on a laptop. Whole-repo run is ~3 min; packages run sequentially so
+  # the bcrypt-heavy auth suites do not time out under parallel load.
+  unit-tests:
     needs: detect-changes
     runs-on: ubuntu-latest
     if: needs.detect-changes.outputs.matrix != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - name: Build shared package
+        run: npm run build --workspace=packages/shared
+      - name: Compose lint (every MCP has the env its code reads)
+        run: node packages/e2e/src/compose-lint.mjs
+      - name: Unit tests (all packages, sequential)
+        run: |
+          set -e
+          for pkg in shared ll5-auth personal-knowledge gtd awareness google messaging health system vault gateway agent-orchestrator dashboard; do
+            echo "== $pkg =="
+            npm test --workspace=packages/$pkg --if-present
+          done
+
+  build:
+    needs: [detect-changes, unit-tests]
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.matrix != '' && needs.unit-tests.result == 'success'
     permissions:
       contents: read
       packages: write
@@ -336,7 +363,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.package }}
 
   deploy:
-    needs: [detect-changes, build]
+    needs: [detect-changes, unit-tests, build]
     runs-on: ubuntu-latest
     # Run on main pushes and on repository_dispatch (variant redeploy). Must run
     # even when `build` is SKIPPED (repository_dispatch builds nothing — deploy
@@ -350,6 +377,8 @@ jobs:
       always() &&
       (github.ref == 'refs/heads/main' || github.event_name == 'repository_dispatch') &&
       needs.detect-changes.result == 'success' &&
+      needs.unit-tests.result != 'failure' &&
+      needs.unit-tests.result != 'cancelled' &&
       needs.build.result != 'failure' &&
       needs.build.result != 'cancelled' &&
       (github.event_name != 'push' || needs.detect-changes.outputs.matrix != '')
@@ -609,6 +638,36 @@ jobs:
               echo "run-claude not in this build — running agents untouched"
             fi
 
+            # ===== Agent smoke: boot AND relaunch on the new image (DECISION-029) =====
+            # ISS-027: a Claude Code upgrade changed a startup picker's default,
+            # every RELAUNCH exited claude and the container looped for 3h40m —
+            # invisible to "deploy: success". So after a roll: (1) the fresh boot
+            # must reach the chat input; (2) a forced fresh relaunch (the same path
+            # the nightly hand-off and the context cap use) must come back too.
+            # Failing here fails the deploy job = a red run + the liveness alert.
+            if echo "$BUILT_MATRIX" | grep -q '"run-claude"'; then
+              agent_up() {
+                C=$(docker ps --format '{{.Names}}' | grep '^ll5-agent-' | head -1)
+                [ -n "$C" ] || return 1
+                docker exec "$C" sh -c 'ps -eo args | grep -E "claude --model" | grep -qv grep' 2>/dev/null || return 1
+                docker exec "$C" sh -c 'tmux capture-pane -t ll5 -p 2>/dev/null | grep -qE "shift\+tab to cycle|esc to interrupt"' 2>/dev/null
+              }
+              wait_up() {  # $1 = label, up to 5 min
+                for i in $(seq 1 30); do
+                  if agent_up; then echo "agent smoke: $1 OK after ${i}0s"; return 0; fi
+                  sleep 10
+                done
+                C=$(docker ps --format '{{.Names}}' | grep '^ll5-agent-' | head -1)
+                echo "agent smoke: $1 FAILED — last screen:"; docker exec "$C" sh -c 'tail -c 1500 /data/home/.ll5/claude.log' 2>/dev/null | tr -d '\033' | tail -12
+                return 1
+              }
+              wait_up "fresh boot"
+              C=$(docker ps --format '{{.Names}}' | grep '^ll5-agent-' | head -1)
+              docker exec "$C" sh -c 'touch /data/home/.ll5/fresh-session; pkill -f "claude --model" || true'
+              sleep 15
+              wait_up "forced relaunch"
+            fi
+
             # ===== Agent health check =====
             # The legacy shared "agent" service is gated behind the "shared-agent"
             # compose profile (retired in favor of per-user orchestrator
@@ -635,3 +694,31 @@ jobs:
             sleep 10
           done
           echo "Warning: health check did not return 200, but containers may still be starting"
+
+  # DECISION-029: live MCP contract tests after every deploy — one real read per
+  # MCP against the deployed stack, asserting the shapes the agent relies on.
+  # Read-only. Needs LL5_E2E_TOKEN (a long-lived agent token); without it the
+  # job reports "skipped" instead of failing. A red e2e cannot undo a deploy —
+  # it is the alarm that the unit tests structurally cannot ring (ISS-028).
+  e2e:
+    needs: [detect-changes, deploy]
+    runs-on: ubuntu-latest
+    if: always() && needs.deploy.result == 'success'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - name: MCP contracts (live, read-only)
+        env:
+          LL5_E2E_TOKEN: ${{ secrets.LL5_E2E_TOKEN }}
+          MCP_BASE_DOMAIN: ${{ vars.MCP_BASE_DOMAIN || 'noninoni.click' }}
+        run: |
+          if [ -z "$LL5_E2E_TOKEN" ]; then
+            echo "::warning title=e2e skipped::LL5_E2E_TOKEN secret is not set — live MCP contract tests did not run"
+            exit 0
+          fi
+          sleep 20
+          npx vitest run --root packages/e2e

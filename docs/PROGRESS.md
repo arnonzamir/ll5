@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (14:00) — DECISION-029: test purge, live contract tests, CI gating
+
+Arnon's question after ISS-028 — "shouldn't a unit test have caught it?" — has the answer no: all three of the day's defects sat at boundaries unit tests cannot see (an external API's response shape, a TUI default of an upgraded binary, a compose env var), and CI ran no tests at all. Decided and shipped: 55 mock-assertion / review-batch test files deleted (1,730 → 1,057 tests; every remaining suite green), `packages/e2e` with live read-only MCP contract tests (5/5 against prod, including `read_messages` on a real WhatsApp conversation) and a compose lint (9 services OK), a post-roll agent smoke (boot + forced relaunch) in the deploy job, and CI gating: `unit-tests` (+ compose lint) → `build` → `deploy` → `e2e`. Full reasoning in `docs/decisions/DECISION-029-test-strategy-fewer-units-live-contracts.md`. The `e2e` job needs the `LL5_E2E_TOKEN` repo secret.
+
 ## 2026-09-05 (10:45) — ISS-028: WhatsApp read was always empty; messaging audit was disabled
 
 The agent reported (via Arnon) that messaging `read_messages` for WhatsApp returns "disconnected-then-empty" while ingestion is fine. Evolution is healthy (state open, 307K messages); the bug is `EvolutionClient.fetchMessages` treating the v2 `{messages:{records}}` envelope as an array → `[]` for every conversation. Fixed with tests. While tracing it: the messaging service had no `ELASTICSEARCH_URL` in `docker-compose.prod.yml`, so its audit logging has been silently off (no `source: messaging` rows in `ll5_audit_log`); added, and `initAudit('')` now shouts at boot. ISS-027 liveness verified live at 07:41Z (`claude_alive: true` heartbeats, `launches.log`). Deployed `33c6e35` (all infra, compose sync): `read_messages` on a WhatsApp group returns rows again (verified from the agent container 07:50Z). Pre-existing: 3 failing tests in `messaging/__tests__/contact-settings-tools.test.ts`, unrelated.

@@ -1,0 +1,14 @@
+{
+  "name": "@ll5/e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Live-stack contract tests (read-only) + deploy lints. No build, no Docker image.",
+  "scripts": {
+    "test": "vitest run",
+    "lint:compose": "node src/compose-lint.mjs"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.2"
+  }
+}

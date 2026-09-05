@@ -1,3 +1,5 @@
+> **2026-09-05 — superseded in part by [DECISION-029](../decisions/DECISION-029-test-strategy-fewer-units-live-contracts.md):** mock-assertion unit tests were purged; live contract tests in `packages/e2e` and CI gating are the current strategy.
+
 # Implementation Testing Plan — Dual Run-Variant Migration
 
 Reality-checker document. Companion to `dual-run-variant-plan.md` (v2) and

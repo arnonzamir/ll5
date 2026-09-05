@@ -510,3 +510,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: packages/gateway/src/utils/agent-liveness.ts (+ __tests__/agent-liveness.test.ts) — heartbeat process liveness → agent.process_down / agent.launch_loop; migrations/045_agent_runtime_health.sql; anomaly-monitor `suppressedBy`.
 2026-09-05: packages/messaging/src/clients/evolution.client.ts fetchMessages unwraps the v2 `{messages:{records}}` envelope (ISS-028); docker-compose.prod.yml messaging ELASTICSEARCH_URL; shared audit.ts loud empty-URL warning.
 2026-09-05: ISS-028 verified live (read_messages returns rows).
+2026-09-05: packages/e2e/ (workspace, no image) — src/mcp-contracts.test.ts (live read-only MCP contracts), src/compose-lint.mjs; docs/decisions/DECISION-029-test-strategy-fewer-units-live-contracts.md; 55 mock-assertion test files removed (see the decision).
