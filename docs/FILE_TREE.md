@@ -523,3 +523,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: anomaly-monitor.ts rateShift `skipIf` (bridge-liveness stand-down for throughput.inbound_messages); server.ts GET /me/bridge-liveness.
 2026-09-05: agent repo scripts/narrative-loop.sh pre-check promote_threshold 2 → 1 (ISS-032).
 2026-09-05: narrative-loop.sh gate restored to promote_threshold 2 (matches the worker prompt).
+2026-09-05: anomaly-monitor.ts clears pre-restart alerts (DB firing set, not only in-memory active).

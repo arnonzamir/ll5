@@ -424,7 +424,12 @@ export class AnomalyMonitor {
       const tripped = await this.runCheck(c);
       if (tripped) { firing.add(c.key); this.active.add(c.key); }
     }
-    for (const key of [...this.active]) {
+    // Clear what did not trip this tick — including alerts raised BEFORE a gateway
+    // restart (this.active is in-memory; `causes` is the DB's firing set, which is
+    // why throughput.inbound_messages stayed firing after the 13:55Z deploy on
+    // 2026-09-05 even though the check was standing down).
+    const ours = new Set(this.checks.map((c) => c.key));
+    for (const key of new Set([...this.active, ...[...causes].filter((k) => ours.has(k))])) {
       if (!firing.has(key)) {
         await clearAlert(this.pool, this.config.userId, key);
         this.active.delete(key);
