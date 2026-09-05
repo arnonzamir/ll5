@@ -534,3 +534,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: gateway processors/phone-status.ts + types/push-data.ts store notification_listener_{enabled,connected}; scheduler/metrics-monitor.ts decideMirrorFromListener (+ __tests__/mirror-listener-decision.test.ts) — package D.
 2026-09-06: alerting.test.ts pins inQuietHours=false (the push-policy tests are time-independent again).
 2026-09-06: gateway — 17 active-hours clock reads wrapped in % 24 (ICU midnight = "24").
+2026-09-06: Android fix batch merged (see docs/implementation/android-fix-batch-2026-09-05.md).

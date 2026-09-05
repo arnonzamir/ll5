@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (01:00) — Android fix batch merged: five packages, one APK
+
+All five subagent packages reviewed and merged into `feat/phone-activity-awareness` (24 files, +1,290/−485): A1 — a DND-bypassing critical channel created under a fresh id once policy access exists (`NotificationChannels.ensureCriticalChannel`), critical service saves the alarm volume once and uses `stopSelf(startId)`, service-scoped FCM coroutines, collapsing notification ids, JSON-encoded token, startup `runBlocking` reads moved to `appScope`, 8 unrouted channels pruned; A2 — notifications + notification access `required`, first-run permission requests sequenced through a queue (POST_NOTIFICATIONS first), DND-access row in Settings wired to A1's helper; B — SSE reconnect with capped jittered backoff, 409 retry cap, auth-aware chat (sign-out clears state + cache), `pendingIdMap` pruned, one new-chat path; C — single `flatMapLatest` fetch for Topics (typing debounced, chips instant), Active/Dormant/All status chip (All = two calls merged; the server has no all-status), one sort default, `<queries>` + installed-target pick for the draft card, location FGS guarded, deep links via `navigateToTab`; D — listener liveness in the phone status push. Built, pushed (`bf5819d`), APK handed to Arnon. Follow-ups in the review doc: `why_now` on Today, error-handling unification, server-side `status=all`, `?token=` on the SSE URL, `NotificationChannels` → `util/`.
+
 ## 2026-09-06 (00:45) — Midnight-hour bug in every active-hours gate
 
 CI failed `agent-output-monitor`'s "genuinely dead" test at 00:16 local: ICU prints midnight as hour "24" with `hour12: false` on the CI runner (local Node printed "00"), so every `hour >= start && hour < end` gate treated 00:00–00:59 as hour 24 = outside active hours — 17 schedulers/monitors silently skipped the midnight hour every night. Every `parseInt(Intl…format(new Date()), 10)` hour read is now `% 24` (17 files). Also `alerting.test.ts` now pins quiet hours off — the phone-push policy tests were time-dependent after DECISION-030.
