@@ -5,6 +5,7 @@ import { processWhatsAppWebhook } from './whatsapp-webhook.js';
 import { processWhatsAppContactWebhook } from './whatsapp-contact-webhook.js';
 import { handleWhatsAppLifecycle } from './whatsapp-lifecycle.js';
 import { logger } from '../utils/logger.js';
+import { recordBridgeEvent } from '../utils/whatsapp-bridge-liveness.js';
 
 /**
  * Shared WhatsApp event dispatch (DECISION-024).
@@ -39,6 +40,9 @@ export async function dispatchEvolutionEvent(
 ): Promise<void> {
   const event = payload?.event as string | undefined;
   const instance = payload?.instance as string | undefined;
+  // Ground truth for the flow monitor (ISS-013): every event proves the bridge
+  // is alive, even when nobody is messaging (receipts, chat updates at night).
+  recordBridgeEvent(userId, event, payload?.data);
 
   // --- Connection lifecycle: login / start / logout / QR (DECISION-024) ------
   if (
