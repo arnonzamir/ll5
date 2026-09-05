@@ -6,7 +6,7 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## START HERE — agent remediation, state as of 2026-09-04 night
 
-**2026-09-05 ISS-028:** WhatsApp `read_messages` returned `[]` (Evolution v2 envelope) and the messaging MCP had no `ELASTICSEARCH_URL` (audit off) — both fixed; the messaging service must have `ELASTICSEARCH_URL` in compose like every other MCP. Liveness (ISS-027 follow-up) is live: heartbeats carry `claude_alive`; `agent.process_down` / `agent.launch_loop` fire within minutes.
+**2026-09-05 ISS-028:** WhatsApp `read_messages` returned `[]` (Evolution v2 envelope) and the messaging MCP had no `ELASTICSEARCH_URL` (audit off) — both fixed and verified live 07:50Z; the messaging service must have `ELASTICSEARCH_URL` in compose like every other MCP. Liveness (ISS-027 follow-up) is live: heartbeats carry `claude_alive`; `agent.process_down` / `agent.launch_loop` fire within minutes.
 
 **2026-09-05 INCIDENT (ISS-027):** 3h40m outage 03:41–07:20Z — Claude Code 2.1.260 changed the dev-channels picker default; the blind `Down Enter` dismissal chose Exit on every relaunch and the container looped. Fixed (pointer-aware dismissal, agent `0fa8ea7`); heartbeat now carries process liveness → `agent.process_down` / `agent.launch_loop` within minutes; symptom alerts suppressed while a cause fires. If the agent ever looks dead: `docker logs ll5-agent-<uid> | grep -E "picker dismissal|claude version"` and `tail -c 3000 /data/home/.ll5/claude.log` (the last screen) before restarting anything.
 
