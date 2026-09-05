@@ -81,6 +81,14 @@ const PushPhoneStatusItemSchema = z.object({
   ram_used_bytes: z.number().nonnegative().optional(),
   ram_total_bytes: z.number().nonnegative().optional(),
   trigger: z.enum(['change', 'plug', 'low', 'heartbeat']).optional(),
+  // Notification-listener liveness (android review 2026-09-05, improvement 1).
+  // Slack/Gmail/SMS reach us ONLY through the phone's notification-mirror
+  // listener; channel.mirror used to infer a dead listener from 24h of silence
+  // and could not tell that apart from a quiet weekend. The app now rides the
+  // truth along on every phone_status push. Optional on purpose: an older app
+  // build omits them and channel.mirror falls back to the silence rule.
+  notification_listener_enabled: z.boolean().optional(),   // the Settings toggle
+  notification_listener_connected: z.boolean().optional(), // the service is bound now
 });
 
 // WiFi connection — current connected network (or disconnect event)
