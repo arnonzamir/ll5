@@ -24,6 +24,7 @@ import { createTenantsRouter, enrichUser, deriveOnboarding, deriveChannels, deri
 import { createAuthRouter } from './auth.js';
 import { createInvitesRouter } from './invites.js';
 import { createChatRouter, chatAuthMiddleware } from './chat.js';
+import { computeDeliveryMode } from './utils/delivery-mode.js';
 import { createAgentRouter } from './agent.js';
 import { createApprovalsRouter } from './approvals.js';
 import { createVaultRouter } from './vault.js';
@@ -1490,6 +1491,19 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   });
 
   // --- User Model API ---
+  // DECISION-030: the user's current delivery mode (sleep / quiet_hours / driving /
+  // meeting / sick / normal). The channel MCP stamps it on every inbound envelope;
+  // the apps can show it. Cached 60s per user inside computeDeliveryMode.
+  app.get('/me/delivery-mode', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      res.json(await computeDeliveryMode(pgPool, esClient, userId, config.calendarReviewTimezone));
+    } catch (err) {
+      logger.error('[deliveryMode][get] failed', { error: err instanceof Error ? err.message : String(err) });
+      res.status(500).json({ error: 'delivery mode unavailable' });
+    }
+  });
+
   app.get('/user-model', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     try {

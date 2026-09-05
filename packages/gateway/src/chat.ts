@@ -10,6 +10,7 @@ import { validateLl5Token } from '@ll5/shared';
 import { logger } from './utils/logger.js';
 import { sendFCMNotification } from './utils/fcm-sender.js';
 import type { NotificationLevel } from './utils/fcm-sender.js';
+import { computeDeliveryMode, userActiveRecently } from './utils/delivery-mode.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 // Public uploads: served WITHOUT auth from /public with crypto-random
@@ -169,6 +170,36 @@ export function chatAuthMiddleware(authSecret: string) {
  *  outside this helper — hand-rolled INSERTs will either race against the
  *  unique-partial-index or miss the "archived writes reroute" logic at the
  *  POST /messages layer. */
+/**
+ * Insert an assistant message into the user's active conversation from server
+ * code (schedulers), with an optional phone push. The chat_messages trigger
+ * NOTIFYs the SSE listeners, so every surface sees it. Used by the quiet-hours
+ * release digest (DECISION-030).
+ */
+export async function insertAssistantMessage(
+  pool: Pool,
+  userId: string,
+  content: string,
+  notificationLevel?: NotificationLevel,
+  metadata: Record<string, unknown> = {},
+): Promise<{ id: string; conversation_id: string }> {
+  const conversationId = await getOrCreateActiveConversation(pool, userId);
+  const r = await pool.query<{ id: string; conversation_id: string }>(
+    `INSERT INTO chat_messages (user_id, conversation_id, channel, direction, role, content, status, metadata)
+     VALUES ($1, $2, 'web', 'outbound', 'assistant', $3, 'delivered', $4) RETURNING id, conversation_id`,
+    [userId, conversationId, content, JSON.stringify(metadata)],
+  );
+  if (notificationLevel) {
+    sendFCMNotification(pool, userId, {
+      title: 'LL5',
+      body: content.length > 200 ? content.slice(0, 200) + '...' : content,
+      type: 'agent_push',
+      notification_level: notificationLevel,
+    }).catch((err) => logger.warn('[chat][insertAssistantMessage] FCM send failed', { error: err instanceof Error ? err.message : String(err) }));
+  }
+  return r.rows[0];
+}
+
 export async function getOrCreateActiveConversation(
   client: PoolClient | Pool,
   userId: string,
@@ -292,6 +323,7 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       reaction,
       display_compact,
       idempotency_key,
+      proactive,
     } = req.body as {
       channel?: string;
       content?: string | null;
@@ -304,6 +336,8 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       reaction?: string;
       display_compact?: boolean;
       idempotency_key?: string;
+      /** Set by push_to_user: an agent-initiated message (not a reply). Subject to quiet hours. */
+      proactive?: boolean;
     };
 
     if (!channel) {
@@ -313,6 +347,31 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
     if (!VALID_CHANNELS.includes(channel)) {
       res.status(400).json({ error: `Invalid channel. Must be one of: ${VALID_CHANNELS.join(', ')}` });
       return;
+    }
+
+    // DECISION-030 quiet hours: an agent-INITIATED, non-critical message while
+    // the user is asleep or inside the quiet window is HELD and released as one
+    // digest in the morning. Replies are never held (no `proactive` flag), nor
+    // is anything while the user has written in the last 30 minutes.
+    if (proactive === true && (direction || 'inbound') === 'outbound' && (role || 'user') === 'assistant'
+        && reaction == null && notification_level !== 'critical' && esClient) {
+      try {
+        const tz = process.env.CALENDAR_REVIEW_TIMEZONE ?? 'Asia/Jerusalem';
+        const mode = await computeDeliveryMode(pool, esClient, userId, tz);
+        if (mode.hold_pushes && !(await userActiveRecently(pool, userId, 30))) {
+          const held = await pool.query<{ id: string }>(
+            `INSERT INTO held_messages (user_id, content, notification_level, display_compact, metadata, reason, release_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+            [userId, content ?? '', notification_level ?? null, display_compact === true, JSON.stringify(metadata || {}), mode.mode, mode.release_at],
+          );
+          logger.info('[chat][createMessage] proactive push held', { userId, reason: mode.mode, release_at: mode.release_at });
+          res.status(202).json({ held: true, id: held.rows[0]?.id, reason: mode.mode, release_at: mode.release_at });
+          return;
+        }
+      } catch (err) {
+        // Never lose a message to the gate: on any failure fall through and send.
+        logger.warn('[chat][createMessage] quiet-hours gate failed — sending', { error: err instanceof Error ? err.message : String(err) });
+      }
     }
 
     const isReaction = reaction != null;

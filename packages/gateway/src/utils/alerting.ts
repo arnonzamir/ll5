@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { logger } from './logger.js';
 import { insertSystemMessage, createSchedulerEvent } from './system-message.js';
 import { sendFCMNotification } from './fcm-sender.js';
+import { inQuietHours, readQuietHours } from './delivery-mode.js';
 
 /**
  * Central alert spine for the metrics watchdog.
@@ -138,7 +139,15 @@ export async function raiseAlert(pool: Pool, input: RaiseAlertInput): Promise<vo
   const firstPush = !row.last_push_at;
   const criticalRepushDue = severity === 'critical' && row.last_push_at != null &&
     now - new Date(row.last_push_at).getTime() >= CRITICAL_PUSH_RENOTIFY_MS;
-  const pushDue = firstPush || criticalRepushDue;
+  // DECISION-030: system alerts never wake the user. Inside quiet hours the
+  // phone push is skipped (the agent is still notified; the dashboard banner
+  // still shows; a critical alert re-pushes once the window ends). "Critical"
+  // for the phone at night means safety/family — never a stalled loop.
+  const quiet = inQuietHours(new Date(), process.env.CALENDAR_REVIEW_TIMEZONE ?? 'Asia/Jerusalem', await readQuietHours(pool, userId));
+  const pushDue = (firstPush || criticalRepushDue) && !quiet;
+  if (quiet && (firstPush || criticalRepushDue)) {
+    logger.info('[alerting][raiseAlert] phone push held — quiet hours', { key, severity });
+  }
   if (pushDue) {
     try {
       await sendFCMNotification(pool, userId, {

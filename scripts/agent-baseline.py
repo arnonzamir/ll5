@@ -77,7 +77,7 @@ def build_queries(since, until, user):
     queries = [
         # chat: every non-system message in the window, oldest first
         q("chat", C, {"size": 10000, "sort": [{"created_at": "asc"}],
-                      "_source": ["role", "channel", "direction", "created_at"],
+                      "_source": ["role", "channel", "direction", "created_at", "content", "metadata.kind"],
                       "query": filt("created_at", {"terms": {"role": ["user", "assistant"]}},
                                     {"bool": {"must_not": {"term": {"channel": "system"}}}})}),
         # rituals: day-histogram per phrase
@@ -229,6 +229,27 @@ def compute(since, until, user, es, pg_text):
     ratio = f"{len(assistants) / len(users):.1f}:1" if users else "n/a"
     rows.append(("Chat", f"{len(users)} user messages, {answered} answered. {lat}. "
                          f"{len(assistants)} assistant outbound ({ratio} agent:user)", "—"))
+
+    # --- style + proactivity shape (DECISION-030): length, initiation, night pushes, kinds
+    outbound = [h for h in assistants if h.get("direction", "outbound") == "outbound" and h.get("content")]
+    lens = sorted(len(h["content"]) for h in outbound)
+    user_ts = [parse_ts(h["created_at"]) for h in users]
+    initiated = [h for h in outbound
+                 if not any(0 <= (parse_ts(h["created_at"]) - u).total_seconds() <= 1800 for u in user_ts)]
+    def local_hm(h):
+        t = parse_ts(h["created_at"]) + dt.timedelta(hours=3)  # Asia/Jerusalem (IDT); good enough for a night count
+        return t.hour * 60 + t.minute
+    night = [h for h in initiated if local_hm(h) >= 23 * 60 + 30 or local_hm(h) < 6 * 60 + 30]
+    kinds = {}
+    for h in outbound:
+        k = ((h.get("metadata") or {}).get("kind")) or "untagged"
+        kinds[k] = kinds.get(k, 0) + 1
+    if lens:
+        rows.append(("Message shape",
+                     f"outbound {len(outbound)}: median {lens[len(lens) // 2]} chars, p90 {lens[nearest_rank(len(lens), 0.9)]}, "
+                     f"max {lens[-1]}; initiated {len(initiated)} ({pct(len(initiated), len(outbound))}); "
+                     f"night pushes (23:30–06:30) {len(night)}; kinds " + ", ".join(f"{k} {v}" for k, v in sorted(kinds.items())),
+                     "DECISION-030"))
 
     # --- rituals
     parts = []

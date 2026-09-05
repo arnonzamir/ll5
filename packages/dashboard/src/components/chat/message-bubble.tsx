@@ -18,7 +18,7 @@ import {
 } from "@/lib/chat/constants";
 import type { Attachment, Message, Reaction } from "@/lib/chat/types";
 import { uploadsUrl, isInstrumentationRow } from "@/lib/chat/format";
-import { Markdown } from "./markdown";
+import { AssistantContent } from "./draft-card";
 
 // ---------------------------------------------------------------------------
 // Reaction strip under a parent bubble
@@ -321,7 +321,7 @@ export function MessageBubble({
               className="w-fit max-w-full rounded-2xl rounded-bl-sm bg-gray-100 px-4 py-2.5 text-[17px] leading-7 text-ink-900 break-words"
               dir="auto"
             >
-              <Markdown content={m.content ?? ""} />
+              <AssistantContent content={m.content ?? ""} />
             </div>
             <ReactionStrip reactions={reactions} onToggle={onRemoveReaction ?? (() => {})} />
             <MetaFooter m={m} align="left" />
@@ -380,7 +380,7 @@ export function MessageBubble({
           {files.map((att, i) => (
             <FileChip key={i} att={att} />
           ))}
-          {isUser ? m.content : <Markdown content={m.content ?? ""} />}
+          {isUser ? m.content : <AssistantContent content={m.content ?? ""} />}
         </div>
         <ReactionStrip reactions={reactions} onToggle={onRemoveReaction ?? (() => {})} />
         <MetaFooter m={m} align={isUser ? "right" : "left"} />

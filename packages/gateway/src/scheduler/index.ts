@@ -24,6 +24,8 @@ import { MCPHealthMonitorScheduler } from './mcp-health-monitor.js';
 import { AgentOutputMonitor } from './agent-output-monitor.js';
 import { CharacterRefreshScheduler } from './character-refresh.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
+import { QuietHoursReleaseScheduler } from './quiet-hours-release.js';
+import { insertAssistantMessage } from '../chat.js';
 import { WhatsAppWebhookReconciler } from './whatsapp-webhook-reconciler.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MetricsMonitor } from './metrics-monitor.js';
@@ -289,6 +291,16 @@ async function startSchedulersForUser(
   });
   whatsappFlowMonitor.start();
   schedulers.push(whatsappFlowMonitor);
+
+  // DECISION-030: proactive pushes held during sleep/quiet hours are released
+  // as one digest when the window ends.
+  const quietHoursRelease = new QuietHoursReleaseScheduler(
+    pgPool,
+    (uid, text, level) => insertAssistantMessage(pgPool, uid, text, level, { kind: 'quiet_hours_digest' }).then(() => undefined),
+    { intervalMinutes: s('quiet_hours_release_minutes', 5), timezone, userId },
+  );
+  quietHoursRelease.start();
+  schedulers.push(quietHoursRelease);
 
   // Self-healing WhatsApp webhook config (DECISION-024): keeps every mapped
   // instance's Evolution webhook at base64:false + the full event list, so a
