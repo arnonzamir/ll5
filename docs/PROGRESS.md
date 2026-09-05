@@ -6,7 +6,7 @@ Current state of the LL5 personal assistant system.
 
 ## 2026-09-05 (late) — Android app reviewed
 
-A read-only subagent review of `ll5-android` (`docs/reviews/2026-09-05/android-review.md`): 13 bugs with file:line — the critical one is that "critical overrides DND" is a no-op (`setBypassDnd` without DND policy access, immutable channels), plus SSE never reconnecting, a first-launch permission storm that can silently deny POST_NOTIFICATIONS, Topics search races, the DraftCard WhatsApp intent failing for lack of `<queries>`; 9 inconsistencies (Topics hard-scoped to active, three sort defaults, draft delivery differing from the dashboard); 8 ranked improvements led by a notification-listener liveness field in the phone status push (ground truth for `channel.mirror`).
+A read-only subagent review of `ll5-android` (`docs/reviews/2026-09-05/android-review.md`): 13 bugs with file:line — the critical one is that "critical overrides DND" is a no-op (`setBypassDnd` without DND policy access, immutable channels), plus SSE never reconnecting, a first-launch permission storm that can silently deny POST_NOTIFICATIONS, Topics search races, the DraftCard WhatsApp intent failing for lack of `<queries>`; 9 inconsistencies (Topics hard-scoped to active, three sort defaults, draft delivery differing from the dashboard); 8 ranked improvements led by a notification-listener liveness field in the phone status push (ground truth for `channel.mirror`). Fix batch planned as five parallel subagent packages (`docs/implementation/android-fix-batch-2026-09-05.md`): A1 DND/critical/FCM, A2 permissions, B chat robustness, C topics/draft/nav, D listener liveness (app + gateway); coordinator merges, builds one APK, reviews, pushes.
 
 ## 2026-09-05 (23:30) — New skill: `interview`
 
