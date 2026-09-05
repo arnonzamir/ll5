@@ -529,3 +529,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-05: runbook — ISS-032 verification items (linked observations, refresh > 0).
 2026-09-05: personal-knowledge NarrativeSort 'active' (repo + tool); gateway /narratives sort=active; Android NarrativesViewModel NarrativeSort + SortRow.
 2026-09-05: packages/ll5-run-shared/skills/interview/SKILL.md (new) — one-question-at-a-time interviews from the data-gaps queue; consolidate Step 1.4 harvests; CLAUDE.md roster + validate-before-acting rule.
+2026-09-05: docs/reviews/2026-09-05/android-review.md — subagent code review of the Android app (13 bugs, 9 inconsistencies, 8 ranked improvements).

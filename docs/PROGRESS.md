@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (late) — Android app reviewed
+
+A read-only subagent review of `ll5-android` (`docs/reviews/2026-09-05/android-review.md`): 13 bugs with file:line — the critical one is that "critical overrides DND" is a no-op (`setBypassDnd` without DND policy access, immutable channels), plus SSE never reconnecting, a first-launch permission storm that can silently deny POST_NOTIFICATIONS, Topics search races, the DraftCard WhatsApp intent failing for lack of `<queries>`; 9 inconsistencies (Topics hard-scoped to active, three sort defaults, draft delivery differing from the dashboard); 8 ranked improvements led by a notification-listener liveness field in the phone status push (ground truth for `channel.mirror`).
+
 ## 2026-09-05 (23:30) — New skill: `interview`
 
 Arnon asked for a skill that initiates interviews with him to clarify topics, surface tasks and validate deductions. `packages/ll5-run-shared/skills/interview/SKILL.md`: the question queue is the (previously unused) personal-knowledge data-gaps store; questions are harvested in `consolidate` (Step 1.4) and whenever the agent catches itself guessing; the skill spends them one at a time with the agent's best guess as the default, ≤200 chars, only in `delivery_mode: normal`, max 3/day, never while one is unanswered; on demand it runs a 5-question session. Answers land the same turn as `user_statement` observations, gap `answered`, narrative thread closed, user-model updated, task captured; a wrong deduction becomes a correction + a lesson. Persona rule: a deduction the agent would act on with medium+ stakes becomes an interview question first.
