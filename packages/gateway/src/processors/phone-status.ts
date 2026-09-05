@@ -27,6 +27,14 @@ export async function processPhoneStatus(
   if (item.ram_used_bytes !== undefined) doc.ram_used_bytes = item.ram_used_bytes;
   if (item.ram_total_bytes !== undefined) doc.ram_total_bytes = item.ram_total_bytes;
   if (item.trigger !== undefined) doc.trigger = item.trigger;
+  // Notification-listener liveness — the ground truth channel.mirror reads back
+  // (android review 2026-09-05, improvement 1). Absent on older app builds.
+  if (item.notification_listener_enabled !== undefined) {
+    doc.notification_listener_enabled = item.notification_listener_enabled;
+  }
+  if (item.notification_listener_connected !== undefined) {
+    doc.notification_listener_connected = item.notification_listener_connected;
+  }
 
   await es.index({
     index: 'll5_awareness_phone_statuses',
