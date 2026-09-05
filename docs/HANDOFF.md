@@ -6,7 +6,9 @@ Everything needed to continue working on the LL5 personal assistant system.
 
 ## START HERE — agent remediation, state as of 2026-09-04 night
 
-**Scheduled:** a one-shot checkpoint fires 2026-09-05 03:12 IDT in Arnon's Claude Code session running `docs/runbooks/post-nightly-checkpoint.md` (verify the hand-off → decide by severity → Phase 5 upgrade if clean, authorized by Arnon). If that session is gone, run the runbook by hand.
+**2026-09-05 03:12 checkpoint ran:** hand-off verified (00:32:38Z, delayed by the anti-flap gap → ISS-026), Phase 5 rolled: image pin 2.1.260, model `claude-opus-5`, watcher cap 150K / gap 1h. Next checkpoint 2026-09-06 03:12 IDT (post-upgrade first night: hooks fire, sessions ≥4h, `isCompactSummary` = 0, `--model claude-opus-5` resolved). 7-day diff on 2026-09-12: `scripts/agent-baseline.sh --since 2026-09-05 --until 2026-09-12`, control = `docs/reviews/2026-09-05/agent-baseline-pre-upgrade.md`.
+
+**Scheduled (history):** a one-shot checkpoint fired 2026-09-05 03:12 IDT in Arnon's Claude Code session running `docs/runbooks/post-nightly-checkpoint.md` (verify the hand-off → decide by severity → Phase 5 upgrade if clean, authorized by Arnon). If that session is gone, run the runbook by hand.
 
 **Read first:** `docs/implementation/agent-remediation-2026-09-04.md` (the approved plan + a phase-by-phase status table), then `docs/ISSUES.md` (per-issue status, evidence, verification line). Frozen control: `docs/reviews/2026-09-04/agent-baseline.md`. Decisions: DECISION-027 (one agent image), DECISION-028 (scaffolding subtraction, reviewed row by row by Arnon).
 

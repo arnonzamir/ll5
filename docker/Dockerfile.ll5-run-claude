@@ -54,7 +54,7 @@ RUN pip3 install --no-cache-dir --break-system-packages faster-whisper openpyxl 
 # entrypoint can assert the installed CLI matches at boot. The npm fetch timeouts
 # are from the old agent-repo Dockerfile: @latest installs hung silently on a slow
 # CDN (2026-05-11/12), so fail fast instead.
-ARG CLAUDE_CODE_VERSION=2.1.204
+ARG CLAUDE_CODE_VERSION=2.1.260
 ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}
 RUN npm config set fetch-timeout 120000 \
  && npm config set fetch-retry-mintimeout 5000 \

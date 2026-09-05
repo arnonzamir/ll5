@@ -17,7 +17,7 @@ This is the repo copy of the plan approved on 2026-09-04 (it lived in a Claude C
 | Phase 1b 3 — memory-intercept fail-closed + outbox | done | outbox drained by the autoheal loop |
 | Phase 1b 4 — ISS-020 core-tool pre-load | fixed | `session-start.sh` CORE_TOOLS_BLOCK |
 | Phase 1b 5 — ISS-021 schema failures | verified | 9 tolerant schemas + tests; persona field names |
-| Phase 1b 6 — ISS-016 controlled daily session | verified (manual) | consolidate → `restart-requested` → watcher → fresh session; `agent.daily_restart_missing`; **first real hand-off 2026-09-05 02:00 local** |
+| Phase 1b 6 — ISS-016 controlled daily session | verified (first real hand-off 2026-09-05 00:32Z) | consolidate → `restart-requested` → watcher → fresh session; `agent.daily_restart_missing`; **first real hand-off 2026-09-05 02:00 local** |
 | Phase 2 1 — CLAUDE.md journal AND observation | live | persona md5 verified in container |
 | Phase 2 2 — consolidate tally | **partial** | `CONSOLIDATE-TALLY …` line lands in the journal (queryable in `ll5_agent_journal`); the "also a whitelisted `/telemetry/eval-moment` field" half was deliberately skipped — the journal line is enough for the 7-day measurement; add the field only if the KPI needs a dashboard |
 | Phase 2 3 — `knowledge.observations_stale` | done | 24h |
@@ -27,7 +27,7 @@ This is the repo copy of the plan approved on 2026-09-04 (it lived in a Claude C
 | Phase 3 2 — ISS-012 history indices | fixed | was a real bug (1000-field mapping limit), not archive-only; index recreated, awareness deployed 18:31Z; verify a snapshot after tonight's 23:00 `write_user_model` |
 | Phase 4 — DECISION-028 batch 1 (#1 #2 #3 #6 #7-clear #8-batch1) | live | reconcile retired both repos, 32 → 26 schedulers, health MCP gone, alerts 6h/24h, rail 5-min poll, narrative loop gated |
 | Phase 4 — #5 record_moment sentinel, #8 pass 2, #7 CharacterRefresh/GTDHealth | deferred by decision | #5 after 2026-09-11; #8 pass 2 needs a dashboard-caller audit; #7 needs data |
-| Phase 5 — runtime upgrade | **last, by decision** | after the clean 7-day baseline |
+| Phase 5 — runtime upgrade | **rolled 2026-09-05 (checkpoint)** | Arnon pulled it forward on 2026-09-04 ("if everything is fine, move on with the upgrades"): pin 2.1.260, model `claude-opus-5`; one-day pre-upgrade control frozen in `docs/reviews/2026-09-05/`; 7-day diff due 2026-09-12 |
 | Phase 6 — ISS-013 chronic infra | **open** | only the deploy-path half is done; per-source fix-or-stop-alerting decisions not started |
 
 **What could not be finished on 2026-09-04 and why:** everything left is either (a) waiting on data that does not exist yet (the 7-day window, tonight's first nightly pass), (b) a persona/skill change that costs another agent roll — each roll is a fresh session (~$5.5 cold start) and the first real nightly hand-off is tonight, so those are batched into one "next persona batch": ISS-017 lesson step, #5 sentinel + ISS-004, ISS-011 budget if needed — or (c) sequenced last by decision (Phase 5, Phase 6).

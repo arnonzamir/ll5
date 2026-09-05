@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-05 (03:12 checkpoint) — first nightly hand-off verified; Phase 5 upgrade rolled
+
+Checkpoint ran under Arnon's standing authorization (`docs/runbooks/post-nightly-checkpoint.md`). Step 1: consolidate pass ran 02:00 local (`CONSOLIDATE-TALLY consolidated=3 resolved=46 observations=3`), `restart-requested` touched 23:05Z, consumed 00:32:38Z — `FRESH RESTART (requested by consolidate (forced after 5227s))`, new session `687da257` — delayed ~1.5h by the 2h anti-flap gap after a context-cap restart (ISS-026); ISS-012 history snapshot landed 23:05Z; `ll5_turn_costs` writing (29 turns / $43 since 18:00Z); observations 18 in 24h; no `agent.*`/`telemetry.*`/`knowledge.*` alerts; `channel.whatsapp` critical at 22:07Z is the chronic ISS-013 stall (Phase 6). Step 2: one mid-level finding — context-cap fresh restarts every ~2h (80K floor + ~850 tokens/message vs a 120K cap) — decided as ISS-026 (cap 150K, gap 1h, `context_tokens()` counts cache writes), reviewed by a subagent (yes; not critical; the undercount fix came from the review). Step 3: pre-upgrade control frozen at `docs/reviews/2026-09-05/agent-baseline-pre-upgrade.md`; pin `CLAUDE_CODE_VERSION` 2.1.204 → **2.1.260** (Dockerfile ARG **and** the workflow build-arg fallback — the workflow value overrides the Dockerfile; 2.1.261 was published the same day, 2.1.260 is the operator-verified one), agent `ll5-server` `--model claude-opus-4-7` → **`claude-opus-5`** (narrative loop stays on `claude-sonnet-4-6`, deliberate), ISS-026 watcher change in the same roll. Post-roll verification is the next entry.
+
 ## 2026-09-04 (late) — autonomous checkpoint scheduled
 
 Arnon authorized the night run to decide on its own: all fine → Phase 5 upgrade with no further approval; minor/mid findings → calculated decision, reviewed by one subagent, documented, continue; critical → stop and wait. The runbook is `docs/runbooks/post-nightly-checkpoint.md`; the trigger is a one-shot scheduled prompt at 03:12 IDT (after the 02:00 consolidate pass and the hand-off's worst-case forced restart at ~02:45).

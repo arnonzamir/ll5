@@ -309,7 +309,7 @@ jobs:
               # the Dockerfile default so a bump is a deliberate, visible act.
               echo "build_args<<EOF" >> "$GITHUB_OUTPUT"
               echo "MCP_BASE_DOMAIN=${{ vars.MCP_BASE_DOMAIN || 'noninoni.click' }}" >> "$GITHUB_OUTPUT"
-              echo "CLAUDE_CODE_VERSION=${{ vars.CLAUDE_CODE_VERSION || '2.1.204' }}" >> "$GITHUB_OUTPUT"
+              echo "CLAUDE_CODE_VERSION=${{ vars.CLAUDE_CODE_VERSION || '2.1.260' }}" >> "$GITHUB_OUTPUT"
               echo "EOF" >> "$GITHUB_OUTPUT" ;;
             run-opencode)
               echo "file=docker/Dockerfile.ll5-run-opencode" >> "$GITHUB_OUTPUT"
