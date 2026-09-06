@@ -45,7 +45,7 @@ jobs:
           # run-claude / run-opencode: agent variants (Phase 4)
           # Variants are NOT in the default push matrix — they have their own CI in
           # their own repos. They're only built via workflow_dispatch or repository_dispatch.
-          INFRA_PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "gateway" "dashboard" "vault" "agent-orchestrator")
+          INFRA_PACKAGES=("personal-knowledge" "gtd" "awareness" "google" "messaging" "health" "connectors" "gateway" "dashboard" "vault" "agent-orchestrator")
           VARIANT_PACKAGES=("run-claude" "run-opencode")
           PACKAGES=("${INFRA_PACKAGES[@]}" "${VARIANT_PACKAGES[@]}")
 
@@ -245,7 +245,7 @@ jobs:
       - name: Unit tests (all packages, sequential)
         run: |
           set -e
-          for pkg in shared ll5-auth personal-knowledge gtd awareness google messaging health system vault gateway agent-orchestrator dashboard; do
+          for pkg in shared ll5-auth personal-knowledge gtd awareness google messaging health connectors system vault gateway agent-orchestrator dashboard; do
             echo "== $pkg =="
             # --passWithNoTests: a package whose tests are all purged (or not yet
             # written) must not fail the gate; a package with a failing test must.
@@ -604,7 +604,7 @@ jobs:
             # `compose up` kept running a stale local image (the control plane
             # never picked up code changes; e.g. multi-provider config was inert
             # until a manual recreate). Its GHCR name is ll5-agent-orchestrator.
-            for img in gateway dashboard personal-knowledge gtd awareness google messaging health vault agent-orchestrator; do
+            for img in gateway dashboard personal-knowledge gtd awareness google messaging health connectors vault agent-orchestrator; do
               docker pull ghcr.io/arnonzamir/ll5-$img:latest 2>/dev/null || true
             done
             # Pull the selected agent variant image
