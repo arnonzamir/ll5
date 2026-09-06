@@ -97,7 +97,9 @@ function parseRules(raw: unknown): ConnectorRules {
  * Everything the page needs in one round trip: the catalog merged with the
  * per-user rows from `list_connectors`, the rules, and whether the MCP answered.
  * When the MCP is down the catalog still renders; enabled flags fall back to
- * the gateway kill switch so the toggles stay truthful.
+ * the gateway kill switch so the picker stays truthful. Label, kinds and
+ * auth_type always come from the catalog (source of truth, no scrapers) even
+ * if the service still holds an older row.
  */
 export async function fetchConnectorsPage(): Promise<ConnectorsPageData> {
   const token = await getToken();
@@ -116,8 +118,6 @@ export async function fetchConnectorsPage(): Promise<ConnectorsPageData> {
     const gatewayEnabled = dataSources[dataSourceKey(entry.id)]?.enabled ?? false;
     return {
       ...entry,
-      label: row?.label ?? entry.label,
-      kinds: row?.kinds ?? entry.kinds,
       enabled: row?.enabled ?? gatewayEnabled,
       status: row?.status ?? "unconfigured",
       last_success_at: row?.last_success_at ?? null,
@@ -174,6 +174,17 @@ export async function submitConnectorCredentials(
 ): Promise<ActionResult> {
   const token = await getToken();
   if (!token) return { ok: false, error: "Not signed in" };
+
+  // Only official-API and aggregator credentials exist; phone-captured
+  // connectors (`auth_type:'none'`) have nothing to store (no scrapers).
+  const entry = CONNECTOR_CATALOG.find((c) => c.id === connectorId);
+  if (!entry) return { ok: false, error: `Unknown connector: ${connectorId}` };
+  if (entry.auth_type !== "api_token" && entry.auth_type !== "oauth") {
+    return { ok: false, error: `${entry.label} is captured on the phone and takes no credentials` };
+  }
+  if (authType !== entry.auth_type) {
+    return { ok: false, error: `${entry.label} expects ${entry.auth_type} credentials` };
+  }
 
   const cleaned: Record<string, string> = {};
   for (const [k, v] of Object.entries(secret)) {
