@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,13 +17,21 @@ import {
 } from "./connectors-server-actions";
 import {
   AUTH_TYPE_NOTES,
+  CONNECTOR_PICKER,
   CREDENTIAL_HINTS,
   DEFAULT_RULES,
+  PICKER_GROUPS,
+  isCardOrBank,
   type ConnectorRules,
   type ConnectorStatus,
   type ConnectorView,
   type ConnectorsPageData,
 } from "./connectors-types";
+
+// Page shape: picker (select = enable) at the top, then alert rules (only when
+// a card/bank connector is selected), then one configuration card per selected
+// connector. Phone-captured connectors show no form; credentials exist only for
+// api_token (Home Assistant) and oauth (Financy).
 
 // ---------- helpers ----------
 
@@ -62,6 +70,14 @@ function formatSchedule(minutes: number | null): string {
   return `every ${minutes} min`;
 }
 
+function hasCredentialsForm(c: ConnectorView): boolean {
+  return c.auth_type === "api_token" || c.auth_type === "oauth";
+}
+
+function isLedger(c: ConnectorView): boolean {
+  return c.kinds.includes("ledger");
+}
+
 type Notice = { kind: "ok" | "error"; text: string } | null;
 
 function NoticeLine({ notice }: { notice: Notice }) {
@@ -71,19 +87,83 @@ function NoticeLine({ notice }: { notice: Notice }) {
   );
 }
 
-function Toggle({ on, disabled, onChange, label }: { on: boolean; disabled?: boolean; onChange: (v: boolean) => void; label: string }) {
+// ---------- picker ----------
+
+function PickerChip({ connector, busy, onToggle }: { connector: ConnectorView; busy: boolean; onToggle: (enabled: boolean) => void }) {
+  const meta = CONNECTOR_PICKER[connector.id];
+  const on = connector.enabled;
   return (
     <button
       type="button"
-      role="switch"
+      role="checkbox"
       aria-checked={on}
-      aria-label={label}
-      onClick={() => onChange(!on)}
-      disabled={disabled}
-      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${on ? "bg-blue-500" : "bg-gray-200"}`}
+      disabled={busy}
+      onClick={() => onToggle(!on)}
+      className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors disabled:cursor-wait disabled:opacity-60 ${
+        on ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white hover:border-gray-300"
+      }`}
     >
-      <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform ${on ? "translate-x-5" : "translate-x-0"}`} />
+      <span
+        aria-hidden
+        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+          on ? "border-blue-500 bg-blue-500 text-white" : "border-gray-300 bg-white"
+        }`}
+      >
+        {on && <Check className="h-3 w-3" />}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium">{connector.label}</span>
+        {meta && <span className="block text-xs text-gray-500">{meta.description}</span>}
+      </span>
     </button>
+  );
+}
+
+function Picker({ connectors, onChanged }: { connectors: ConnectorView[]; onChanged: () => void }) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+
+  async function toggle(connector: ConnectorView, enabled: boolean) {
+    setBusyId(connector.id);
+    setNotice(null);
+    const res = await setConnectorEnabled(connector.id, enabled);
+    if (!res.ok) setNotice({ kind: "error", text: `${connector.label}: ${res.error ?? "update failed"}` });
+    setBusyId(null);
+    onChanged();
+  }
+
+  const selected = connectors.filter((c) => c.enabled).length;
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-4 mb-6">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-semibold">Select connectors</h2>
+        <span className="text-xs text-gray-400">
+          {selected} of {connectors.length} selected
+        </span>
+      </div>
+      <p className="text-xs text-gray-400 mt-0.5 mb-4">
+        Selecting a connector enables it: the gateway accepts its events and, for ledgers, the scheduled pull runs.
+        Configuration appears below for selected connectors only.
+      </p>
+      <div className="space-y-4">
+        {PICKER_GROUPS.map((group) => {
+          const members = connectors.filter((c) => CONNECTOR_PICKER[c.id]?.group === group.id);
+          if (members.length === 0) return null;
+          return (
+            <div key={group.id}>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">{group.label}</h3>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {members.map((c) => (
+                  <PickerChip key={c.id} connector={c} busy={busyId === c.id} onToggle={(v) => toggle(c, v)} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <NoticeLine notice={notice} />
+    </section>
   );
 }
 
@@ -129,7 +209,7 @@ function RulesSection({ initial, disabled }: { initial: ConnectorRules; disabled
     <section className="rounded-lg border border-gray-200 bg-white p-4 mb-6">
       <h2 className="text-base font-semibold">Alert rules</h2>
       <p className="text-xs text-gray-400 mt-0.5 mb-4">
-        Which connector events wake the agent immediately. Everything else lands in the morning brief.
+        Which card and bank events wake the agent immediately. Everything else lands in the morning brief.
       </p>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
@@ -186,7 +266,7 @@ function RulesSection({ initial, disabled }: { initial: ConnectorRules; disabled
   );
 }
 
-// ---------- credentials ----------
+// ---------- credentials (api_token / oauth only) ----------
 
 function CredentialsForm({ connector, onSaved }: { connector: ConnectorView; onSaved: () => void }) {
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -194,33 +274,25 @@ function CredentialsForm({ connector, onSaved }: { connector: ConnectorView; onS
   const [notice, setNotice] = useState<Notice>(null);
 
   const authType = connector.auth_type;
-  if (authType !== "scraper_credentials" && authType !== "api_token" && authType !== "oauth") {
-    return <p className="text-xs text-gray-500">{AUTH_TYPE_NOTES[authType]}</p>;
-  }
+  if (authType !== "api_token" && authType !== "oauth") return null;
 
-  const spec: Array<{ key: string; label: string; type?: string; optional?: boolean; placeholder?: string }> =
-    authType === "scraper_credentials"
+  const spec: Array<{ key: string; label: string; type?: string; placeholder?: string }> =
+    authType === "oauth"
       ? [
-          { key: "username", label: "Username or ID number", placeholder: "Portal username / teudat zehut" },
-          { key: "password", label: "Password", type: "password" },
-          { key: "card_last4", label: "Card last 4 digits", optional: true, placeholder: "Optional" },
+          { key: "client_id", label: "Client id" },
+          { key: "client_secret", label: "Client secret", type: "password" },
+          { key: "user_id", label: "User id" },
         ]
-      : authType === "oauth"
-        ? [
-            { key: "client_id", label: "Client id" },
-            { key: "client_secret", label: "Client secret", type: "password" },
-            { key: "user_id", label: "User id" },
-          ]
-        : [
-            { key: "token", label: "API token", type: "password" },
-            { key: "base_url", label: "Base URL", placeholder: "https://..." },
-          ];
+      : [
+          { key: "token", label: "API token", type: "password" },
+          { key: "base_url", label: "Base URL", placeholder: "https://..." },
+        ];
   const hint = CREDENTIAL_HINTS[connector.id];
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     for (const f of spec) {
-      if (!f.optional && !(fields[f.key] ?? "").trim()) {
+      if (!(fields[f.key] ?? "").trim()) {
         setNotice({ kind: "error", text: `${f.label} is required` });
         return;
       }
@@ -268,7 +340,7 @@ function CredentialsForm({ connector, onSaved }: { connector: ConnectorView; onS
   );
 }
 
-// ---------- card ----------
+// ---------- configuration card (selected connectors only) ----------
 
 function ConnectorCard({ connector, mcpAvailable, onChanged }: { connector: ConnectorView; mcpAvailable: boolean; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -279,18 +351,14 @@ function ConnectorCard({ connector, mcpAvailable, onChanged }: { connector: Conn
     setSchedule(connector.schedule_minutes?.toString() ?? "");
   }, [connector.schedule_minutes]);
 
-  const badge = STATUS_BADGE[connector.status] ?? STATUS_BADGE.unconfigured;
-  const canSync = connector.enabled && connector.has_credentials && mcpAvailable;
-  const hasPull = connector.kinds.includes("ledger") && connector.default_schedule_minutes !== null;
-
-  async function toggle(enabled: boolean) {
-    setBusy(true);
-    setNotice(null);
-    const res = await setConnectorEnabled(connector.id, enabled);
-    if (!res.ok) setNotice({ kind: "error", text: res.error ?? "Update failed" });
-    setBusy(false);
-    onChanged();
-  }
+  const phoneOnly = connector.auth_type === "none";
+  const ledger = isLedger(connector);
+  const badge =
+    phoneOnly && connector.status === "unconfigured"
+      ? { label: "Phone capture", variant: "secondary" as const }
+      : (STATUS_BADGE[connector.status] ?? STATUS_BADGE.unconfigured);
+  const canSync = ledger && connector.has_credentials && mcpAvailable;
+  const hasPull = ledger && connector.default_schedule_minutes !== null;
 
   async function sync() {
     setBusy(true);
@@ -319,7 +387,7 @@ function ConnectorCard({ connector, mcpAvailable, onChanged }: { connector: Conn
   }
 
   return (
-    <div className={`rounded-lg border p-4 transition-colors ${connector.enabled ? "border-gray-200 bg-white" : "border-gray-100 bg-gray-50"}`}>
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex items-start gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -333,28 +401,47 @@ function ConnectorCard({ connector, mcpAvailable, onChanged }: { connector: Conn
             ))}
           </div>
           <div className="text-xs text-gray-400 mt-1">
-            <span>Last sync: {formatWhen(connector.last_success_at)}</span>
-            <span className="mx-2">|</span>
-            <span>{formatSchedule(connector.schedule_minutes)}</span>
-            <span className="mx-2">|</span>
-            <span>{connector.has_credentials ? "credentials stored" : "no credentials"}</span>
+            <span>{ledger ? "Last sync" : "Last received"}: {formatWhen(connector.last_success_at)}</span>
+            {ledger && (
+              <>
+                <span className="mx-2">|</span>
+                <span>{formatSchedule(connector.schedule_minutes)}</span>
+              </>
+            )}
+            {hasCredentialsForm(connector) && (
+              <>
+                <span className="mx-2">|</span>
+                <span>{connector.has_credentials ? "credentials stored" : "no credentials"}</span>
+              </>
+            )}
           </div>
           {connector.last_error && (
             <p className="text-xs text-red-600 mt-1 break-words">Last error: {connector.last_error}</p>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <Button size="sm" variant="outline" onClick={sync} disabled={busy || !canSync} title={canSync ? "Run one pull now" : "Enable the connector and store credentials first"}>
-            Sync now
-          </Button>
-          <Toggle on={connector.enabled} disabled={busy} onChange={toggle} label={`Enable ${connector.label}`} />
-        </div>
+        {ledger && (
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={sync}
+              disabled={busy || !canSync}
+              title={canSync ? "Run one pull now" : mcpAvailable ? "Store credentials first" : "Connectors service is down"}
+            >
+              Sync now
+            </Button>
+          </div>
+        )}
       </div>
 
       <NoticeLine notice={notice} />
 
       <div className="mt-3 border-t border-gray-100 pt-3 space-y-3">
-        <CredentialsForm connector={connector} onSaved={onChanged} />
+        {phoneOnly ? (
+          <p className="text-xs text-gray-500">{AUTH_TYPE_NOTES.none}</p>
+        ) : (
+          <CredentialsForm connector={connector} onSaved={onChanged} />
+        )}
         {hasPull && (
           <div className="flex items-end gap-2">
             <div>
@@ -398,14 +485,17 @@ export function ConnectorsView() {
     load();
   }, [load]);
 
+  const selected = data?.connectors.filter((c) => c.enabled) ?? [];
+  const showRules = selected.some((c) => isCardOrBank(c.id));
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">Connectors</h1>
           <p className="text-sm text-gray-500 mt-1">
-            External accounts (cards, bank, HMO, municipality, utilities, home). Enabling a connector opens its
-            gateway ingest and its scheduled pull; credentials are stored encrypted on the connectors service.
+            Cards, bank, HMO and utility notifications captured on your phone, plus the Financy ledger and Home
+            Assistant. No scrapers: only phone events, official APIs and a licensed aggregator.
           </p>
         </div>
         <Button variant="ghost" size="icon" onClick={load} disabled={loading} aria-label="Refresh">
@@ -417,8 +507,8 @@ export function ConnectorsView() {
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
-            The connectors service did not answer. Showing the catalog with gateway switch state only: status, last
-            sync, credentials and sync are unavailable until it is back.
+            The connectors service did not answer. Selection reflects the gateway switch only: status, last sync,
+            credentials and sync are unavailable until it is back.
           </span>
         </div>
       )}
@@ -427,12 +517,22 @@ export function ConnectorsView() {
         <p className="text-sm text-gray-400">Loading...</p>
       ) : (
         <>
-          <RulesSection initial={data.rules} disabled={false} />
-          <div className="space-y-3">
-            {data.connectors.map((c) => (
-              <ConnectorCard key={c.id} connector={c} mcpAvailable={data.mcpAvailable} onChanged={load} />
-            ))}
-          </div>
+          <Picker connectors={data.connectors} onChanged={load} />
+
+          {showRules && <RulesSection initial={data.rules} disabled={false} />}
+
+          {selected.length === 0 ? (
+            <p className="text-sm text-gray-400">Select a connector above to configure it.</p>
+          ) : (
+            <section>
+              <h2 className="text-base font-semibold mb-3">Configuration</h2>
+              <div className="space-y-3">
+                {selected.map((c) => (
+                  <ConnectorCard key={c.id} connector={c} mcpAvailable={data.mcpAvailable} onChanged={load} />
+                ))}
+              </div>
+            </section>
+          )}
         </>
       )}
     </div>
