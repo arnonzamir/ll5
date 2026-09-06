@@ -6,7 +6,7 @@ Current state of the LL5 personal assistant system.
 
 ## 2026-09-06 (17:00) — Financy verified live; picker merged
 
-CI run 34035282393 failed in `unit-tests`: `connector-sync-scheduler.test.ts` still used `bank` as a scheduled ledger target after the trim made it event-only (deploy skipped, nothing rolled). Fixed to `home-assistant`; e2e catalog contract updated to the ten current ids; stale scraper/municipality comments and fixtures cleaned.
+CI run 34035282393 failed in `unit-tests`: `connector-sync-scheduler.test.ts` still used `bank` as a scheduled ledger target after the trim made it event-only (deploy skipped, nothing rolled). Fixed to `home-assistant` (second push `13d7d4e` still had the alert-key assertion on `bank`; fixed in the next commit); e2e catalog contract updated to the ten current ids; stale scraper/municipality comments and fixtures cleaned.
 
 Run 34034788653 green; connectors service logged `Connector adapters registered ["financy"]` at 13:08Z, gateway `ConnectorSyncScheduler` ticks every 15 min (first tick: 7 attempted, 7 skipped for no credentials, 0 failed). Picker rework merged (`feat/connectors-picker`); this push rolls the trimmed no-scrapers catalog to gateway, connectors and dashboard. Arnon's step: `/settings/connectors` → select Financy → enter client id / client secret / user id from the Financy app (Settings → API); select the card, bank, PayBox and Clalit connectors and tick the same ones under Connector capture in the Android app.
 

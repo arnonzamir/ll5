@@ -588,3 +588,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: catalog trimmed to the no-scrapers policy (municipality removed; cards/bank/Clalit/IEC event-only).
 2026-09-06: connectors picker merged; Financy verified live.
 2026-09-06: scheduler test + e2e contract aligned with the trimmed catalog.
+2026-09-06: scheduler test alert key aligned too.

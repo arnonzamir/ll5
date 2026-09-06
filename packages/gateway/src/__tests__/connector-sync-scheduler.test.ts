@@ -102,7 +102,7 @@ describe('ConnectorSyncScheduler.run', () => {
     const s = new ConnectorSyncScheduler(pool, { userId: USER }, client);
     expect(await s.run()).toMatchObject({ failed: 2 });
     expect(alerts.get('connector.financy.sync')?.value).toBe('plan_not_eligible: not on plan');
-    expect(alerts.has('connector.bank.sync')).toBe(true);
+    expect(alerts.has('connector.home-assistant.sync')).toBe(true);
     expect([...SILENT_SYNC_REASONS].sort()).toEqual(['disabled', 'no_adapter', 'no_credentials', 'not_due']);
   });
 
