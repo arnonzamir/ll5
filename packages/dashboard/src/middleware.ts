@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { decideTokenAction } from "@/lib/auth-decision";
+import { STEP_UP_COOKIE, VERIFY_PATH, isSensitivePath, isStepUpValid, userIdFromPayload } from "@/lib/sensitive";
 
 /** Paths that don't require a login session. */
 const PUBLIC_PATHS = new Set<string>([
@@ -46,6 +47,32 @@ function withPathname(response: NextResponse, pathname: string): NextResponse {
 }
 
 /**
+ * Step-up gate for the sensitive catalog (lib/sensitive.ts): a session that
+ * reaches a sensitive path without a valid `ll5_stepup` cookie for ITS user
+ * id is sent to /verify?next=<path+query>. Returns null when the request may
+ * proceed. Called only after the session checks passed, with the token that
+ * will actually be served (the refreshed one when a refresh just happened).
+ */
+async function stepUpRedirect(request: NextRequest, pathname: string, token: string): Promise<NextResponse | null> {
+  if (!isSensitivePath(pathname)) return null;
+  const uid = userIdFromPayload(decodeTokenPayload(token));
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) {
+    console.error(`[middleware] AUTH_SECRET is not set; sensitive path ${pathname} cannot be unlocked`);
+  }
+  const cookie = request.cookies.get(STEP_UP_COOKIE)?.value;
+  const valid = await isStepUpValid(cookie, uid, secret, Math.floor(Date.now() / 1000));
+  if (valid) return null;
+  const url = request.nextUrl.clone();
+  url.pathname = VERIFY_PATH;
+  url.search = "";
+  url.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+  const redirect = NextResponse.redirect(url);
+  if (cookie) redirect.cookies.delete(STEP_UP_COOKIE);
+  return redirect;
+}
+
+/**
  * Edge middleware:
  *   1. Redirects any non-public page to /login if the ll5_token cookie is missing.
  *   2. Runs decideTokenAction() over the decoded token to pick exactly one of:
@@ -59,7 +86,10 @@ function withPathname(response: NextResponse, pathname: string): NextResponse {
  *        - reauth:  expired beyond grace, or malformed (missing exp) — clear the
  *                   cookie and redirect to /login. A missing exp is handled as
  *                   reauth rather than refresh-spamming every request.
- *   3. Injects x-pathname for server-side layouts.
+ *   3. For sensitive paths (SENSITIVE_PATHS in lib/sensitive.ts) requires a
+ *      valid ll5_stepup cookie for the session's user id, else redirects to
+ *      /verify?next=<path>. /verify itself needs a session (not public).
+ *   4. Injects x-pathname for server-side layouts.
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -88,7 +118,7 @@ export async function middleware(request: NextRequest) {
 
   // (a) Valid and not near expiry — serve as-is, no logging noise.
   if (action === "pass") {
-    return withPathname(NextResponse.next(), pathname);
+    return (await stepUpRedirect(request, pathname, token)) ?? withPathname(NextResponse.next(), pathname);
   }
 
   const buildReauthRedirect = (reason: string): NextResponse => {
@@ -125,7 +155,8 @@ export async function middleware(request: NextRequest) {
     // components reading cookies() via next/headers see the refreshed value,
     // and set it on the response so the browser persists it for next time.
     request.cookies.set(COOKIE_NAME, fresh);
-    const response = NextResponse.next({ request });
+    const stepUp = await stepUpRedirect(request, pathname, fresh);
+    const response = stepUp ?? NextResponse.next({ request });
     response.cookies.set(COOKIE_NAME, fresh, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -146,7 +177,7 @@ export async function middleware(request: NextRequest) {
     console.warn(
       `[middleware] auth refresh miss, token still valid — serving stale (path=${pathname}, secondsLeft=${secondsLeft})`,
     );
-    return withPathname(NextResponse.next(), pathname);
+    return (await stepUpRedirect(request, pathname, token)) ?? withPathname(NextResponse.next(), pathname);
   }
 
   return buildReauthRedirect("refresh failed for expired token");

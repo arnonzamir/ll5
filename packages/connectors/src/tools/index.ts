@@ -21,6 +21,7 @@ import type { SyncService } from '../sync.js';
 import type { OtpStore } from '../otp.js';
 import type { LedgerRowRecord } from '../types.js';
 import { periodRange, summarizeEvents, summarizeLedger, ageMinutes } from '../digest.js';
+import { connectorSnapshot } from '../snapshot.js';
 import type { ConnectorDigest, DigestPeriod } from '../digest.js';
 import { IngestLedgerRowsShape, IngestLedgerRowsSchema, QueryEventsShape, QueryLedgerShape } from './schemas.js';
 
@@ -65,7 +66,7 @@ export function registerAllTools(server: McpServer, deps: ToolDeps): void {
 
   server.tool(
     'list_connectors',
-    'The connector catalog (cards, bank, PayBox, Clalit, IEC, water, Home Assistant, Financy) joined with this user\'s state: enabled, status, last success, last error, schedule, whether credentials are stored. Never returns secrets.',
+    'The connector catalog (cards, bank, PayBox, Clalit, IEC, water, Home Assistant, Financy) joined with this user\'s state: enabled, status, last success, last error, schedule, whether credentials are stored, and `snapshot` (what the ledger adapter recorded: masked accounts with balances when the aggregator reports them, connection freshness, data_through). Never returns secrets.',
     {},
     async () => {
       const [rows, withCreds] = await Promise.all([repos.connectors.list(), repos.credentials.connectorIdsWithCredentials()]);
@@ -84,6 +85,9 @@ export function registerAllTools(server: McpServer, deps: ToolDeps): void {
           last_error: row?.last_error ?? null,
           schedule_minutes: row?.schedule_minutes ?? c.default_schedule_minutes,
           has_credentials: withCreds.has(c.id),
+          // Allow-list projection of config (accounts / connections / data_through /
+          // accounts_fetched_at only) — see snapshot.ts.
+          snapshot: connectorSnapshot(row?.config),
         };
       });
       return ok({ connectors });

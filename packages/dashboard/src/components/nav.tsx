@@ -38,8 +38,11 @@ import {
   Bot,
   Lightbulb,
   Tag,
+  Landmark,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isSensitivePath } from "@/lib/sensitive";
 import { logoutAction } from "@/app/(user)/logout-action";
 
 interface NavLink {
@@ -60,6 +63,12 @@ interface NavGroup {
   items: NavLink[];
 }
 
+/** Small lock glyph after entries in the sensitive catalog (lib/sensitive.ts): they ask for the password again. */
+function SensitiveMark({ href }: { href: string }) {
+  if (!isSensitivePath(href)) return null;
+  return <Lock className="h-3 w-3 text-gray-400" aria-label="Requires identity confirmation" />;
+}
+
 function buildNavGroups(): NavGroup[] {
   const calendarItems: NavLink[] = [
     { href: "/calendar", label: "Calendar", icon: CalendarDays },
@@ -73,6 +82,7 @@ function buildNavGroups(): NavGroup[] {
     { href: "/journal", label: "Journal", icon: BookOpen },
     { href: "/lessons", label: "Lessons", icon: Lightbulb },
     { href: "/health", label: "Health", icon: HeartPulse },
+    { href: "/finance", label: "Finance", icon: Landmark },
   ];
   return [
     {
@@ -242,6 +252,7 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                               >
                                 <ItemIcon className="h-4 w-4" />
                                 {item.label}
+                                <SensitiveMark href={item.href} />
                               </Link>
                             );
                           })}
@@ -345,6 +356,7 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                     >
                       <Plug className="h-4 w-4" />
                       Connectors
+                      <SensitiveMark href="/settings/connectors" />
                     </Link>
                     <Link
                       href="/settings/health"
@@ -434,6 +446,7 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                 >
                   <Icon className="h-4 w-4" />
                   {link.label}
+                  <SensitiveMark href={link.href} />
                 </Link>
               );
             })}

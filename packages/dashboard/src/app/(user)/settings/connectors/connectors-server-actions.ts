@@ -3,6 +3,7 @@
 import { env } from "@/lib/env";
 import { getToken } from "@/lib/auth";
 import { mcpCallJsonSafe } from "@/lib/api";
+import { requireStepUp } from "@/lib/step-up";
 import {
   CONNECTOR_CATALOG,
   DEFAULT_RULES,
@@ -17,6 +18,12 @@ import {
 
 // All token handling stays here: the client never sees the bearer token, the
 // credentials it submits are forwarded once and only success/failure returns.
+//
+// /settings/connectors is in the sensitive catalog (lib/sensitive.ts): every
+// exported action first calls requireStepUp(), so a direct action call without
+// a fresh password confirmation redirects to /verify instead of returning data.
+
+const STEP_UP_NEXT = "/settings/connectors";
 
 const CONNECTORS_REST = env.CONNECTORS_MCP_URL;
 
@@ -102,6 +109,7 @@ function parseRules(raw: unknown): ConnectorRules {
  * if the service still holds an older row.
  */
 export async function fetchConnectorsPage(): Promise<ConnectorsPageData> {
+  await requireStepUp(STEP_UP_NEXT);
   const token = await getToken();
   const settings = token ? await readUserSettings(token) : {};
   const rules = parseRules((settings.connectors as Record<string, unknown> | undefined)?.rules);
@@ -137,6 +145,7 @@ export async function fetchConnectorsPage(): Promise<ConnectorsPageData> {
  * down MCP still leaves ingest gated consistently.
  */
 export async function setConnectorEnabled(connectorId: string, enabled: boolean): Promise<ActionResult> {
+  await requireStepUp(STEP_UP_NEXT);
   const token = await getToken();
   if (!token) return { ok: false, error: "Not signed in" };
 
@@ -153,6 +162,7 @@ export async function setConnectorEnabled(connectorId: string, enabled: boolean)
 }
 
 export async function updateConnectorSchedule(connectorId: string, scheduleMinutes: number): Promise<ActionResult> {
+  await requireStepUp(STEP_UP_NEXT);
   const token = await getToken();
   if (!token) return { ok: false, error: "Not signed in" };
   if (!Number.isInteger(scheduleMinutes) || scheduleMinutes < 5) {
@@ -172,6 +182,7 @@ export async function submitConnectorCredentials(
   authType: string,
   secret: Record<string, string>
 ): Promise<ActionResult> {
+  await requireStepUp(STEP_UP_NEXT);
   const token = await getToken();
   if (!token) return { ok: false, error: "Not signed in" };
 
@@ -201,6 +212,7 @@ export async function submitConnectorCredentials(
 
 /** Run one pull now via the `sync_connector` tool. */
 export async function syncConnectorNow(connectorId: string): Promise<SyncResult> {
+  await requireStepUp(STEP_UP_NEXT);
   const token = await getToken();
   if (!token) return { ok: false, error: "Not signed in" };
 
@@ -215,6 +227,7 @@ export async function syncConnectorNow(connectorId: string): Promise<SyncResult>
 }
 
 export async function updateConnectorRules(rules: ConnectorRules): Promise<ActionResult> {
+  await requireStepUp(STEP_UP_NEXT);
   const token = await getToken();
   if (!token) return { ok: false, error: "Not signed in" };
 
