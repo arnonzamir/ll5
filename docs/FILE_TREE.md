@@ -181,6 +181,7 @@ ll5/
 │       ├── utils/self-names.ts        # User's own display names (user_settings.self_names, 60s cache) → message.ts flags from_me on self-authored phone-mirrored messages (Slack channels)
 │       (Dashboard) packages/dashboard/src/app/(user)/settings/data-sources/data-sources-types.ts — types + DEFAULTS for the data-sources page. Extracted from data-sources-server-actions.ts on May 18 because Next.js 15 rejects non-async exports from a "use server" file.
 │       ├── utils/system-message.ts    # Shared system message writer with scheduler event correlation + source routing metadata
+│       ├── utils/group-coalescer.ts   # (ISS-033, 2026-09-06) Pure GroupCoalescer<TMeta> — per-key burst buffer for immediate/agent WhatsApp GROUP messages: flush at windowMs from the FIRST item (default 90 s, env WHATSAPP_GROUP_COALESCE_MS), at maxItems (12), or flushAll(); injectable timers; onError never swallows. renderGroupBurst: 1 item = the legacy per-message string (no header), N items = `[WhatsApp] group: <name> — <n> messages over <m>s:` + `- <sender|You>: "…"` lines, 4000-char body cap + `… (+k more)`. Singleton + flushWhatsAppGroupBursts() live in processors/whatsapp-webhook.ts. Tests: __tests__/group-coalescer.test.ts (12). Group docs are marked processed at flush time.
 │       ├── utils/export.ts            # Full user data export (ES + PG → JSON, no media binaries)
 │       ├── utils/device-commands.ts   # Queue device command + send FCM data message
 │       ├── utils/fcm-sender.ts       # FCM v1 API sender (service account JWT + OAuth2, 4-level notification). Exposes getFcmStats() — per-reason failure counter for /admin/health.fcm
@@ -537,3 +538,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: gateway — 17 active-hours clock reads wrapped in % 24 (ICU midnight = "24").
 2026-09-06: Android fix batch merged (see docs/implementation/android-fix-batch-2026-09-05.md).
 2026-09-06: packages/awareness/src/tools/user-model-budget.ts — per-section byte budgets for write_user_model (active_context 8 KB, others 12 KB; ISS-033); test in packages/awareness/src/__tests__/user-model-budget.test.ts.
+2026-09-06: gateway utils/group-coalescer.ts (+ __tests__/group-coalescer.test.ts, 12) — ISS-033 WhatsApp group-burst coalescing; processors/whatsapp-webhook.ts routes isGroup immediate/agent inserts through the singleton (flushWhatsAppGroupBursts exported).
