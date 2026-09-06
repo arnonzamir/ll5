@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (14:50) — Connectors live: verified after the roll
+
+Run 34030090273 green (16 jobs incl. `build (connectors)`, deploy, e2e). Host: `connectors-…` healthy, migration `001_connectors.sql` applied, `https://mcp-connectors.noninoni.click/health` 200. Agent container (rolled 11:29Z): `.mcp.json` lists `mcp-connectors`, persona has the "External accounts" line, `daily` skill has the digest step, `list_connectors` answers with the agent token (catalog rows, all `enabled:false`, `unconfigured`). Gateway registered `connector.<id>.events` staleness checks. Dashboard `/settings/connectors` routes (login redirect). Pending on Arnon: tick Connector capture in the app (Max, Isracard, Bank, PayBox, Clalit) — the first captured `app_notification` proves the phone → gateway → MCP path; then the stored `unknown` payloads become the issuer push patterns.
+
 ## 2026-09-06 (14:40) — Connectors Phase 0 + Phase 1 merged and pushed
 
 All four worktrees merged on main (dashboard `8ba2535`, connectors MCP `411102e`, gateway `7ea8f99`; Android `dba8728` + `ff4da0c` on `feat/phone-activity-awareness`, APK on the phone 14:16). Main after the merge: typecheck clean across gateway/connectors/dashboard/awareness; tests gateway 579, connectors 32, shared 137, awareness 108; compose lint 10 services. One push builds every image including run-claude (persona: external-accounts line, `daily` digest step, `mcp-endpoints.json` gains `connectors`). Verification after the roll: `mcp-connectors.noninoni.click/health`, `list_connectors` from the agent container (e2e job covers it), `/settings/connectors` renders, a captured `app_notification` from the phone lands in `query_events` (needs Arnon to tick Connector capture in the app and a real charge or Clalit SMS). Next jobs: read stored `unknown` payloads and turn them into issuer push patterns; Phase 2 Home Assistant adapter; Phase 3 moneyman ledger.
