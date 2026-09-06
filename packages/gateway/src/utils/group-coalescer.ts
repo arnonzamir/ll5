@@ -33,6 +33,8 @@ export interface CoalescedItem {
   /** Pre-rendered ` [replying to: «…»]` suffix, or ''. */
   quotedInfo: string;
   fromMe: boolean;
+  /** ll5_awareness_messages doc id — marked processed only once the burst is delivered. */
+  docId?: string;
 }
 
 export type FlushHandler<TMeta> = (

@@ -27,13 +27,14 @@ const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './u
 // Process singleton, created lazily on the first group push so it carries no
 // pool of its own: the pool travels in the window's meta. The gateway has no
 // SIGTERM/shutdown hook today, so a restart can lose at most one open window
-// (≤ 90 s of group chatter) per conversation — the ES doc is already marked
-// processed, so the batch review will not re-report it either. If a shutdown
-// path is ever added, call `flushWhatsAppGroupBursts()` from it.
+// (≤ 90 s of group chatter) per conversation — those docs stay unprocessed,
+// so the next batch review reports them. If a shutdown path is ever added, call
+// `flushWhatsAppGroupBursts()` from it.
 // ---------------------------------------------------------------------------
 
 interface GroupBurstMeta {
   pgPool: Pool;
+  es: Client;
   userId: string;
   remoteJid: string;
   groupName: string | null;
@@ -67,6 +68,16 @@ async function deliverGroupBurst(key: string, meta: GroupBurstMeta, items: Coale
       groupName: meta.groupName,
     }),
   );
+  // Mark processed only now: a window lost to a restart or a failed insert
+  // leaves its messages unprocessed, so the batch review still reports them.
+  for (const it of items) {
+    if (!it.docId) continue;
+    try {
+      await meta.es.update({ index: 'll5_awareness_messages', id: it.docId, doc: { processed: true }, refresh: false });
+    } catch (err) {
+      logger.warn('[processWhatsAppWebhook][coalesce] processed flag failed', { docId: it.docId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
   const spanSec = Math.max(0, Math.round((last.ts - items[0].ts) / 1000));
   logger.info('[processWhatsAppWebhook][coalesce] Group burst delivered to agent', {
     key,
@@ -528,8 +539,8 @@ export async function processWhatsAppWebhook(
         // ISS-033: defer — one system message per burst, not per message.
         getGroupCoalescer().push(
           `${userId}:${remoteJid}`,
-          { pgPool, userId, remoteJid, groupName, peerName, personId },
-          { ts: Date.parse(timestamp), sender: '(me)', text: truncBody, mediaInfo, quotedInfo, fromMe: true },
+          { pgPool, es, userId, remoteJid, groupName, peerName, personId },
+          { ts: Date.parse(timestamp), sender: '(me)', text: truncBody, mediaInfo, quotedInfo, fromMe: true, docId },
         );
       } else {
         await insertSystemMessage(
@@ -551,12 +562,14 @@ export async function processWhatsAppWebhook(
         );
       }
 
-      await es.update({
-        index: 'll5_awareness_messages',
-        id: docId,
-        doc: { processed: true },
-        refresh: false,
-      });
+      if (!isGroup) {
+        await es.update({
+          index: 'll5_awareness_messages',
+          id: docId,
+          doc: { processed: true },
+          refresh: false,
+        });
+      }
 
       logger.info('[processWhatsAppWebhook][handle] Outbound message notified to agent', { isGroup, priority, to: dest, coalesced: isGroup });
     }
@@ -625,8 +638,8 @@ export async function processWhatsAppWebhook(
       // ISS-033: defer — one system message per burst, not per message.
       getGroupCoalescer().push(
         `${userId}:${remoteJid}`,
-        { pgPool, userId, remoteJid, groupName, peerName, personId },
-        { ts: Date.parse(timestamp), sender, text: truncBody, mediaInfo, quotedInfo, fromMe: false },
+        { pgPool, es, userId, remoteJid, groupName, peerName, personId },
+        { ts: Date.parse(timestamp), sender, text: truncBody, mediaInfo, quotedInfo, fromMe: false, docId },
       );
     } else {
       // No FCM notify — immediate WhatsApp goes to agent via system message → SSE only
@@ -649,13 +662,15 @@ export async function processWhatsAppWebhook(
       );
     }
 
-    // Mark as processed so batch review doesn't re-report it
-    await es.update({
-      index: 'll5_awareness_messages',
-      id: docId,
-      doc: { processed: true },
-      refresh: false,
-    });
+    // Mark as processed so batch review doesn't re-report it (groups: at flush).
+    if (!isGroup) {
+      await es.update({
+        index: 'll5_awareness_messages',
+        id: docId,
+        doc: { processed: true },
+        refresh: false,
+      });
+    }
 
     logger.info('[processWhatsAppWebhook][handle] Immediate notification sent', { sender, coalesced: isGroup });
   }
