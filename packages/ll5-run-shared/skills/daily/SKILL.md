@@ -15,7 +15,8 @@ Deliver a concise morning summary. Keep it under 10 lines. Don't dump everything
 4. Call calendar MCP `list_events` for today and tomorrow (this returns events from all readable calendars — primary, Family, Bor-Kaz, holidays, Sunbit)
 5. Call calendar MCP `list_ticklers` for the next 3 days
 6. Call `list_narratives({ status: "active", limit: 20 })` — review the active threads in the user's life. Note any that are *unusually* quiet (haven't moved in a long time but used to be active) or *unusually* loud (a usually-quiet thread that's seen a recent burst). Most days, nothing notable — that's fine.
-7. After delivering the brief, call `set_today_card` with your read of the day (voice, ≤2 sentences, first-person — the same read that opens the brief, never a list) and today's ONE thing.
+7. Call `get_connector_digest({ period: "yesterday" })` (connectors MCP; skip silently if the tool is unavailable). Mention only rule hits, open findings and stale feeds — one line, no totals unless something is off.
+8. After delivering the brief, call `set_today_card` with your read of the day (voice, ≤2 sentences, first-person — the same read that opens the brief, never a list) and today's ONE thing.
 
 ## Format
 
