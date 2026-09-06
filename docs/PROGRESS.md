@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (19:50) — Account email + password; SMTP dead (ISS-034)
+
+Arnon's account had no email and no password (PIN login only), so the new step-up could never pass (ISS-035). At his request: email set to his address (verified) on `auth_users`; `POST /auth/forgot` created a reset token but the mail bounced — Brevo SMTP "not yet activated" (ISS-034) — so a reset token was minted by hand (`auth_tokens`, sha256 of a random 32-byte hex, 1 h) and the link handed to Arnon to choose his own password.
+
 ## 2026-09-06 (19:10) — Storage schema approved
 
 Arnon asked whether ledger data lives in Financy's schema or ours; answer: ours (normalized rows, source-specific fields inside the encrypted payload, mapping at the adapter boundary). Approved and recorded as a DECISION-032 amendment.
