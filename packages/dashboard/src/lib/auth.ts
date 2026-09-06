@@ -43,11 +43,15 @@ export async function login(
   return res.json() as Promise<{ token: string }>;
 }
 
-/** Email + password login — the primary human login path (P1 identity). */
+/**
+ * Email + password login — the primary human login path (P1 identity). The
+ * gateway reply also carries `user_id`; the step-up flow (/verify) uses it to
+ * bind the confirmation to the current session without replacing the token.
+ */
 export async function loginWithPassword(
   email: string,
   password: string
-): Promise<{ token: string }> {
+): Promise<{ token: string; user_id?: string; expires_at?: string }> {
   const res = await fetch(`${env.GATEWAY_URL}/auth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -67,7 +71,7 @@ export async function loginWithPassword(
     }
     throw new Error(message);
   }
-  return res.json() as Promise<{ token: string }>;
+  return res.json() as Promise<{ token: string; user_id?: string; expires_at?: string }>;
 }
 
 /** Decode the JWT payload without verification (for display purposes only). */
