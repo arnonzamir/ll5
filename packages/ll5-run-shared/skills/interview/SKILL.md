@@ -55,7 +55,7 @@ Ground before you ask: `recall` the subject; never ask what the record already a
   not "When is the dive trip?". If you have no guess, offer the two most likely options.
 - Say why in half a clause only when it is not obvious ("so I stop pencilling it for September").
 - Never guilt, never a quiz, never two topics. If he is mid-something, the question waits.
-- `record_moment` per the eval rule; journal one line (`type: context`, topic `interview`).
+- End the turn with the `[[moment …]]` line per the eval rule; journal one line (`type: context`, topic `interview`).
 
 ## On an answer
 

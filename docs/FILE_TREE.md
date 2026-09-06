@@ -19,9 +19,12 @@ ll5/
 │   └── render-mcp-config.ts           # Renders mcp-endpoints.json → Claude Code .claude/settings.json or opencode opencode-mcp-fragment.json (--format claude|opencode, --config, --output, --worker). MERGES into an existing output file, preserving other top-level keys (hooks/permissions) — a plain overwrite killed the agent's hook wiring for 33h [2026-07-14]
 │
 ├── packages/ll5-run-shared/            # Shared content for both agent variants (dual run-variant Phase 1)
-│   ├── CLAUDE.md                       # Persona, 14 Hard Rules, GTD coaching (moved from ll5-run)
+│   ├── CLAUDE.md                       # Persona, 15 Hard Rules, GTD coaching (~62 KB after the 2026-09-06 trim; event how-tos live in skills)
 │   ├── mcp-endpoints.json              # MCP endpoint definitions (source of truth for render script)
-│   ├── skills/                         # 17 SKILL.md files (daily, review, clarify, engage, sweep, plan, etc.)
+│   ├── skills/                         # 20 SKILL.md files (daily, review, clarify, engage, sweep, plan, etc.)
+│   │   ├── media/SKILL.md              # 2026-09-06: images, [Photo] reel triage, voice-note transcription, PDF/document extraction, generated-image delivery (moved out of CLAUDE.md)
+│   │   ├── vault-login/SKILL.md        # 2026-09-06: vault MCP browser login + onboarding procedure (moved out of CLAUDE.md)
+│   │   └── location/SKILL.md           # 2026-09-06: location snapshot fields, deduction rules, travel-mode provenance, contextual cross-references (moved out of CLAUDE.md)
 │   └── prompts/                        # narrative-loop.md (worker prompt; reconcile-loop.md retired 2026-09-04)
 │
 ├── .github/workflows/
@@ -536,3 +539,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: alerting.test.ts pins inQuietHours=false (the push-policy tests are time-independent again).
 2026-09-06: gateway — 17 active-hours clock reads wrapped in % 24 (ICU midnight = "24").
 2026-09-06: Android fix batch merged (see docs/implementation/android-fix-batch-2026-09-05.md).
+2026-09-06: packages/ll5-run-shared/CLAUDE.md trimmed 97 KB → 62 KB; new skills media/, vault-login/, location/ (moved sections); Eval rule record_moment → [[moment …]] line (coach-scan, evening-close, interview updated).

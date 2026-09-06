@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (10:45) — Persona trimmed to 62 KB (ISS-033 follow-up)
+
+`packages/ll5-run-shared/CLAUDE.md` 97,477 → ~62,500 bytes with no rule dropped: three sections moved into on-demand skills (`media` — the whole Media Handling section incl. PDF/document extraction and image delivery; `vault-login` — vault MCP login + onboarding; `location` — snapshot mechanics and contextual cross-references), each left as a one-paragraph pointer plus its standing rules, and registered under "Your skills". The rest is prose compression: duplicated rules now stated once and cross-referenced (Hard Rule 6 ↔ Scheduling, Rules 1/9 ↔ Emotional Contract, Rule 7 ↔ One Event at a Time), worked examples cut to a clause, motivational framing removed. Caps, quiet hours, the act-by-default ladder, delivery mode, the draft/topic/silent/compact block syntaxes, and every tool name are intact (mechanically checked against the original's backticked identifiers). Coordinated change: the Eval rule no longer calls `record_moment` — every proactive turn ends with one `[[moment category="…" sentiment="…" decision="ping_now|ping_later|suppress" reason="…"]]` line in the final message (`ping_later` requires `deferral_ref`, ISS-004); the mirror hook strips it, the Stop-hook recorder reads it. `coach-scan`, `evening-close`, `interview` skills updated to the same line. Branch `fix/persona-trim`, not yet deployed to the agent.
+
 ## 2026-09-06 (10:20) — Consolidation lost to a cap restart; cap policy was burning money (ISS-033)
 
 Arnon reported the nightly consolidation missed "thanks to a power cable being disconnected". The cable was his laptop's: it killed this session and its 03:12 checkpoint cron (server up 195 days, containers healthy). The pass itself was lost because the watcher's context-cap restart fired at 02:07 local while the pass's grounding-reviewer subagent was running — the main transcript looked idle for 120 s. Four `CONSOLIDATED Sep 5` entries landed; tally, promotions, user-model update and the 14-day pre-stage did not.
