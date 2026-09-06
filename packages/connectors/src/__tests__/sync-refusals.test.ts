@@ -62,7 +62,7 @@ describe('SyncService refusals', () => {
     registry.register(fakeAdapter('max', async () => { throw new AdapterAuthError('401 from source'); }));
     const sync = new SyncService({ repos, registry, otp: new OtpStore(), getUserId: () => 'u1' });
     await inCtx(() => repos.connectors.upsert('max', { enabled: true }));
-    await inCtx(() => repos.credentials.put('max', 'scraper_credentials', { user: 'u', password: 'p' }));
+    await inCtx(() => repos.credentials.put('max', 'api_token', { token: 't' }));
     const r = await inCtx(() => sync.run('max'));
     expect(r).toMatchObject({ ok: false, reason: 'pull_failed', status: 'auth_failed', error: '401 from source' });
     expect(connectors.get('max')).toMatchObject({ status: 'auth_failed', consecutive_failures: 1, last_error: '401 from source' });

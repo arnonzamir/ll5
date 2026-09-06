@@ -25,8 +25,10 @@ export interface PullContext {
 /**
  * A ledger adapter: one per connector that has a batch feed the service can
  * pull itself (scraper child process, HA REST API, an aggregator's read API).
- * Read-only towards the outside world, always. Skill-driven portals (Clalit,
- * municipality) have no adapter — their rows arrive through `ingest_ledger_rows`.
+ * Read-only towards the outside world, always. Event-only connectors (cards,
+ * bank, Clalit, IEC, water, PayBox) have no adapter; no scrapers, no portal
+ * automation (DECISION-032 amendment). `ingest_ledger_rows` exists for rows an
+ * agent skill or a manual import hands over.
  */
 export interface ConnectorAdapter {
   readonly id: string;

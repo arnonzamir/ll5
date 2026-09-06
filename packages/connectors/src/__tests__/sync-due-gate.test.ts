@@ -80,13 +80,13 @@ describe('SyncService due gate (scheduled calls)', () => {
     t = T0 + 359 * MIN;
     expect(await inCtx(() => fSync.run('financy', { scheduled: true }))).toMatchObject({ ok: false, reason: 'not_due' });
 
-    // municipality: catalog default null (skill-driven) → a scheduled call is never due even with an adapter.
-    const m = await ready('municipality');
+    // clalit: catalog default null (event-only) → a scheduled call is never due even with an adapter.
+    const m = await ready('clalit');
     const mReg = new ConnectorAdapterRegistry();
-    mReg.register(adapter('municipality', async () => ({ rows: [], cursor: null })));
+    mReg.register(adapter('clalit', async () => ({ rows: [], cursor: null })));
     const mSync = new SyncService({ repos: m.repos, registry: mReg, otp: new OtpStore(), getUserId: () => 'u1', now: () => T0 });
-    expect(await inCtx(() => mSync.run('municipality', { scheduled: true }))).toMatchObject({ ok: false, reason: 'not_due' });
-    expect(await inCtx(() => mSync.run('municipality'))).toMatchObject({ ok: true });
+    expect(await inCtx(() => mSync.run('clalit', { scheduled: true }))).toMatchObject({ ok: false, reason: 'not_due' });
+    expect(await inCtx(() => mSync.run('clalit'))).toMatchObject({ ok: true });
   });
 
   it('a failed pull does not move last_success_at, so the next scheduled tick retries', async () => {

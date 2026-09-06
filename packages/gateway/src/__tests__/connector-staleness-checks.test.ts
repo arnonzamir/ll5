@@ -29,8 +29,8 @@ describe('connector event-feed staleness checks (derived from CONNECTOR_CATALOG)
       expect((c as { maxMinutes: number }).maxMinutes).toBe(CONNECTOR_EVENTS_MAX_MINUTES);
       expect(CONNECTOR_EVENTS_MAX_MINUTES).toBe(48 * 60);
     }
-    // municipality (ledger-only) and home-assistant (webhook) are not phone-fed
-    expect(keys).not.toContain('connector.municipality.events');
+    // financy (ledger-only) and home-assistant (webhook) are not phone-fed
+    expect(keys).not.toContain('connector.financy.events');
     expect(keys).not.toContain('connector.home-assistant.events');
   });
 

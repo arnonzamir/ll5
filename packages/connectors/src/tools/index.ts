@@ -65,7 +65,7 @@ export function registerAllTools(server: McpServer, deps: ToolDeps): void {
 
   server.tool(
     'list_connectors',
-    'The connector catalog (cards, bank, Clalit, IEC, municipality, Home Assistant) joined with this user\'s state: enabled, status, last success, last error, schedule, whether credentials are stored. Never returns secrets.',
+    'The connector catalog (cards, bank, PayBox, Clalit, IEC, water, Home Assistant, Financy) joined with this user\'s state: enabled, status, last success, last error, schedule, whether credentials are stored. Never returns secrets.',
     {},
     async () => {
       const [rows, withCreds] = await Promise.all([repos.connectors.list(), repos.credentials.connectorIdsWithCredentials()]);
@@ -243,7 +243,7 @@ export function registerAllTools(server: McpServer, deps: ToolDeps): void {
 
   server.tool(
     'ingest_ledger_rows',
-    'Store ledger rows gathered by a skill (Clalit / municipality portal reads via vault-login). Strict schema: typed fields only, memo up to 200 chars, at most 200 rows; upsert on external_id. Reconciles against open events afterwards.',
+    'Store ledger rows handed over by an agent skill or a manual import (no scrapers, no portal automation). Strict schema: typed fields only, memo up to 200 chars, at most 200 rows; upsert on external_id. Reconciles against open events afterwards.',
     IngestLedgerRowsShape,
     async (params) => {
       const parsed = IngestLedgerRowsSchema.safeParse(params);

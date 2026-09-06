@@ -146,7 +146,7 @@ d('MCP contracts (live, read-only)', () => {
     expect(r.isError, r.text.slice(0, 200)).toBe(false);
     expect(Array.isArray(r.data?.connectors), 'list_connectors must return { connectors: [...] }').toBe(true);
     const ids = r.data!.connectors!.map((c) => c.id);
-    for (const id of ['cal', 'max', 'isracard', 'bank', 'clalit', 'iec', 'municipality', 'home-assistant']) expect(ids).toContain(id);
+    for (const id of ['cal', 'max', 'isracard', 'bank', 'paybox', 'clalit', 'iec', 'water', 'home-assistant', 'financy']) expect(ids).toContain(id);
     expect(typeof r.data!.connectors![0].enabled).toBe('boolean');
     expect(typeof r.data!.connectors![0].status).toBe('string');
     expect(typeof r.data!.connectors![0].has_credentials).toBe('boolean');

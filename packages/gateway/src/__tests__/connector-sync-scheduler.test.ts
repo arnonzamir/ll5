@@ -62,7 +62,7 @@ describe('ConnectorSyncScheduler.run', () => {
   it('posts scheduled:true for every target as the user and counts ok / not_due / silent refusals', async () => {
     const { client, calls } = fakeClient((id) => {
       if (id === 'financy') return { ok: true, connector_id: id, pulled: 3 };
-      if (id === 'bank') return { ok: false, connector_id: id, reason: 'not_due' };
+      if (id === 'home-assistant') return { ok: false, connector_id: id, reason: 'not_due' };
       return { ok: false, connector_id: id, reason: 'no_adapter' };
     });
     const s = new ConnectorSyncScheduler(pool, { userId: USER }, client);
@@ -96,7 +96,7 @@ describe('ConnectorSyncScheduler.run', () => {
   it('plan_not_eligible and rate_limited count as failures; the silent set is exactly the four quiet reasons', async () => {
     const { client } = fakeClient((id) => {
       if (id === 'financy') return { ok: false, connector_id: id, reason: 'pull_failed', status: 'error', code: 'plan_not_eligible', error: 'not on plan' };
-      if (id === 'bank') return { ok: false, connector_id: id, reason: 'rate_limited', retry_after_seconds: 30 };
+      if (id === 'home-assistant') return { ok: false, connector_id: id, reason: 'rate_limited', retry_after_seconds: 30 };
       return { ok: false, connector_id: id, reason: 'disabled' };
     });
     const s = new ConnectorSyncScheduler(pool, { userId: USER }, client);
