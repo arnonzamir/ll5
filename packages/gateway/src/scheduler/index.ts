@@ -25,6 +25,7 @@ import { AgentOutputMonitor } from './agent-output-monitor.js';
 import { CharacterRefreshScheduler } from './character-refresh.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { QuietHoursReleaseScheduler } from './quiet-hours-release.js';
+import { ConnectorSyncScheduler } from './connector-sync.js';
 import { insertAssistantMessage } from '../chat.js';
 import { WhatsAppWebhookReconciler } from './whatsapp-webhook-reconciler.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
@@ -414,6 +415,17 @@ async function startSchedulersForUser(
   });
   compositeTriggerScheduler.start();
   schedulers.push(compositeTriggerScheduler);
+
+  // Connector ledger pulls (docs/design/connectors.md §2) — a 15-min ticker that
+  // POSTs /api/sync { scheduled:true } per ledger connector; the service's due
+  // gate (not_due) enforces each connector's own cadence.
+  const connectorSyncScheduler = new ConnectorSyncScheduler(pgPool, {
+    userId,
+    intervalMinutes: s('connector_sync_minutes', 15),
+    enabled: (sched['connector_sync_enabled'] as unknown as boolean) ?? true,
+  });
+  connectorSyncScheduler.start();
+  schedulers.push(connectorSyncScheduler);
 
   return schedulers;
 }

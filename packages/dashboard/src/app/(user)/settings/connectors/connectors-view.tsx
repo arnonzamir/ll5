@@ -17,6 +17,7 @@ import {
 } from "./connectors-server-actions";
 import {
   AUTH_TYPE_NOTES,
+  CREDENTIAL_HINTS,
   DEFAULT_RULES,
   type ConnectorRules,
   type ConnectorStatus,
@@ -193,7 +194,7 @@ function CredentialsForm({ connector, onSaved }: { connector: ConnectorView; onS
   const [notice, setNotice] = useState<Notice>(null);
 
   const authType = connector.auth_type;
-  if (authType !== "scraper_credentials" && authType !== "api_token") {
+  if (authType !== "scraper_credentials" && authType !== "api_token" && authType !== "oauth") {
     return <p className="text-xs text-gray-500">{AUTH_TYPE_NOTES[authType]}</p>;
   }
 
@@ -204,10 +205,17 @@ function CredentialsForm({ connector, onSaved }: { connector: ConnectorView; onS
           { key: "password", label: "Password", type: "password" },
           { key: "card_last4", label: "Card last 4 digits", optional: true, placeholder: "Optional" },
         ]
-      : [
-          { key: "token", label: "API token", type: "password" },
-          { key: "base_url", label: "Base URL", placeholder: "https://..." },
-        ];
+      : authType === "oauth"
+        ? [
+            { key: "client_id", label: "Client id" },
+            { key: "client_secret", label: "Client secret", type: "password" },
+            { key: "user_id", label: "User id" },
+          ]
+        : [
+            { key: "token", label: "API token", type: "password" },
+            { key: "base_url", label: "Base URL", placeholder: "https://..." },
+          ];
+  const hint = CREDENTIAL_HINTS[connector.id];
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -233,6 +241,7 @@ function CredentialsForm({ connector, onSaved }: { connector: ConnectorView; onS
   return (
     <form onSubmit={submit} className="space-y-2" autoComplete="off">
       <p className="text-xs text-gray-500">{AUTH_TYPE_NOTES[authType]}</p>
+      {hint && <p className="text-xs text-gray-500">{hint}</p>}
       <div className="grid gap-2 sm:grid-cols-2">
         {spec.map((f) => (
           <div key={f.key}>

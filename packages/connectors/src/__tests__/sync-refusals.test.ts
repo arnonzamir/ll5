@@ -7,71 +7,8 @@ import { runWithRequestContext } from '@ll5/shared';
 import { SyncService, SYNC_MIN_INTERVAL_MS, AdapterAuthError } from '../sync.js';
 import { ConnectorAdapterRegistry } from '../adapters/registry.js';
 import { OtpStore } from '../otp.js';
-import type { Repositories } from '../repositories/postgres/index.js';
-import type { ConnectorRow, FindingInput, FindingRecord, LedgerRowInput } from '../types.js';
 import type { ConnectorAdapter } from '../adapters/adapter.js';
-
-function memRepos() {
-  const connectors = new Map<string, ConnectorRow>();
-  const creds = new Map<string, Record<string, unknown>>();
-  const ledger: Array<{ connector_id: string } & LedgerRowInput> = [];
-  const findings: FindingRecord[] = [];
-  const row = (id: string, p: Partial<ConnectorRow> = {}): ConnectorRow => ({
-    connector_id: id, enabled: false, status: 'unconfigured', schedule_minutes: null, last_success_at: null,
-    last_error_at: null, last_error: null, consecutive_failures: 0, cursor: null, config: {}, created_at: '', updated_at: '', ...p,
-  });
-  const repos: Repositories = {
-    connectors: {
-      list: async () => [...connectors.values()],
-      get: async (id) => connectors.get(id) ?? null,
-      upsert: async (id, patch) => {
-        const r = { ...(connectors.get(id) ?? row(id)), ...patch, config: patch.config ?? connectors.get(id)?.config ?? {} } as ConnectorRow;
-        connectors.set(id, r);
-        return r;
-      },
-      recordSync: async (id, o) => {
-        const r = connectors.get(id) ?? row(id);
-        connectors.set(id, o.ok
-          ? { ...r, status: o.status, last_success_at: 'now', last_error: null, consecutive_failures: 0, cursor: o.cursor ?? r.cursor }
-          : { ...r, status: o.status, last_error: o.error ?? null, consecutive_failures: r.consecutive_failures + 1 });
-      },
-      setStatus: async (id, status) => { connectors.set(id, { ...(connectors.get(id) ?? row(id)), status }); },
-    },
-    credentials: {
-      get: async (id) => (creds.has(id) ? { connector_id: id, auth_type: 'api_token', secret: creds.get(id)!, updated_at: '' } : null),
-      put: async (id, _t, secret) => { creds.set(id, secret); },
-      connectorIdsWithCredentials: async () => new Set(creds.keys()),
-    },
-    events: {
-      insert: async () => ({ id: 'e', created: true }),
-      query: async () => ({ items: [], hasMore: false }),
-      openForReconcile: async () => [],
-      markMatched: async () => 0,
-      expireOpenOlderThan: async () => [],
-      nullPayloadsOlderThan: async () => 0,
-      newestReceivedAt: async () => ({}),
-    },
-    ledger: {
-      upsertMany: async (id, rows) => { for (const r of rows) ledger.push({ connector_id: id, ...r }); return { inserted: rows.length, updated: 0 }; },
-      query: async () => ({ items: [], hasMore: false }),
-      forReconcile: async () => [],
-      count: async (id) => ledger.filter((r) => r.connector_id === id).length,
-      deleteOlderThan: async () => 0,
-      newestFetchedAt: async () => ({}),
-    },
-    findings: {
-      open: async (f: FindingInput) => {
-        const rec: FindingRecord = { id: `f${findings.length + 1}`, connector_id: f.connector_id, kind: f.kind, summary: f.summary, ref_id: f.ref_id ?? null, opened_at: '', resolved_at: null, resolution: null, delivered: f.delivered ?? 'none' };
-        findings.push(rec);
-        return rec;
-      },
-      resolve: async () => null,
-      listOpen: async (id) => findings.filter((f) => !f.resolved_at && (!id || f.connector_id === id)),
-      deleteResolvedOlderThan: async () => 0,
-    },
-  };
-  return { repos, connectors, creds, ledger, findings };
-}
+import { memRepos } from './mem-repos.js';
 
 const inCtx = <T>(fn: () => Promise<T>) => runWithRequestContext({ userId: 'u1' }, fn);
 

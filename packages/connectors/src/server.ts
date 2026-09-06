@@ -69,7 +69,7 @@ export async function startServer(): Promise<void> {
   const repos = createRepositories(pool, env.encryptionKey, merchantSubKey(env.encryptionKey));
   const otp = new OtpStore();
   const sync = new SyncService({ repos, registry, otp, getUserId });
-  // Phase 0: no adapters registered. Ledger rows arrive via ingest_ledger_rows; events via POST /api/events.
+  // Built-in adapters come with the default registry (financy). Everything else: ingest_ledger_rows / POST /api/events.
   logger.info('[startServer][init] Connector adapters registered', { adapters: registry.list().map((a) => a.id) });
 
   const timeZone = process.env.TZ || HOME_TIMEZONE_FALLBACK;

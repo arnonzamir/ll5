@@ -6,7 +6,7 @@
  *   POST /api/events                      ConnectorEventInput → ConnectorEventAck (idempotent on dedupe_key)
  *   PUT  /api/connectors/:id              { enabled?, schedule_minutes?, config? } → row (created on first call)
  *   POST /api/connectors/:id/credentials  { auth_type, secret } → 204 (encrypted; never logged)
- *   POST /api/sync                        { connector_id } → SyncResult (same as the tool)
+ *   POST /api/sync                        { connector_id, scheduled? } → SyncResult (same as the tool; scheduled:true adds the due gate → { ok:false, reason:'not_due' })
  */
 import type { Express, Request, Response, NextFunction, RequestHandler } from 'express';
 import { catalogEntry, runWithRequestContext } from '@ll5/shared';
@@ -110,6 +110,6 @@ export function registerApiRoutes(app: Express, authMw: RequestHandler, deps: Ap
       res.status(404).json({ ok: false, connector_id: id, reason: 'unknown_connector' });
       return;
     }
-    res.status(200).json(await sync.run(id));
+    res.status(200).json(await sync.run(id, { scheduled: parsed.data.scheduled === true }));
   }));
 }

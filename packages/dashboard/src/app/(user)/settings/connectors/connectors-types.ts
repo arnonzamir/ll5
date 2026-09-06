@@ -31,7 +31,13 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
   { id: "iec", label: "Israel Electric Corporation", kinds: ["event", "ledger"], auth_type: "api_token", sensitivity: "utility", default_schedule_minutes: 60 },
   { id: "municipality", label: "Municipality (city4u)", kinds: ["ledger"], auth_type: "vault_browser_login", sensitivity: "civic", default_schedule_minutes: null },
   { id: "home-assistant", label: "Home Assistant", kinds: ["stream", "ledger"], auth_type: "api_token", sensitivity: "home", default_schedule_minutes: 60 },
+  { id: "financy", label: "Financy (open-banking aggregator: all banks and cards)", kinds: ["ledger"], auth_type: "oauth", sensitivity: "financial", default_schedule_minutes: 360 },
 ];
+
+/** One-line, per-connector hint shown above the credentials form (where the values come from). */
+export const CREDENTIAL_HINTS: Record<string, string> = {
+  financy: "The values come from the Financy app, Settings → API (client id, client secret, user id). Only read-only data endpoints are called; refresh and payments never.",
+};
 
 /** One row of the `list_connectors` tool result (contract in docs/design/connectors.md, Section 5). */
 export interface ConnectorRow {
@@ -100,5 +106,5 @@ export const AUTH_TYPE_NOTES: Record<ConnectorAuthType, string> = {
   scraper_credentials: "Portal login stored encrypted on the connectors service; used only by the scheduled pull.",
   vault_browser_login: "Authenticated through the vault browser login (vault-login skill). No credentials are stored here.",
   api_token: "Long-lived API token stored encrypted on the connectors service.",
-  oauth: "Authorized through the provider's OAuth consent screen. No credentials are stored here.",
+  oauth: "OAuth client credentials (client id, client secret, user id) stored encrypted on the connectors service; the service mints short-lived access tokens for the scheduled pull.",
 };

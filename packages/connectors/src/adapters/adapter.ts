@@ -5,6 +5,12 @@ export interface PullResult {
   rows: LedgerRowInput[];
   /** Opaque, persisted on the connectors row and handed back on the next pull. */
   cursor: unknown;
+  /**
+   * Optional patch merged (shallow) into the connector row's `config` after a
+   * successful pull — e.g. a masked account/balance snapshot for the digest.
+   * Never secrets, never owner identifiers.
+   */
+  config?: Record<string, unknown>;
 }
 
 export interface PullContext {
@@ -18,9 +24,9 @@ export interface PullContext {
 
 /**
  * A ledger adapter: one per connector that has a batch feed the service can
- * pull itself (scraper child process, HA REST API). Read-only towards the
- * outside world, always. Skill-driven portals (Clalit, municipality) have no
- * adapter — their rows arrive through `ingest_ledger_rows`.
+ * pull itself (scraper child process, HA REST API, an aggregator's read API).
+ * Read-only towards the outside world, always. Skill-driven portals (Clalit,
+ * municipality) have no adapter — their rows arrive through `ingest_ledger_rows`.
  */
 export interface ConnectorAdapter {
   readonly id: string;
