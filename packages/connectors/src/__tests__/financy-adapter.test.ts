@@ -147,6 +147,7 @@ function fakeApi(opts: {
   tokens?: string[];
   txPages?: Array<{ items: FinancyTransaction[]; nextPage?: string | null }>;
   accounts?: FinancyAccount[];
+  connections?: unknown[];
   reject401Tokens?: Set<string>;
   plan403?: boolean;
   tokenStatus?: number;
@@ -167,6 +168,7 @@ function fakeApi(opts: {
     const bearer = auth?.replace('Bearer ', '') ?? '';
     if (opts.reject401Tokens?.has(bearer)) return json(401, { error: 'expired' });
     if (opts.plan403 && url.pathname === '/v2/data/transactions') return json(403, { code: 'NOT_AVAILABLE_ON_PLAN', message: 'upgrade your plan' });
+    if (url.pathname === '/v2/connections') return opts.connections ? json(200, { items: opts.connections, nextPage: null }) : json(500, { error: 'boom' });
     if (url.pathname === '/v2/data/accounts') return json(200, { items: opts.accounts ?? [], nextPage: null });
     if (url.pathname === '/v2/data/transactions') {
       const cursor = url.searchParams.get('nextPage');
@@ -203,7 +205,7 @@ describe('FinancyAdapter.pull (injected fetch)', () => {
     expect(txCalls[1].url.searchParams.get('nextPage')).toBe('p1');
     // Forbidden surface: no refresh, no payments, no non-GET data calls.
     const paths = api.calls.map((c) => `${c.method} ${c.url.pathname}`);
-    expect(paths.every((p) => p === 'POST /oauth/token' || p === 'GET /v2/data/accounts' || p === 'GET /v2/data/transactions')).toBe(true);
+    expect(paths.every((p) => p === 'POST /oauth/token' || p === 'GET /v2/connections' || p === 'GET /v2/data/accounts' || p === 'GET /v2/data/transactions')).toBe(true);
     // The token POST carries the documented body keys and no credential leaks into query strings.
     expect(api.calls[0].body).toEqual({ userId: 'uid-test', clientId: 'cid-test', clientSecret: 'csecret-test' });
     expect(api.calls.some((c) => c.url.search.includes('csecret-test'))).toBe(false);
@@ -267,4 +269,26 @@ describe('FinancyAdapter.pull (injected fetch)', () => {
     await adapter.pull(CREDS, null, CTX);
     expect(api.calls.filter((c) => c.url.pathname === '/oauth/token')).toHaveLength(2);
   });
+  it('stores connection freshness (lastFetchedAt, data_through) and survives a failing connections call', async () => {
+    const withConn = fakeApi({
+      connections: [
+        { id: 'c1', providerId: 'discount', status: 'ACTIVE', lastFetchedAt: '2026-09-06T05:00:00Z', lastFetchedDataDate: { from: '2026-06-01', to: '2026-09-01' }, error: { code: 'x' } },
+        { id: 'c2', providerId: 'max', status: 'ACTIVE', lastFetchedAt: '2026-09-06T06:00:00Z', lastFetchedDataDate: '2026-09-05' },
+      ],
+    });
+    const res = await new FinancyAdapter({ fetch: withConn.fetchImpl, now }).pull(CREDS, null, CTX);
+    expect(res.config).toMatchObject({
+      data_through: '2026-09-05',
+      connections: [
+        { id: 'c1', providerId: 'discount', dataThrough: '2026-09-01', hasError: true },
+        { id: 'c2', providerId: 'max', dataThrough: '2026-09-05', hasError: false, lastFetchedAt: '2026-09-06T06:00:00Z' },
+      ],
+    });
+    expect(JSON.stringify(res.config)).not.toContain('"code":"x"');
+
+    const noConn = fakeApi({}); // /v2/connections answers 500
+    const res2 = await new FinancyAdapter({ fetch: noConn.fetchImpl, now }).pull(CREDS, null, CTX);
+    expect(res2.config).toMatchObject({ connections: [], data_through: null });
+  });
 });
+

@@ -1,6 +1,6 @@
 /**
  * Financy (Open-Finance.ai) ledger adapter — a licensed Israeli open-banking
- * aggregator. READ-ONLY: only `GET /v2/data/accounts` and
+ * aggregator. READ-ONLY: only `GET /v2/connections`, `GET /v2/data/accounts` and
  * `GET /v2/data/transactions` are called (plus the token mint). The refresh
  * endpoint (`/connections/refresh`, costs credits) and every payment endpoint
  * are never called; the adapter reads whatever Financy has already fetched.
@@ -79,6 +79,42 @@ export interface FinancyTransaction {
   balancePerEndDay?: number;
   debtorAccount?: { maskedPan?: string };
   code?: string;
+}
+
+/** A Financy connection (one linked bank/card login) as returned by GET /v2/connections. */
+export interface FinancyConnection {
+  id: string;
+  providerId?: string;
+  status?: string;
+  lastFetchedAt?: string;
+  lastFetchedDataDate?: string | { from?: string; to?: string } | null;
+  error?: unknown;
+}
+
+/** What goes into `config.connections`: freshness only, no error bodies. */
+export interface FinancyConnectionSnapshot {
+  id: string;
+  providerId: string | null;
+  status: string | null;
+  /** Most recent fetch attempt by Financy (success or failure), ISO. */
+  lastFetchedAt: string | null;
+  /** Latest day of transaction data Financy holds for this connection, YYYY-MM-DD. */
+  dataThrough: string | null;
+  hasError: boolean;
+}
+
+export function snapshotConnection(c: FinancyConnection): FinancyConnectionSnapshot | null {
+  if (!c || typeof c.id !== 'string' || !c.id) return null;
+  const d = c.lastFetchedDataDate;
+  const dataThrough = typeof d === 'string' ? d.slice(0, 10) : d && typeof d === 'object' && typeof d.to === 'string' ? d.to.slice(0, 10) : null;
+  return {
+    id: c.id,
+    providerId: c.providerId ?? null,
+    status: c.status ?? null,
+    lastFetchedAt: c.lastFetchedAt ?? null,
+    dataThrough,
+    hasError: c.error != null && c.error !== false,
+  };
 }
 
 export interface FinancyAccount {
@@ -302,8 +338,22 @@ export class FinancyAdapter implements ConnectorAdapter {
     });
     const mapped = mapFinancyTransactions(txItems, accountsById);
 
+    // Freshness: Financy refreshes the banks on its own plan cadence and has no
+    // data webhooks, so the ledger is only as new as each connection's last
+    // fetch. Tolerant: a failure here must not fail the pull.
+    let connections: FinancyConnectionSnapshot[] = [];
+    try {
+      const items = await this.paginate<FinancyConnection>(creds, '/v2/connections', { limit: String(FINANCY_PAGE_LIMIT) });
+      connections = items.map(snapshotConnection).filter((c): c is FinancyConnectionSnapshot => c !== null);
+    } catch (err) {
+      if (err instanceof AdapterAuthError || err instanceof AdapterPlanError) throw err;
+      logger.warn('[FinancyAdapter][pull] connections read failed (continuing)', { error: err instanceof Error ? err.message : String(err) });
+    }
+
+
     logger.info('[FinancyAdapter][pull] pulled', {
       dateFrom,
+      connections: connections.length,
       accounts: accountsById.size,
       transactions: txItems.length,
       rows: mapped.rows.length,
@@ -317,6 +367,9 @@ export class FinancyAdapter implements ConnectorAdapter {
       config: {
         accounts: Array.from(accountsById.values()),
         accounts_fetched_at: this.now().toISOString(),
+        connections,
+        /** Latest day any connection holds data for; null when unknown. */
+        data_through: connections.reduce<string | null>((m, c) => (c.dataThrough && (!m || c.dataThrough > m) ? c.dataThrough : m), null),
       },
     };
   }

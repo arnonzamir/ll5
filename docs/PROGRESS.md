@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (18:40) — Financy running: first pull, freshness fields
+
+Arnon entered the Financy credentials at 15:29Z; "Sync now" pulled 7 Discount accounts (ILS + EUR checking, cards 0034/0026, securities, two loans) and 325 rows (June 7 – September 1) in 2.2 s; status ok, next scheduled pull in 6 h. Balances came back empty from Financy for Discount (adapter handles both documented shapes). Phone events already flowing: four Discount SMS in a week — three OTPs (`otp`, codes redacted), one marketing notice (`unknown`, no trigger). Improvement shipped: the adapter also reads `GET /v2/connections` (read-only) and stores `config.connections` (providerId, status, lastFetchedAt, dataThrough, hasError) and `config.data_through`, so a ledger that ends September 1 reads as "Financy data through 09-01", not a quiet bank; the call is tolerant to failure but rethrows auth/plan errors. Financy has no data webhooks (only connection/payment/session lifecycle); refresh is plan-cadenced (Starter 1/day, Pro 4/day) and the paid on-demand refresh is never called.
+
 ## 2026-09-06 (17:00) — Financy verified live; picker merged
 
 CI run 34035282393 failed in `unit-tests`: `connector-sync-scheduler.test.ts` still used `bank` as a scheduled ledger target after the trim made it event-only (deploy skipped, nothing rolled). Fixed to `home-assistant` (second push `13d7d4e` still had the alert-key assertion on `bank`; fixed in the next commit); e2e catalog contract updated to the ten current ids; stale scraper/municipality comments and fixtures cleaned. Run 34035513186 (`cc0f591`) rolled the gateway only (targets now `home-assistant`, `financy`) — its diff vs the failed push held just tests, so connectors and dashboard were rebuilt by a manual dispatch (run 34035851311). Lesson for the runbooks: after a failed push, the next successful push only deploys the delta since the failed one; dispatch the rest by hand. Dispatch 34035851311 green: connectors now serves the ten trimmed ids (cal, max, isracard, bank, paybox, clalit, iec, water, home-assistant, financy), dashboard serves the picker.
