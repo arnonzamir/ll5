@@ -35,5 +35,8 @@ export * from './request-context.js';
 // ES fetch auth helper
 export * from './es-auth.js';
 
+// AES-256-GCM at rest (single copy; google/health keep local copies until touched)
+export * from './encryption.js';
+
 // Connectors (docs/design/connectors.md): static catalog + event envelope contract.
 export * from './connectors/index.js';

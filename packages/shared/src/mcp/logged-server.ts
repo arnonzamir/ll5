@@ -11,6 +11,25 @@ import { logToolCall } from '../audit.js';
 
 type ToolHandler = (...args: unknown[]) => Promise<unknown>;
 
+export interface ToolLoggingOptions {
+  /**
+   * Tool names whose RESULT must not be written to the audit ledger (the args
+   * and the timing still are). For tools that return sensitive payloads —
+   * e.g. financial rows from the connectors MCP — the ledger row carries
+   * `{ redacted: true }` instead. The caller still receives the full result.
+   */
+  redactResults?: Iterable<string>;
+}
+
+/** The audit-ledger view of a tool result: the result itself, or a redaction marker. */
+export function auditResultFor(
+  toolName: string,
+  result: unknown,
+  redacted: ReadonlySet<string>,
+): unknown {
+  return redacted.has(toolName) ? { redacted: true } : result;
+}
+
 /**
  * Wrap an McpServer so every tool call is logged.
  * Call this before registering tools.
@@ -18,8 +37,10 @@ type ToolHandler = (...args: unknown[]) => Promise<unknown>;
 export function withToolLogging(
   server: McpServer,
   getUserId: () => string,
+  options: ToolLoggingOptions = {},
 ): McpServer {
   const originalTool = server.tool.bind(server);
+  const redacted = new Set(options.redactResults ?? []);
 
   // Override server.tool to wrap each handler with logging
   (server as unknown as Record<string, unknown>).tool = function (
@@ -56,7 +77,7 @@ export function withToolLogging(
           tool_name: name,
           user_id: userId,
           args: toolArgs,
-          result,
+          result: auditResultFor(name, result, redacted),
           duration_ms: duration,
           success: true,
         });

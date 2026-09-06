@@ -221,6 +221,23 @@ ll5/
 │       ├── __tests__/registry.test.ts    # HealthClientRegistry register/get/list/clear semantics + per-instance isolation + default-instance shim contract (May 18, 9 tests)
 │       └── server.ts                    # MCP server with ES+PG, registers adapters
 │
+├── packages/connectors/               # @ll5/connectors — external-account connectors MCP (PG; docs/design/connectors.md; Phase 0, 2026-09-06)
+│   └── src/
+│       ├── adapters/                    # ConnectorAdapter interface `{ id, authType, pull(creds, cursor, ctx) }` + instance-scoped registry (NO adapters in Phase 0)
+│       ├── repositories/interfaces/     # ConnectorRepository, CredentialRepository, EventRepository, LedgerRepository, FindingRepository
+│       ├── repositories/postgres/       # PG implementations; base.repository.ts = tenancy (user_id from request context only) + AES-256-GCM payload boundary
+│       ├── tools/index.ts               # 8 tools: list_connectors, query_events, query_ledger, get_connector_digest, resolve_finding, sync_connector, ingest_ledger_rows, submit_otp (capped; 3 results redacted in audit)
+│       ├── tools/schemas.ts             # Zod: strict ledger rows (≤200, memo ≤200), event envelope, connector patch, credentials body
+│       ├── routes/api.ts                # REST behind the same bearer auth: POST /api/events, PUT /api/connectors/:id, POST /api/connectors/:id/credentials, POST /api/sync
+│       ├── reconcile.ts                 # Pure reconciler: same amount + merchant_key within ±3 days, one-to-one, closest pair first
+│       ├── sync.ts                      # SyncService: refusal ladder (no_adapter|disabled|rate_limited|no_credentials), 10-min rate limit, maintenance (reconcile, expire 48 h, retention)
+│       ├── digest.ts                    # Pure digest pieces: local-day period ranges, per-connector totals / top merchants / rule hits / feed ages
+│       ├── otp.ts                       # OtpStore: 60 s TTL in memory, hands a code to a waiting pull
+│       ├── utils/                       # env, logger, migration runner, keys.ts (merchant_key HMAC sub-key, normalizeMerchant, dedupeKey)
+│       ├── migrations/001_connectors.sql # connectors, connector_credentials, connector_events, connector_ledger_rows, connector_findings
+│       ├── __tests__/                   # reconcile, keys, ingest-schema, otp, digest, sync-refusals (32 tests, pure + in-memory fake)
+│       └── server.ts                    # PG-only MCP server (no ES client), /mcp + /health + REST, withToolLogging redactResults
+│
 ├── packages/system/                  # @ll5/system — local stdio MCP for this Mac (battery, cpu, memory, disk, system_health)
 │   └── src/
 │       ├── collectors.ts              # macOS shell-based collectors (pmset, vm_stat, df, ps, os module) + threshold-based health summary
@@ -552,3 +569,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: docs/decisions/DECISION-032-connectors-framework.md — connectors framework decision (two feeds, connectors MCP, read-only, cost guard, routes per source).
 2026-09-06: catalog package ids corrected after Play Store verification.
 2026-09-06: catalog gains paybox + water, bank packages (Discount, Leumi) and OneZero SMS sender.
+2026-09-06: packages/connectors/ — NEW connectors MCP (Phase 0: registry, encrypted events/ledger/findings, 8 tools, REST ingest); packages/shared/src/encryption.ts — NEW shared AES-256-GCM encrypt/decrypt/deriveSubKey (+ __tests__/encryption.test.ts); packages/shared/src/mcp/logged-server.ts — withToolLogging gains { redactResults } (+ __tests__/logged-server-redaction.test.ts); docker/docker-compose.prod.yml connectors: block; build-and-push.yml package lists; packages/ll5-run-shared/mcp-endpoints.json connectors; packages/e2e/src/mcp-contracts.test.ts connectors contract.

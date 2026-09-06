@@ -31,6 +31,12 @@
       "path": "/mcp",
       "auth": "agent-token",
       "correlationIds": true
+    },
+    "connectors": {
+      "subdomain": "mcp-connectors",
+      "path": "/mcp",
+      "auth": "agent-token",
+      "correlationIds": true
     }
   },
   "workers": {

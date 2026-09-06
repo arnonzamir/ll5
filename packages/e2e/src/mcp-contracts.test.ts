@@ -135,4 +135,20 @@ d('MCP contracts (live, read-only)', () => {
     expect(r.data!.messages!.length, 'read_messages returned [] for a live conversation — the ISS-028 failure').toBeGreaterThan(0);
     expect(typeof r.data!.messages![0].timestamp).toBe('string');
   });
+
+  it('connectors: list_connectors returns the catalog joined with per-user state', async () => {
+    const tools = await listTools('connectors');
+    expect(tools.sort()).toEqual([
+      'get_connector_digest', 'ingest_ledger_rows', 'list_connectors', 'query_events',
+      'query_ledger', 'resolve_finding', 'submit_otp', 'sync_connector',
+    ]);
+    const r = await call<{ connectors?: Array<{ id: string; enabled: boolean; status: string; has_credentials: boolean }> }>('connectors', 'list_connectors', {});
+    expect(r.isError, r.text.slice(0, 200)).toBe(false);
+    expect(Array.isArray(r.data?.connectors), 'list_connectors must return { connectors: [...] }').toBe(true);
+    const ids = r.data!.connectors!.map((c) => c.id);
+    for (const id of ['cal', 'max', 'isracard', 'bank', 'clalit', 'iec', 'municipality', 'home-assistant']) expect(ids).toContain(id);
+    expect(typeof r.data!.connectors![0].enabled).toBe('boolean');
+    expect(typeof r.data!.connectors![0].status).toBe('string');
+    expect(typeof r.data!.connectors![0].has_credentials).toBe('boolean');
+  });
 });
