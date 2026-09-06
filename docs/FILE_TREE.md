@@ -551,3 +551,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: packages/shared/src/connectors/{catalog,events,index}.ts — connector catalog + gateway→connectors event contract; test packages/shared/src/__tests__/connectors-catalog.test.ts.
 2026-09-06: docs/decisions/DECISION-032-connectors-framework.md — connectors framework decision (two feeds, connectors MCP, read-only, cost guard, routes per source).
 2026-09-06: catalog package ids corrected after Play Store verification.
+2026-09-06: catalog gains paybox + water, bank packages (Discount, Leumi) and OneZero SMS sender.
