@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (19:10) — Storage schema approved
+
+Arnon asked whether ledger data lives in Financy's schema or ours; answer: ours (normalized rows, source-specific fields inside the encrypted payload, mapping at the adapter boundary). Approved and recorded as a DECISION-032 amendment.
+
 ## 2026-09-06 (18:50) — Finance page + sensitive-page step-up (live 19:00)
 
 Arnon: a dashboard page concentrating finance data with interaction, cataloged as sensitive with identity validation. DECISION-033: `SENSITIVE_PATHS` catalog (`/finance`, `/settings/connectors`), password re-validation against the gateway sets a 15-minute HMAC step-up cookie enforced in the middleware and in every server action behind those pages. Merged `bd24277`, run 34043508476: deploy green, e2e flaked on the messaging read contract (5 s timeout on a slow Evolution read; raised to 20 s, job re-run). Live: `/finance`, `/verify`, `/settings/connectors` all redirect to login without a session; the step-up round trip needs a browser session to verify. `/finance` (ledger with filters and pagination, period summary, events, findings, mark-merchant-known, sync now) over the connectors MCP; `list_connectors` gains a `snapshot` (accounts, connections, data_through).

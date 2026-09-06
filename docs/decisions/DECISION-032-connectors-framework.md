@@ -19,6 +19,10 @@ Arnon wants the assistant to see his cards, bank, HMO (Clalit), municipality, bi
 
 Arnon: "we won't scrape banks or anything fragile." Routes are now exactly three: phone notification/SMS events (cards, bank, PayBox, Clalit, IEC, water), the licensed Financy API for every bank and card ledger, and the official Home Assistant API for the house (IEC and water readings can ride on it later). Removed: the `scraper_credentials` and `vault_browser_login` auth types, the `israeli-bank-scrapers`/moneyman plan, the weekly agent-driven portal skill, and the `municipality` entry (nothing non-fragile feeds it; Arnona arrives through PayBox and email). The UI is a picker: choose connectors, configure only the chosen ones.
 
+## Amendment (2026-09-06 19:10, Arnon: "Good! I approve this approach") — storage schema
+
+Approved: LL5 holds ledger and event data in its own normalized schema (`connector_ledger_rows` / `connector_events`: external id, kind, absolute amount, currency, occurred/posted time, masked account ref, HMAC merchant key, encrypted payload). Source-specific fields (Financy category, status, installments, provider, original amount) live only inside the encrypted payload and are returned as fields by the tools, never as columns; promoting one to a column is a migration. Adapters translate at the boundary; no source schema leaks past it.
+
 ## Alternatives considered
 
 - Extend the health MCP (has the credential/adapter skeleton): rejected, different domain and different sensitivity boundary.
