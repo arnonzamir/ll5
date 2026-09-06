@@ -63,7 +63,7 @@ export const ConnectorPatchSchema = z
 
 export const CredentialsBodySchema = z
   .object({
-    auth_type: z.enum(['scraper_credentials', 'api_token', 'vault_browser_login', 'oauth']),
+    auth_type: z.enum(['api_token', 'oauth']), // no scrapers, no portal automation (2026-09-06)
     secret: z.record(z.unknown()).refine((s) => Object.keys(s).length > 0, 'secret must not be empty'),
   })
   .strict();

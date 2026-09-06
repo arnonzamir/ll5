@@ -4,6 +4,8 @@ External-account feeds for LL5: credit cards, bank, Clalit (HMO), municipality, 
 
 Two feeds per source. An **event** feed is near-real-time and cheap (the phone's notification listener parsing a source's push/SMS, or a Home Assistant automation posting a state change). A **ledger** feed is a batch pull (scraper, portal login, official API). A reconciler matches events to ledger rows; what does not match, and feeds that go quiet, become **findings**. The agent is woken only by a small rule set; everything else is a notable event in the situation snapshot and a line in the morning brief. ISS-033 (83 triggers, $72 in one hour from one WhatsApp group) is the failure this design must not repeat.
 
+**Amendment 2026-09-06 16:20 (Arnon):** no scrapers and no portal automation. Auth types are `none` (phone events), `api_token` (Home Assistant) and `oauth` (Financy). Sections 4 and 9 below still describe the scraper and vault-skill routes as originally proposed; they are superseded — see DECISION-032 amendment.
+
 ## 1. What exists today
 
 | Component | Evidence | Verdict |

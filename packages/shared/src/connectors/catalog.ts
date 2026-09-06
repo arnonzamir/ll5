@@ -10,7 +10,8 @@
  * on the phone.
  */
 export type ConnectorKind = 'event' | 'ledger' | 'stream';
-export type ConnectorAuthType = 'none' | 'scraper_credentials' | 'vault_browser_login' | 'api_token' | 'oauth';
+/** No scrapers and no portal automation (Arnon, 2026-09-06): only phone events, official APIs and a licensed aggregator. */
+export type ConnectorAuthType = 'none' | 'api_token' | 'oauth';
 export type ConnectorSensitivity = 'financial' | 'medical' | 'civic' | 'utility' | 'home';
 export type ConnectorEventSource = 'phone' | 'webhook' | null;
 
@@ -34,45 +35,45 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
   {
     id: 'cal',
     label: 'Cal (Visa Cal)',
-    kinds: ['event', 'ledger'],
-    auth_type: 'scraper_credentials',
+    kinds: ['event'],
+    auth_type: 'none',
     event_source: 'phone',
     android_packages: ['com.onoapps.cal4u'],
     sms_senders: ['Cal', 'כאל'],
-    default_schedule_minutes: 720,
+    default_schedule_minutes: null,
     sensitivity: 'financial',
   },
   {
     id: 'max',
     label: 'Max',
-    kinds: ['event', 'ledger'],
-    auth_type: 'scraper_credentials',
+    kinds: ['event'],
+    auth_type: 'none',
     event_source: 'phone',
     android_packages: ['com.ideomobile.leumicard'],
     sms_senders: ['max', 'MAX', 'מקס'],
-    default_schedule_minutes: 720,
+    default_schedule_minutes: null,
     sensitivity: 'financial',
   },
   {
     id: 'isracard',
     label: 'Isracard',
-    kinds: ['event', 'ledger'],
-    auth_type: 'scraper_credentials',
+    kinds: ['event'],
+    auth_type: 'none',
     event_source: 'phone',
     android_packages: ['com.isracard.hatavot', 'il.co.isracard.MobileDashboard'],
     sms_senders: ['Isracard', 'ישראכרט'],
-    default_schedule_minutes: 720,
+    default_schedule_minutes: null,
     sensitivity: 'financial',
   },
   {
     id: 'bank',
-    label: 'Bank account (Discount, Leumi, OneZero)',
-    kinds: ['event', 'ledger'],
-    auth_type: 'scraper_credentials',
+    label: 'Bank notifications (Discount, Leumi, OneZero)',
+    kinds: ['event'],
+    auth_type: 'none',
     event_source: 'phone',
     android_packages: ['com.ideomobile.discount', 'com.leumi.leumiwallet'],
     sms_senders: ['Discount', 'דיסקונט', 'Leumi', 'לאומי', 'ONEZEROBANK'],
-    default_schedule_minutes: 1440,
+    default_schedule_minutes: null,
     sensitivity: 'financial',
   },
   {
@@ -89,8 +90,8 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
   {
     id: 'clalit',
     label: 'Clalit (HMO)',
-    kinds: ['event', 'ledger'],
-    auth_type: 'vault_browser_login',
+    kinds: ['event'],
+    auth_type: 'none',
     event_source: 'phone',
     android_packages: ['clalit.android'],
     sms_senders: ['Clalit', 'כללית'],
@@ -100,12 +101,12 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
   {
     id: 'iec',
     label: 'Israel Electric Corporation',
-    kinds: ['event', 'ledger'],
-    auth_type: 'api_token',
+    kinds: ['event'],
+    auth_type: 'none',
     event_source: 'phone',
     android_packages: ['com.ewavemobile.electriccompany'],
     sms_senders: ['IEC', 'חברת החשמל'],
-    default_schedule_minutes: 60,
+    default_schedule_minutes: null,
     sensitivity: 'utility',
   },
   {
@@ -118,15 +119,6 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
     sms_senders: ['MayanotH'],
     default_schedule_minutes: null,
     sensitivity: 'utility',
-  },
-  {
-    id: 'municipality',
-    label: 'Municipality (city4u)',
-    kinds: ['ledger'],
-    auth_type: 'vault_browser_login',
-    event_source: null,
-    default_schedule_minutes: null,
-    sensitivity: 'civic',
   },
   {
     id: 'home-assistant',
@@ -144,7 +136,7 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
     // arrive under cal / max / isracard / bank; the reconciler matches them
     // user-wide against these rows.
     id: 'financy',
-    label: 'Financy (open-banking aggregator: all banks and cards)',
+    label: 'Financy (licensed open-banking aggregator: the ledger for every bank and card)',
     kinds: ['ledger'],
     auth_type: 'oauth',
     event_source: null,

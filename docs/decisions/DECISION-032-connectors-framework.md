@@ -15,6 +15,10 @@ Arnon wants the assistant to see his cards, bank, HMO (Clalit), municipality, bi
 5. **Routes per source** (from the research): cards by notification capture now and `israeli-bank-scrapers` (via moneyman) for ledgers later; Home Assistant for the house and for IEC/water/gas; Clalit and municipality as a weekly agent skill through the vault; no direct open-banking APIs; Financy considered if a paid, credential-free ledger is wanted.
 6. **Open questions decided by standing authorization:** OTP by chat paste first (SMS forwarding is a consent switch, off); connector tool results redacted from the audit log; retention 24 months ledger / 90 days raw text; family attribution later.
 
+## Amendment (2026-09-06 16:20, Arnon): no scrapers, nothing fragile
+
+Arnon: "we won't scrape banks or anything fragile." Routes are now exactly three: phone notification/SMS events (cards, bank, PayBox, Clalit, IEC, water), the licensed Financy API for every bank and card ledger, and the official Home Assistant API for the house (IEC and water readings can ride on it later). Removed: the `scraper_credentials` and `vault_browser_login` auth types, the `israeli-bank-scrapers`/moneyman plan, the weekly agent-driven portal skill, and the `municipality` entry (nothing non-fragile feeds it; Arnona arrives through PayBox and email). The UI is a picker: choose connectors, configure only the chosen ones.
+
 ## Alternatives considered
 
 - Extend the health MCP (has the credential/adapter skeleton): rejected, different domain and different sensitivity boundary.
