@@ -5,6 +5,8 @@ import { raiseAlert, clearAlert, type AlertSeverity } from '../utils/alerting.js
 import { firingAlertKeys } from '../utils/agent-liveness.js';
 import { getBridgeLiveness } from '../utils/whatsapp-bridge-liveness.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
+import { CONNECTOR_CATALOG } from '@ll5/shared';
+import { connectorEventAgeMinutes } from '../connectors/liveness.js';
 
 interface AnomalyMonitorConfig {
   intervalMinutes: number;
@@ -296,6 +298,13 @@ export class AnomalyMonitor {
     }
   }
 
+  /** Minutes since this gateway last received a phone event for the connector; null = not observed since start. */
+  connectorEventAgeMinutes(connectorId: string): number | null {
+    const age = connectorEventAgeMinutes(this.config.userId, connectorId);
+    if (age === null && process.uptime() < 15 * 60) return null; // fresh process: nothing observed yet
+    return age; // still null past 15 min — unknown stays unknown until the first event (in-memory only)
+  }
+
   // --- detectors -----------------------------------------------------------
 
   private async runStaleness(c: StalenessCheck): Promise<boolean> {
@@ -451,8 +460,36 @@ export class AnomalyMonitor {
  * mismatch) is added once record_moment moments are shipped to ES (Phase B).
  * Add a metric = push one object here.
  */
+/**
+ * Connector event-feed staleness (docs/design/connectors.md, Section 8): one
+ * check per phone-fed catalog connector that actually has a package or SMS
+ * sender to listen to. `ageMinutes` reads the in-memory last-event map
+ * (connectors/liveness.ts): null = nothing observed since this process started
+ * = "unknown, do not fire" (the staleness detector never alerts on null), so a
+ * restart re-arms the check on the first event — same stand-down idiom as the
+ * bridge-liveness skipIf above. A dead notification listener (channel.mirror)
+ * is the cause, not the connector, hence suppressedBy.
+ */
+export const CONNECTOR_EVENTS_MAX_MINUTES = 48 * 60;
+
+export function buildConnectorChecks(): Check[] {
+  return CONNECTOR_CATALOG
+    .filter((c) => c.event_source === 'phone' && ((c.android_packages?.length ?? 0) > 0 || (c.sms_senders?.length ?? 0) > 0))
+    .map((c) => ({
+      kind: 'staleness' as const,
+      key: `connector.${c.id}.events`,
+      suppressedBy: ['channel.mirror'],
+      label: `${c.label} event feed`,
+      maxMinutes: CONNECTOR_EVENTS_MAX_MINUTES,
+      severity: 'warning' as const,
+      suggestion: `No ${c.label} notification has reached the gateway for two days. Check that the phone's connector capture is on for this app, that the app still sends transaction pushes, and the app_notification path in the gateway log.`,
+      ageMinutes: async (m: AnomalyMonitor) => m.connectorEventAgeMinutes(c.id),
+    }));
+}
+
 function buildChecks(): Check[] {
   return [
+    ...buildConnectorChecks(),
     // FRESHNESS — "did it stop". The narrative loop calls list_narrative_work
     // every ~20 min (Claude Code variant) or ~60 min (opencode variant, sleep 3600s).
     // maxMinutes=90 accommodates the opencode cadence (catches a double-missed cycle).

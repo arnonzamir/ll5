@@ -15,6 +15,7 @@ export {
   type PushSleepSegmentItem,
   type PushSleepClassifyItem,
   type PushCurrentPlaceItem,
+  type PushAppNotificationItem,
   type PushItem,
   type WebhookPayload,
   type ItemResult,
