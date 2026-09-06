@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 vi.mock('../utils/alerting.js', () => ({ raiseAlert: async () => {}, clearAlert: async () => {} }));
 vi.mock('../utils/scheduler-health.js', () => ({ withSchedulerHealth: (_n: string, fn: () => Promise<void>) => fn() }));
 
+import { CONNECTOR_CATALOG } from '@ll5/shared';
 import { AnomalyMonitor, buildConnectorChecks, CONNECTOR_EVENTS_MAX_MINUTES } from '../scheduler/anomaly-monitor.js';
 import { recordConnectorEvent, resetConnectorLiveness } from '../connectors/liveness.js';
 
@@ -16,15 +17,19 @@ describe('connector event-feed staleness checks (derived from CONNECTOR_CATALOG)
   it('one check per phone-fed connector that has a package or SMS sender; 48 h; suppressed by channel.mirror', () => {
     const checks = buildConnectorChecks();
     const keys = checks.map((c) => c.key).sort();
-    expect(keys).toEqual(['connector.cal.events', 'connector.clalit.events', 'connector.iec.events', 'connector.isracard.events', 'connector.max.events']);
+    // Derived from the catalog so a new entry (paybox, water, bank packages) is covered without editing this test.
+    const expected = CONNECTOR_CATALOG
+      .filter((c) => c.event_source === 'phone' && ((c.android_packages?.length ?? 0) > 0 || (c.sms_senders?.length ?? 0) > 0))
+      .map((c) => `connector.${c.id}.events`).sort();
+    expect(keys).toEqual(expected);
+    expect(keys).toEqual(expect.arrayContaining(['connector.cal.events', 'connector.max.events', 'connector.isracard.events', 'connector.clalit.events']));
     for (const c of checks) {
       expect(c.kind).toBe('staleness');
       expect(c.suppressedBy).toEqual(['channel.mirror']);
       expect((c as { maxMinutes: number }).maxMinutes).toBe(CONNECTOR_EVENTS_MAX_MINUTES);
       expect(CONNECTOR_EVENTS_MAX_MINUTES).toBe(48 * 60);
     }
-    // bank has no packages/senders yet and municipality/home-assistant are not phone-fed
-    expect(keys).not.toContain('connector.bank.events');
+    // municipality (ledger-only) and home-assistant (webhook) are not phone-fed
     expect(keys).not.toContain('connector.municipality.events');
     expect(keys).not.toContain('connector.home-assistant.events');
   });

@@ -36,7 +36,9 @@ function check(input: ParserInput, e: Expect): void {
   if (e.foreign !== undefined) expect(ev!.foreign).toBe(e.foreign);
   if (e.occurred !== undefined) expect(ev!.occurred_at).toBe(e.occurred);
   expect(ev!.dedupe_key).toMatch(/^[0-9a-f]{64}$/);
-  expect(ev!.payload.text).toBe(input.text);
+  // Raw text is always kept — except OTP codes, which are redacted before storage.
+  if (e.kind === 'otp') expect(String(ev!.payload.text)).not.toMatch(/\d{4,8}/);
+  else expect(ev!.payload.text).toBe(input.text);
   expect(ev!.payload.post_time).toBe(input.post_time);
 }
 
@@ -125,6 +127,90 @@ describe('cal parser (no public fixture — generic shape from research Section 
     app('cal', 'com.onoapps.cal4u', 'זיכוי בסך 120 ₪ מ-SUPER PHARM נרשם בכרטיסך 4321', 'Cal'),
     { kind: 'refund', amount: 120, currency: 'ILS' },
   ));
+});
+
+describe('clalit parser (real SMS templates from the phone, 2026-09-06, anonymized)', () => {
+  const S = 'CLALIT';
+  it('appointment set → kind appointment at the stated Jerusalem time, doctor + clinic + action', () => {
+    const ev = parse(sms('clalit', S, "שלום ישראל, נקבע לך תור לד\"ר לוי כהן ב- 06/09/2026, יום א', בשעה 17:40, במרפאת מרפאת פסגת זכרון. אם ברצונך לבטל את התור, היכנס לאפליקציה."));
+    expect(ev?.kind).toBe('appointment');
+    expect(ev?.occurred_at).toBe('2026-09-06T17:40:00+03:00');
+    expect(ev?.amount).toBeNull();
+    expect(ev?.payload).toMatchObject({ action: 'set', doctor: 'ד"ר לוי כהן', clinic: 'מרפאת פסגת זכרון', parser: 'clalit' });
+  });
+  it('appointment in winter time gets the +02:00 offset', () => {
+    const ev = parse(sms('clalit', 'Clalit', "שלום ישראל, נקבע לך תור לד\"ר לוי כהן ב- 15/01/2027, יום ו', בשעה 08:30, במרפאת מרפאת רמת אביב."));
+    expect(ev?.occurred_at).toBe('2027-01-15T08:30:00+02:00');
+  });
+  it('appointment cancelled → action cancelled', () => {
+    const ev = parse(sms('clalit', S, "שלום ישראל, בוטל התור לד\"ר לוי כהן ב- 06/09/2026, יום א', בשעה 17:40."));
+    expect(ev?.kind).toBe('appointment');
+    expect(ev?.occurred_at).toBe('2026-09-06T17:40:00+03:00');
+    expect(ev?.payload).toMatchObject({ action: 'cancelled', doctor: 'ד"ר לוי כהן', clinic: null });
+  });
+  it('prescription ready → notice with subject', () => {
+    const ev = parse(sms('clalit', S, 'שלום ישראל, המרשם שקיבלת ממתין לך בבית המרקחת!'));
+    expect(ev?.kind).toBe('notice');
+    expect(ev?.amount).toBeNull();
+    expect(ev?.payload.subject).toBe('prescription_ready');
+  });
+  it('OTP with maqaf wording → otp, code redacted in the payload', () => {
+    const ev = parse(sms('clalit', S, '250975 הוא קוד האימות החד־פעמי לכללית און־ליין, והוא תקף ל־5 הדקות הקרובות. אין למסור את הקוד לאף אחד.'));
+    expect(ev?.kind).toBe('otp');
+    expect(ev?.amount).toBeNull();
+    expect(String(ev?.payload.text)).not.toContain('250975');
+    expect(String(ev?.payload.text)).toContain('<redacted>');
+    expect(String(ev?.payload.normalized)).not.toContain('250975');
+  });
+});
+
+describe('generic parser for the other catalog ids (bank, paybox, water)', () => {
+  it('water bill from MayanotH: ע"ס without a currency token → bill, 729.27 ILS', () => {
+    const ev = parse(sms('water', 'MayanotH', 'ישראלי ישראל שלום, בימים אלו מופק חשבון המים התקופתי ע"ס 729.27. מצ"ב לנוחיותך קישור לתשלום מהיר https://example.invalid/pay'));
+    expect(ev?.connector_id).toBe('water');
+    expect(ev?.kind).toBe('bill');
+    expect(ev?.amount).toBe(729.27);
+    expect(ev?.currency).toBe('ILS');
+    expect(ev?.payload.parser).toBe('sms-generic');
+  });
+  it('OneZero bank OTP with <#> prefix → otp, code redacted', () => {
+    const ev = parse(sms('bank', 'ONEZEROBANK', '<#>(בנק וואן זירו) קוד האימות שלך הוא 467834'));
+    expect(ev?.kind).toBe('otp');
+    expect(String(ev?.payload.text)).toBe('<#>(בנק וואן זירו) קוד האימות שלך הוא <redacted>');
+  });
+  it('Cal OTP for bit registration → otp, never a charge', () => {
+    const ev = parse(sms('cal', 'Cal', '8822 הינו קוד האימות החד פעמי של כרטיס האשראי שלך לרישום באפליקציית bit.'));
+    expect(ev?.kind).toBe('otp');
+    expect(ev?.amount).toBeNull();
+    expect(String(ev?.payload.text)).not.toContain('8822');
+  });
+  it('unknown wording from a catalog package with no amount → unknown, raw fields kept', () => {
+    const ev = parse(app('paybox', 'com.payboxapp', 'יש לך בקשה חדשה מדנה', 'PayBox'));
+    expect(ev?.kind).toBe('unknown');
+    expect(ev?.amount).toBeNull();
+    expect(ev?.payload).toMatchObject({ package: 'com.payboxapp', title: 'PayBox', text: 'יש לך בקשה חדשה מדנה', big_text: null });
+  });
+  it('app push fallback: amount + no known wording → charge, title as merchant candidate', () => {
+    const ev = parse(app('bank', 'com.ideomobile.discount', 'שולם 349.90 ₪', 'רמי לוי שיווק השקמה'));
+    expect(ev?.kind).toBe('charge');
+    expect(ev?.amount).toBe(349.9);
+    expect(ev?.currency).toBe('ILS');
+    expect(ev?.merchant).toBe('רמי לוי שיווק השקמה');
+    expect(ev?.payload.merchant_source).toBe('title');
+  });
+  it('app push fallback: currency before the number; a brand-name title is not a merchant', () => {
+    const ev = parse(app('paybox', 'com.payboxapp', '₪120 הועברו בהצלחה', 'PayBox'));
+    expect(ev?.kind).toBe('charge');
+    expect(ev?.amount).toBe(120);
+    expect(ev?.merchant).toBeNull();
+    expect(ev?.payload.merchant_source).toBeUndefined();
+  });
+  it('SMS fallback (no package) with an amount but no wording stays unknown, amount dropped', () => {
+    const ev = parse(sms('bank', 'Leumi', 'יתרה: 5,000 ₪'));
+    expect(ev?.kind).toBe('unknown');
+    expect(ev?.amount).toBeNull();
+    expect(ev?.payload.text).toBe('יתרה: 5,000 ₪');
+  });
 });
 
 describe('negatives — never a charge', () => {

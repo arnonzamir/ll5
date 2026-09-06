@@ -29,6 +29,7 @@ export function normalizeText(s: string | null | undefined): string {
     .replace(/\u00a0/g, ' ')
     .replace(/[״”“]/g, '"')
     .replace(/[׳’‘]/g, "'")
+    .replace(/[־–—]/g, '-') // maqaf / dashes ("החד־פעמי", "ל־5")
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -52,6 +53,9 @@ const AMOUNT_THEN_CURRENCY = new RegExp(`(${AMOUNT_ALT})\\s*(${CURRENCY_ALTS})(?
 const CURRENCY_THEN_AMOUNT = new RegExp(`(${CURRENCY_ALTS})\\s*(${AMOUNT_ALT})(?!\\d)`, 'u');
 // "בסך 29.75 ש"ח" / "ב 5,564.59 ש"ח" / "סכום של 11411 ש"ח" — the hint makes the pick unambiguous.
 const HINTED = new RegExp(`(?:בסך|ע"ס|סכום של|ב-|ב)\\s*(${AMOUNT_ALT})\\s*(${CURRENCY_ALTS})(?![A-Za-z\\u05d0-\\u05ea])`, 'u');
+// "ע"ס 729.27." / "על סך 120" — an explicit sum hint without a currency token means shekels
+// (the water bill SMS from MayanotH writes it this way).
+const HINTED_NO_CURRENCY = new RegExp(`(?:ע"ס|על\\s+סך|בסך\\s+של)\\s*(${AMOUNT_ALT})(?![\\d/:])`, 'u');
 
 export function currencyCode(token: string): string {
   const t = token.replace(/\s+/g, '');
@@ -86,7 +90,12 @@ export function extractAmount(text: string): AmountMatch | null {
   const a = AMOUNT_THEN_CURRENCY.exec(text);
   const c = CURRENCY_THEN_AMOUNT.exec(text);
   const pick = a && c ? (a.index <= c.index ? a : c) : (a ?? c);
-  if (!pick) return null;
+  if (!pick) {
+    const n = HINTED_NO_CURRENCY.exec(text);
+    const amount = n ? parseAmountNumber(n[1]) : null;
+    if (n && amount !== null) return { amount, currency: 'ILS', start: n.index, end: n.index + n[0].length };
+    return null;
+  }
   const amountRaw = pick === a ? pick[1] : pick[2];
   const curRaw = pick === a ? pick[2] : pick[1];
   const amount = parseAmountNumber(amountRaw);
@@ -174,7 +183,7 @@ export function extractOccurredAt(text: string, postTime: string): string {
 export const OTP_RE = /(קוד\s*(?:ה?אימות|ה?זיהוי|ה?כניסה|חד[- ]פעמי|ה?אבטחה|ה?גישה)|סיסמ[הא]\s*(?:חד[- ]פעמית|זמנית)|הקוד\s*(?:שלך|הוא)|\bOTP\b|verification code|one[- ]time (?:code|password|passcode)|security code)/iu;
 export const REFUND_RE = /(זיכוי|זוכה|זוכית|הוחזר|החזר\s+כספי|refund|credited)/iu;
 export const DECLINED_RE = /(נדחתה|לא\s+אושרה|סורבה|declined)/iu;
-export const BILL_RE = /(מסכמים\s+עוד\s+חודש|חיוב\s+חודשי|החיוב\s+החודשי|דף\s+החיוב|סך\s+החיוב|לתשלום\s+ב-?\s*\d)/iu;
+export const BILL_RE = /(מסכמים\s+עוד\s+חודש|חיוב\s+חודשי|החיוב\s+החודשי|דף\s+החיוב|סך\s+החיוב|לתשלום\s+ב-?\s*\d|מופק\s+חשבון|חשבון\s+(?:המים|החשמל|הגז|הארנונה|הטלפון)|חשבון\s+\S+\s+התקופתי|חשבונית|invoice|bill\s+(?:is|of))/iu;
 export const CHARGE_RE = /(אושרה\s+עסקה|אושרה\s+העסקה|חייב\s+את\s+כרטיס|חוייב|חויב\s+ב|חיוב\s+(?:על|בסך|ב)|בוצעה\s+עסקה|נרשמה\s+עסקה|עסקה\s+(?:ב|על\s+סך|בסך|בוצעה)|עסקת\s+(?:אינטרנט|חו"ל|חול)|רכישה\s+ב|purchase|charged|transaction\s+(?:of|approved)|approved)/iu;
 export const NOTICE_RE = /(מסגרת|יתרה\s+הפנויה|יתרת\s+(?:המסגרת|האשראי)|ניצול\s+מסגרת|80%|תזכורת)/iu;
 export const MARKETING_RE = /(הטבה|מבצע|הנחה|קמפיין|הצטרפ|הורידו|מועדון|לחצ[ו]?\s+כאן|לחץ\s+כאן|נקודות|מתנה|חדש!|כנסו|גלו|הזמנה\s+מיוחדת|לכל\s+הפרטים)/iu;
@@ -186,8 +195,22 @@ export interface KindDecision {
   keepAmount: boolean;
 }
 
-export function classifyKind(text: string, hasAmount: boolean): KindDecision {
-  if (OTP_RE.test(text) && /\b\d{4,8}\b/.test(text)) return { kind: 'otp', keepAmount: false };
+export interface ClassifyOptions {
+  /**
+   * App pushes from a catalog package: an amount with no other recognizable
+   * shape is still a charge (Phase 1 collects real samples; the zenmoney SMS
+   * wordings are not what the apps push). Marketing wording still wins.
+   */
+  amountImpliesCharge?: boolean;
+}
+
+/** OTP codes never reach storage: every 4-8 digit run is replaced. */
+export function redactCodes(s: string | null): string | null {
+  return s === null ? null : s.replace(/\d{4,8}/g, '<redacted>');
+}
+
+export function classifyKind(text: string, hasAmount: boolean, opts: ClassifyOptions = {}): KindDecision {
+  if (OTP_RE.test(text) && /(?<!\d)\d{4,8}(?!\d)/.test(text)) return { kind: 'otp', keepAmount: false };
   if (REFUND_RE.test(text) && hasAmount) return { kind: 'refund', keepAmount: true };
   if (DECLINED_RE.test(text)) return { kind: 'notice', keepAmount: hasAmount };
   if (BILL_RE.test(text) && hasAmount) return { kind: 'bill', keepAmount: true };
@@ -196,7 +219,42 @@ export function classifyKind(text: string, hasAmount: boolean): KindDecision {
   // alone (no charge keyword) falls through to notice/unknown with amount null.
   if (CHARGE_RE.test(text) && hasAmount) return { kind: 'charge', keepAmount: true };
   if (NOTICE_RE.test(text)) return { kind: 'notice', keepAmount: false };
+  if (hasAmount && opts.amountImpliesCharge && !MARKETING_RE.test(text)) return { kind: 'charge', keepAmount: true };
   return { kind: 'unknown', keepAmount: false };
+}
+
+// ---------------------------------------------------------------------------
+// Zoned wall-clock → ISO (for sources that state a local time without an offset)
+// ---------------------------------------------------------------------------
+
+function zoneOffsetMinutes(utcMs: number, tz: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(utcMs));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? '0');
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'));
+  return Math.round((asUtc - utcMs) / 60_000);
+}
+
+/** ISO-8601 with the zone's offset for the given wall-clock time in `tz` (DST-aware via Intl). */
+export function zonedIso(year: number, month: number, day: number, hh: number, mm: number, tz: string): string {
+  const naive = Date.UTC(year, month - 1, day, hh, mm, 0);
+  let utc = naive - zoneOffsetMinutes(naive, tz) * 60_000;
+  utc = naive - zoneOffsetMinutes(utc, tz) * 60_000; // second pass settles a DST edge
+  return isoWithOffset(utc, zoneOffsetMinutes(utc, tz));
+}
+
+/** dd/mm/yyyy (or dd/mm/yy) + hh:mm from the text as a zoned ISO, or null when either is missing. */
+export function extractZonedDateTime(text: string, tz: string): string | null {
+  const d = DATE_RE.exec(text);
+  const t = TIME_RE.exec(text);
+  if (!d || !t) return null;
+  const day = Number(d[1]);
+  const month = Number(d[2] ?? d[4] ?? d[6]);
+  const yearRaw = d[3] ?? d[5] ?? d[7];
+  if (!yearRaw || !(day >= 1 && day <= 31 && month >= 1 && month <= 12)) return null;
+  const year = yearRaw.length === 2 ? 2000 + Number(yearRaw) : Number(yearRaw);
+  return zonedIso(year, month, day, Number(t[1]), Number(t[2]), tz);
 }
 
 // ---------------------------------------------------------------------------

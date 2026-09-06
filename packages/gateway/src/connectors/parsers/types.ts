@@ -16,4 +16,4 @@ export interface ParserInput {
   post_time: string;
 }
 
-export type ParserName = 'cal' | 'max' | 'isracard' | 'sms-generic';
+export type ParserName = 'cal' | 'max' | 'isracard' | 'clalit' | 'sms-generic';
