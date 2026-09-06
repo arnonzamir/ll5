@@ -44,3 +44,14 @@ Same authorization, same Step 1 and Step 2. Step 3 is replaced by the post-upgra
 8. DECISION-030 first night: no agent message to the user between 23:30 and 06:30 local (`ll5_chat_messages` role=assistant, channel web) except level critical; `held_messages` rows released at ~06:30 as one digest (`metadata.kind = quiet_hours_digest`); at least one `NOT SENT` refusal in the transcript followed by a shorter resend (`grep -c "NOT SENT"` on the session jsonl); `GET /me/delivery-mode` answers.
 9. Behaviour sanity on Opus 5: `CONSOLIDATE-TALLY` from the 02:00 pass (observations > 0), `note_observation` count for the day, replies to Arnon's messages (latency from `ll5_chat_messages`), no `behavior.*` alert.
 10. Write the dated PROGRESS entry + update ISSUES rows; schedule the third run for 2026-09-07 03:12 only if something needed a fix, otherwise the next fixed date is the 7-day readout on 2026-09-12 (`scripts/agent-baseline.sh --since 2026-09-05 --until 2026-09-12`, control `docs/reviews/2026-09-05/agent-baseline-pre-upgrade.md`).
+
+**Second run did not fire:** Arnon's laptop lost power overnight; the session and its cron died. Run by hand 2026-09-06 09:50–10:20 IDT — findings in ISS-033 (pass killed at 02:07 by the cap restart; cap policy cost). Items 1, 3, 4, 5, 6, 7, 8 above verified; 2 failed (restarts hourly, no `requested by consolidate`); 9 partial (no tally).
+
+## Third run — 2026-09-07 03:12 IDT (ISS-033 verification)
+
+Same authorization, Step 1 and Step 2 as written, then:
+1. The pass completed: `CONSOLIDATE-TALLY` after 02:00 local, a `consolidation-pass` journal entry, and the watcher log's next `FRESH RESTART` line says `requested by consolidate`, not `context … >= cap`. No cap restart between 02:00 and 03:30 local.
+2. Cap policy: `FRESH RESTART (context N >= cap 200000)` lines at least 15 min apart, N mostly 200–260K (not 300K+). If N regularly exceeds 300K the trigger volume is outpacing the gap — lower `LL5_RESTART_MIN_GAP_SECS` to 600 (mid-level, reviewer, document).
+3. Cost: `scripts/esq.sh /ll5_turn_costs/_search '{"size":1000,"_source":["timestamp","cost_usd"],"query":{"range":{"timestamp":{"gte":"2026-09-06T00:00:00Z"}}}}'` summed per day — 09-06 full day vs $239 on 09-05; report the number to Arnon either way.
+4. Watcher provenance: `docker exec <agent> grep -c "CONTEXT_CAP_TOKENS:-200000" /workspace/ll5-run/scripts/mcp-autoheal-server.sh` = 1 and `mcp-autoheal-server.log` shows `watcher started` after the roll.
+5. Then the standing items: no `behavior.*`/`agent.*` alert, observations > 0, user-model history advanced (ISS-012), replies to Arnon normal. Next fixed date after this: the 7-day readout 2026-09-12.

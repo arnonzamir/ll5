@@ -505,6 +505,7 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-04: docs/runbooks/post-nightly-checkpoint.md — the scheduled 03:12 checkpoint runbook (verify the nightly hand-off, decide by severity, Phase 5 upgrade if clean).
 2026-09-05: docs/reviews/2026-09-05/agent-baseline-pre-upgrade.md — one-day control frozen before the Phase 5 roll; docker/Dockerfile.ll5-run-claude + build-and-push.yml pin 2.1.260.
 2026-09-05: docs/runbooks/post-nightly-checkpoint.md — second-run section (post-upgrade checks) appended.
+2026-09-06: docs/runbooks/post-nightly-checkpoint.md — second run done by hand (laptop power loss killed the cron); third-run section (ISS-033 verification) appended.
 2026-09-05: agent repo scripts/narrative-loop.sh + scripts/continuity-probe.sh default model claude-sonnet-5.
 2026-09-05: runbook second-run item 5 — first Sonnet-5 narrative run check.
 2026-09-05: packages/gateway/src/utils/agent-liveness.ts (+ __tests__/agent-liveness.test.ts) — heartbeat process liveness → agent.process_down / agent.launch_loop; migrations/045_agent_runtime_health.sql; anomaly-monitor `suppressedBy`.
