@@ -544,3 +544,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: gateway utils/group-coalescer.ts (+ __tests__/group-coalescer.test.ts, 12) — ISS-033 WhatsApp group-burst coalescing; processors/whatsapp-webhook.ts routes isGroup immediate/agent inserts through the singleton (flushWhatsAppGroupBursts exported).
 2026-09-06: packages/ll5-run-shared/CLAUDE.md trimmed 97 KB → 62 KB; new skills media/, vault-login/, location/ (moved sections); Eval rule record_moment → [[moment …]] line (coach-scan, evening-close, interview updated).
 2026-09-06: docs/decisions/DECISION-031-context-floor-and-trigger-fanout.md — the four ISS-033 levers (section budgets, persona trim, moment line, group burst coalescing); docs/reviews/2026-09-06/persona-trim-ledger.md — section-by-section ledger of the persona trim.
+2026-09-06: DECISION-031 verified live (agent session 8c5e686a); FILE_TREE unchanged otherwise.

@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (11:10) — DECISION-031 rolled and verified inside the container
+
+Gateway + awareness run 34019999497 green; run-claude run 34020281379 green, agent session `8c5e686a` from 07:55Z. Inside the container: persona 62,581 bytes, skills `location` / `media` / `vault-login` registered (20 skills), no `record_moment` tool, watcher at cap 200K / gap 15 min, `[[moment …]]` line written once per trigger (2 for 2) and absent from `chat_messages`, `active_context` truncated to 7.9 KB in the pack. Floor: first-message context 63.5K (was 75K); after two triggers and 26 assistant messages 96K (was ~120K). Left on the table: the operating-lessons block is 26.7 KB of the 78.5 KB start pack (DECISION-028 #4 loads all active lessons at start) — my earlier split had folded it into `active_context`; capping it is Arnon's call. Lessons-in-pack aside, the remaining floor is system prompt + tool schemas (26K) and the persona (~16K).
+
 ## 2026-09-06 (11:05) — DECISION-031: all four ISS-033 levers merged
 
 Lever A (section budgets, `574d910`), D (group burst coalescing, `de2db88`), B (persona 97 → 62 KB with `media` / `vault-login` / `location` skills, `6bdd127`) are on ll5 main; C (`[[moment …]]` line replacing the `record_moment` tool, plus a defensive strip on `push_to_user` / `reply`) is on agent main `bfb36a3`. Decision record `docs/decisions/DECISION-031-context-floor-and-trigger-fanout.md`; trim ledger `docs/reviews/2026-09-06/persona-trim-ledger.md`. Ship order: ll5 push with `[skip ci]` + dispatch `awareness,gateway`; after that lands, the agent repo push rolls run-claude once with persona and channel together (one cold start, not two). Verification at the 09-07 checkpoint: floor after the first trigger, assistant messages per trigger, system messages per hour during a group burst, $/day.
