@@ -18,6 +18,7 @@ import { getAllAgentOutputSnapshots } from './scheduler/agent-output-monitor.js'
 import { getSystemMessageFailureStats } from './utils/system-message.js';
 import { getSchedulerHealthSnapshot } from './utils/scheduler-health.js';
 import { getFcmStats } from './utils/fcm-sender.js';
+import { getConnectorCostGuardStats } from './processors/connector-event.js';
 import { getChatSearchIndexerStats } from './scheduler/chat-search-indexer.js';
 import { getWebhookStats } from './utils/webhook-stats.js';
 
@@ -258,6 +259,9 @@ export function createAdminRouter(
         fcm,
         chat_indexer: chatIndexer,
         webhook,
+        // Connector cost guard (docs/design/connectors.md, Section 8): immediate
+        // messages per connector per hour/day, coalesced bursts, digest-only count.
+        connectors: { cost_guard: getConnectorCostGuardStats() },
         databases: {
           postgres: { healthy: pgHealthy, error: pgError },
         },

@@ -497,6 +497,9 @@ services:
       ORCHESTRATOR_SECRET: ${ORCHESTRATOR_SECRET:-}
       GOOGLE_MCP_URL: http://google:3000
       GOOGLE_MCP_API_KEY: ${API_KEY}
+      # Connectors MCP ingest route (POST /api/events, docs/design/connectors.md).
+      # The gateway mints a user-scoped ll5 token from AUTH_SECRET for the call.
+      CONNECTORS_MCP_URL: http://connectors:3000
       WEBHOOK_TOKENS: ${WEBHOOK_TOKENS:-{}}
       GEOCODING_API_KEY: ${GEOCODING_API_KEY:-}
       FCM_SERVICE_ACCOUNT_PATH: /etc/fcm/fcm-service-account.json

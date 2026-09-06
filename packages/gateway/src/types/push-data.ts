@@ -253,7 +253,23 @@ const PushCurrentPlaceSchema = z.object({
   timestamp: z.string().datetime({ offset: true }),
 });
 
+// App notification — a raw notification from a CONNECTOR package (cards, bank,
+// HMO, utilities; the catalog in @ll5/shared decides which packages the phone
+// forwards). Unlike `message` items, nothing is parsed on the phone: the
+// gateway's pure parsers (src/connectors/parsers) turn title/text/big_text
+// into a connector event. `post_time` is the notification's own post time.
+const PushAppNotificationSchema = z.object({
+  type: z.literal('app_notification'),
+  package: z.string().min(1),
+  title: z.string().nullable(),
+  text: z.string().nullable(),
+  big_text: z.string().nullable(),
+  post_time: z.string().datetime({ offset: true }),
+  timestamp: z.string().datetime({ offset: true }).optional(),
+});
+
 const PushItemSchema = z.discriminatedUnion('type', [
+  PushAppNotificationSchema,
   PushLocationItemSchema,
   PushMessageItemSchema,
   PushCalendarItemSchema,
@@ -295,6 +311,7 @@ export type PushGeofenceTransitionItem = z.infer<typeof PushGeofenceTransitionSc
 export type PushSleepSegmentItem = z.infer<typeof PushSleepSegmentSchema>;
 export type PushSleepClassifyItem = z.infer<typeof PushSleepClassifySchema>;
 export type PushCurrentPlaceItem = z.infer<typeof PushCurrentPlaceSchema>;
+export type PushAppNotificationItem = z.infer<typeof PushAppNotificationSchema>;
 export type PushItem = z.infer<typeof PushItemSchema>;
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 

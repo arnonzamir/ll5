@@ -49,6 +49,8 @@ import { processBluetooth } from './processors/bluetooth.js';
 import { processGeofence } from './processors/geofence.js';
 import { processSleepSegment, processSleepClassify } from './processors/sleep.js';
 import { processCurrentPlace } from './processors/current-place.js';
+import { processConnectorEvent } from './processors/connector-event.js';
+import { connectorForPackage, connectorForSmsSender } from '@ll5/shared';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
@@ -292,12 +294,34 @@ async function processItem(
       sleep_classify: 'sleep',
       current_place: 'current_place',
     };
-    const sourceKey = sourceMap[item.type];
+    // Connector notifications are gated per connector (`connector_<id>`, the
+    // key the dashboard's /settings/connectors page writes). A package that is
+    // not in the catalog is dropped here: the phone should not forward it, and
+    // the gateway never stores raw text from an unknown app.
+    const appConnector = item.type === 'app_notification' ? connectorForPackage(item.package) : undefined;
+    if (item.type === 'app_notification' && !appConnector) {
+      logger.debug('[processItem][app_notification] package not in the connector catalog, dropped', { package: item.package });
+      return { index: itemIndex, type: item.type, status: 'ok' };
+    }
+    const sourceKey = appConnector ? `connector_${appConnector.id}` : sourceMap[item.type];
     if (sourceKey && pgPool && !await isSourceEnabled(pgPool, userId, sourceKey)) {
       return { index: itemIndex, type: item.type, status: 'ok' }; // silently skip
     }
 
     switch (item.type) {
+      case 'app_notification':
+        if (appConnector && pgPool) {
+          await processConnectorEvent(es, pgPool, userId, appConnector, {
+            connector_id: appConnector.id,
+            package: item.package,
+            sender: null,
+            title: item.title,
+            text: item.text,
+            big_text: item.big_text,
+            post_time: item.post_time,
+          });
+        }
+        break;
       case 'location': {
         const stored = await processLocation(
           es,
@@ -312,9 +336,32 @@ async function processItem(
         if (prevPointRef && stored) prevPointRef.current = stored;
         break;
       }
-      case 'message':
+      case 'message': {
         await processMessage(es, userId, item, pgPool, matcher);
+        // An SMS from a catalog sender (Cal / max / Isracard …) is ALSO a
+        // connector event. The SMS row above is stored exactly as before; this
+        // is an additional path, gated by the connector's own toggle, and its
+        // failure never fails the message item.
+        const smsConnector = item.app.toLowerCase() === 'sms' && !item.from_me ? connectorForSmsSender(item.sender) : undefined;
+        if (smsConnector && pgPool && await isSourceEnabled(pgPool, userId, `connector_${smsConnector.id}`)) {
+          try {
+            await processConnectorEvent(es, pgPool, userId, smsConnector, {
+              connector_id: smsConnector.id,
+              package: null,
+              sender: item.sender,
+              title: null,
+              text: item.body,
+              big_text: null,
+              post_time: item.timestamp,
+            });
+          } catch (err) {
+            logger.error('[processItem][message] connector path failed for SMS', {
+              connector: smsConnector.id, error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
         break;
+      }
       case 'calendar_event':
         await processCalendar(es, userId, item);
         break;
