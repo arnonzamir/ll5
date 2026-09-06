@@ -134,7 +134,7 @@ d('MCP contracts (live, read-only)', () => {
     expect(Array.isArray(r.data?.messages), 'read_messages must return { messages: [...] }').toBe(true);
     expect(r.data!.messages!.length, 'read_messages returned [] for a live conversation — the ISS-028 failure').toBeGreaterThan(0);
     expect(typeof r.data!.messages![0].timestamp).toBe('string');
-  });
+  }, 20_000); // Evolution reads take seconds on a busy bridge; 5 s flaked on 2026-09-06 (run 34043508476)
 
   it('connectors: list_connectors returns the catalog joined with per-user state', async () => {
     const tools = await listTools('connectors');
