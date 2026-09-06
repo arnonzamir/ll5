@@ -34,3 +34,6 @@ export * from './request-context.js';
 
 // ES fetch auth helper
 export * from './es-auth.js';
+
+// Connectors (docs/design/connectors.md): static catalog + event envelope contract.
+export * from './connectors/index.js';
