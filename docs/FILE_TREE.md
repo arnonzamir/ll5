@@ -592,3 +592,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: partial-deploy note after a failed push (PROGRESS 17:00).
 2026-09-06: trimmed catalog + picker verified live.
 2026-09-06: financy adapter reads /v2/connections for freshness (config.connections, data_through).
+2026-09-06: docs/decisions/DECISION-033-sensitive-pages-step-up.md — sensitive-page catalog + password re-validation (15-min step-up); /finance is the first member.

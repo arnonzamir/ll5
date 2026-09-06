@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (18:50) — Finance page + sensitive-page step-up (in progress)
+
+Arnon: a dashboard page concentrating finance data with interaction, cataloged as sensitive with identity validation. DECISION-033: `SENSITIVE_PATHS` catalog (`/finance`, `/settings/connectors`), password re-validation against the gateway sets a 15-minute HMAC step-up cookie enforced in the middleware and in every server action behind those pages. Worker building `/finance` (ledger with filters and pagination, period summary, events, findings, mark-merchant-known, sync now) over the connectors MCP; `list_connectors` gains a `snapshot` (accounts, connections, data_through).
+
 ## 2026-09-06 (18:40) — Financy running: first pull, freshness fields
 
 Arnon entered the Financy credentials at 15:29Z; "Sync now" pulled 7 Discount accounts (ILS + EUR checking, cards 0034/0026, securities, two loans) and 325 rows (June 7 – September 1) in 2.2 s; status ok, next scheduled pull in 6 h. Balances came back empty from Financy for Discount (adapter handles both documented shapes). Phone events already flowing: four Discount SMS in a week — three OTPs (`otp`, codes redacted), one marketing notice (`unknown`, no trigger). Improvement shipped: the adapter also reads `GET /v2/connections` (read-only) and stores `config.connections` (providerId, status, lastFetchedAt, dataThrough, hasError) and `config.data_through`, so a ledger that ends September 1 reads as "Financy data through 09-01", not a quiet bank; the call is tolerant to failure but rethrows auth/plan errors. Financy has no data webhooks (only connection/payment/session lifecycle); refresh is plan-cadenced (Starter 1/day, Pro 4/day) and the paid on-demand refresh is never called.
