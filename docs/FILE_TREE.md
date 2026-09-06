@@ -589,3 +589,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: connectors picker merged; Financy verified live.
 2026-09-06: scheduler test + e2e contract aligned with the trimmed catalog.
 2026-09-06: scheduler test alert key aligned too.
+2026-09-06: partial-deploy note after a failed push (PROGRESS 17:00).
