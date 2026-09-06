@@ -9,7 +9,7 @@ This is the **strategic layer** of your coaching. `situation-check` recognizes t
 
 Its durable output is **your plan**: a set of `create_tickler(kind: "instruction")` notes-to-future-self, each booked at a contextual lead time, so the right review fires at the right time without you re-deriving it. You stay mostly silent — at most one coaching message to the user.
 
-**How it runs.** A `[Coach Scan]` system message (the weekly scheduler) OR a manual `/coach-scan` invocation. Both run the same loop. It is **force-runnable on demand** — a reviewer can invoke `/coach-scan` once and inspect exactly what it scheduled and why via (a) `list_ticklers` (the `instruction` ticklers it created), (b) the journal entry it wrote, and (c) the `record_moment` it logged.
+**How it runs.** A `[Coach Scan]` system message (the weekly scheduler) OR a manual `/coach-scan` invocation. Both run the same loop. It is **force-runnable on demand** — a reviewer can invoke `/coach-scan` once and inspect exactly what it scheduled and why via (a) `list_ticklers` (the `instruction` ticklers it created), (b) the journal entry it wrote, and (c) the `[[moment …]]` line it ended with.
 
 **Discipline.** This is strategic and rare. **Bias hard to scheduling-and-journaling over messaging** — the opposite of `situation-check`'s eager appetite. Ground every claim in a tool read before asserting it (Hard Rule 12 — never confabulate the user's goals, dates, or commitments). The scan's job is mostly to *book your own attention*, not to talk.
 
@@ -82,7 +82,7 @@ If the scan found nothing to schedule or say, there's nothing to review — skip
 
 **c) `write_journal` the scan outcome** (mandatory). One `type: "context"` (or `type: "thought"`) entry summarizing what the scan found and decided: which goals you checked, what you judged drifting/steady, what reviews you scheduled (list the tickler anchors), and whether you messaged the user or stayed silent. If nothing fired anywhere, that's still a one-line entry: "coach-scan: scanned N goals / M threads, all on-track, nothing scheduled" — so the silence is visible and reviewable.
 
-**d) `record_moment` (mandatory — this is a proactive turn).** A `[Coach Scan]` wake is a proactive turn, so call `record_moment` exactly once (per the Eval rule in CLAUDE.md): `category: "coach/scan"`, `inferred_sentiment` (one phrase on how the user likely feels about where things stand), `decision` (`ping_now` if you sent the one message, else `suppress` for schedule-and-journal-only), and `reason` (one sentence). A pure suppress (you only scheduled + journaled) still gets a `record_moment`. On a manual `/coach-scan` that the user explicitly invoked, treat it like the proactive scan it is and still record the moment — the value of the scan is in what it scheduled, not in a reply.
+**d) The `[[moment …]]` line (mandatory — this is a proactive turn).** A `[Coach Scan]` wake is a proactive turn, so end your final message with exactly one moment line (per the Eval rule in CLAUDE.md): `[[moment category="coach/scan" sentiment="<one phrase on how the user likely feels about where things stand>" decision="ping_now" reason="<one sentence>"]]` — `decision="ping_now"` if you sent the one message, else `decision="suppress"` for schedule-and-journal-only (`ping_later` only with a `deferral_ref="<wake or tickler id booked this turn>"`). A pure suppress (you only scheduled + journaled) still gets the line. On a manual `/coach-scan` that the user explicitly invoked, treat it like the proactive scan it is and still write the line — the value of the scan is in what it scheduled, not in a reply.
 
 ---
 
@@ -94,7 +94,7 @@ If the scan found nothing to schedule or say, there's nothing to review — skip
 - **Ground before asserting (Hard Rule 12).** Don't tell the user a goal is drifting, or that a date matters, unless the cross-source reads back it. A confident-wrong claim about their own priorities is worse than silence.
 - **Never guilt (Hard Rule 9).** Drift gets named once, paired with a smaller doorway, never "you still haven't…".
 - **Anchor every tickler to the user's named zone** — a UTC time misfires by hours; assumed-Israel misfires when traveling.
-- **Always end with a journal entry + a `record_moment`** — even a fully-silent "all on-track" scan.
+- **Always end with a journal entry + a `[[moment …]]` line** — even a fully-silent "all on-track" scan.
 
 ---
 
@@ -105,6 +105,6 @@ A reviewer can verify the skill in isolation:
 1. **Force-run:** invoke `/coach-scan` manually (or wait for the `[Coach Scan]` system message). Both run the full loop above.
 2. **Inspect what it scheduled and why:** `list_ticklers` — every review the scan booked appears as a `kind: "instruction"` tickler with a complete self-contained `description` (what / why / anchor / scheduled-on date). That is the scan's plan, made durable.
 3. **Inspect the journal:** `read_journal` shows the one outcome entry — goals checked, what was judged drifting vs steady, which reviews were scheduled, message-or-silent.
-4. **Inspect the moment:** the `record_moment` for `category: "coach/scan"` is logged (local-only instrumentation), with the decision the scan made.
+4. **Inspect the moment:** the `[[moment category="coach/scan" …]]` line is recorded by the Stop hook (local-only instrumentation), with the decision the scan made.
 
-If the scan ran and scheduled nothing, that is still observable: the journal "nothing fired" line + the `record_moment(decision: suppress)`, with no new instruction-ticklers. Either way a reviewer can read off exactly what the scan did and why.
+If the scan ran and scheduled nothing, that is still observable: the journal "nothing fired" line + the moment line with `decision="suppress"`, with no new instruction-ticklers. Either way a reviewer can read off exactly what the scan did and why.

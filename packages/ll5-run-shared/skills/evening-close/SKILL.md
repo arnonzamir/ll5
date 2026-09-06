@@ -26,7 +26,7 @@ audience here, exactly once.
 3. Compose ONE message (structure below) and deliver it with `push_to_user(level: "notify")`.
 4. For each embedded staged item, record the call you made: picked up (it's in the message), rebooked
    (`create_wake` to a named moment — say so), or dropped (say so, one clause). Journal the close;
-   `record_moment` per the eval rule (`ping_now` — this beat always delivers).
+   end the turn with the `[[moment …]]` line per the eval rule (`decision="ping_now"` — this beat always delivers).
 5. Call `set_today_card` with your read (voice ≤2 sentences, first-person) and tomorrow's ONE thing —
    the phone's Today card should end the day current, pointed at tomorrow.
 
