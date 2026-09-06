@@ -9,8 +9,96 @@ import { escalateConversation } from '../utils/escalation.js';
 import { decrypt } from '../utils/encryption.js';
 import { buildSourceRouting, enrichContact } from './message-identity.js';
 import type { ContactRoutingResolver } from './contact-routing.js';
+import {
+  GroupCoalescer,
+  renderGroupBurst,
+  DEFAULT_GROUP_COALESCE_WINDOW_MS,
+  type CoalescedItem,
+} from '../utils/group-coalescer.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
+
+// ---------------------------------------------------------------------------
+// Group burst coalescing (ISS-033). Group messages at immediate/agent priority
+// are buffered per `${userId}:${remoteJid}` and delivered to the agent as ONE
+// system message per burst (window = WHATSAPP_GROUP_COALESCE_MS, default 90 s,
+// or 12 items). Direct chats are untouched — one system message per message.
+//
+// Process singleton, created lazily on the first group push so it carries no
+// pool of its own: the pool travels in the window's meta. The gateway has no
+// SIGTERM/shutdown hook today, so a restart can lose at most one open window
+// (≤ 90 s of group chatter) per conversation — the ES doc is already marked
+// processed, so the batch review will not re-report it either. If a shutdown
+// path is ever added, call `flushWhatsAppGroupBursts()` from it.
+// ---------------------------------------------------------------------------
+
+interface GroupBurstMeta {
+  pgPool: Pool;
+  userId: string;
+  remoteJid: string;
+  groupName: string | null;
+  peerName: string;
+  personId: string | null;
+}
+
+function readCoalesceWindowMs(): number {
+  const raw = process.env.WHATSAPP_GROUP_COALESCE_MS;
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_GROUP_COALESCE_WINDOW_MS;
+}
+
+async function deliverGroupBurst(key: string, meta: GroupBurstMeta, items: CoalescedItem[]): Promise<void> {
+  const last = items[items.length - 1];
+  const content = renderGroupBurst({ groupName: meta.groupName, remoteJid: meta.remoteJid }, items);
+  await insertSystemMessage(
+    meta.pgPool,
+    meta.userId,
+    content,
+    undefined, // notify — immediate WhatsApp goes to agent via system message → SSE only
+    undefined, // schedulerEvent
+    buildSourceRouting({
+      platform: 'whatsapp',
+      remoteJid: meta.remoteJid,
+      senderName: last.fromMe ? '(me)' : last.sender,
+      contactName: meta.peerName,
+      personId: meta.personId,
+      fromMe: last.fromMe,
+      isGroup: true,
+      groupName: meta.groupName,
+    }),
+  );
+  const spanSec = Math.max(0, Math.round((last.ts - items[0].ts) / 1000));
+  logger.info('[processWhatsAppWebhook][coalesce] Group burst delivered to agent', {
+    key,
+    group: meta.groupName ?? meta.remoteJid,
+    items: items.length,
+    spanSec,
+  });
+}
+
+let groupCoalescer: GroupCoalescer<GroupBurstMeta> | null = null;
+
+function getGroupCoalescer(): GroupCoalescer<GroupBurstMeta> {
+  if (!groupCoalescer) {
+    groupCoalescer = new GroupCoalescer<GroupBurstMeta>({
+      onFlush: deliverGroupBurst,
+      windowMs: readCoalesceWindowMs(),
+      onError: (err, key, itemCount) => {
+        logger.error('[processWhatsAppWebhook][coalesce] Group burst delivery failed', {
+          key,
+          items: itemCount,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      },
+    });
+  }
+  return groupCoalescer;
+}
+
+/** Deliver every open group window now. For a future shutdown hook and for tests. */
+export function flushWhatsAppGroupBursts(): Promise<void> {
+  return groupCoalescer ? groupCoalescer.flushAll() : Promise.resolve();
+}
 
 /**
  * Enrich a WhatsApp contact's display_name from pushName.
@@ -436,23 +524,32 @@ export async function processWhatsAppWebhook(
       // Name the recipient so the agent knows exactly who the user messaged, and
       // attach source routing (peer name + person_id + from_me) for context.
       const dest = isGroup ? `group: ${groupName ?? remoteJid}` : peerName;
-      await insertSystemMessage(
-        pgPool,
-        userId,
-        `[WhatsApp] You → ${dest}: "${truncBody}"${mediaInfo}${quotedInfo}`,
-        undefined, // notify
-        undefined, // schedulerEvent
-        buildSourceRouting({
-          platform: 'whatsapp',
-          remoteJid,
-          senderName: '(me)',
-          contactName: peerName,
-          personId,
-          fromMe: true,
-          isGroup,
-          groupName,
-        }),
-      );
+      if (isGroup) {
+        // ISS-033: defer — one system message per burst, not per message.
+        getGroupCoalescer().push(
+          `${userId}:${remoteJid}`,
+          { pgPool, userId, remoteJid, groupName, peerName, personId },
+          { ts: Date.parse(timestamp), sender: '(me)', text: truncBody, mediaInfo, quotedInfo, fromMe: true },
+        );
+      } else {
+        await insertSystemMessage(
+          pgPool,
+          userId,
+          `[WhatsApp] You → ${dest}: "${truncBody}"${mediaInfo}${quotedInfo}`,
+          undefined, // notify
+          undefined, // schedulerEvent
+          buildSourceRouting({
+            platform: 'whatsapp',
+            remoteJid,
+            senderName: '(me)',
+            contactName: peerName,
+            personId,
+            fromMe: true,
+            isGroup,
+            groupName,
+          }),
+        );
+      }
 
       await es.update({
         index: 'll5_awareness_messages',
@@ -461,7 +558,7 @@ export async function processWhatsAppWebhook(
         refresh: false,
       });
 
-      logger.info('[processWhatsAppWebhook][handle] Outbound message notified to agent', { isGroup, priority, to: dest });
+      logger.info('[processWhatsAppWebhook][handle] Outbound message notified to agent', { isGroup, priority, to: dest, coalesced: isGroup });
     }
     return;
   }
@@ -524,24 +621,33 @@ export async function processWhatsAppWebhook(
     const mediaInfo = hasMedia && mediaUrl ? ` [${mediaType} attached: ${mediaUrl}${mediaDurationSec ? ` (${mediaDurationSec}s)` : ''}]` : hasMedia ? ` [${mediaType} attached]` : '';
     // Inbound only (fromMe returns earlier). Header = sender (+ group context).
     const header = `${sender}${isGroup && groupName ? ` (group: ${groupName})` : ''}`;
-    // No FCM notify — immediate WhatsApp goes to agent via system message → SSE only
-    await insertSystemMessage(
-      pgPool,
-      userId,
-      `[WhatsApp] ${header}: "${truncBody}"${mediaInfo}${quotedInfo}`,
-      undefined, // notify
-      undefined, // schedulerEvent
-      buildSourceRouting({
-        platform: 'whatsapp',
-        remoteJid,
-        senderName: sender,
-        contactName: peerName,
-        personId,
-        fromMe,
-        isGroup,
-        groupName,
-      }),
-    );
+    if (isGroup) {
+      // ISS-033: defer — one system message per burst, not per message.
+      getGroupCoalescer().push(
+        `${userId}:${remoteJid}`,
+        { pgPool, userId, remoteJid, groupName, peerName, personId },
+        { ts: Date.parse(timestamp), sender, text: truncBody, mediaInfo, quotedInfo, fromMe: false },
+      );
+    } else {
+      // No FCM notify — immediate WhatsApp goes to agent via system message → SSE only
+      await insertSystemMessage(
+        pgPool,
+        userId,
+        `[WhatsApp] ${header}: "${truncBody}"${mediaInfo}${quotedInfo}`,
+        undefined, // notify
+        undefined, // schedulerEvent
+        buildSourceRouting({
+          platform: 'whatsapp',
+          remoteJid,
+          senderName: sender,
+          contactName: peerName,
+          personId,
+          fromMe,
+          isGroup,
+          groupName,
+        }),
+      );
+    }
 
     // Mark as processed so batch review doesn't re-report it
     await es.update({
@@ -551,6 +657,6 @@ export async function processWhatsAppWebhook(
       refresh: false,
     });
 
-    logger.info('[processWhatsAppWebhook][handle] Immediate notification sent', { sender });
+    logger.info('[processWhatsAppWebhook][handle] Immediate notification sent', { sender, coalesced: isGroup });
   }
 }

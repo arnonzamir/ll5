@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (13:30) — WhatsApp group bursts coalesced into one agent turn (ISS-033)
+
+The other half of the $72 hour: when Arnon posts in a group, the escalation window makes that group `immediate`, and `processors/whatsapp-webhook.ts` inserted one system message per inbound message — 83 agent turns from one group in an hour. New pure module `utils/group-coalescer.ts` (`GroupCoalescer` + `renderGroupBurst`) buffers group messages at immediate/agent priority per `${userId}:${remoteJid}` and delivers ONE system message per burst: flush 90 s after the first item (env `WHATSAPP_GROUP_COALESCE_MS`), or at 12 items, or on `flushWhatsAppGroupBursts()`. Both the `fromMe` and inbound paths defer only the `insertSystemMessage`; ES `processed`, logging and escalation bookkeeping stay per message. A single-item burst renders exactly as before (no header); multi-item renders `[WhatsApp] group: <name> — <n> messages over <m>s:` + one line per message, body capped at 4000 chars with `… (+k more)`; source routing carries the last item's sender/from_me. Direct chats are unchanged. The gateway has no shutdown hook, so a restart can lose at most one open window per group (≤ 90 s). Tests: `__tests__/group-coalescer.test.ts` (12, pure; DECISION-029 style). Gateway suite 494/494, tsc clean.
+
 ## 2026-09-06 (10:20) — Consolidation lost to a cap restart; cap policy was burning money (ISS-033)
 
 Arnon reported the nightly consolidation missed "thanks to a power cable being disconnected". The cable was his laptop's: it killed this session and its 03:12 checkpoint cron (server up 195 days, containers healthy). The pass itself was lost because the watcher's context-cap restart fired at 02:07 local while the pass's grounding-reviewer subagent was running — the main transcript looked idle for 120 s. Four `CONSOLIDATED Sep 5` entries landed; tally, promotions, user-model update and the 14-day pre-stage did not.
