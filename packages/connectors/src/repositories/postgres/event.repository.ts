@@ -87,16 +87,22 @@ export class PgEventRepository extends PgRepository implements EventRepository {
     return { items: res.rows.slice(0, f.limit).map((r) => this.toRecord(r)), hasMore };
   }
 
-  async openForReconcile(connectorId: string, sinceIso: string): Promise<ReconcileEvent[]> {
+  async openForReconcile(sinceIso: string, connectorId?: string): Promise<ReconcileEvent[]> {
+    const params: unknown[] = [this.userId(), sinceIso];
+    let where = `user_id = $1 AND status = 'open' AND occurred_at >= $2`;
+    if (connectorId) {
+      params.push(connectorId);
+      where += ` AND connector_id = $3`;
+    }
     const res = await this.pool.query(
-      `SELECT id, amount, merchant_key, occurred_at FROM connector_events
-       WHERE user_id = $1 AND connector_id = $2 AND status = 'open' AND occurred_at >= $3`,
-      [this.userId(), connectorId, sinceIso],
+      `SELECT id, amount, merchant_key, account_ref, occurred_at FROM connector_events WHERE ${where}`,
+      params,
     );
     return res.rows.map((r) => ({
       id: String(r.id),
       amount: num(r.amount),
       merchant_key: r.merchant_key == null ? null : String(r.merchant_key),
+      account_ref: r.account_ref == null ? null : String(r.account_ref),
       occurred_at: iso(r.occurred_at) ?? '',
     }));
   }

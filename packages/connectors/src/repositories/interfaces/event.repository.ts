@@ -14,8 +14,12 @@ export interface EventRepository {
   /** Idempotent on (user, dedupe_key): a repeat returns the existing id with created:false. */
   insert(input: ConnectorEventInput, merchantKey: string | null): Promise<ConnectorEventAck>;
   query(filters: EventFilters): Promise<Page<ConnectorEventRecord>>;
-  /** Open events of one connector since `sinceIso`, in the shape the reconciler takes. */
-  openForReconcile(connectorId: string, sinceIso: string): Promise<ReconcileEvent[]>;
+  /**
+   * Open events since `sinceIso`, in the shape the reconciler takes. User-wide
+   * by default (card events sit under the issuer id, ledger rows under the
+   * aggregator's); pass `connectorId` to narrow.
+   */
+  openForReconcile(sinceIso: string, connectorId?: string): Promise<ReconcileEvent[]>;
   markMatched(pairs: Array<{ event_id: string; row_id: string }>): Promise<number>;
   /** Open events older than `hours` → status 'expired'. Returns what was expired. */
   expireOpenOlderThan(connectorId: string, hours: number): Promise<ExpiredEvent[]>;

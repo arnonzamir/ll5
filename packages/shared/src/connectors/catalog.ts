@@ -137,6 +137,20 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
     default_schedule_minutes: 60,
     sensitivity: 'home',
   },
+  {
+    // Open-Finance.ai (licensed Israeli open-banking aggregator). Ledger only:
+    // the adapter reads what Financy already fetched (read-only data endpoints,
+    // never /connections/refresh or any payment endpoint). Card EVENTS still
+    // arrive under cal / max / isracard / bank; the reconciler matches them
+    // user-wide against these rows.
+    id: 'financy',
+    label: 'Financy (open-banking aggregator: all banks and cards)',
+    kinds: ['ledger'],
+    auth_type: 'oauth',
+    event_source: null,
+    default_schedule_minutes: 360,
+    sensitivity: 'financial',
+  },
 ] as const;
 
 export function catalogEntry(id: string): ConnectorCatalogEntry | undefined {

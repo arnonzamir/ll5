@@ -68,7 +68,13 @@ export const CredentialsBodySchema = z
   })
   .strict();
 
-export const SyncBodySchema = z.object({ connector_id: z.string().min(1).max(50) }).strict();
+/** POST /api/sync body. `scheduled: true` (gateway scheduler) engages the due gate; a manual sync ignores it. */
+export const SyncBodySchema = z
+  .object({
+    connector_id: z.string().min(1).max(50),
+    scheduled: z.boolean().optional(),
+  })
+  .strict();
 
 export const QueryEventsShape = {
   connector_id: z.string().optional().describe('Catalog connector id'),

@@ -74,4 +74,40 @@ describe('reconcile (pure)', () => {
   it('handles empty inputs', () => {
     expect(reconcile([], [])).toEqual({ matches: [], unmatched_events: [], unmatched_rows: [] });
   });
+
+  it('is connector-agnostic: nothing about the pair depends on where either side came from', () => {
+    // A card event (issuer connector) and an aggregator ledger row carry no connector id at all here.
+    const ev = { id: 'e-max', amount: 214.9, merchant_key: M1, occurred_at: '2026-09-01T12:31:00Z' };
+    const row = { id: 'r-financy', amount: 214.9, merchant_key: M1, occurred_at: '2026-09-03T00:00:00Z' };
+    expect(reconcile([ev], [row]).matches).toEqual([{ event_id: 'e-max', row_id: 'r-financy', delta_hours: 35.483333333333334, matched_on: 'merchant' }]);
+  });
+
+  it('falls back to the masked account last 4 when the merchant strings differ (app push vs statement wording)', () => {
+    const ev = { id: 'e1', amount: 73.42, merchant_key: 'mk-amazon-marketplace', account_ref: '4321', occurred_at: '2026-09-05T09:00:00Z' };
+    const rows = [
+      { id: 'r-other-card', amount: 73.42, merchant_key: 'mk-amzn-mktp-us', account_ref: '**** 9999', occurred_at: '2026-09-06T00:00:00Z' },
+      { id: 'r-same-card', amount: 73.42, merchant_key: 'mk-amzn-mktp-us', account_ref: '**** **** **** 4321', occurred_at: '2026-09-06T00:00:00Z' },
+    ];
+    const r = reconcile([ev], rows);
+    expect(r.matches).toEqual([{ event_id: 'e1', row_id: 'r-same-card', delta_hours: 15, matched_on: 'account' }]);
+    expect(r.unmatched_rows).toEqual(['r-other-card']);
+  });
+
+  it('a merchant match outranks a closer account-only match', () => {
+    const ev = { id: 'e1', amount: 100, merchant_key: M1, account_ref: '1234', occurred_at: '2026-09-01T00:00:00Z' };
+    const rows = [
+      { id: 'r-account-close', amount: 100, merchant_key: M2, account_ref: '1234', occurred_at: '2026-09-01T01:00:00Z' },
+      { id: 'r-merchant-far', amount: 100, merchant_key: M1, account_ref: '9999', occurred_at: '2026-09-03T00:00:00Z' },
+    ];
+    expect(reconcile([ev], rows).matches[0]).toMatchObject({ row_id: 'r-merchant-far', matched_on: 'merchant' });
+  });
+
+  it('an account-only match still needs the same amount and the window', () => {
+    const ev = { id: 'e1', amount: 100, merchant_key: null, account_ref: '1234', occurred_at: '2026-09-01T00:00:00Z' };
+    const rows = [
+      { id: 'r-amount', amount: 101, merchant_key: null, account_ref: '1234', occurred_at: '2026-09-01T00:00:00Z' },
+      { id: 'r-late', amount: 100, merchant_key: null, account_ref: '1234', occurred_at: '2026-09-04T00:00:01Z' },
+    ];
+    expect(reconcile([ev], rows).matches).toEqual([]);
+  });
 });

@@ -231,7 +231,7 @@ export function registerAllTools(server: McpServer, deps: ToolDeps): void {
 
   server.tool(
     'sync_connector',
-    'Run one ledger pull now for a connector (rate-limited to one per 10 minutes per connector). Returns counts and open findings, or a structured refusal: { ok:false, reason: no_adapter | disabled | rate_limited | no_credentials | pull_failed }. The retention and reconcile step runs either way.',
+    'Run one ledger pull now for a connector (rate-limited to one per 10 minutes per connector; ignores the scheduled due gate). Adapters: financy (read-only open-banking aggregator). Returns counts and open findings, or a structured refusal: { ok:false, reason: no_adapter | disabled | rate_limited | no_credentials | pull_failed }. The retention and reconcile step runs either way.',
     { connector_id: z.string().min(1).max(50).describe('Catalog connector id') },
     async (params) => {
       if (!catalogEntry(params.connector_id)) {

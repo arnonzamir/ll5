@@ -105,25 +105,34 @@ export class PgLedgerRepository extends PgRepository implements LedgerRepository
     return { items: res.rows.slice(0, f.limit).map((r) => this.toRecord(r)), hasMore };
   }
 
-  async forReconcile(connectorId: string, sinceIso: string, untilIso: string): Promise<ReconcileRow[]> {
+  async forReconcile(sinceIso: string, untilIso: string, connectorId?: string): Promise<ReconcileRow[]> {
+    const params: unknown[] = [this.userId(), sinceIso, untilIso];
+    let where = `user_id = $1 AND occurred_at >= $2 AND occurred_at <= $3`;
+    if (connectorId) {
+      params.push(connectorId);
+      where += ` AND connector_id = $4`;
+    }
     const res = await this.pool.query(
-      `SELECT id, amount, merchant_key, occurred_at FROM connector_ledger_rows
-       WHERE user_id = $1 AND connector_id = $2 AND occurred_at >= $3 AND occurred_at <= $4`,
-      [this.userId(), connectorId, sinceIso, untilIso],
+      `SELECT id, amount, merchant_key, account_ref, occurred_at FROM connector_ledger_rows WHERE ${where}`,
+      params,
     );
     return res.rows.map((r) => ({
       id: String(r.id),
       amount: num(r.amount),
       merchant_key: r.merchant_key == null ? null : String(r.merchant_key),
+      account_ref: r.account_ref == null ? null : String(r.account_ref),
       occurred_at: iso(r.occurred_at) ?? '',
     }));
   }
 
-  async count(connectorId: string): Promise<number> {
-    const res = await this.pool.query(
-      `SELECT count(*)::int AS n FROM connector_ledger_rows WHERE user_id = $1 AND connector_id = $2`,
-      [this.userId(), connectorId],
-    );
+  async count(connectorId?: string): Promise<number> {
+    const params: unknown[] = [this.userId()];
+    let where = 'user_id = $1';
+    if (connectorId) {
+      params.push(connectorId);
+      where += ' AND connector_id = $2';
+    }
+    const res = await this.pool.query(`SELECT count(*)::int AS n FROM connector_ledger_rows WHERE ${where}`, params);
     return Number(res.rows[0]?.n ?? 0);
   }
 
