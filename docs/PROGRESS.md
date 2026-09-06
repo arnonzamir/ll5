@@ -4,10 +4,14 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (11:05) — DECISION-031: all four ISS-033 levers merged
+
+Lever A (section budgets, `574d910`), D (group burst coalescing, `de2db88`), B (persona 97 → 62 KB with `media` / `vault-login` / `location` skills, `6bdd127`) are on ll5 main; C (`[[moment …]]` line replacing the `record_moment` tool, plus a defensive strip on `push_to_user` / `reply`) is on agent main `bfb36a3`. Decision record `docs/decisions/DECISION-031-context-floor-and-trigger-fanout.md`; trim ledger `docs/reviews/2026-09-06/persona-trim-ledger.md`. Ship order: ll5 push with `[skip ci]` + dispatch `awareness,gateway`; after that lands, the agent repo push rolls run-claude once with persona and channel together (one cold start, not two). Verification at the 09-07 checkpoint: floor after the first trigger, assistant messages per trigger, system messages per hour during a group burst, $/day.
+
 ## 2026-09-06 (10:35) — Context floor, lever A: user-model section budgets
 
 Arnon approved all four ISS-033 levers ("everything else do as recommended"). Lever A ships first: `write_user_model` refuses a section over budget (`active_context` 8 KB, any other section 12 KB, UTF-8 bytes of the JSON) with a `NOT SAVED` message that says what to cut (`packages/awareness/src/tools/user-model-budget.ts`, pure, tested); the session-start pack truncates an over-budget section on the read side with a rewrite note, so the 46 KB `active_context` written on 09-04 stops costing ~12K tokens per message from the next restart; the consolidate skill states the cap. Levers B (persona trim), C (`[[moment …]]` line instead of the `record_moment` tool) and D (WhatsApp group burst coalescing) run in parallel subagent worktrees and merge after review.
-## 2026-09-06 (13:30) — WhatsApp group bursts coalesced into one agent turn (ISS-033)
+## 2026-09-06 (10:55) — WhatsApp group bursts coalesced into one agent turn (ISS-033)
 
 The other half of the $72 hour: when Arnon posts in a group, the escalation window makes that group `immediate`, and `processors/whatsapp-webhook.ts` inserted one system message per inbound message — 83 agent turns from one group in an hour. New pure module `utils/group-coalescer.ts` (`GroupCoalescer` + `renderGroupBurst`) buffers group messages at immediate/agent priority per `${userId}:${remoteJid}` and delivers ONE system message per burst: flush 90 s after the first item (env `WHATSAPP_GROUP_COALESCE_MS`), or at 12 items, or on `flushWhatsAppGroupBursts()`. Both the `fromMe` and inbound paths defer only the `insertSystemMessage`; ES `processed`, logging and escalation bookkeeping stay per message. A single-item burst renders exactly as before (no header); multi-item renders `[WhatsApp] group: <name> — <n> messages over <m>s:` + one line per message, body capped at 4000 chars with `… (+k more)`; source routing carries the last item's sender/from_me. Direct chats are unchanged. The gateway has no shutdown hook, so a restart can lose at most one open window per group (≤ 90 s). Tests: `__tests__/group-coalescer.test.ts` (12, pure; DECISION-029 style). Gateway suite 494/494, tsc clean.
 
