@@ -592,6 +592,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       GATEWAY_URL: http://gateway:3000
       NEXT_PUBLIC_GATEWAY_URL: https://gateway.noninoni.click
+      # Connectors service (/mcp + /api/connectors REST) for /settings/connectors.
+      CONNECTORS_MCP_URL: http://connectors:3000
       AUTH_SECRET: ${AUTH_SECRET}
       ELASTICSEARCH_URL: http://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
     depends_on:

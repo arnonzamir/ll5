@@ -12,6 +12,9 @@ export const env = {
     process.env.MCP_MESSAGING_URL ?? "https://mcp-messaging.noninoni.click",
   MCP_HEALTH_URL:
     process.env.MCP_HEALTH_URL ?? "https://mcp-health.noninoni.click",
+  // Connectors service: /mcp tools and /api/connectors/* REST share this base URL.
+  CONNECTORS_MCP_URL:
+    process.env.CONNECTORS_MCP_URL ?? "https://mcp-connectors.noninoni.click",
   GATEWAY_URL: process.env.GATEWAY_URL ?? "https://gateway.noninoni.click",
   ELASTICSEARCH_URL: process.env.ELASTICSEARCH_URL ?? "http://elasticsearch:9200",
 } as const;

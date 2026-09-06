@@ -33,6 +33,7 @@ import {
   HeartPulse,
   Clock,
   ToggleLeft,
+  Plug,
   Sparkles,
   Bot,
   Lightbulb,
@@ -336,6 +337,14 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                     >
                       <ToggleLeft className="h-4 w-4" />
                       Data Sources
+                    </Link>
+                    <Link
+                      href="/settings/connectors"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <Plug className="h-4 w-4" />
+                      Connectors
                     </Link>
                     <Link
                       href="/settings/health"
