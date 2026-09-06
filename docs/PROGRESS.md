@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-06 (10:35) — Context floor, lever A: user-model section budgets
+
+Arnon approved all four ISS-033 levers ("everything else do as recommended"). Lever A ships first: `write_user_model` refuses a section over budget (`active_context` 8 KB, any other section 12 KB, UTF-8 bytes of the JSON) with a `NOT SAVED` message that says what to cut (`packages/awareness/src/tools/user-model-budget.ts`, pure, tested); the session-start pack truncates an over-budget section on the read side with a rewrite note, so the 46 KB `active_context` written on 09-04 stops costing ~12K tokens per message from the next restart; the consolidate skill states the cap. Levers B (persona trim), C (`[[moment …]]` line instead of the `record_moment` tool) and D (WhatsApp group burst coalescing) run in parallel subagent worktrees and merge after review.
+
 ## 2026-09-06 (10:20) — Consolidation lost to a cap restart; cap policy was burning money (ISS-033)
 
 Arnon reported the nightly consolidation missed "thanks to a power cable being disconnected". The cable was his laptop's: it killed this session and its 03:12 checkpoint cron (server up 195 days, containers healthy). The pass itself was lost because the watcher's context-cap restart fired at 02:07 local while the pass's grounding-reviewer subagent was running — the main transcript looked idle for 120 s. Four `CONSOLIDATED Sep 5` entries landed; tally, promotions, user-model update and the 14-day pre-stage did not.

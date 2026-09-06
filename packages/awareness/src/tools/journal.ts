@@ -3,6 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Client } from '@elastic/elasticsearch';
 import { logAudit, formatTime, sessionTimezone, capItems, pageFields, resolveOffset } from '@ll5/shared';
 import { logger } from '../utils/logger.js';
+import { checkSectionBudget } from './user-model-budget.js';
 
 const INDEX = 'll5_agent_journal';
 const USER_MODEL_INDEX = 'll5_agent_user_model';
@@ -338,6 +339,12 @@ export function registerJournalTools(
       const userId = getUserId();
       const now = new Date().toISOString();
       const docId = `${userId}_${params.section}`;
+
+      // ISS-033: a section is context on every message — refuse oversize writes.
+      const budgetProblem = checkSectionBudget(params.section, params.content);
+      if (budgetProblem) {
+        return { content: [{ type: 'text' as const, text: budgetProblem }], isError: true };
+      }
 
       // Snapshot current version to history before overwriting. A 404 on the get is
       // the first write of this section; any other failure is logged and reported

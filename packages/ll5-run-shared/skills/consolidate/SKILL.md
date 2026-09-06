@@ -76,7 +76,7 @@ A DROP is a save, not a failure — it's a confabulation or a misattribution cau
      upcoming_grounded: [ { when: "...", item: "...", grounding: "<who/what/whose/prep>", source: "<store>" }, ... ]
    })
    ```
-   Keep it tight — the highest-value items for the next few days, not all 14 days of noise. Drop stale ones each pass.
+   Keep it tight — the highest-value items for the next few days, not all 14 days of noise. Drop stale ones each pass. **Hard cap 8 KB** (the tool refuses larger with `NOT SAVED`): about 8 `upcoming_grounded` items of 1–2 lines each, the hot topics, the open commitments — this section is re-read on every message of every session, so every line here is paid hundreds of times a day (ISS-033: it reached 46 KB).
 2. **Promotions → their durable stores** (the reviewer-approved versions), then `resolve_journal` the source entries that are now promoted.
 3. **Journal the pass**: one `write_journal(type: "context", topic: "consolidation-pass")` whose content STARTS with a machine-readable tally line, then the prose:
    ```
