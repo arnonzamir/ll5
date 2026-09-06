@@ -550,3 +550,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: docs/research/2026-09-06-israeli-connectors.md — primary-source research on Israeli bank/card APIs, scrapers, Home Assistant integrations, Clalit, municipal portals, notification formats (new docs/research/ folder).
 2026-09-06: packages/shared/src/connectors/{catalog,events,index}.ts — connector catalog + gateway→connectors event contract; test packages/shared/src/__tests__/connectors-catalog.test.ts.
 2026-09-06: docs/decisions/DECISION-032-connectors-framework.md — connectors framework decision (two feeds, connectors MCP, read-only, cost guard, routes per source).
+2026-09-06: catalog package ids corrected after Play Store verification.

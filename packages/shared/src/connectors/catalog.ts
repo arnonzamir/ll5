@@ -5,9 +5,9 @@
  * compose lint. Per-user state (enabled, status, cursor) lives in the
  * connectors MCP's `connectors` table, keyed by `id`.
  *
- * Package ids and SMS sender names: verified against play.google.com where
- * marked; the rest are best-effort and must be confirmed on the phone
- * (`adb shell pm list packages -3`) before a parser is trusted.
+ * Package ids verified against play.google.com on 2026-09-06 (cal, max, isracard
+ * consumer + business, clalit, iec). SMS sender names are best-effort until seen
+ * on the phone.
  */
 export type ConnectorKind = 'event' | 'ledger' | 'stream';
 export type ConnectorAuthType = 'none' | 'scraper_credentials' | 'vault_browser_login' | 'api_token' | 'oauth';
@@ -59,7 +59,7 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
     kinds: ['event', 'ledger'],
     auth_type: 'scraper_credentials',
     event_source: 'phone',
-    android_packages: ['com.isracard.hapoalim'],
+    android_packages: ['com.isracard.hatavot', 'il.co.isracard.MobileDashboard'],
     sms_senders: ['Isracard', 'ישראכרט'],
     default_schedule_minutes: 720,
     sensitivity: 'financial',
@@ -81,7 +81,7 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
     kinds: ['event', 'ledger'],
     auth_type: 'vault_browser_login',
     event_source: 'phone',
-    android_packages: ['com.ideomobile.clalit'],
+    android_packages: ['clalit.android'],
     sms_senders: ['Clalit', 'כללית'],
     default_schedule_minutes: null,
     sensitivity: 'medical',
@@ -92,7 +92,7 @@ export const CONNECTOR_CATALOG: readonly ConnectorCatalogEntry[] = [
     kinds: ['event', 'ledger'],
     auth_type: 'api_token',
     event_source: 'phone',
-    android_packages: ['com.iec.myiec'],
+    android_packages: ['com.ewavemobile.electriccompany'],
     sms_senders: ['IEC', 'חברת החשמל'],
     default_schedule_minutes: 60,
     sensitivity: 'utility',
