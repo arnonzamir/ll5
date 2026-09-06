@@ -546,3 +546,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: docs/decisions/DECISION-031-context-floor-and-trigger-fanout.md — the four ISS-033 levers (section budgets, persona trim, moment line, group burst coalescing); docs/reviews/2026-09-06/persona-trim-ledger.md — section-by-section ledger of the persona trim.
 2026-09-06: DECISION-031 verified live (agent session 8c5e686a); FILE_TREE unchanged otherwise.
 2026-09-06: docs/design/connectors.md — proposed generic connector framework (registry, PG schema with encrypted payloads, auth types, 8 MCP tools, rules + cost guard, UI, phased plan).
+2026-09-06: docs/research/2026-09-06-israeli-connectors.md — primary-source research on Israeli bank/card APIs, scrapers, Home Assistant integrations, Clalit, municipal portals, notification formats (new docs/research/ folder).
