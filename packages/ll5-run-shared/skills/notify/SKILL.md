@@ -1,34 +1,37 @@
 ---
 name: notify
-description: Full notification-level reference and conversation-escalation procedure. CLAUDE.md keeps the short rules; this skill is the reference you pull in when deciding a level or handling an escalation.
+description: Delivery-class reference (fyi / needs-you / do-by, subject, due time, stakes, the escalation ladder) and the conversation-escalation procedure. CLAUDE.md keeps the short rules; this skill is the reference you pull in when deciding how a message reaches the user or handling an escalation.
 ---
 
 # Notifications & Escalations — Deep Reference
 
-CLAUDE.md has the one-line rules. This skill is the table you consult when you're actively deciding a notification level or processing an `[Escalation]`/`[Escalation Expiring]` system message.
+CLAUDE.md has the one-line rules. This skill is the table you consult when you're actively deciding a message's class (and, rarely, a level) or processing an `[Escalation]`/`[Escalation Expiring]` system message.
 
-## `push_to_user` notification levels
+## First decision: the class (DECISION-034)
 
-`push_to_user` accepts an optional `level` parameter that controls how aggressively the phone grabs attention. **Omit `level`** to skip the phone notification entirely (the message still appears in chat). When you include it, choose carefully:
+Every `push_to_user` declares what the message is FOR THE USER. You pick the class; the gateway picks the modality (chat row, tray item, phone level, escalation) and learns per user what works. The tool refuses a message that does not fit its class.
 
-| Level | Phone behavior | When to use |
-|-------|---------------|-------------|
-| **silent** | Notification shade + badge, no sound | FYI items. "Your morning briefing is ready." Low-urgency insights. |
-| **notify** | Sound or soft vibration | Actionable context. Nearby shop with items on list. Meeting changed. Someone texted about an upcoming plan. A task deadline approaching. |
-| **alert** | Sound + vibration + heads-up popup | Important person (wife, kid) with an urgent message. User explicitly asked to be alerted and hasn't acted. Time-sensitive escalation (e.g., missed nudges about an email they wanted to send). |
-| **critical** | Override DND, persistent | Emergencies ONLY. Fire sensor triggered. Someone is in trouble. Something critical is about to blow up. Use this extremely rarely. |
+| Class | Meaning | What you must pass | What the machinery does |
+|-------|---------|--------------------|-------------------------|
+| **`fyi`** | Nothing to do; read when convenient. | `text` (optionally `level` as a floor if it should buzz) | Chat row. Held for the morning digest in quiet hours. No tray item. |
+| **`needs-you`** | He must KNOW or DECIDE by a time; missing it costs something. | `subject` (≤ 40 chars, opens the text), `due_at` (ISO with offset, ≤ 14 days), `stakes` | Tray item with the due time, pushed at the policy's level; expires at `due_at` (outcome `missed`). |
+| **`do-by`** | He must ACT by a time. | `subject`, `due_at`, `stakes` (`ack_required` is true by definition) | Tray card with Got it / Done; the ladder runs until acknowledged: push at send, re-push at alert, alarm at T-15 min, then reach (a WhatsApp to his own number). |
 
-**Your job is to judge.** There are no if-then rules. Consider:
-- Who is it about? (family > colleague > acquaintance)
-- How time-sensitive? (minutes > hours > days)
-- What's the consequence of missing it? (safety > money > inconvenience > nice-to-know)
-- Has the user been unresponsive to lower-level nudges?
+**Choosing the class.** Is there something he must do with his hands or feet by a time (pick up, call, leave, sign, bring)? → `do-by`. Must he only know or answer by a time (a plan to confirm, a change to be aware of before a meeting)? → `needs-you`. Neither? → `fyi` — and ask whether it is worth a message at all, or belongs in the rail (`narrate`) as a report of what you did.
 
-**Escalation discipline.** Start low. If a `notify` goes unacted on and the deadline is approaching, escalate to `alert` the next time. Journal your reasoning.
+**Subject first.** The tray card and the notification show the subject alone; the text must open with it so the message reads with no prior turn. "Card pickup, 17 HaNadiv — by 17:00, the branch closes then." Not "As mentioned this morning, …".
 
-**Journal every notification decision.** Write a brief journal entry for each push where you chose a level, noting what level you chose and why. This lets the user give feedback ("that shouldn't have been an alert") which you learn from.
+**Stakes** = what missing it costs: `low` inconvenience · `medium` money or a plan slips · `high` a commitment to someone or a real loss · `critical` safety or family only (the one thing that rings in quiet hours; DECISION-030). Stakes feed the policy's modality choice and the learning; they are not a phone level.
 
-The user sets a maximum level for normal hours and quiet hours. The system automatically caps your chosen level — you don't need to worry about quiet hours, just choose the level that fits the content.
+**The ladder is the machinery's job.** Never schedule your own repeat push or a chain of wakes for an ask. `escalation` defaults to `standard` on a do-by; `gentle` = re-push only; an explicit list `[{offset_minutes, rung}]` for an unusual shape. Acknowledgement (a tap, a reaction, his reply) stops it; you receive `[Tray] acknowledged / done / missed: <subject>` — on `missed`, decide whether a follow-up is warranted.
+
+**Quiet hours.** `fyi` and `needs-you` are held and delivered in the morning digest (a HELD result means done — never resend). A `do-by` files its tray item immediately and the ladder starts at quiet-hours end; the tool result says so. If it truly must ring before morning, `stakes: "critical"` — and that had better be safety or family.
+
+**Journal every ask** (class, stakes, why). That is what lets him say "that did not need a tray card" and what the nightly pass learns from.
+
+## `level` — a floor, not the choice
+
+`level` (`silent` / `notify` / `alert` / `critical`) survives for compatibility. On a `fyi` it is the way to say "this should buzz" (`notify`) rather than sit in chat; on `needs-you` / `do-by` the policy picks the level from stakes and context, and a `level` only raises it. The user's settings cap the effective level and quiet hours cap it further — choose for content, not time of day. Escalating an unacted item yourself by re-pushing at a higher level is the pre-DECISION-034 pattern; use `do-by` instead.
 
 ## Conversation Escalation
 
