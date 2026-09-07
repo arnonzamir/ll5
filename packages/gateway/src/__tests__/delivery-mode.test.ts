@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { inQuietHours, nextQuietEnd, looksSick, pickMode } from '../utils/delivery-mode.js';
+import { describe, it, expect } from "vitest";
+import { inQuietHours, nextQuietEnd, looksSick, pickMode, isUserMeeting } from '../utils/delivery-mode.js';
 import { buildDigest } from '../scheduler/quiet-hours-release.js';
 
 const TZ = 'Asia/Jerusalem'; // UTC+3 in September
@@ -71,5 +71,23 @@ describe('buildDigest (DECISION-034: no trim, class lines, asks first)', () => {
     expect(lines[1]).toBe('- 06:00 · do-by · Card pickup, 17 HaNadiv — Card pickup, 17 HaNadiv — the branch closes at 13:00.');
     expect(lines[2]).toBe('- 04:00 · needs-you · Dentist form — Dentist form: sign and send back before 09:00.');
     expect(lines[3]).toBe('- 05:10 · fyi · Shokz connected at 05:08.');
+  });
+});
+
+describe('isUserMeeting (2026-09-07: meeting false positives)', () => {
+  const base = { status: 'confirmed', calendar_name: 'arnon@example.com', start_time: '2026-09-07T18:00:00+03:00', end_time: '2026-09-07T19:00:00+03:00', availability: 'busy' };
+  it('a normal 1 h work meeting counts', () => { expect(isUserMeeting({ ...base, title: 'Sync with Gill' })).toBe(true); });
+  it('placeholders, agent notes, free blocks, cancelled do not', () => {
+    expect(isUserMeeting({ ...base, title: 'SAVE THE DATE - Rosh Hashanah Event' })).toBe(false);
+    expect(isUserMeeting({ ...base, title: '[agent] review' })).toBe(false);
+    expect(isUserMeeting({ ...base, title: 'Sync', availability: 'free' })).toBe(false);
+    expect(isUserMeeting({ ...base, title: 'Sync', status: 'cancelled' })).toBe(false);
+  });
+  it('long blocks and shared named calendars do not', () => {
+    expect(isUserMeeting({ ...base, title: 'Offsite', end_time: '2026-09-07T22:30:00+03:00' })).toBe(false);
+    expect(isUserMeeting({ ...base, title: 'ערב אימהות א1', calendar_name: 'Family' })).toBe(false);
+    expect(isUserMeeting({ ...base, title: 'Sync', calendar_name: 'primary' })).toBe(true);
+    expect(isUserMeeting({ ...base, title: 'Sync', calendar_name: 'Work', attendees: "['a@x.com (organizer)', 'arnon@example.com']" })).toBe(true);
+    expect(isUserMeeting({ ...base, title: 'Birthday dinner' })).toBe(true);
   });
 });

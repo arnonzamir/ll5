@@ -246,6 +246,12 @@ export class CompositeTriggerScheduler {
       if (!s) continue;
       const convId = s.conversation_id ?? s.group_name ?? null;
       if (!convId || !importantConvIds.has(convId)) continue;
+      // 2026-09-07: seven false positives in one day, all on GROUPS — a forwarded
+      // advert, a send-off ("drive safely"), a thread whose tail was the user's
+      // own message. A group message carries no personal obligation to answer,
+      // and many groups are read-only for the agent anyway (Hard Rule 3), so the
+      // rule proposed replies it could not send. R1 is for direct threads.
+      if (s.is_group) continue;
       const ts = s.timestamp ? new Date(s.timestamp).getTime() : null;
       if (ts == null) continue;
       let st = byConv.get(convId);

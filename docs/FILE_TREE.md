@@ -610,3 +610,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-07: DECISION-034 Phase 1 verified live (PROGRESS 09:50).
 2026-09-07: tray ack/done accept ask:<uuid>; Android posts ask.item_id.
 2026-09-07: compose gateway upload bind mounts (ISS-037); fcm-sender prunes unregistered tokens (ISS-038).
+2026-09-07: ISS-039/040/041 detector fixes; messaging __tests__/message-text.test.ts.

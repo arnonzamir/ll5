@@ -68,6 +68,47 @@ export function looksSick(activeContext: unknown): boolean {
 }
 
 /** Pure: pick the mode from the raw signals. */
+export interface MeetingCandidate {
+  title?: string;
+  status?: string;
+  start_time?: string;
+  end_time?: string;
+  calendar_name?: string;
+  attendees?: unknown;
+  availability?: string;
+}
+
+/** Titles that mark a calendar block the user is not "sitting in". */
+export const NOT_A_MEETING_TITLE = /\[agent\]|save the date|tentative|placeholder|\bhold\b|\bfyi\b|\breminder\b/i;
+/** A meeting the user is sitting in is rarely longer than this. */
+export const MEETING_MAX_HOURS = 3;
+
+/**
+ * Is this in-progress calendar event a meeting the user is actually in?
+ * 2026-09-07: "meeting" flipped on nine times while Arnon was home with the phone
+ * in hand — a 4.5 h "SAVE THE DATE" placeholder on the work calendar, and family
+ * calendar entries that are other people's evenings. Rules: not cancelled, not
+ * the agent's own note, not a placeholder title, not marked free, at most
+ * MEETING_MAX_HOURS long, and on one of the user's own calendars (a calendar
+ * named by an address) rather than a shared named calendar ("Family").
+ */
+export function isUserMeeting(e: MeetingCandidate): boolean {
+  const title = String(e.title ?? '');
+  if (e.status === 'cancelled') return false;
+  if (NOT_A_MEETING_TITLE.test(title)) return false;
+  if (e.availability === 'free') return false;
+  // A calendar named by an address is the user's own; a shared named calendar
+  // ("Family") is not — unless the event has attendees, which a renamed primary
+  // or a self-owned "Work" calendar still carries (reviewer note, 2026-09-07).
+  const cal = String(e.calendar_name ?? '');
+  const hasAttendees = Array.isArray(e.attendees) ? e.attendees.length > 0 : typeof e.attendees === 'string' ? e.attendees.trim().length > 2 : false;
+  if (cal && !cal.includes('@') && cal.toLowerCase() !== 'primary' && !hasAttendees) return false;
+  const start = e.start_time ? Date.parse(e.start_time) : NaN;
+  const end = e.end_time ? Date.parse(e.end_time) : NaN;
+  if (Number.isFinite(start) && Number.isFinite(end) && end - start > MEETING_MAX_HOURS * 3_600_000) return false;
+  return true;
+}
+
 export function pickMode(s: { quiet: boolean; asleep: boolean; driving: boolean; meeting: boolean; sick: boolean }): { mode: DeliveryMode; reasons: string[] } {
   const reasons: string[] = [];
   if (s.asleep) reasons.push('phone sleep-classify: asleep');
@@ -138,21 +179,16 @@ export async function computeDeliveryMode(pool: Pool, es: Client, userId: string
 
   let meeting = false;
   try {
-    const r = await es.search<{ title?: string; status?: string }>({
+    const r = await es.search<MeetingCandidate>({
       index: 'll5_awareness_calendar_events',
       size: 10,
-      _source: ['title', 'status'],
+      _source: ['title', 'status', 'start_time', 'end_time', 'calendar_name', 'attendees', 'availability'],
       query: { bool: {
         filter: [{ term: { user_id: userId } }, { range: { start_time: { lte: now.toISOString() } } }, { range: { end_time: { gte: now.toISOString() } } }],
         must_not: [{ term: { all_day: true } }, { term: { kind: 'instruction' } }],
       } },
     });
-    // The agent's own timeline entries ("[agent] …" titles on the LL5 System
-    // calendar) are notes to itself, not meetings the user is sitting in.
-    meeting = (r.hits?.hits ?? []).some((h) => {
-      const t = String(h._source?.title ?? '');
-      return !t.startsWith('[agent]') && h._source?.status !== 'cancelled';
-    });
+    meeting = (r.hits?.hits ?? []).some((h) => isUserMeeting(h._source ?? {}));
   } catch (err) { logger.debug('[deliveryMode] calendar probe failed', { error: String(err) }); }
 
   let sick = false;

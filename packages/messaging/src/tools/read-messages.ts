@@ -14,6 +14,39 @@ function isSupportedPlatform(p: string): p is SupportedPlatform {
   return (SUPPORTED_PLATFORMS as readonly string[]).includes(p);
 }
 
+
+/**
+ * Text of a WhatsApp message across the shapes Evolution returns. 2026-09-07:
+ * `read_messages` came back with EMPTY content for a group thread whose
+ * messages were forwards, captions and view-once wrappers — only
+ * `conversation` / `extendedTextMessage.text` were read. Media without a
+ * caption gets a bracketed placeholder so the agent knows something was there.
+ */
+export function messageText(m: Record<string, unknown> | undefined): string {
+  if (!m) return '';
+  const wrapped = (m.ephemeralMessage ?? m.viewOnceMessage ?? m.viewOnceMessageV2 ?? m.viewOnceMessageV2Extension ?? m.documentWithCaptionMessage) as { message?: Record<string, unknown> } | undefined;
+  if (wrapped?.message) return messageText(wrapped.message);
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : '');
+  const g = (k: string) => (m[k] ?? undefined) as Record<string, unknown> | undefined;
+  return (
+    str(m.conversation) ||
+    str(g('extendedTextMessage')?.text) ||
+    str(g('imageMessage')?.caption) || (g('imageMessage') ? '[image]' : '') ||
+    str(g('videoMessage')?.caption) || (g('videoMessage') ? '[video]' : '') ||
+    (g('audioMessage') ? '[voice note]' : '') ||
+    (g('stickerMessage') ? '[sticker]' : '') ||
+    str(g('documentMessage')?.caption) || str(g('documentMessage')?.fileName) || (g('documentMessage') ? '[document]' : '') ||
+    str(g('contactMessage')?.displayName && `[contact: ${String(g('contactMessage')?.displayName)}]`) ||
+    (g('locationMessage') ? '[location]' : '') ||
+    str(g('buttonsResponseMessage')?.selectedDisplayText) ||
+    str((g('listResponseMessage')?.singleSelectReply as Record<string, unknown> | undefined)?.selectedRowId) ||
+    str(g('templateButtonReplyMessage')?.selectedDisplayText) ||
+    (g('reactionMessage') ? `[reaction ${String(g('reactionMessage')?.text ?? '')}]` : '') ||
+    (g('pollCreationMessage') ? `[poll: ${String(g('pollCreationMessage')?.name ?? '')}]` : '') ||
+    ''
+  );
+}
+
 export function registerReadMessagesTool(
   server: McpServer,
   accountRepo: AccountRepository,
@@ -132,10 +165,7 @@ async function readWhatsAppMessages(
 
   const filtered = rawMessages
     .map((msg) => {
-      const text =
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text ||
-        '';
+      const text = messageText(msg.message as Record<string, unknown> | undefined);
       const timestamp = msg.messageTimestamp
         ? new Date(msg.messageTimestamp * 1000)
         : new Date();
