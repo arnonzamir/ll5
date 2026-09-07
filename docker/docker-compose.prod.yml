@@ -514,6 +514,11 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
     volumes:
       - /data/coolify/services/xkkcc0g4o48kkcows8488so4/fcm-service-account.json:/etc/fcm/fcm-service-account.json:ro
+      # ISS-037 (2026-09-07): uploads lived in the container layer — every gateway
+      # roll wiped photos/voice notes and the agent's inspect_image got 404s.
+      # Host dirs are owned by uid 100 (the image's `app` user).
+      - /data/coolify/services/xkkcc0g4o48kkcows8488so4/uploads:/app/uploads
+      - /data/coolify/services/xkkcc0g4o48kkcows8488so4/public-uploads:/app/public-uploads
     depends_on:
       elasticsearch:
         condition: service_healthy

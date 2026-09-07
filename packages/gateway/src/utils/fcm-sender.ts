@@ -262,6 +262,15 @@ export async function sendFCMNotification(
 
       if (!response.ok) {
         const text = await response.text();
+        // ISS-038 (2026-09-07): a token FCM reports as NotRegistered/UNREGISTERED
+        // is a dead device registration (reinstall, token rotation). Keeping it
+        // meant two 404s on every push, forever. Prune it; the live token is
+        // unaffected. Counted as a prune, not a failure.
+        if (response.status === 404 && /NotRegistered|UNREGISTERED/.test(text)) {
+          await pool.query('DELETE FROM fcm_tokens WHERE user_id = $1 AND token = $2', [userId, row.token]);
+          logger.warn('[FCMSender][send] Pruned unregistered FCM token', { user_id: userId, token_prefix: String(row.token).slice(0, 10) });
+          continue;
+        }
         recordFcmFailure(`http_${response.status}`, text);
         logger.error('[FCMSender][send] FCM v1 send failed', {
           status: response.status,
