@@ -4,6 +4,8 @@ import { logger } from '../utils/logger.js';
 import { raiseAlert, clearAlert, type AlertSeverity } from '../utils/alerting.js';
 import { firingAlertKeys } from '../utils/agent-liveness.js';
 import { getBridgeLiveness } from '../utils/whatsapp-bridge-liveness.js';
+import { inQuietHours, readQuietHours } from '../utils/delivery-mode.js';
+import { getEffectiveTimezone } from '../utils/timezone.js';
 import { withSchedulerHealth } from '../utils/scheduler-health.js';
 import { CONNECTOR_CATALOG } from '@ll5/shared';
 import { connectorEventAgeMinutes } from '../connectors/liveness.js';
@@ -88,7 +90,7 @@ interface RateShiftCheck {
   /** Skip this check while one of these cause-level alerts is firing — one root cause, one alert (ISS-027). */
   suppressedBy?: string[];
   /** Skip this tick when a ground-truth signal says the feed is fine; returns the reason, or null to run. */
-  skipIf?: (userId: string) => Promise<string | null>;
+  skipIf?: (userId: string, pool: Pool) => Promise<string | null>;
   windowMinutes: number;
   /** 'drop' (a feed went quiet) or 'rise' (a spike, e.g. over-suppressing). Default 'drop'. */
   direction?: 'drop' | 'rise';
@@ -427,7 +429,7 @@ export class AnomalyMonitor {
         continue;
       }
       if (c.kind === 'rateShift' && c.skipIf) {
-        const why = await c.skipIf(this.config.userId).catch(() => null);
+        const why = await c.skipIf(this.config.userId, this.pool).catch(() => null);
         if (why) { logger.info('[AnomalyMonitor][check] skipped — ground truth says fine', { key: c.key, why }); continue; }
       }
       const tripped = await this.runCheck(c);
@@ -526,7 +528,7 @@ function buildChecks(): Check[] {
       // undelivered message in Evolution was a group emoji reaction and the
       // bridge was live — a quiet afternoon read as an outage. If Evolution
       // delivered ANY event recently, a low count is people, not plumbing.
-      skipIf: async (userId) => {
+      skipIf: async (userId, pool) => {
         const b = getBridgeLiveness(userId);
         const age = b?.last_event_at ? (Date.now() - new Date(b.last_event_at).getTime()) / 60_000 : null;
         if (age !== null && age <= 30) return `bridge alive (last Evolution event ${Math.round(age)}m ago)`;
@@ -534,6 +536,12 @@ function buildChecks(): Check[] {
         // been observed yet and the monitor's first tick runs at start. Judging
         // on "no evidence" re-raised this alert on every deploy (14:13Z).
         if (age === null && process.uptime() < 15 * 60) return `bridge liveness not observed yet (gateway up ${Math.round(process.uptime() / 60)}m)`;
+        // 2026-09-07 03:04 local: "1 in 120m vs 8 median" — a night baseline of 8
+        // is noise, and quiet hours are where nobody messages. Quiet hours skip
+        // the check outright (the push would be held anyway, but the agent was
+        // still woken for a $2 turn about nothing); minBaseline moved 8 → 20.
+        const [tz, q] = await Promise.all([getEffectiveTimezone(pool, userId), readQuietHours(pool, userId)]);
+        if (inQuietHours(new Date(), tz, q)) return `quiet hours (${q.start}–${q.end} local)`;
         return null;
       },
       label: 'Inbound message volume',
@@ -541,7 +549,7 @@ function buildChecks(): Check[] {
       suggestion: 'Far fewer inbound messages than the same time yesterday — a phone listener / channel may be down.',
       windowMinutes: 120,
       direction: 'drop',
-      minBaseline: 8,
+      minBaseline: 20,
       minChangePct: 0.8, // current is < 20% of yesterday's same window
       index: 'll5_awareness_messages',
       timestampField: 'timestamp',

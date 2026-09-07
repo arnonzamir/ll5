@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-07 (03:30) — Third checkpoint: ISS-033 verified, one night false positive fixed (ISS-036)
+
+All Step 1 checks pass (details in the runbook's third-run note): the 02:00 pass completed with a tally and handed over via `requested by consolidate`; no cap restart in the pass window; cap restarts at least 28 minutes apart at 200–243K; zero compactions; agent answering. Cost: per-turn $2.21 (before the levers) → $1.94 → $1.61 (after all four); 09-06 total $348 over 181 turns vs $239/135 on 09-05 — volume, not price: six agent rolls during the connectors build and the pre-coalescer group flood. Fix: `throughput.inbound_messages` fired at 03:04 local on a baseline of 8 → skipped in quiet hours, `minBaseline` 20 (ISS-036; reviewer: ship, plus honour user-configured quiet hours — applied). Next fixed date: 2026-09-12 readout (`scripts/agent-baseline.sh --since 2026-09-05 --until 2026-09-12`).
+
 ## 2026-09-06 (19:50) — Account email + password; SMTP dead (ISS-034)
 
 Arnon's account had no email and no password (PIN login only), so the new step-up could never pass (ISS-035). At his request: email set to his address (verified) on `auth_users`; `POST /auth/forgot` created a reset token but the mail bounced — Brevo SMTP "not yet activated" (ISS-034) — so a reset token was minted by hand (`auth_tokens`, sha256 of a random 32-byte hex, 1 h) and the link handed to Arnon to choose his own password.

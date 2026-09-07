@@ -601,3 +601,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: finance page + step-up live; e2e messaging read contract timeout 20 s.
 2026-09-06: DECISION-032 storage-schema amendment (own normalized schema approved).
 2026-09-06: ISS-034 (SMTP dead), ISS-035 (PIN-only accounts vs step-up).
+2026-09-07: runbook third-run note; ISS-036; anomaly-monitor skipIf(userId, pool).
