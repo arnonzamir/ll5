@@ -27,7 +27,7 @@ Channel (`channel/lib/delivery-contract.mjs`, pure, 38 `node --test` cases): `pu
 
 ## 2026-09-08 (00:45) — Occasional 404 on Needs You taps: diagnostics added
 
-Arnon: "I still get some 404 errors in the app when clicking on a needs you card. Not every time." Rows are intact (no ask was deleted; expired/done asks answer 200 idempotently), so the 404 means the id the app sent is not one of his tray rows. The gateway did not log 404s on the tray routes; it now logs the outcome, the raw param, whether the id exists under another kind/user, and the user agent, on both the ask and decision routes. Waiting on which build and which tap produced it.
+Arnon: "I still get some 404 errors in the app when clicking on a needs you card. Not every time." Rows are intact (no ask was deleted; expired/done asks answer 200 idempotently), so the 404 means the id the app sent is not one of his tray rows. The gateway did not log 404s on the tray routes; it now logs the outcome, the raw param, whether the id exists under another kind/user, and the user agent, on both the ask and decision routes. Waiting on which build and which tap produced it. (First push `6726597` failed CI: the diagnostics used `req.get`, absent on the route-test fakes; fixed to a plain header read.)
 
 ## 2026-09-08 (00:25) — DECISION-034 Phases 2-4 live
 
