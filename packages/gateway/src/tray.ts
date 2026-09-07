@@ -533,6 +533,13 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
     try {
       const result = await markAsk(pool, userId, itemId, outcome, nowFn());
       if (!result) {
+        // 2026-09-08: Arnon sees occasional 404s on card taps. Log enough to
+        // attribute them: does the id exist at all, under which kind/user?
+        const probe = await pool.query<{ kind: string; status: string; same_user: boolean }>(
+          'SELECT kind, status, (user_id = $2) AS same_user FROM tray_items WHERE id = $1',
+          [itemId, userId],
+        ).catch(() => ({ rows: [] as Array<{ kind: string; status: string; same_user: boolean }> }));
+        logger.warn('[tray][ask] 404', { outcome, itemId, rawParam: String(req.params.id ?? ''), probe: probe.rows[0] ?? null, ua: req.get('user-agent') ?? null });
         res.status(404).json({ error: 'Ask not found' });
         return;
       }
@@ -816,6 +823,7 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
       );
       const item = itemRes.rows[0];
       if (!item || item.status !== 'open') {
+        logger.warn('[tray][decision] 404', { itemId, ua: req.get('user-agent') ?? null });
         res.status(404).json({ error: 'Open tray item not found' });
         return;
       }
@@ -834,6 +842,7 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
       );
       if (update.rowCount === 0) {
         // Lost a race with the expiry sweep or a concurrent answer.
+        logger.warn('[tray][decision] 404', { itemId, ua: req.get('user-agent') ?? null });
         res.status(404).json({ error: 'Open tray item not found' });
         return;
       }
