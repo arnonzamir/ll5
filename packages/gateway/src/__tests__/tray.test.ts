@@ -669,3 +669,211 @@ describe('POST /me/tray/decision — one-tap decision answer', () => {
     expect(res._status).toBe(401);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Ask items + ack/done (DECISION-034 — migration 049)
+// ---------------------------------------------------------------------------
+
+const ASK_ID = '55555555-5555-5555-5555-555555555555';
+const ASK_MSG = '66666666-6666-6666-6666-666666666666';
+
+const askCollectorMatcher = (rows: unknown[]): Matcher =>
+  (sql) => /FROM tray_items t\s+LEFT JOIN message_delivery d/.test(sql) ? { rows } : undefined;
+
+function askRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: ASK_ID,
+    question: 'Card pickup, 17 HaNadiv',
+    context: 'Card pickup, 17 HaNadiv — the branch closes at 13:00.',
+    subject: 'Card pickup, 17 HaNadiv',
+    due_at: '2026-07-05T10:00:00Z',
+    ack_required: true,
+    message_id: ASK_MSG,
+    escalation: { rungs: [], next_at: null },
+    future_text: 're-push 09:15 · alarm 09:45 · reach 09:55',
+    status: 'open',
+    created_at: '2026-07-05T08:20:00Z',
+    class: 'do-by',
+    stakes: 'medium',
+    rung_sent: 0,
+    ...overrides,
+  };
+}
+
+describe('GET /me/tray — ask items lead (DECISION-034)', () => {
+  it('projects an open ask to the frozen card shape and puts it before everything else', async () => {
+    const { pool } = makePool([
+      tzMatcher,
+      askCollectorMatcher([askRow()]),
+      habitsMatcher([habitRow()]),
+      logMatcher([]),
+    ]);
+    const res = await runTray(pool);
+    const items = (res._json as { items: any[] }).items;
+    expect(items[0]).toEqual({
+      id: `ask:${ASK_ID}`,
+      kind: 'ask',
+      question: 'Card pickup, 17 HaNadiv',
+      context: 'Card pickup, 17 HaNadiv — the branch closes at 13:00.',
+      created_at: '2026-07-05T08:20:00.000Z',
+      escalation: { future_text: 're-push 09:15 · alarm 09:45 · reach 09:55' },
+      ask: {
+        item_id: ASK_ID,
+        message_id: ASK_MSG,
+        class: 'do-by',
+        subject: 'Card pickup, 17 HaNadiv',
+        due_at: '2026-07-05T10:00:00.000Z',
+        stakes: 'medium',
+        ack_required: true,
+        status: 'open',
+        rung_sent: 0,
+      },
+    });
+    // The habit (created 08:00, before the ask) still follows the ask.
+    expect(items[1].kind).toBe('habit');
+  });
+
+  it('the ask query is user-scoped, kind=ask, open or acknowledged-with-ack-required, soonest due first', async () => {
+    const { pool, calls } = makePool([tzMatcher, askCollectorMatcher([])]);
+    await runTray(pool);
+    const [sql, params] = calls.find((c) => /LEFT JOIN message_delivery/.test(c[0]))!;
+    expect(sql).toMatch(/t\.user_id = \$1 AND t\.kind = 'ask'/);
+    expect(sql).toMatch(/t\.status = 'open' OR \(t\.status = 'acknowledged' AND t\.ack_required = true\)/);
+    expect(sql).toMatch(/ORDER BY t\.due_at ASC/);
+    expect(params).toEqual(['u1']);
+  });
+
+  it('survives migration 049 not being applied yet (missing column) — no ask items, other sources intact', async () => {
+    const { pool } = makePool([
+      tzMatcher,
+      (sql) => {
+        if (/LEFT JOIN message_delivery/.test(sql)) {
+          const err = new Error('column t.subject does not exist') as Error & { code: string };
+          err.code = '42703';
+          throw err;
+        }
+        return undefined;
+      },
+      habitsMatcher([habitRow()]),
+      logMatcher([]),
+    ]);
+    const res = await runTray(pool);
+    expect(res._status).toBe(200);
+    expect((res._json as { items: any[] }).items.map((i) => i.kind)).toEqual(['habit']);
+  });
+});
+
+describe('POST /me/tray/:id/ack and /done — ask lifecycle', () => {
+  const askSelectMatcher = (rows: unknown[]): Matcher =>
+    (sql) => /SELECT id, status, subject, ack_required FROM tray_items WHERE id = \$1 AND user_id = \$2 AND kind = 'ask'/.test(sql)
+      ? { rows } : undefined;
+  const trayUpdateMatcher = (rowCount = 1): Matcher =>
+    (sql) => /UPDATE tray_items SET status = '(acknowledged|done)'/.test(sql) ? { rows: [{ status: 'x' }], rowCount } : undefined;
+  const deliveryUpdateMatcher: Matcher = (sql) =>
+    /UPDATE message_delivery SET status/.test(sql) ? { rows: [], rowCount: 1 } : undefined;
+  const chatInsertMatcher: Matcher = (sql) =>
+    /INSERT INTO chat_messages/.test(sql) ? { rows: [{ id: 'msg-1' }] } : undefined;
+
+  const run = async (pool: Pool, verb: 'ack' | 'done', id = ASK_ID, token: string | null = userToken('u1')) => {
+    const chain = getChain(trayRouter(pool), 'post', `/me/tray/:id/${verb}`);
+    const req = makeReq({ headers: token ? authHeader(token) : {}, params: { id } as any });
+    const res = makeRes();
+    await chain(req, res);
+    return res;
+  };
+
+  it('ack flips an open ask to acknowledged, stops the ladder, and tells the agent (no push)', async () => {
+    const { pool, calls } = makePool([
+      askSelectMatcher([{ id: ASK_ID, status: 'open', subject: 'Card pickup, 17 HaNadiv', ack_required: true }]),
+      trayUpdateMatcher(), deliveryUpdateMatcher, chatInsertMatcher,
+    ]);
+    const res = await run(pool, 'ack');
+    expect(res._status).toBe(200);
+    expect(res._json).toEqual({ status: 'acknowledged', changed: true });
+
+    const [traySql, trayParams] = calls.find((c) => /UPDATE tray_items/.test(c[0]))!;
+    expect(traySql).toMatch(/SET status = 'acknowledged', acknowledged_at = \$3/);
+    expect(traySql).toMatch(/WHERE id = \$1 AND user_id = \$2 AND kind = 'ask' AND status = 'open'/);
+    expect(trayParams.slice(0, 2)).toEqual([ASK_ID, 'u1']);
+
+    const [delSql] = calls.find((c) => /UPDATE message_delivery/.test(c[0]))!;
+    expect(delSql).toMatch(/status = 'acknowledged'/);
+    expect(delSql).toMatch(/"next_at":null/);
+
+    const [msgSql, msgParams] = calls.find((c) => /INSERT INTO chat_messages/.test(c[0]))!;
+    expect(msgSql).toMatch(/'system', 'inbound', 'system'/);
+    expect(msgParams[1]).toBe('[Tray] acknowledged: Card pickup, 17 HaNadiv');
+  });
+
+  it('done flips open or acknowledged to done and tells the agent', async () => {
+    const { pool, calls } = makePool([
+      askSelectMatcher([{ id: ASK_ID, status: 'acknowledged', subject: 'Card pickup, 17 HaNadiv', ack_required: true }]),
+      trayUpdateMatcher(), deliveryUpdateMatcher, chatInsertMatcher,
+    ]);
+    const res = await run(pool, 'done');
+    expect(res._json).toEqual({ status: 'done', changed: true });
+    const [traySql] = calls.find((c) => /UPDATE tray_items/.test(c[0]))!;
+    expect(traySql).toMatch(/SET status = 'done', done_at = \$3/);
+    expect(traySql).toMatch(/status IN \('open', 'acknowledged', 'expired'\)/);
+    const [, msgParams] = calls.find((c) => /INSERT INTO chat_messages/.test(c[0]))!;
+    expect(msgParams[1]).toBe('[Tray] done: Card pickup, 17 HaNadiv');
+  });
+
+  it('is idempotent: a repeat tap returns the current status and writes nothing', async () => {
+    const acked = makePool([askSelectMatcher([{ id: ASK_ID, status: 'acknowledged', subject: 's', ack_required: true }]), trayUpdateMatcher(), chatInsertMatcher]);
+    expect((await run(acked.pool, 'ack'))._json).toEqual({ status: 'acknowledged', changed: false });
+    expect(acked.calls.some((c) => /UPDATE|INSERT/.test(c[0]))).toBe(false);
+
+    const done = makePool([askSelectMatcher([{ id: ASK_ID, status: 'done', subject: 's', ack_required: true }]), trayUpdateMatcher(), chatInsertMatcher]);
+    expect((await run(done.pool, 'done'))._json).toEqual({ status: 'done', changed: false });
+    expect((await run(done.pool, 'ack'))._json).toEqual({ status: 'done', changed: false });
+    expect(done.calls.some((c) => /UPDATE|INSERT/.test(c[0]))).toBe(false);
+  });
+
+  it('404s for a missing or foreign item; 400s on a malformed id; 401s without a token', async () => {
+    const { pool } = makePool([askSelectMatcher([])]);
+    expect((await run(pool, 'ack'))._status).toBe(404);
+    expect((await run(pool, 'done', 'not-a-uuid'))._status).toBe(400);
+    expect((await run(pool, 'ack', ASK_ID, null))._status).toBe(401);
+  });
+
+  it('sends no system message when the guarded update lost a race (expiry sweep)', async () => {
+    const { pool, calls } = makePool([
+      askSelectMatcher([{ id: ASK_ID, status: 'open', subject: 's', ack_required: true }]),
+      trayUpdateMatcher(0), deliveryUpdateMatcher, chatInsertMatcher,
+    ]);
+    const res = await run(pool, 'ack');
+    expect(res._json).toEqual({ status: 'open', changed: false });
+    expect(calls.some((c) => /INSERT INTO chat_messages/.test(c[0]))).toBe(false);
+  });
+});
+
+describe('GET /me/delivery — open deliveries with rung state', () => {
+  it('lists sent/acknowledged rows soonest due first with the ladder fields', async () => {
+    const { pool, calls } = makePool([
+      (sql) => /FROM message_delivery d\s+LEFT JOIN chat_messages m/.test(sql)
+        ? { rows: [{
+          id: 'd1', user_id: 'u1', message_id: ASK_MSG, tray_item_id: ASK_ID, class: 'do-by', subject: 'Card pickup',
+          stakes: 'medium', due_at: '2026-07-05T10:00:00Z', modality: 'push_notify', delivery_mode: 'normal',
+          ack_required: true, status: 'sent', acknowledged_at: null, done_at: null,
+          escalation: { rungs: [{ rung: 'repush', at: '2026-07-05T09:15:00.000Z', level: 'alert' }], next_at: '2026-07-05T09:15:00.000Z', initial_push: 'sent' },
+          rung_sent: 0, created_at: '2026-07-05T08:20:00Z', content: 'Card pickup, 17 HaNadiv',
+        }] }
+        : undefined,
+    ]);
+    const chain = getChain(trayRouter(pool), 'get', '/me/delivery');
+    const res = makeRes();
+    await chain(makeReq({ headers: authHeader(userToken('u1')) }), res);
+    expect(res._status).toBe(200);
+    const item = (res._json as { items: any[] }).items[0];
+    expect(item).toMatchObject({
+      id: 'd1', tray_item_id: ASK_ID, class: 'do-by', subject: 'Card pickup', status: 'sent', modality: 'push_notify',
+      rung_sent: 0, next_at: '2026-07-05T09:15:00.000Z', initial_push: 'sent', due_at: '2026-07-05T10:00:00.000Z',
+    });
+    expect(item.rungs).toHaveLength(1);
+    const [sql, params] = calls[0];
+    expect(sql).toMatch(/d\.user_id = \$1 AND d\.status IN \('sent', 'acknowledged'\)/);
+    expect(sql).toMatch(/ORDER BY d\.due_at ASC/);
+    expect(params).toEqual(['u1']);
+  });
+});

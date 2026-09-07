@@ -11,6 +11,10 @@ import { logger } from './utils/logger.js';
 import { sendFCMNotification } from './utils/fcm-sender.js';
 import type { NotificationLevel } from './utils/fcm-sender.js';
 import { computeDeliveryMode, userActiveRecently } from './utils/delivery-mode.js';
+import type { DeliveryModeResult } from './utils/delivery-mode.js';
+import { validateDeliveryBlock } from './utils/delivery-contract.js';
+import type { DeliveryBlock } from './utils/delivery-contract.js';
+import { attachDelivery } from './delivery.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 // Public uploads: served WITHOUT auth from /public with crypto-random
@@ -324,6 +328,7 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       display_compact,
       idempotency_key,
       proactive,
+      delivery: deliveryRaw,
     } = req.body as {
       channel?: string;
       content?: string | null;
@@ -338,6 +343,8 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       idempotency_key?: string;
       /** Set by push_to_user: an agent-initiated message (not a reply). Subject to quiet hours. */
       proactive?: boolean;
+      /** DECISION-034 delivery block: class + subject + due_at + stakes + ack_required + escalation. */
+      delivery?: unknown;
     };
 
     if (!channel) {
@@ -349,24 +356,61 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       return;
     }
 
+    // DECISION-034: an assistant-outbound message may carry a delivery block;
+    // a proactive one MUST. Re-validated here so a hand-crafted POST cannot
+    // bypass the channel tool's refusals. Reactions never carry one.
+    const isAssistantOutbound = (direction || 'inbound') === 'outbound' && (role || 'user') === 'assistant' && reaction == null;
+    let delivery: DeliveryBlock | null = null;
+    let deliveryNotes: string[] = [];
+    if (isAssistantOutbound) {
+      const v = validateDeliveryBlock({
+        delivery: deliveryRaw, content: content ?? '', proactive: proactive === true,
+        notification_level, now: new Date(),
+      });
+      if (!v.ok) {
+        res.status(400).json({ error: v.error, code: 'delivery_contract' });
+        return;
+      }
+      delivery = v.delivery;
+      deliveryNotes = v.notes;
+    } else if (deliveryRaw != null) {
+      res.status(400).json({ error: 'delivery applies to assistant outbound messages only', code: 'delivery_contract' });
+      return;
+    }
+    // Metadata carries the class fields (no new columns on chat_messages).
+    const rowMetadata: Record<string, unknown> = { ...(metadata || {}) };
+    if (delivery) {
+      rowMetadata.class = delivery.class;
+      if (delivery.subject) rowMetadata.subject = delivery.subject;
+      if (delivery.due_at) rowMetadata.due_at = delivery.due_at;
+      if (delivery.stakes) rowMetadata.stakes = delivery.stakes;
+    }
+
     // DECISION-030 quiet hours: an agent-INITIATED, non-critical message while
     // the user is asleep or inside the quiet window is HELD and released as one
     // digest in the morning. Replies are never held (no `proactive` flag), nor
     // is anything while the user has written in the last 30 minutes.
-    if (proactive === true && (direction || 'inbound') === 'outbound' && (role || 'user') === 'assistant'
-        && reaction == null && notification_level !== 'critical' && esClient) {
+    // DECISION-034: a do-by is never held as a message — its row and tray item
+    // land now, only its push waits (ladder start = max(now, quiet end)).
+    let holdMode: DeliveryModeResult | null = null;
+    if (proactive === true && isAssistantOutbound && notification_level !== 'critical' && esClient) {
       try {
         const tz = process.env.CALENDAR_REVIEW_TIMEZONE ?? 'Asia/Jerusalem';
         const mode = await computeDeliveryMode(pool, esClient, userId, tz);
         if (mode.hold_pushes && !(await userActiveRecently(pool, userId, 30))) {
-          const held = await pool.query<{ id: string }>(
-            `INSERT INTO held_messages (user_id, content, notification_level, display_compact, metadata, reason, release_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-            [userId, content ?? '', notification_level ?? null, display_compact === true, JSON.stringify(metadata || {}), mode.mode, mode.release_at],
-          );
-          logger.info('[chat][createMessage] proactive push held', { userId, reason: mode.mode, release_at: mode.release_at });
-          res.status(202).json({ held: true, id: held.rows[0]?.id, reason: mode.mode, release_at: mode.release_at });
-          return;
+          if (delivery?.class === 'do-by') {
+            holdMode = mode;
+          } else {
+            const held = await pool.query<{ id: string }>(
+              `INSERT INTO held_messages (user_id, content, notification_level, display_compact, metadata, reason, release_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+              [userId, content ?? '', notification_level ?? null, display_compact === true,
+                JSON.stringify({ ...rowMetadata, ...(delivery ? { delivery } : {}) }), mode.mode, mode.release_at],
+            );
+            logger.info('[chat][createMessage] proactive push held', { userId, reason: mode.mode, release_at: mode.release_at, class: delivery?.class ?? null });
+            res.status(202).json({ held: true, id: held.rows[0]?.id, reason: mode.mode, release_at: mode.release_at, notes: deliveryNotes });
+            return;
+          }
         }
       } catch (err) {
         // Never lose a message to the gate: on any failure fall through and send.
@@ -441,7 +485,7 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
           msgRole,
           isReaction ? null : content,
           msgStatus,
-          JSON.stringify(metadata || {}),
+          JSON.stringify(rowMetadata),
           reply_to_id || null,
           reaction || null,
           display_compact === true,
@@ -470,6 +514,34 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       const row = result.rows[0];
       const body: Record<string, unknown> = { id: row.id, conversation_id: row.conversation_id };
       if (rerouted) body.rerouted_from = rerouted.from;
+
+      if (delivery) {
+        // Classed message: tray ask + delivery record + push at the stakes
+        // level (attachDelivery owns the push — the plain path below is skipped).
+        let mode: string | null = holdMode?.mode ?? null;
+        if (!mode && esClient) {
+          try { mode = (await computeDeliveryMode(pool, esClient, userId, process.env.CALENDAR_REVIEW_TIMEZONE ?? 'Asia/Jerusalem')).mode; } catch { /* optional */ }
+        }
+        try {
+          const attached = await attachDelivery(pool, {
+            userId, messageId: row.id, content: content ?? '', delivery,
+            notificationLevel: notification_level ?? null,
+            deliveryMode: (mode as DeliveryModeResult['mode'] | null),
+            holdUntil: holdMode?.release_at ?? null,
+          });
+          body.delivery = attached
+            ? { ...attached, class: delivery.class, notes: deliveryNotes }
+            : { class: delivery.class, modality: 'chat', tray_item_id: null, notes: [...deliveryNotes, 'delivery record not written (migration pending)'] };
+        } catch (err) {
+          logger.error('[chat][createMessage] attachDelivery failed — row inserted, no tray/push', {
+            id: row.id, error: err instanceof Error ? err.message : String(err),
+          });
+          body.delivery = { class: delivery.class, modality: 'chat', tray_item_id: null, notes: [...deliveryNotes, 'delivery attach failed'] };
+        }
+        res.status(201).json(body);
+        return;
+      }
+
       res.status(201).json(body);
 
       if (notification_level && msgDirection === 'outbound' && !isReaction) {
