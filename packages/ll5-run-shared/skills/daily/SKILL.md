@@ -16,7 +16,8 @@ Deliver a concise morning summary. Keep it under 10 lines. Don't dump everything
 5. Call calendar MCP `list_ticklers` for the next 3 days
 6. Call `list_narratives({ status: "active", limit: 20 })` — review the active threads in the user's life. Note any that are *unusually* quiet (haven't moved in a long time but used to be active) or *unusually* loud (a usually-quiet thread that's seen a recent burst). Most days, nothing notable — that's fine.
 7. Call `get_connector_digest({ period: "yesterday" })` (connectors MCP; skip silently if the tool is unavailable). Mention only rule hits, open findings and stale feeds — one line, no totals unless something is off.
-8. After delivering the brief, call `set_today_card` with your read of the day (voice, ≤2 sentences, first-person — the same read that opens the brief, never a list) and today's ONE thing.
+8. Open asks (DECISION-034): `Bash: curl -s -H "Authorization: Bearer $(cat ~/.ll5/token)" https://gateway.noninoni.click/me/seen-state` → `open_asks`. When it is above 0, the brief's FIRST line carries "open asks: N" ("Good morning — open asks: 2. …"): tray items still waiting on him, which the tray and the ladder handle — name the count, do not list them. When it is 0 (or the route fails), say nothing about it.
+9. After delivering the brief, call `set_today_card` with your read of the day (voice, ≤2 sentences, first-person — the same read that opens the brief, never a list) and today's ONE thing.
 
 ## Format
 
