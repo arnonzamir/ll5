@@ -603,3 +603,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-06: ISS-034 (SMTP dead), ISS-035 (PIN-only accounts vs step-up).
 2026-09-07: runbook third-run note; ISS-036; anomaly-monitor skipIf(userId, pool).
 2026-09-07: docs/design/delivery-contract.md — proposed delivery contract (classes, tray/push/escalation, activity rail, seen model, modality learning).
+2026-09-07: docs/decisions/DECISION-034-delivery-contract.md — message classes, ladder (reach = self-WhatsApp), rail, seen model, adaptive learning; Phase 1 started.

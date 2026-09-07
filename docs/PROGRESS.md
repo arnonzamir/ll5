@@ -4,6 +4,10 @@ Current state of the LL5 personal assistant system.
 
 ---
 
+## 2026-09-07 (08:55) — DECISION-034 accepted; Phase 1 started
+
+Arnon answered the six questions (reach = self-WhatsApp + app alert levels used wisely; adaptive floor; digest + individual asks; Android tray first; desktop not seen; start assertive and dial back). DECISION-034 written. Phase 1 (card-reminder case: class + tray + push + ack + ladder, plus the draft-card overlap and digest trim fixes) runs as three worktrees: gateway, agent channel + persona, Android.
+
 ## 2026-09-07 (08:40) — Delivery contract: design proposed (not built)
 
 Arnon's morning screenshots: draft card painted over the preceding sentence; overnight digest cut mid-sentence; internal narration in the user thread; proactive tails ("Parked…", "Card: 17 הנדיב…") with no context; a card-pickup reminder that needed action delivered as a chat row nobody watches. Agreed principles: three message classes (`fyi` / `needs-you` / `do-by`) declared by the agent and enforced at the tool; a do-by escalation ladder (re-push, alarm, reach) gated by delivery mode; an activity rail as a view over journal + moment + narrate rows, with purpose-built messages when thinking yields something for the user; a seen model fed by the app; per-user modality learning as data in the user model, updated nightly, with early exploration. Design: `docs/design/delivery-contract.md` (survey with file:line, contract, seen model, rail, ladder, learning, four phases with the card reminder first). Provenance check on the morning rows: narrate lines are `kind=thinking`, "Card:" was a `notice` push with no level (chat only), four rows had no kind at all (reply/mirror tails of proactive turns). Nothing built yet; Arnon reads first.

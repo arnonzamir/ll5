@@ -239,7 +239,11 @@ gateway: `GET /me/delivery-stats`, policy read + exploration in `chat.ts`. agent
 Tests: bucket key + aggregate math (pure); policy-pick with exploration seeded RNG (pure); budget: a 60-bucket policy stays under 12 KB (unit on the serialiser).
 Verification: after 14 days, `delivery_policy.buckets` has `n ≥ 5` on the common buckets and the tray count per day fell while do-by `done` rate did not.
 
-## 8. Open questions for Arnon
+## 8. Open questions for Arnon — answered 2026-09-07 08:55 (DECISION-034)
+
+1. Reach = self-WhatsApp through the messaging MCP (dedicated self-chat) plus the app's alert levels used sparingly; no paid provider. 2. Silent push is the initial floor for low-stakes needs-you, and the floor is a learned policy field (adaptive). 3. Digest plus open asks re-pushed individually. 4. Android tray first, dashboard tray in Phase 3. 5. Desktop is not "seen". 6. Start more assertive and dial back (exploration biased to stronger modalities, decaying on "too much" and dismissed-without-action).
+
+### Original questions
 
 1. Rung 3 (`reach`): self-WhatsApp only, or also a voice call/SMS provider (Twilio: a new secret, ~$1/month idle)? Self-WhatsApp is free but it is a notification the phone may also silence.
 2. Should `needs-you` ever push when the policy's bucket says `chat` — i.e. is the tray badge alone enough for low-stakes needs-you, or is a `silent` push the floor?
