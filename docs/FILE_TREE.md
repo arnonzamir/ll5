@@ -620,3 +620,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-07: DECISION-034 Phases 2-4 started (four worktrees).
 
 2026-09-07: DECISION-034 dashboard P2+4 — lib/chat/format.ts isRailRow (+test), message-stream #msg-<id> anchors, components/chat/activity-rail.tsx + app/(user)/chat/activity-server-actions.ts, app/(user)/settings/delivery/ (types+tests, server actions, view, page), nav "What works for you", globals.css chat-row-flash.2026-09-07: DECISION-034 Phases 2-4 merged.
+2026-09-08: DECISION-034 Phases 2-4 live.
