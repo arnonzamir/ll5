@@ -30,14 +30,14 @@ Recognizing the present (matching the moment to the catalog below) is the floor.
 2. **Pull what the snapshot doesn't include**, only as needed per matched situation: due/overdue ticklers (google MCP), overdue/contextual actions (`recommend_actions`, `list_actions`), unprocessed inbox (`list_inbox`), open journal entries (`read_journal status:open`), stale narratives (`recall` / `list_narratives`).
 3. **Scan the catalog below.** Catalog conditions calibrate WHICH message and HOW urgent — they are not a gate on *whether* to speak. Multiple can fire — handle the most time-critical first, batch the rest into one message. A genuine state-change with no exact catalog match still surfaces (default: surface).
 4. **Check the guardrails** (don't re-fire, respect caps, quiet hours, driving). A guardrail is the ONLY thing that turns a surface into a hold — absent one, you act.
-5. **Act:** surface info and/or take the action, with the right `notification_level`.
+5. **Act:** surface info and/or take the action, with the right class (DECISION-034): an action item for the user is a `do-by` with a due time (`subject` + `due_at` + `stakes`), never a chat line; something he must know or decide by a time is a `needs-you`; everything else is `fyi`.
 6. **Journal the outcome** (mandatory — see [CLAUDE.md → Session Memory]). Every run ends in a `write_journal`, a `note_observation`, or one skip line. "Checked, nothing fired" is a skip line with the reason, not nothing.
 
 ---
 
 ## Notification levels
 
-Set `notification_level` on your outbound message. The user's settings cap the effective level (and quiet-hours cap it further), so request the *true* urgency and let the cap do its job.
+The class carries the urgency now (`do-by` / `needs-you` / `fyi` — see the `notify` skill); the level below is the pre-DECISION-034 vocabulary, kept as the floor for a `fyi` that should buzz. The user's settings cap the effective level (and quiet-hours cap it further), so declare the *true* stakes and let the machinery do its job.
 
 | Level | Use for | Examples here |
 |---|---|---|

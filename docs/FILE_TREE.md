@@ -19,7 +19,7 @@ ll5/
 │   └── render-mcp-config.ts           # Renders mcp-endpoints.json → Claude Code .claude/settings.json or opencode opencode-mcp-fragment.json (--format claude|opencode, --config, --output, --worker). MERGES into an existing output file, preserving other top-level keys (hooks/permissions) — a plain overwrite killed the agent's hook wiring for 33h [2026-07-14]
 │
 ├── packages/ll5-run-shared/            # Shared content for both agent variants (dual run-variant Phase 1)
-│   ├── CLAUDE.md                       # Persona, 15 Hard Rules, GTD coaching (~62 KB after the 2026-09-06 trim; event how-tos live in skills)
+│   ├── CLAUDE.md                       # Persona, 15 Hard Rules, GTD coaching (~64 KB: 62 KB after the 2026-09-06 trim + 1.4 KB DECISION-034 delivery classes; event how-tos live in skills)
 │   ├── mcp-endpoints.json              # MCP endpoint definitions (source of truth for render script)
 │   ├── skills/                         # 20 SKILL.md files (daily, review, clarify, engage, sweep, plan, etc.)
 │   │   ├── media/SKILL.md              # 2026-09-06: images, [Photo] reel triage, voice-note transcription, PDF/document extraction, generated-image delivery (moved out of CLAUDE.md)
@@ -604,3 +604,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-07: runbook third-run note; ISS-036; anomaly-monitor skipIf(userId, pool).
 2026-09-07: docs/design/delivery-contract.md — proposed delivery contract (classes, tray/push/escalation, activity rail, seen model, modality learning).
 2026-09-07: docs/decisions/DECISION-034-delivery-contract.md — message classes, ladder (reach = self-WhatsApp), rail, seen model, adaptive learning; Phase 1 started.
+2026-09-07: DECISION-034 agent side — packages/ll5-run-shared/CLAUDE.md (act-by-default reports in the rail, Delivery classes paragraph, Notifications = class + stakes, self-check by class), skills/notify/SKILL.md (class table first, level = floor), skills/situation-check/SKILL.md (step 5: do-by for action items). Agent repo: channel/lib/delivery-contract.mjs (NEW pure check), channel/__tests__/delivery-contract.test.mjs (NEW, node --test), channel/ll5-channel.mjs (schema, currentTurn marker, reply gate, narrate rail stamp), channel/package.json (npm test), .claude/hooks/lib/decide_mirror.py + cli-input-mirror.sh + stop-mirror.sh (CLI-typing marker), tests/test_decide_mirror.py.
