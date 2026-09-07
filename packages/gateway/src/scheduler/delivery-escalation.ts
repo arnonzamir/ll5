@@ -10,11 +10,14 @@ import {
   expireDelivery, isPastGrace, listOpenDeliveries, releaseHeldInitialPushes, sendRung,
 } from '../delivery.js';
 import type { DeliveryRow } from '../delivery.js';
+import type { ReachConfig } from '../utils/reach.js';
 
 interface DeliveryEscalationConfig {
   userId: string;
   timezone: string;
   intervalMinutes: number;
+  /** Phase 2 of the ladder: the reach rung's self-WhatsApp (messaging MCP + user token). */
+  reach?: ReachConfig | null;
 }
 
 /**
@@ -101,7 +104,7 @@ export class DeliveryEscalationScheduler {
     );
     switch (decision.action) {
       case 'send':
-        await sendRung(this.pool, d, decision.index, tz, now);
+        await sendRung(this.pool, d, decision.index, tz, now, this.config.reach ?? null);
         return;
       case 'hold':
         logger.info('[DeliveryEscalation][tick] rung held by delivery mode', { delivery_id: d.id, rung: decision.rung.rung, mode });

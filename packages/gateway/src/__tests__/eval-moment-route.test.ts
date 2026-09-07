@@ -176,6 +176,8 @@ describe('POST /telemetry/eval-moment — close_count + F5 whitelist', () => {
       'timestamp', 'user_id', 'decision', 'decision_claimed', 'deferral_ref', 'decision_mismatch',
       'trigger_class', 'source', 'message_sent', 'cold_start', 'grounding_calls',
       'close_count', 'pencil_count', 'session_id',
+      // DECISION-034 Phase 2 rail fields
+      'trigger_id', 'reason', 'category', 'produced_message_id',
     ]));
 
     // The unexpected free-text fields did not survive.
@@ -191,6 +193,31 @@ describe('POST /telemetry/eval-moment — close_count + F5 whitelist', () => {
     expect(blob).not.toContain('bank pin');
     expect(blob).not.toContain('your PIN');
     expect(blob).not.toContain('trigger body');
+  });
+
+  it('DECISION-034 rail fields: trigger_id / category / produced_message_id land as strings, reason is bounded', async () => {
+    const handler = getHandler(app, 'post', '/telemetry/eval-moment');
+    const res = makeRes();
+    await handler(reqAs('owner-1', {
+      ts: '2026-09-07T08:00:00.000Z',
+      decision: 'ping_now',
+      session_id: 'sess-1',
+      trigger_id: 'aaaaaaaa-0000-4000-8000-000000000001',
+      reason: 'x'.repeat(500),
+      category: 'calendar',
+      produced_message_id: 'bbbbbbbb-0000-4000-8000-000000000001',
+    }), res);
+    const doc = (esMock.index.mock.calls[0][0] as any).document;
+    expect(doc.trigger_id).toBe('aaaaaaaa-0000-4000-8000-000000000001');
+    expect(doc.category).toBe('calendar');
+    expect(doc.produced_message_id).toBe('bbbbbbbb-0000-4000-8000-000000000001');
+    expect(doc.reason).toHaveLength(300);
+    // non-strings are dropped, never coerced
+    const res2 = makeRes();
+    await handler(reqAs('owner-1', { ts: '2026-09-07T08:00:00.000Z', trigger_id: 42, reason: { text: 'x' } }), res2);
+    const doc2 = (esMock.index.mock.calls[1][0] as any).document;
+    expect(doc2.trigger_id).toBeUndefined();
+    expect(doc2.reason).toBeUndefined();
   });
 
   it('rejects a payload with no ts (400, no index write)', async () => {

@@ -29,6 +29,7 @@ import { DeliveryEscalationScheduler } from './delivery-escalation.js';
 import { ConnectorSyncScheduler } from './connector-sync.js';
 import { insertAssistantMessage } from '../chat.js';
 import { attachDelivery } from '../delivery.js';
+import { readDeliveryPolicy } from '../utils/delivery-policy.js';
 import { WhatsAppWebhookReconciler } from './whatsapp-webhook-reconciler.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MetricsMonitor } from './metrics-monitor.js';
@@ -310,10 +311,13 @@ async function startSchedulersForUser(
       if (delivery.due_at) meta.due_at = delivery.due_at;
       if (delivery.stakes) meta.stakes = delivery.stakes;
       const inserted = await insertAssistantMessage(pgPool, uid, row.content, undefined, meta);
+      // Phase 4: the same policy read as POST /chat/messages (5-min cache).
+      const policy = await readDeliveryPolicy({ awarenessMcpUrl: config.mcpHealthUrls.awareness, authSecret: config.authSecret }, uid);
       await attachDelivery(pgPool, {
         userId: uid, messageId: inserted.id, content: row.content, delivery,
         notificationLevel: (row.notification_level as 'silent' | 'notify' | 'alert' | 'critical' | null) ?? null,
         deliveryMode: 'normal',
+        policy,
       });
     },
   );
@@ -321,9 +325,11 @@ async function startSchedulersForUser(
   schedulers.push(quietHoursRelease);
 
   // DECISION-034 do-by escalation ladder (re-push / alarm / reach) + ask
-  // expiry; 5-minute tick, gated by delivery mode.
+  // expiry; 5-minute tick, gated by delivery mode. The reach rung sends the
+  // self-WhatsApp through the messaging MCP with a minted user token.
   const deliveryEscalation = new DeliveryEscalationScheduler(pgPool, es, {
     intervalMinutes: s('delivery_escalation_minutes', 5), timezone, userId,
+    reach: { messagingMcpUrl: config.mcpHealthUrls.messaging, authSecret: config.authSecret },
   });
   deliveryEscalation.start();
   schedulers.push(deliveryEscalation);
