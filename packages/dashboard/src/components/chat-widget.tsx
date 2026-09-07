@@ -887,6 +887,9 @@ export function ChatWidget() {
     const items: RenderItem[] = [];
     for (const m of messages) {
       if (reactionIds.has(m.id)) continue; // reactions are rendered under parent
+      // DECISION-034: proactive-turn narration (`metadata.rail`) belongs to the
+      // /chat activity rail, not the thread. Same rule as lib/chat/format.ts.
+      if (m.role !== "user" && (m.metadata as { rail?: unknown } | undefined)?.rail === true) continue;
       // narrate / internal voice renders standalone so it isn't hidden inside the
       // collapsible "N system events" band; also ends any open compact group.
       if (m.metadata?.kind === "thinking") {
@@ -1067,6 +1070,7 @@ export function ChatWidget() {
       if (m.role !== "assistant") continue;
       if (m.reaction) continue;
       if (m.metadata?.kind === "thinking") continue;
+      if ((m.metadata as { rail?: unknown } | undefined)?.rail === true) continue; // rail narration is not the answer
       if (m.display_compact || isInstrumentationRow(m)) continue;
       return false; // real answer arrived — stop waiting.
     }

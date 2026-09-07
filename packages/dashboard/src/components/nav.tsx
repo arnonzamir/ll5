@@ -40,6 +40,7 @@ import {
   Tag,
   Landmark,
   Lock,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isSensitivePath } from "@/lib/sensitive";
@@ -332,6 +333,14 @@ export function Nav({ username = "User", isAdmin = false }: NavProps) {
                     >
                       <Bell className="h-4 w-4" />
                       Notification Levels
+                    </Link>
+                    <Link
+                      href="/settings/delivery"
+                      onClick={() => setProfileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <Gauge className="h-4 w-4" />
+                      What works for you
                     </Link>
                     <Link
                       href="/settings/scheduler"

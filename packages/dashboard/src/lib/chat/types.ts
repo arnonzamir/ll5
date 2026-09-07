@@ -28,6 +28,11 @@ export interface Message {
     /** tool-mirror rows. */
     tool?: string;
     duration_ms?: number;
+    /** DECISION-034 Phase 2: the channel stamps narration on a proactive turn
+     *  with `rail: true` + the trigger id. Such rows belong to the activity
+     *  rail (GET /me/activity), never to the thread. */
+    rail?: boolean;
+    trigger_id?: string;
     [key: string]: unknown;
   };
 }

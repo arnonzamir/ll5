@@ -63,6 +63,14 @@ export function isInstrumentationRow(m: Message): boolean {
   return INSTRUMENTATION_TOOL_NAMES.some((n) => head.startsWith(n));
 }
 
+/** DECISION-034 Phase 2: assistant/system rows stamped `metadata.rail === true`
+ *  are the agent's own narration on a proactive turn (narrate lines, compact
+ *  tool markers). They are rendered by the activity rail, not the thread.
+ *  A user row is never a rail row, whatever its metadata says. */
+export function isRailRow(m: Message): boolean {
+  return m.role !== "user" && m.metadata?.rail === true;
+}
+
 export function buildRenderItems(
   messages: Message[],
   reactionIds: Set<string>,
@@ -70,6 +78,7 @@ export function buildRenderItems(
   const out: RenderItem[] = [];
   for (const m of messages) {
     if (reactionIds.has(m.id)) continue;
+    if (isRailRow(m)) continue;
     // Defense in depth — skip content-less non-reaction rows. The DB
     // constraint `(reaction IS NULL) <> (content IS NULL)` guarantees this
     // never happens for persisted rows, but client-state can accumulate
