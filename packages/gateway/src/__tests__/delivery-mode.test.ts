@@ -44,16 +44,32 @@ describe('pickMode precedence + sick detection', () => {
   });
 });
 
-describe('buildDigest', () => {
-  it('one line per held push, local time, long items trimmed to their first line', () => {
+describe('buildDigest (DECISION-034: no trim, class lines, asks first)', () => {
+  const at = (utc: string) => new Date(utc);
+  it('one line per held push, local time, class shown, long first lines kept whole', () => {
     const rows = [
-      { id: '1', content: 'Wine tasting is in 2.5 hours. Still off unless you say otherwise.', notification_level: 'notify', reason: 'quiet_hours', created_at: new Date('2026-09-05T23:07:00Z') },
-      { id: '2', content: 'Shokz connected at 05:08.\nIf that means a swim…', notification_level: null, reason: 'sleep', created_at: new Date('2026-09-06T02:10:00Z') },
+      { content: 'Wine tasting is in 2.5 hours. Still off unless you say otherwise, and this sentence runs well past the old one-hundred-and-sixty character trim so the whole line must survive intact.', created_at: at('2026-09-05T23:07:00Z') },
+      { content: 'Shokz connected at 05:08.\nIf that means a swim…', created_at: at('2026-09-06T02:10:00Z'), class: 'fyi' as const },
     ];
     const d = buildDigest(rows, TZ);
     expect(d.split('\n')[0]).toBe('Held overnight (2):');
-    expect(d).toContain('- 02:07 Wine tasting is in 2.5 hours.');
-    expect(d).toContain('- 05:10 Shokz connected at 05:08.');
+    expect(d).toContain('- 02:07 · fyi · Wine tasting is in 2.5 hours. Still off unless you say otherwise, and this sentence runs well past the old one-hundred-and-sixty character trim so the whole line must survive intact.');
+    expect(d).not.toContain('…');
+    // Only the FIRST line of a multi-line item is used — but it is not trimmed.
+    expect(d).toContain('- 05:10 · fyi · Shokz connected at 05:08.');
     expect(d).not.toContain('If that means');
+  });
+
+  it('open asks lead (do-by, then needs-you, then fyi by time) and carry class · subject — first line', () => {
+    const rows = [
+      { content: 'Shokz connected at 05:08.', created_at: at('2026-09-06T02:10:00Z'), class: 'fyi' as const },
+      { content: 'Dentist form: sign and send back before 09:00.', created_at: at('2026-09-06T01:00:00Z'), class: 'needs-you' as const, subject: 'Dentist form' },
+      { content: 'Card pickup, 17 HaNadiv — the branch closes at 13:00.', created_at: at('2026-09-06T03:00:00Z'), class: 'do-by' as const, subject: 'Card pickup, 17 HaNadiv' },
+    ];
+    const lines = buildDigest(rows, TZ).split('\n');
+    expect(lines[0]).toBe('Held overnight (3):');
+    expect(lines[1]).toBe('- 06:00 · do-by · Card pickup, 17 HaNadiv — Card pickup, 17 HaNadiv — the branch closes at 13:00.');
+    expect(lines[2]).toBe('- 04:00 · needs-you · Dentist form — Dentist form: sign and send back before 09:00.');
+    expect(lines[3]).toBe('- 05:10 · fyi · Shokz connected at 05:08.');
   });
 });

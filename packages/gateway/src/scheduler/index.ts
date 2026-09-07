@@ -25,8 +25,10 @@ import { AgentOutputMonitor } from './agent-output-monitor.js';
 import { CharacterRefreshScheduler } from './character-refresh.js';
 import { WhatsAppFlowMonitor } from './whatsapp-flow-monitor.js';
 import { QuietHoursReleaseScheduler } from './quiet-hours-release.js';
+import { DeliveryEscalationScheduler } from './delivery-escalation.js';
 import { ConnectorSyncScheduler } from './connector-sync.js';
 import { insertAssistantMessage } from '../chat.js';
+import { attachDelivery } from '../delivery.js';
 import { WhatsAppWebhookReconciler } from './whatsapp-webhook-reconciler.js';
 import { PhoneLivenessMonitor } from './phone-liveness-monitor.js';
 import { MetricsMonitor } from './metrics-monitor.js';
@@ -295,13 +297,36 @@ async function startSchedulersForUser(
 
   // DECISION-030: proactive pushes held during sleep/quiet hours are released
   // as one digest when the window ends.
+  // DECISION-034: the digest row carries kind/class/digest_of; held needs-you
+  // rows come back as real classed messages (chat row + tray ask + push).
   const quietHoursRelease = new QuietHoursReleaseScheduler(
     pgPool,
-    (uid, text, level) => insertAssistantMessage(pgPool, uid, text, level, { kind: 'quiet_hours_digest' }).then(() => undefined),
+    (uid, text, level, metadata) => insertAssistantMessage(pgPool, uid, text, level, metadata).then(() => undefined),
     { intervalMinutes: s('quiet_hours_release_minutes', 5), timezone, userId },
+    async (uid, row, delivery) => {
+      const meta: Record<string, unknown> = { ...(row.metadata ?? {}), class: delivery.class };
+      delete meta.delivery;
+      if (delivery.subject) meta.subject = delivery.subject;
+      if (delivery.due_at) meta.due_at = delivery.due_at;
+      if (delivery.stakes) meta.stakes = delivery.stakes;
+      const inserted = await insertAssistantMessage(pgPool, uid, row.content, undefined, meta);
+      await attachDelivery(pgPool, {
+        userId: uid, messageId: inserted.id, content: row.content, delivery,
+        notificationLevel: (row.notification_level as 'silent' | 'notify' | 'alert' | 'critical' | null) ?? null,
+        deliveryMode: 'normal',
+      });
+    },
   );
   quietHoursRelease.start();
   schedulers.push(quietHoursRelease);
+
+  // DECISION-034 do-by escalation ladder (re-push / alarm / reach) + ask
+  // expiry; 5-minute tick, gated by delivery mode.
+  const deliveryEscalation = new DeliveryEscalationScheduler(pgPool, es, {
+    intervalMinutes: s('delivery_escalation_minutes', 5), timezone, userId,
+  });
+  deliveryEscalation.start();
+  schedulers.push(deliveryEscalation);
 
   // Self-healing WhatsApp webhook config (DECISION-024): keeps every mapped
   // instance's Evolution webhook at base64:false + the full event list, so a

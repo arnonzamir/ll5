@@ -7,6 +7,9 @@ import { listPendingApprovals } from './approvals.js';
 import { getEffectiveTimezone, startOfDayInTz } from './utils/timezone.js';
 import { insertSystemMessage } from './utils/system-message.js';
 import { logger } from './utils/logger.js';
+import { listOpenDeliveries, markAsk } from './delivery.js';
+import type { EscalationState } from './delivery.js';
+import type { DeliveryClass, Stakes } from './utils/delivery-contract.js';
 
 /**
  * "Needs You" tray plane (android-companion-ui Phase 1).
@@ -45,10 +48,26 @@ export interface TrayDecisionOption {
   recommended: boolean;
 }
 
+/** DECISION-034 ask card (needs-you / do-by). `status` 'acknowledged' only
+ *  appears for a do-by (ack_required) that is not yet done — render muted. */
+export interface TrayAsk {
+  /** Raw tray_items uuid — what POST /me/tray/:id/ack and /done take. */
+  item_id: string;
+  message_id: string | null;
+  class: DeliveryClass;
+  subject: string;
+  due_at: string;
+  stakes: Stakes | null;
+  ack_required: boolean;
+  status: 'open' | 'acknowledged';
+  /** Ladder rungs already sent (0 = only the initial push). */
+  rung_sent: number;
+}
+
 export interface TrayItem {
-  /** Stable: "habit:<habit_id>:<due_date>:<due_time>" | "approval_contact:<request_id>" | "approval_vault:<domain>" | "decision:<uuid>" */
+  /** Stable: "habit:<habit_id>:<due_date>:<due_time>" | "approval_contact:<request_id>" | "approval_vault:<domain>" | "decision:<uuid>" | "ask:<uuid>" */
   id: string;
-  kind: 'habit' | 'approval_contact' | 'approval_vault' | 'decision';
+  kind: 'habit' | 'approval_contact' | 'approval_vault' | 'decision' | 'ask';
   /** FIRST-PERSON agent voice — one question, never a paragraph. */
   question: string;
   /** One line max. */
@@ -67,6 +86,7 @@ export interface TrayItem {
   approval_vault?: { domain: string };
   /** item_id is the raw tray_items uuid — what POST /me/tray/decision takes. */
   decision?: { item_id: string; options: TrayDecisionOption[] };
+  ask?: TrayAsk;
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -378,21 +398,93 @@ async function collectDecisionItems(pool: Pool, userId: string): Promise<TrayIte
   });
 }
 
+// ---------------------------------------------------------------------------
+// Ask items (DECISION-034 — needs-you / do-by messages, migration 049)
+// ---------------------------------------------------------------------------
+
+interface AskRow {
+  id: string;
+  question: string;
+  context: string | null;
+  subject: string | null;
+  due_at: Date | string;
+  ack_required: boolean | null;
+  message_id: string | null;
+  escalation: EscalationState | null;
+  future_text: string | null;
+  status: string;
+  created_at: Date | string;
+  class: DeliveryClass | null;
+  stakes: Stakes | null;
+  rung_sent: number | null;
+}
+
+/** Open asks (plus acknowledged-but-not-done do-bys), soonest due first.
+ *  The message's class / stakes / rung state come from message_delivery. */
+async function collectAskItems(pool: Pool, userId: string): Promise<TrayItem[]> {
+  let rows: AskRow[];
+  try {
+    const res = await pool.query<AskRow>(
+      `SELECT t.id, t.question, t.context, t.subject, t.due_at, t.ack_required, t.message_id, t.escalation,
+              t.future_text, t.status, t.created_at, d.class, d.stakes, d.rung_sent
+         FROM tray_items t
+         LEFT JOIN message_delivery d ON d.tray_item_id = t.id AND d.user_id = t.user_id
+        WHERE t.user_id = $1 AND t.kind = 'ask'
+          AND (t.status = 'open' OR (t.status = 'acknowledged' AND t.ack_required = true))
+        ORDER BY t.due_at ASC NULLS LAST, t.created_at ASC`,
+      [userId],
+    );
+    rows = res.rows;
+  } catch (err) {
+    if (isMissingTable(err) || isMissingColumn(err)) {
+      logger.warn('[tray][asks] tray_items asks not ready (migration 049 pending) — no ask items');
+      return [];
+    }
+    throw err;
+  }
+  return rows.map((r) => {
+    const cls: DeliveryClass = r.class ?? (r.ack_required ? 'do-by' : 'needs-you');
+    const subject = r.subject ?? r.question;
+    return {
+      id: `ask:${r.id}`,
+      kind: 'ask' as const,
+      question: subject,
+      context: r.context ? oneLine(r.context) : null,
+      created_at: new Date(r.created_at).toISOString(),
+      escalation: { future_text: r.future_text ?? 'waiting' },
+      ask: {
+        item_id: r.id,
+        message_id: r.message_id,
+        class: cls,
+        subject,
+        due_at: new Date(r.due_at).toISOString(),
+        stakes: r.stakes,
+        ack_required: r.ack_required === true,
+        status: r.status === 'acknowledged' ? 'acknowledged' : 'open',
+        rung_sent: r.rung_sent ?? 0,
+      },
+    };
+  });
+}
+
 /**
- * Every open mandate for a user, one list, newest first — the single source
- * of truth behind GET /me/tray AND the Today card's needs_you_count
- * (today.ts). Extracted so the two surfaces can never disagree on what
- * "needs you" means.
+ * Every open mandate for a user, one list — the single source of truth
+ * behind GET /me/tray AND the Today card's needs_you_count (today.ts).
+ * Extracted so the two surfaces can never disagree on what "needs you"
+ * means. Asks lead, soonest due first (DECISION-034); everything else
+ * follows newest first.
  */
 export async function collectTrayItems(pool: Pool, userId: string, now: Date): Promise<TrayItem[]> {
-  const [habitItems, contactItems, vaultItems, decisionItems] = await Promise.all([
+  const [askItems, habitItems, contactItems, vaultItems, decisionItems] = await Promise.all([
+    collectAskItems(pool, userId),
     collectHabitItems(pool, userId, now),
     collectContactApprovalItems(pool, userId),
     collectVaultApprovalItems(pool, userId),
     collectDecisionItems(pool, userId),
   ]);
-  return [...habitItems, ...contactItems, ...vaultItems, ...decisionItems]
+  const rest = [...habitItems, ...contactItems, ...vaultItems, ...decisionItems]
     .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+  return [...askItems, ...rest];
 }
 
 /** Count of open mandates — the tray badge / Today "needs you" number. */
@@ -421,6 +513,78 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[tray][get] Failed', { userId, error: message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /me/tray/:id/ack and /done — the one-tap answers to an ask card
+  // (DECISION-034). Both flip the tray row + message_delivery, stop the
+  // ladder and hand `[Tray] acknowledged|done: <subject>` to the agent (no
+  // push). Idempotent: a repeat tap is a 200 with the current status.
+  const askAnswer = (outcome: 'acknowledged' | 'done') => async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    const itemId = String(req.params.id ?? '');
+    if (!UUID_RE.test(itemId)) {
+      res.status(400).json({ error: 'id must be the tray item UUID (TrayItem.ask.item_id)' });
+      return;
+    }
+    try {
+      const result = await markAsk(pool, userId, itemId, outcome, nowFn());
+      if (!result) {
+        res.status(404).json({ error: 'Ask not found' });
+        return;
+      }
+      if (result.changed) {
+        logAudit({
+          user_id: userId,
+          source: 'gateway',
+          action: 'update',
+          entity_type: 'tray_item',
+          entity_id: itemId,
+          summary: `Ask ${outcome}: ${oneLine(result.subject ?? '', 100)}`,
+          metadata: { outcome },
+        });
+      }
+      res.json({ status: result.status, changed: result.changed });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error(`[tray][ask:${outcome}] Failed`, { userId, itemId, error: message });
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+  router.post('/me/tray/:id/ack', authMw, askAnswer('acknowledged'));
+  router.post('/me/tray/:id/done', authMw, askAnswer('done'));
+
+  // GET /me/delivery — open deliveries with their rung state (the Android
+  // tray detail and the dashboard later).
+  router.get('/me/delivery', authMw, async (req: Request, res: Response) => {
+    const userId = (req as Request & { userId: string }).userId;
+    try {
+      const rows = await listOpenDeliveries(pool, userId);
+      res.json({
+        items: rows.map((d) => ({
+          id: d.id,
+          message_id: d.message_id,
+          tray_item_id: d.tray_item_id,
+          class: d.class,
+          subject: d.subject,
+          stakes: d.stakes,
+          due_at: d.due_at ? new Date(d.due_at).toISOString() : null,
+          modality: d.modality,
+          delivery_mode: d.delivery_mode,
+          ack_required: d.ack_required,
+          status: d.status,
+          acknowledged_at: d.acknowledged_at ? new Date(d.acknowledged_at).toISOString() : null,
+          rung_sent: d.rung_sent,
+          rungs: d.escalation?.rungs ?? [],
+          next_at: d.escalation?.next_at ?? null,
+          initial_push: d.escalation?.initial_push ?? null,
+          created_at: new Date(d.created_at).toISOString(),
+        })),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[tray][delivery] Failed', { userId, error: message });
       res.status(500).json({ error: 'Internal server error' });
     }
   });
