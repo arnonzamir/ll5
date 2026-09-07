@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { inQuietHours, nextQuietEnd, looksSick, pickMode, isUserMeeting } from '../utils/delivery-mode.js';
-import { buildDigest } from '../scheduler/quiet-hours-release.js';
+import { buildDigest, unseenDigestRows } from '../scheduler/quiet-hours-release.js';
 
 const TZ = 'Asia/Jerusalem'; // UTC+3 in September
 const at = (utc: string) => new Date(utc);
@@ -71,6 +71,20 @@ describe('buildDigest (DECISION-034: no trim, class lines, asks first)', () => {
     expect(lines[1]).toBe('- 06:00 · do-by · Card pickup, 17 HaNadiv — Card pickup, 17 HaNadiv — the branch closes at 13:00.');
     expect(lines[2]).toBe('- 04:00 · needs-you · Dentist form — Dentist form: sign and send back before 09:00.');
     expect(lines[3]).toBe('- 05:10 · fyi · Shokz connected at 05:08.');
+  });
+
+  it('Phase 3: items the user already saw (seen_at) are dropped from the digest; the count follows', () => {
+    const rows = [
+      { content: 'Card pickup, 17 HaNadiv — closes at 13:00.', created_at: at('2026-09-06T03:00:00Z'), class: 'do-by' as const, subject: 'Card pickup, 17 HaNadiv', seen_at: at('2026-09-06T03:20:00Z') },
+      { content: 'Dentist form: sign and send back.', created_at: at('2026-09-06T01:00:00Z'), class: 'needs-you' as const, subject: 'Dentist form', seen_at: null },
+      { content: 'Shokz connected at 05:08.', created_at: at('2026-09-06T02:10:00Z'), class: 'fyi' as const },
+    ];
+    const unseen = unseenDigestRows(rows);
+    expect(unseen.map((r) => r.class)).toEqual(['needs-you', 'fyi']);
+    const d = buildDigest(unseen, TZ);
+    expect(d.split('\n')[0]).toBe('Held overnight (2):');
+    expect(d).not.toContain('Card pickup');
+    expect(unseenDigestRows([rows[0]])).toEqual([]);
   });
 });
 

@@ -29,6 +29,13 @@ export interface DigestRow {
   created_at: Date;
   class?: DeliveryClass | null;
   subject?: string | null;
+  /** Phase 3: set when the user already saw the row (opened the app during the hold) — dropped from the digest. */
+  seen_at?: Date | string | null;
+}
+
+/** Pure: the digest carries unseen items only (DECISION-034 §2 digest exemption). */
+export function unseenDigestRows(rows: DigestRow[]): DigestRow[] {
+  return rows.filter((r) => !r.seen_at);
 }
 
 export type Deliver = (
@@ -87,15 +94,15 @@ export class QuietHoursReleaseScheduler {
   /** do-by rows whose initial push is still held — they lead the digest. */
   private async heldDoBys(now: Date): Promise<DigestRow[]> {
     try {
-      const r = await this.pool.query<{ subject: string | null; content: string | null; created_at: Date }>(
-        `SELECT d.subject, m.content, d.created_at
+      const r = await this.pool.query<{ subject: string | null; content: string | null; created_at: Date; seen_at: Date | null }>(
+        `SELECT d.subject, m.content, d.created_at, d.seen_at
            FROM message_delivery d LEFT JOIN chat_messages m ON m.id = d.message_id
           WHERE d.user_id = $1 AND d.status = 'sent' AND d.class = 'do-by'
             AND d.escalation->>'initial_push' = 'held'
             AND (d.escalation->>'ladder_start')::timestamptz <= $2`,
         [this.config.userId, now.toISOString()],
       );
-      return r.rows.map((x) => ({ class: 'do-by' as const, subject: x.subject, content: x.content ?? x.subject ?? '', created_at: new Date(x.created_at) }));
+      return r.rows.map((x) => ({ class: 'do-by' as const, subject: x.subject, content: x.content ?? x.subject ?? '', created_at: new Date(x.created_at), seen_at: x.seen_at }));
     } catch (err) {
       if ((err as { code?: string } | null)?.code === '42P01') return [];
       throw err;
@@ -112,17 +119,24 @@ export class QuietHoursReleaseScheduler {
     const doBys = await this.heldDoBys(now);
     if (due.rows.length === 0 && doBys.length === 0) return 0;
 
-    const digestRows: DigestRow[] = [
+    // Phase 3: a held do-by whose row the user already opened (seen_at) is
+    // not digested again; held_messages never became rows, so they are unseen
+    // by definition.
+    const digestRows: DigestRow[] = unseenDigestRows([
       ...doBys,
       ...due.rows.map((r) => {
         const d = heldDelivery(r);
         return { content: r.content, created_at: new Date(r.created_at), class: d?.class ?? null, subject: d?.subject ?? null };
       }),
-    ];
-    const text = buildDigest(digestRows, this.config.timezone);
-    await this.deliver(this.config.userId, text, 'notify', {
-      kind: 'quiet_hours_digest', class: 'fyi', digest_of: due.rows.map((r) => r.id),
-    });
+    ]);
+    if (digestRows.length > 0) {
+      const text = buildDigest(digestRows, this.config.timezone);
+      await this.deliver(this.config.userId, text, 'notify', {
+        kind: 'quiet_hours_digest', class: 'fyi', digest_of: due.rows.map((r) => r.id),
+      });
+    } else {
+      logger.info('[QuietHoursRelease][tick] every held item already seen — no digest', { userId: this.config.userId, held_do_bys: doBys.length });
+    }
     if (due.rows.length > 0) {
       await this.pool.query(`UPDATE held_messages SET released_at = now() WHERE id = ANY($1::uuid[])`, [due.rows.map((r) => r.id)]);
     }

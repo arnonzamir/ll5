@@ -10,6 +10,10 @@ import {
   planRungs, timeLeftText,
 } from './utils/delivery-contract.js';
 import type { DeliveryBlock, DeliveryClass, Modality, PlannedRung, Rung, Stakes } from './utils/delivery-contract.js';
+import { pickModality } from './utils/delivery-policy.js';
+import type { DeliveryPolicy } from './utils/delivery-policy.js';
+import { buildReachText, reachAlreadySent, sendReachWhatsApp } from './utils/reach.js';
+import type { ReachConfig } from './utils/reach.js';
 
 /**
  * Delivery contract — the database side (DECISION-034, Phase 1).
@@ -31,6 +35,9 @@ export interface EscalationState {
   ladder_start: string;
   /** 'held' while the quiet-hours hold withholds the initial push. */
   initial_push: 'sent' | 'held' | 'none';
+  /** Set once the self-WhatsApp reach went out (or was attempted) — never more than one per delivery. */
+  reach_sent_at?: string;
+  reach_result?: { ok: boolean; error?: string; jid?: string };
 }
 
 export interface DeliveryRow {
@@ -65,6 +72,10 @@ export interface AttachDeliveryInput {
   /** When set, the initial push is withheld and the ladder starts here. */
   holdUntil?: string | null;
   now?: Date;
+  /** Phase 4: the user's learned delivery_policy (null → Phase 1 stakes map). */
+  policy?: DeliveryPolicy | null;
+  /** [0, 1) — exploration draw; injected for tests. */
+  rng?: () => number;
 }
 
 export interface AttachDeliveryResult {
@@ -74,6 +85,9 @@ export interface AttachDeliveryResult {
   level: NotificationLevel | null;
   push_held: boolean;
   future_text: string | null;
+  /** Phase 4: the bucket the pick was made in and whether it was an exploration pick. */
+  bucket: string | null;
+  explored: boolean;
 }
 
 export interface PushArgs {
@@ -129,13 +143,30 @@ export async function attachDelivery(pool: Pool, input: AttachDeliveryInput): Pr
   const isAsk = delivery.class !== 'fyi';
   const tz = await getEffectiveTimezone(pool, userId);
 
-  // Level: the stakes map, with the agent's level as a floor. fyi keeps
-  // today's behaviour (push only when the agent asked for a level).
-  const level: NotificationLevel | null = isAsk
-    ? maxLevel(LEVEL_BY_STAKES[delivery.stakes ?? 'medium'], input.notificationLevel)
-    : (input.notificationLevel ?? null);
+  // Modality (Phase 4): for an ask the policy pick — bucket preferred (or the
+  // Phase 1 stakes map), floored by the agent's level, capped by delivery
+  // mode, with an exploration draw one rung stronger. fyi keeps today's
+  // behaviour (push only when the agent asked for a level).
+  let level: NotificationLevel | null;
+  let modality: Modality;
+  let bucket: string | null = null;
+  let explored = false;
+  if (isAsk) {
+    const pick = pickModality({
+      cls: delivery.class, stakes: delivery.stakes, due_at: delivery.due_at, now,
+      mode: input.deliveryMode, agent_level: input.notificationLevel ?? null,
+      policy: input.policy ?? null, rng: input.rng ?? Math.random,
+    });
+    // Critical stakes keep Phase 1's critical level (the safety/family rule).
+    level = delivery.stakes === 'critical' ? maxLevel(LEVEL_BY_STAKES.critical, input.notificationLevel) : pick.level;
+    modality = level ? modalityForLevel(level) : 'chat';
+    bucket = pick.bucket;
+    explored = pick.explored;
+  } else {
+    level = input.notificationLevel ?? null;
+    modality = level ? modalityForLevel(level) : 'chat';
+  }
   const pushHeld = !!input.holdUntil && level !== 'critical';
-  const modality: Modality = level ? modalityForLevel(level) : 'chat';
 
   const dueAt = delivery.due_at ? new Date(delivery.due_at) : null;
   const ladderStart = pushHeld && input.holdUntil ? new Date(Math.max(now.getTime(), Date.parse(input.holdUntil))) : now;
@@ -170,19 +201,34 @@ export async function attachDelivery(pool: Pool, input: AttachDeliveryInput): Pr
   }
 
   let deliveryId: string | null = null;
+  const baseParams = [
+    userId, messageId, trayItemId, delivery.class, delivery.subject, delivery.stakes,
+    dueAt?.toISOString() ?? null, modality, input.deliveryMode, localHour(now, tz),
+    delivery.ack_required, JSON.stringify(escalation),
+  ];
   try {
-    const ins = await pool.query<{ id: string }>(
-      `INSERT INTO message_delivery
-         (user_id, message_id, tray_item_id, class, subject, stakes, due_at, modality, delivery_mode, hour_local,
-          ack_required, status, escalation, rung_sent)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'sent', $12, 0)
-       RETURNING id`,
-      [
-        userId, messageId, trayItemId, delivery.class, delivery.subject, delivery.stakes,
-        dueAt?.toISOString() ?? null, modality, input.deliveryMode, localHour(now, tz),
-        delivery.ack_required, JSON.stringify(escalation),
-      ],
-    );
+    let ins;
+    try {
+      ins = await pool.query<{ id: string }>(
+        `INSERT INTO message_delivery
+           (user_id, message_id, tray_item_id, class, subject, stakes, due_at, modality, delivery_mode, hour_local,
+            ack_required, status, escalation, rung_sent, explored, policy_bucket)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'sent', $12, 0, $13, $14)
+         RETURNING id`,
+        [...baseParams, explored, bucket],
+      );
+    } catch (err) {
+      if ((err as { code?: string } | null)?.code !== '42703') throw err;
+      // Migration 050 pending: write the Phase 1 shape.
+      ins = await pool.query<{ id: string }>(
+        `INSERT INTO message_delivery
+           (user_id, message_id, tray_item_id, class, subject, stakes, due_at, modality, delivery_mode, hour_local,
+            ack_required, status, escalation, rung_sent)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'sent', $12, 0)
+         RETURNING id`,
+        baseParams,
+      );
+    }
     deliveryId = ins.rows[0]?.id ?? null;
   } catch (err) {
     if (isMissingTable(err)) {
@@ -203,7 +249,7 @@ export async function attachDelivery(pool: Pool, input: AttachDeliveryInput): Pr
     logger.info('[delivery][attach] initial push held until quiet hours end', { userId, class: delivery.class, ladder_start: escalation.ladder_start });
   }
 
-  return { delivery_id: deliveryId!, tray_item_id: trayItemId, modality, level, push_held: pushHeld, future_text: future };
+  return { delivery_id: deliveryId!, tray_item_id: trayItemId, modality, level, push_held: pushHeld, future_text: future, bucket, explored };
 }
 
 /** Open (sent / acknowledged) deliveries with their message text, oldest due first. */
@@ -267,10 +313,11 @@ export async function releaseHeldInitialPushes(pool: Pool, userId: string, now =
 
 /**
  * Send one ladder rung and record it (rung_sent + sent_at on the plan +
- * next_at + the tray card's future_text). `reach` in Phase 1 is the FCM
- * rung only — see the TODO.
+ * next_at + the tray card's future_text). The `reach` rung also sends the
+ * self-WhatsApp through the messaging MCP when `reach` config is given —
+ * once per delivery, whatever the plan says.
  */
-export async function sendRung(pool: Pool, d: DeliveryRow, index: number, tz: string, now = new Date()): Promise<void> {
+export async function sendRung(pool: Pool, d: DeliveryRow, index: number, tz: string, now = new Date(), reach?: ReachConfig | null): Promise<void> {
   const esc = d.escalation!;
   const rung = esc.rungs[index];
   const dueAt = d.due_at ? new Date(d.due_at) : null;
@@ -307,15 +354,42 @@ export async function sendRung(pool: Pool, d: DeliveryRow, index: number, tz: st
   }).catch((err) => logger.warn('[delivery][sendRung] FCM send failed', { error: err instanceof Error ? err.message : String(err) }));
 
   if (rung.rung === 'reach') {
-    // TODO(Phase 2, DECISION-034 #3): reach = a WhatsApp message to the user's
-    // own number through the messaging MCP (`send_whatsapp` to the self JID,
-    // a dedicated self-chat the phone treats as a real conversation). Phase 1
-    // logs + sends the FCM `rung:'reach'` only.
-    logger.warn('[delivery][sendRung] reach rung — FCM only in Phase 1 (self-WhatsApp lands in Phase 2)', {
-      userId: d.user_id, delivery_id: d.id, subject: d.subject,
-    });
+    await sendReach(pool, d, esc, tz, now, reach);
   }
   logger.info('[delivery][sendRung] rung sent', { userId: d.user_id, delivery_id: d.id, rung: rung.rung, level: rung.level, index });
+}
+
+/**
+ * DECISION-034 §5 rung 3: the self-WhatsApp. Claims `reach_sent_at` on the
+ * escalation JSON first (WHERE it is still null) so a re-planned ladder or a
+ * concurrent tick can never send a second one; the FCM `rung:'reach'` has
+ * already gone out by the time this runs.
+ */
+async function sendReach(pool: Pool, d: DeliveryRow, esc: EscalationState, tz: string, now: Date, reach?: ReachConfig | null): Promise<void> {
+  if (!reach) {
+    logger.warn('[delivery][reach] no reach config — FCM reach rung only', { userId: d.user_id, delivery_id: d.id });
+    return;
+  }
+  if (reachAlreadySent(esc as unknown as Record<string, unknown>)) return;
+  const claim = await pool.query(
+    `UPDATE message_delivery SET escalation = escalation || $3::jsonb
+      WHERE id = $1 AND user_id = $2 AND escalation->>'reach_sent_at' IS NULL`,
+    [d.id, d.user_id, JSON.stringify({ reach_sent_at: now.toISOString() })],
+  );
+  if (claim.rowCount === 0) return;
+
+  const dueAt = d.due_at ? new Date(d.due_at) : null;
+  const text = buildReachText(d.subject, firstLine(d.content ?? ''), dueAt ? fmtLocalHHMM(dueAt, tz) : null);
+  const result = await sendReachWhatsApp(pool, reach, d.user_id, text);
+  await pool.query(
+    `UPDATE message_delivery SET escalation = escalation || $3::jsonb WHERE id = $1 AND user_id = $2`,
+    [d.id, d.user_id, JSON.stringify({ reach_result: { ok: result.ok, ...(result.error ? { error: result.error } : {}), ...(result.target ? { jid: result.target.jid } : {}) } })],
+  ).catch((err) => logger.warn('[delivery][reach] could not record reach result', { error: err instanceof Error ? err.message : String(err) }));
+  if (result.ok) {
+    logger.info('[delivery][reach] self-WhatsApp sent', { userId: d.user_id, delivery_id: d.id, jid: result.target?.jid, source: result.target?.source });
+  } else {
+    logger.warn('[delivery][reach] self-WhatsApp NOT sent', { userId: d.user_id, delivery_id: d.id, error: result.error, jid: result.target?.jid ?? null });
+  }
 }
 
 export type AskOutcome = 'acknowledged' | 'done';

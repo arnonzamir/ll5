@@ -63,8 +63,9 @@ import type { EnvConfig } from './utils/env.js';
 import { raiseAlert, clearAlert, getFiringAlerts } from './utils/alerting.js';
 import { logger } from './utils/logger.js';
 import { recordWebhookFailure } from './utils/webhook-stats.js';
-import { Client as McpClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { callMcpTool as callMcpToolShared } from './utils/mcp-call.js';
+import { createDeliveryRouter, readSeenState } from './delivery-routes.js';
+import type { SeenState } from './delivery-routes.js';
 
 // --- Elasticsearch indices owned by the gateway (infra-level) ---
 // The 7 ll5_awareness_* indices and ll5_knowledge_networks live in @ll5/shared
@@ -140,6 +141,15 @@ const GATEWAY_INFRA_INDICES: IndexDefinition[] = [
         // going ~0 over an active window (the reflex went dormant).
         pencil_count: { type: 'integer' },
         session_id: { type: 'keyword' },
+        // DECISION-034 Phase 2 (activity rail): the inbound chat row that started
+        // the turn (= the channel's agent-trace-id), the moment's one-line reason
+        // and category, and the message id a ping_now produced. The live index
+        // already exists, so these land through dynamic mapping there; the
+        // declaration keeps a fresh deploy from guessing types.
+        trigger_id: { type: 'keyword' },
+        reason: { type: 'text' },
+        category: { type: 'keyword' },
+        produced_message_id: { type: 'keyword' },
       },
     },
   },
@@ -499,7 +509,11 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   app.use('/public', createPublicUploadsRouter(publicUploadsDir));
 
   // Mount chat routes
-  app.use('/chat', createChatRouter(pgPool, config.authSecret, esClient));
+  app.use('/chat', createChatRouter(pgPool, config.authSecret, esClient, { awarenessMcpUrl: config.mcpHealthUrls.awareness }));
+
+  // DECISION-034 Phases 2-4: POST /me/delivery-events, GET /me/seen-state,
+  // GET /me/delivery-stats, GET /me/activity.
+  app.use(createDeliveryRouter(pgPool, esClient, config.authSecret));
 
   // Mount agent-connection plane (self-scoped; owns /me/agent/*).
   app.use(createAgentRouter(pgPool, config.authSecret, config.encryptionKey, config.mcpBaseDomain));
@@ -728,44 +742,12 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   // chatAuthMiddleware-gated. Only exercised when OPENCODE_SERVER_URL is set
   // (opencode variant); harmless no-ops otherwise.
 
-  const INTERNAL_MCP_TIMEOUT_MS = 8000;
-
   /**
    * Call an MCP tool server-side, forwarding the caller's bearer token so the
-   * MCP scopes to the right user. Connects per request (cheap; mirrors the
-   * narratives router + MCP health probe). Returns the parsed JSON of the
-   * first text content, or null.
+   * MCP scopes to the right user. The implementation lives in
+   * utils/mcp-call.ts (shared with the delivery policy reader + reach rung).
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async function callMcpTool(
-    baseUrl: string,
-    authHeader: string,
-    tool: string,
-    args: Record<string, unknown>,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ): Promise<any> {
-    const mcpUrl = `${baseUrl.replace(/\/$/, '')}/mcp`;
-    let client: McpClient | null = null;
-    try {
-      const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), {
-        requestInit: { headers: { Authorization: authHeader } },
-      });
-      client = new McpClient({ name: 'll5-gateway-internal', version: '0.1.0' }, { capabilities: {} });
-      await Promise.race([
-        client.connect(transport),
-        new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`mcp_timeout_${INTERNAL_MCP_TIMEOUT_MS}ms`)), INTERNAL_MCP_TIMEOUT_MS)),
-      ]);
-      const res = await Promise.race([
-        client.callTool({ name: tool, arguments: args }),
-        new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`mcp_timeout_${INTERNAL_MCP_TIMEOUT_MS}ms`)), INTERNAL_MCP_TIMEOUT_MS)),
-      ]);
-      const content = res.content as Array<{ type: string; text?: string }> | undefined;
-      const text = content?.find((c) => c.type === 'text')?.text;
-      return text ? JSON.parse(text) : null;
-    } finally {
-      if (client) await client.close().catch(() => {});
-    }
-  }
+  const callMcpTool = callMcpToolShared;
 
   // POST /internal/agent-session — session registration.
   // The agent container calls this on startup after creating its opencode
@@ -1035,6 +1017,12 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         close_count: int(b.close_count),
         pencil_count: int(b.pencil_count),
         session_id: sessionId,
+        // DECISION-034 Phase 2 rail fields. `reason` is the recorder's one-line
+        // moment reason (bounded); the ids are opaque keys, never free text.
+        trigger_id: str(b.trigger_id)?.slice(0, 80),
+        reason: str(b.reason)?.slice(0, 300),
+        category: str(b.category)?.slice(0, 40),
+        produced_message_id: str(b.produced_message_id)?.slice(0, 80),
       });
       res.json(outcome === 'duplicate' ? { ok: true, duplicate: true } : { ok: true });
     } catch (err) {
@@ -1554,7 +1542,21 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
   app.get('/me/delivery-mode', authMw, async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     try {
-      res.json(await computeDeliveryMode(pgPool, esClient, userId, config.calendarReviewTimezone));
+      // DECISION-034 Phase 3: the channel reads this per trigger, so the seen
+      // hint rides along (user_seen_up_to / unseen_count / open_asks). A seen
+      // read failure never blocks the mode.
+      const mode = await computeDeliveryMode(pgPool, esClient, userId, config.calendarReviewTimezone);
+      let seen: Partial<SeenState> = {};
+      try { seen = await readSeenState(pgPool, userId); } catch (err) {
+        logger.warn('[deliveryMode][get] seen state unavailable', { error: err instanceof Error ? err.message : String(err) });
+      }
+      res.json({
+        ...mode,
+        user_seen_up_to: seen.chat_seen_up_to ?? null,
+        user_seen_age: seen.seen_age ?? null,
+        unseen_count: seen.unseen_count ?? 0,
+        open_asks: seen.open_asks ?? 0,
+      });
     } catch (err) {
       logger.error('[deliveryMode][get] failed', { error: err instanceof Error ? err.message : String(err) });
       res.status(500).json({ error: 'delivery mode unavailable' });

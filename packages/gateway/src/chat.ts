@@ -15,6 +15,7 @@ import type { DeliveryModeResult } from './utils/delivery-mode.js';
 import { validateDeliveryBlock } from './utils/delivery-contract.js';
 import type { DeliveryBlock } from './utils/delivery-contract.js';
 import { attachDelivery } from './delivery.js';
+import { readDeliveryPolicy } from './utils/delivery-policy.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 // Public uploads: served WITHOUT auth from /public with crypto-random
@@ -306,9 +307,15 @@ async function resolveWriteTarget(
 /**
  * Create the /chat router with message queue endpoints.
  */
-export function createChatRouter(pool: Pool, authSecret: string, esClient?: Client): Router {
+export interface ChatRouterOptions {
+  /** Awareness MCP base URL — where the Phase 4 `delivery_policy` user-model section is read from. */
+  awarenessMcpUrl?: string;
+}
+
+export function createChatRouter(pool: Pool, authSecret: string, esClient?: Client, options: ChatRouterOptions = {}): Router {
   const router = Router();
   const auth = chatAuthMiddleware(authSecret);
+  const policyReader = { awarenessMcpUrl: options.awarenessMcpUrl, authSecret };
 
   // ---------------------------------------------------------------------------
   // POST /chat/messages — create message (inbound or outbound, incl. reactions)
@@ -523,11 +530,14 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
           try { mode = (await computeDeliveryMode(pool, esClient, userId, process.env.CALENDAR_REVIEW_TIMEZONE ?? 'Asia/Jerusalem')).mode; } catch { /* optional */ }
         }
         try {
+          // Phase 4: the learned policy (5-min cache; null → Phase 1 map).
+          const policy = delivery.class !== 'fyi' ? await readDeliveryPolicy(policyReader, userId) : null;
           const attached = await attachDelivery(pool, {
             userId, messageId: row.id, content: content ?? '', delivery,
             notificationLevel: notification_level ?? null,
             deliveryMode: (mode as DeliveryModeResult['mode'] | null),
             holdUntil: holdMode?.release_at ?? null,
+            policy,
           });
           body.delivery = attached
             ? { ...attached, class: delivery.class, notes: deliveryNotes }
