@@ -80,10 +80,26 @@ A DROP is a save, not a failure — it's a confabulation or a misattribution cau
 2. **Promotions → their durable stores** (the reviewer-approved versions), then `resolve_journal` the source entries that are now promoted.
 3. **Journal the pass**: one `write_journal(type: "context", topic: "consolidation-pass")` whose content STARTS with a machine-readable tally line, then the prose:
    ```
-   CONSOLIDATE-TALLY consolidated=<n> resolved=<n> observations=<n> questions=<n> promoted_facts=<n> promoted_people=<n> user_model_sections=<n> prestaged=<n> reviewer_dropped=<n> reviewer_fixed=<n>
+   CONSOLIDATE-TALLY consolidated=<n> resolved=<n> observations=<n> questions=<n> promoted_facts=<n> promoted_people=<n> user_model_sections=<n> prestaged=<n> reviewer_dropped=<n> reviewer_fixed=<n> policy=<n>
    ```
-   The anomaly monitor and the baseline re-measure read this line — it is how "did the nightly pass actually promote anything" becomes a number instead of a feeling.
-4. **Hand the day over (controlled daily restart, ISS-016).** As the very last step, `Bash: touch ~/.ll5/restart-requested`. The in-container watcher then restarts you into a **fresh session** at the next idle moment (within minutes): the previous session's tail is in `recent_sessions`, `active_context` is what you just wrote, and SessionStart re-grounds from the stores. This is deliberate — it keeps the context small and the grounding fresh, instead of a 7-generation compaction chain. Do not skip it.
+   `policy=` is the bucket count Step 6 wrote — so run Step 6 before this line. The anomaly monitor and the baseline re-measure read this line — it is how "did the nightly pass actually promote anything" becomes a number instead of a feeling.
+4. **Hand the day over (controlled daily restart, ISS-016).** As the very last step (after Step 6), `Bash: touch ~/.ll5/restart-requested`. The in-container watcher then restarts you into a **fresh session** at the next idle moment (within minutes): the previous session's tail is in `recent_sessions`, `active_context` is what you just wrote, and SessionStart re-grounds from the stores. This is deliberate — it keeps the context small and the grounding fresh, instead of a 7-generation compaction chain. Do not skip it.
+
+## Step 6 — Delivery policy (DECISION-034 Phase 4)
+
+The gateway picks the modality of every classed message (`chat` < `push_silent` < `push_notify` < `push_alert` < `push_alarm` < `reach`) from the user-model section `delivery_policy`; this pass is its only writer. Run it after 5.2 and before the tally (5.3) and the handover (5.4).
+
+1. **Read the stats and the current policy.** `Bash: curl -s -H "Authorization: Bearer $(cat ~/.ll5/token)" "https://gateway.noninoni.click/me/delivery-stats?days=14"` →
+   `{ days, buckets: [ { key: "<class>|<stakes>|<deadline_band>|<mode_at_send>", n, modalities: { <modality>: { sent, seen, acknowledged, done_by_deadline, dismissed, missed, too_much, not_enough } } } ] }`.
+   The previous policy is the `delivery_policy` section of `read_user_model()`; when absent, `exploration_rate` starts at 0.25 and each bucket's previous `preferred` is the class default (fyi → `chat`, needs-you → `push_notify`, do-by → `push_alert`). Route unreachable or empty → skip the step, `policy=0`, leave the section untouched.
+2. **Per bucket, compute:**
+   - `acted(m)` = max(`acknowledged`, `done_by_deadline`) / `sent` for every modality with `sent ≥ 5` (the two counts overlap; max stands in for "acknowledged or done").
+   - `best` = the highest `acted` among those; **`preferred`** = the **weakest** modality with `sent ≥ 5` whose `acted ≥ best − 0.10`. No modality reaches `sent ≥ 5` → keep the previous `preferred`. Never above `push_alert` on outcome alone — alarm and reach are ladder rungs, not defaults.
+   - **Dial back:** when the bucket's `too_much` (summed over modalities) is ≥ 3 and ≥ 3 × its `not_enough`, step `preferred` one rung down (never below `chat`) and mark the pass for a reset of the exploration rate.
+   - **`floor`** = one rung below `preferred`, never below `chat`. **`score`** = `acted(preferred)` rounded to 2 decimals (`null` when kept without data). **`n`** = the bucket's `n`.
+3. **Exploration rate:** previous − 0.05 while the result stays ≥ 0.10 (it floors at 0.10); a dial-back anywhere in this pass sets it back to 0.25.
+4. **Write it whole** — `write_user_model(section: "delivery_policy", content: { version: 1, updated_at: "<today>", exploration_rate, buckets: { "<key>": { preferred, floor, n, score } } })`. Cap at the **60 buckets with the largest `n`** (the section's 12 KB budget; ~120 B per bucket). Buckets in the previous policy that the stats no longer list are carried unchanged (they still gate sends) unless they fall outside the cap.
+5. Add `policy=<buckets written>` to the tally line, and one sentence in the pass's journal entry when a `preferred` moved (which bucket, which way, why).
 
 ---
 
@@ -97,3 +113,4 @@ A DROP is a save, not a failure — it's a confabulation or a misattribution cau
   belong in the topic sections / facts, not here.
 - **Promote the repeated, not the one-off.** ≥2 mentions earns a durable home; a single mention stays in the journal.
 - **Consolidate, don't append. Be concise. Don't hallucinate** — only what was actually observed, said, or retrieved.
+- **delivery_policy is computed, not judged.** Step 6 is arithmetic over the stats route; do not hand-tune a bucket from a feeling about the day. The gateway applies the policy at send time, so a wrong write changes how every ask reaches him tomorrow.

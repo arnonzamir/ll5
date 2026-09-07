@@ -19,9 +19,11 @@ ll5/
 │   └── render-mcp-config.ts           # Renders mcp-endpoints.json → Claude Code .claude/settings.json or opencode opencode-mcp-fragment.json (--format claude|opencode, --config, --output, --worker). MERGES into an existing output file, preserving other top-level keys (hooks/permissions) — a plain overwrite killed the agent's hook wiring for 33h [2026-07-14]
 │
 ├── packages/ll5-run-shared/            # Shared content for both agent variants (dual run-variant Phase 1)
-│   ├── CLAUDE.md                       # Persona, 15 Hard Rules, GTD coaching (~64 KB: 62 KB after the 2026-09-06 trim + 1.4 KB DECISION-034 delivery classes; event how-tos live in skills)
+│   ├── CLAUDE.md                       # Persona, 15 Hard Rules, GTD coaching (~65 KB: 62 KB after the 2026-09-06 trim + 1.4 KB DECISION-034 delivery classes + 0.6 KB "What the user has seen" (P3); event how-tos live in skills)
 │   ├── mcp-endpoints.json              # MCP endpoint definitions (source of truth for render script)
 │   ├── skills/                         # 20 SKILL.md files (daily, review, clarify, engage, sweep, plan, etc.)
+│   │   ├── consolidate/SKILL.md        # Nightly pass: look back, promote, pre-stage, review gate, commit; Step 6 (2026-09-07, DECISION-034 P4) writes the user-model `delivery_policy` from GET /me/delivery-stats
+│   │   ├── daily/SKILL.md              # Morning brief; step 8 (2026-09-07, DECISION-034 P3) leads with "open asks: N" from GET /me/seen-state when N > 0
 │   │   ├── media/SKILL.md              # 2026-09-06: images, [Photo] reel triage, voice-note transcription, PDF/document extraction, generated-image delivery (moved out of CLAUDE.md)
 │   │   ├── vault-login/SKILL.md        # 2026-09-06: vault MCP browser login + onboarding procedure (moved out of CLAUDE.md)
 │   │   └── location/SKILL.md           # 2026-09-06: location snapshot fields, deduction rules, travel-mode provenance, contextual cross-references (moved out of CLAUDE.md)
