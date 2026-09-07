@@ -89,18 +89,21 @@ export function MessageStream({
             if (item.kind === "thinking") {
               return <ThinkingLine key={item.message.id} m={item.message} />;
             }
+            // `id="msg-<uuid>"` is the anchor the activity rail scrolls to
+            // (chat-root jumpToMessage); keep it on the wrapper, not the bubble.
             return (
-              <MessageBubble
-                key={item.message.id}
-                message={item.message}
-                parent={item.message.reply_to_id ? byId.get(item.message.reply_to_id) : undefined}
-                reactions={reactionsByTarget.get(item.message.id) ?? []}
-                variant="unboxed"
-                onReply={onReply}
-                onReact={onReact}
-                onRemoveReaction={onRemoveReaction}
-                isLastUser={item.message.id === lastUserMsg?.id}
-              />
+              <div key={item.message.id} id={`msg-${item.message.id}`}>
+                <MessageBubble
+                  message={item.message}
+                  parent={item.message.reply_to_id ? byId.get(item.message.reply_to_id) : undefined}
+                  reactions={reactionsByTarget.get(item.message.id) ?? []}
+                  variant="unboxed"
+                  onReply={onReply}
+                  onReact={onReact}
+                  onRemoveReaction={onRemoveReaction}
+                  isLastUser={item.message.id === lastUserMsg?.id}
+                />
+              </div>
             );
           })
         )}

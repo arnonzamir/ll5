@@ -73,3 +73,18 @@
 @media (prefers-reduced-motion: reduce) {
   .chat-caret { animation: none; opacity: 0.6; }
 }
+
+/* Activity rail → thread deep link (DECISION-034): a short highlight on the
+   target row after scrollIntoView, so the eye lands on the linked message. */
+@keyframes chat-row-flash {
+  0%   { background-color: rgb(245 158 11 / 0.22); }
+  100% { background-color: transparent; }
+}
+.chat-row-flash {
+  animation: chat-row-flash 2.2s ease-out;
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-row-flash { animation: none; background-color: rgb(245 158 11 / 0.14); }
+}

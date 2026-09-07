@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { LayoutList } from "lucide-react";
+import { Activity, LayoutList } from "lucide-react";
 import type { Message, Reaction } from "@/lib/chat/types";
 import {
   useChatSession,
@@ -16,11 +16,32 @@ import {
 import { Composer } from "./composer";
 import { ConversationList } from "./conversation-list";
 import { ActiveTopicsRail } from "./active-topics-rail";
+import { ActivityRail } from "./activity-rail";
 import { TopicCardDrawer } from "./topic-card-drawer";
 import { MessageStream } from "./message-stream";
 import { CommandPalette } from "./command-palette";
 import { NewConversationDialog } from "./new-conversation-dialog";
 import type { Narrative } from "@/app/(user)/narratives/narratives-server-actions";
+
+/** localStorage key remembering whether the activity rail is open (DECISION-034). */
+const ACTIVITY_RAIL_KEY = "ll5_chat_activity_rail_v1";
+
+/** Scroll the thread to a rendered row and flash it. False when it is not in the DOM. */
+function flashRow(messageId: string): boolean {
+  const el = document.getElementById(`msg-${messageId}`);
+  if (!el) return false;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("chat-row-flash");
+  // Re-trigger the animation on repeat clicks.
+  void el.offsetWidth;
+  el.classList.add("chat-row-flash");
+  setTimeout(() => el.classList.remove("chat-row-flash"), 2400);
+  return true;
+}
+
+function nextPaint(): Promise<void> {
+  return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+}
 
 /**
  * Top-level client shell for /chat. Owns:
@@ -48,6 +69,47 @@ export function ChatRoot() {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [sending, setSending] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Activity rail (DECISION-034 Section 4): collapsed by default; the choice
+  // persists per browser. Read after mount so SSR and the first client render
+  // agree. While closed the rail is unmounted — no fetch, no timer.
+  const [activityOpen, setActivityOpen] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(ACTIVITY_RAIL_KEY) === "1") setActivityOpen(true);
+    } catch { /* storage unavailable — stay collapsed */ }
+  }, []);
+  const toggleActivity = useCallback(() => {
+    setActivityOpen((v) => {
+      const next = !v;
+      try { localStorage.setItem(ACTIVITY_RAIL_KEY, next ? "1" : "0"); } catch { /* noop */ }
+      return next;
+    });
+  }, []);
+
+  // Rail row → thread: scroll to the produced message if it is rendered;
+  // otherwise pull the rows around the trigger time for the open conversation
+  // (gateway `since` + `before` window) and try again. False = not shown.
+  const jumpToMessage = useCallback(async (messageId: string, at: string): Promise<boolean> => {
+    if (flashRow(messageId)) return true;
+    const cid = useChatStore.getState().convId;
+    const t = new Date(at).getTime();
+    if (!cid || !Number.isFinite(t)) return false;
+    try {
+      const since = new Date(t - 60_000).toISOString();
+      const before = new Date(t + 30 * 60_000).toISOString();
+      const res = await fetch(
+        `/api/chat/messages?conversation_id=${encodeURIComponent(cid)}&since=${encodeURIComponent(since)}&before=${encodeURIComponent(before)}&limit=50`,
+      );
+      if (!res.ok) return false;
+      const data = (await res.json()) as { messages?: Message[] };
+      if (data.messages?.length) useChatStore.getState().ingest("history", data.messages);
+    } catch {
+      return false;
+    }
+    await nextPaint();
+    return flashRow(messageId);
+  }, []);
 
   // Keyboard shortcuts — installed globally on the route. Each condition
   // is explicit so shortcuts inside inputs don't accidentally fire.
@@ -193,12 +255,25 @@ export function ChatRoot() {
               /chat
             </span>
           </div>
-          <button
-            onClick={() => setPaletteOpen(true)}
-            className="text-[11px] text-ink-400 hover:text-ink-700 font-mono"
-          >
-            ⌘K palette
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPaletteOpen(true)}
+              className="text-[11px] text-ink-400 hover:text-ink-700 font-mono"
+            >
+              ⌘K palette
+            </button>
+            <button
+              onClick={toggleActivity}
+              className={`flex items-center gap-1 text-[11px] font-mono ${
+                activityOpen ? "text-primary" : "text-ink-400 hover:text-ink-700"
+              }`}
+              title={activityOpen ? "Hide the agent's activity" : "Show the agent's activity"}
+              aria-pressed={activityOpen}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              activity
+            </button>
+          </div>
         </div>
 
         <MessageStream
@@ -222,6 +297,12 @@ export function ChatRoot() {
           </div>
         </div>
       </div>
+
+      {activityOpen && (
+        <div className="w-80 shrink-0 hidden md:flex flex-col">
+          <ActivityRail onJumpToMessage={jumpToMessage} onClose={toggleActivity} />
+        </div>
+      )}
 
       <CommandPalette
         open={paletteOpen}
