@@ -523,7 +523,9 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
   // push). Idempotent: a repeat tap is a 200 with the current status.
   const askAnswer = (outcome: 'acknowledged' | 'done') => async (req: Request, res: Response) => {
     const userId = (req as Request & { userId: string }).userId;
-    const itemId = String(req.params.id ?? '');
+    // Accept the composite list id too (`ask:<uuid>`, what GET /me/tray returns as
+    // `id`): the first app build posted it and got a 400 (2026-09-07 16:26).
+    const itemId = String(req.params.id ?? '').replace(/^ask:/, '');
     if (!UUID_RE.test(itemId)) {
       res.status(400).json({ error: 'id must be the tray item UUID (TrayItem.ask.item_id)' });
       return;
