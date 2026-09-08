@@ -554,7 +554,12 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
           metadata: { outcome },
         });
       }
-      res.json({ status: result.status, changed: result.changed });
+      // 2026-09-08: the app deserialises the reply as a full tray item (its
+      // "Network error" on every tap was a JSON parse failure after the action
+      // had already been applied). Return the item as GET /me/tray renders it,
+      // plus `status` and `changed` at the top level for older builds.
+      const item = (await collectAskItems(pool, userId)).find((i) => i.id === `ask:${itemId}`) ?? null;
+      res.json({ ...(item ?? {}), status: result.status, changed: result.changed });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error(`[tray][ask:${outcome}] Failed`, { userId, itemId, error: message });
