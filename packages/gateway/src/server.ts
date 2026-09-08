@@ -50,9 +50,10 @@ import { processGeofence } from './processors/geofence.js';
 import { processSleepSegment, processSleepClassify } from './processors/sleep.js';
 import { processCurrentPlace } from './processors/current-place.js';
 import { processConnectorEvent } from './processors/connector-event.js';
-import { processAppNotification, classifyNotificationPackage } from './processors/app-notification.js';
+import { routeAppNotification } from './processors/app-notification.js';
 import { processPhoneCall } from './processors/phone-call.js';
-import { connectorForPackage, connectorForSmsSender } from '@ll5/shared';
+import { connectorForSmsSender } from '@ll5/shared';
+import { connectorCaptureCommands, notificationCaptureSeed, UPDATE_DATA_SOURCE_COMMAND } from './utils/notification-capture.js';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
 import { queueDeviceCommand } from './utils/device-commands.js';
@@ -306,41 +307,21 @@ async function processItem(
       sleep_classify: 'sleep',
       current_place: 'current_place',
       phone_call: 'phone_calls',
-      // Non-connector, non-IM app notifications (2026-09-08); the connector
-      // branch below overrides this key for catalog packages.
-      app_notification: 'notifications_all',
+      // app_notification is NOT here: its two gates (`connector_<id>` for the
+      // parser path, `notifications_all` for the awareness store) are read
+      // inside routeAppNotification (processors/app-notification.ts).
     };
-    // app_notification routing by package (2026-09-08): catalog connectors are
-    // gated per connector (`connector_<id>`, the key the dashboard's
-    // /settings/connectors page writes) and parsed; IM packages are dropped
-    // here (they already arrive as `message` items with sender/conversation
-    // identity); everything else is stored raw in ll5_awareness_notifications
-    // under the `notifications_all` toggle.
-    const appConnector = item.type === 'app_notification' ? connectorForPackage(item.package) : undefined;
-    if (item.type === 'app_notification' && !appConnector && classifyNotificationPackage(item.package) === 'im') {
-      logger.debug('[processItem][app_notification] IM package, carried by the message path — dropped', { package: item.package });
-      return { index: itemIndex, type: item.type, status: 'ok' };
-    }
-    const sourceKey = appConnector ? `connector_${appConnector.id}` : sourceMap[item.type];
+    const sourceKey = sourceMap[item.type];
     if (sourceKey && pgPool && !await isSourceEnabled(pgPool, userId, sourceKey)) {
       return { index: itemIndex, type: item.type, status: 'ok' }; // silently skip
     }
 
     switch (item.type) {
       case 'app_notification':
-        if (appConnector && pgPool) {
-          await processConnectorEvent(es, pgPool, userId, appConnector, {
-            connector_id: appConnector.id,
-            package: item.package,
-            sender: null,
-            title: item.title,
-            text: item.text,
-            big_text: item.big_text,
-            post_time: item.post_time,
-          });
-        } else if (!appConnector) {
-          await processAppNotification(es, pgPool, userId, item);
-        }
+        // One entry point (2026-09-08): the phone's generic capture feeds both
+        // the awareness store and the connector parsers; routing by package
+        // and both gates live in processors/app-notification.ts.
+        await routeAppNotification(es, pgPool, userId, item);
         break;
       case 'phone_call':
         await processPhoneCall(es, pgPool, userId, item, matcher);
@@ -738,10 +719,47 @@ export function createApp(config: EnvConfig): { app: express.Application; esClie
         [userId, JSON.stringify(merged)],
       );
       logger.info('[server][putUserSettings] Updated', { userId, keys: Object.keys(patch) });
+
+      // Connector toggles (2026-09-08): the phone has one generic notification
+      // capture; a `data_sources.connector_<id>` write tells it to add/drop that
+      // connector's packages in its include-list. Same `update_data_source`
+      // command the data-sources page already sends, plus `packages`.
+      // Best-effort: the settings write above is the source of truth and the
+      // app re-seeds from GET /me/notification-capture on start.
+      for (const cmd of connectorCaptureCommands(patch.data_sources)) {
+        try {
+          await queueDeviceCommand(pgPool, userId, UPDATE_DATA_SOURCE_COMMAND, { ...cmd });
+        } catch (err) {
+          logger.warn('[server][putUserSettings] connector capture command not queued', {
+            userId, source: cmd.source, error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
       res.json({ updated: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error('[server][putUserSettings] Failed', { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  /**
+   * What the Android app seeds its notification-capture include-list with on
+   * start (2026-09-08): the packages of every enabled catalog connector and
+   * the IM packages. The gateway routes by package on receipt; the phone only
+   * has to not exclude these.
+   */
+  app.get('/me/notification-capture', authMw, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    try {
+      const result = await pgPool.query(
+        "SELECT settings->'data_sources' AS ds FROM user_settings WHERE user_id = $1",
+        [userId],
+      );
+      res.json(notificationCaptureSeed(result.rows[0]?.ds ?? null));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('[server][notificationCapture] Failed', { error: message });
       res.status(500).json({ error: message });
     }
   });

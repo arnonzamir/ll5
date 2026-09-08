@@ -138,7 +138,7 @@ export function dataSourceKey(connectorId: string): string {
 }
 
 export const AUTH_TYPE_NOTES: Record<ConnectorAuthType, string> = {
-  none: "Captured on the phone: enable it under Settings → Connector capture in the app. Nothing to configure here.",
+  none: "Captured by the phone's notification capture — keep the app out of the exclusion list (include-list mode adds it automatically). Nothing to configure here.",
   api_token: "Long-lived API token stored encrypted on the connectors service.",
   oauth: "OAuth client credentials (client id, client secret, user id) stored encrypted on the connectors service; the service mints short-lived access tokens for the scheduled pull.",
 };

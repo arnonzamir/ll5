@@ -1,8 +1,23 @@
 /**
  * All-app notification processor (2026-09-08) — the phone forwards every
- * package's notifications; this is the path for the ones that are neither a
- * catalog connector (processors/connector-event.ts) nor an IM app (those
- * already arrive as `message` items and keep processors/message.ts).
+ * package's notifications through ONE generic capture (no per-connector
+ * capture on the phone since 2026-09-08 evening, Arnon's decision); this file
+ * is the single `app_notification` entry point and routes by package
+ * (`routeAppNotification`, decision table in `decideNotificationRoute`):
+ *
+ *   - catalog connector package (`connectorForPackage`) with
+ *     `data_sources.connector_<id>` enabled → handed to
+ *     processors/connector-event.ts (parse → store → rules → ladder) AND, when
+ *     `notifications_all` is on, stored here with `connector_id` set — it is
+ *     still a notification the user saw;
+ *   - catalog connector package with the connector disabled → a normal
+ *     notification (stored here per routing, no parser);
+ *   - IM package (`IM_PACKAGES`) → dropped: the `message` path carries it;
+ *   - anything else → stored here under the `notifications_all` gate.
+ *
+ * The `notifications_all` gate applies only to the awareness store, never to
+ * connector routing (a user who turned generic capture off on the phone sends
+ * nothing anyway). Removals (`removed:true`) never reach the parser.
  *
  * Awareness stores, the agent queries (docs/purpose.md): one doc per
  * notification key in ll5_awareness_notifications, no notable event, and by
@@ -27,12 +42,14 @@
 import type { Client } from '@elastic/elasticsearch';
 import crypto from 'node:crypto';
 import type { Pool } from 'pg';
-import { connectorForPackage } from '@ll5/shared';
+import { connectorForPackage, type ConnectorCatalogEntry } from '@ll5/shared';
 import type { PushAppNotificationItem } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { insertSystemMessage, createSchedulerEvent } from '../utils/system-message.js';
 import { GroupCoalescer, type CoalescedItem } from '../utils/group-coalescer.js';
+import { isSourceEnabled } from '../utils/data-source-config.js';
 import { decide, newCostGuardState, noteBurstFlushed, type CostGuardState, type ImmediateDecision } from '../connectors/cost-guard.js';
+import { processConnectorEvent } from './connector-event.js';
 
 export type NotificationRouting = 'immediate' | 'batch' | 'ignore';
 export type NotificationPackageClass = 'connector' | 'im' | 'app';
@@ -67,6 +84,52 @@ export function classifyNotificationPackage(pkg: string): NotificationPackageCla
   if (connectorForPackage(pkg)) return 'connector';
   if (IM_PACKAGES.has(pkg)) return 'im';
   return 'app';
+}
+
+export interface NotificationRouteInputs {
+  /** `data_sources.connector_<id>.enabled` for the matched connector (ignored for non-connector packages). */
+  connectorEnabled: boolean;
+  /** `data_sources.notifications_all.enabled`. */
+  notificationsAllEnabled: boolean;
+  /** `removed:true` items are removal events — never parsed as a connector event. */
+  removed?: boolean;
+}
+
+export interface NotificationRoute {
+  class: NotificationPackageClass;
+  /** Hand the item to processors/connector-event.ts (this connector). */
+  connector: ConnectorCatalogEntry | null;
+  /** Store in ll5_awareness_notifications (per-package routing still applies). */
+  store: boolean;
+  /** Stamped on the stored doc when the item was handed to the connector path. */
+  connectorId: string | null;
+}
+
+/**
+ * Pure: the routing decision table.
+ *
+ *   class      connector_<id>  notifications_all  → parser  store
+ *   connector  on              on                   yes     yes (connector_id)
+ *   connector  on              off                  yes     no
+ *   connector  off             on                   no      yes
+ *   connector  off             off                  no      no
+ *   im         any             any                  no      no   (dropped)
+ *   app        n/a             on                   no      yes
+ *   app        n/a             off                  no      no
+ *
+ * A removal of a connector-package notification skips the parser row.
+ */
+export function decideNotificationRoute(pkg: string, inputs: NotificationRouteInputs): NotificationRoute {
+  const cls = classifyNotificationPackage(pkg);
+  if (cls === 'im') return { class: cls, connector: null, store: false, connectorId: null };
+  const entry = cls === 'connector' ? connectorForPackage(pkg) ?? null : null;
+  const toParser = !!entry && inputs.connectorEnabled && !inputs.removed;
+  return {
+    class: cls,
+    connector: toParser ? entry : null,
+    store: inputs.notificationsAllEnabled,
+    connectorId: toParser ? entry!.id : null,
+  };
 }
 
 /** Pure: the per-(user, notification) identity — Android's key, else a content hash. */
@@ -105,10 +168,12 @@ export interface NotificationDoc {
   received_at: string;
   removed_at: string | null;
   dedupe_key: string;
+  /** Catalog connector id when the same notification was handed to the connector parser; null otherwise. */
+  connector_id: string | null;
 }
 
 /** Pure: the stored document for a posted notification. */
-export function buildNotificationDoc(userId: string, item: PushAppNotificationItem, receivedAt: string): NotificationDoc {
+export function buildNotificationDoc(userId: string, item: PushAppNotificationItem, receivedAt: string, connectorId: string | null = null): NotificationDoc {
   return {
     user_id: userId,
     package: item.package,
@@ -124,6 +189,7 @@ export function buildNotificationDoc(userId: string, item: PushAppNotificationIt
     received_at: receivedAt,
     removed_at: null,
     dedupe_key: notificationDedupeKey(item),
+    connector_id: connectorId,
   };
 }
 
@@ -233,12 +299,64 @@ export function resetAppNotificationState(): void {
 
 export const NOTIFICATIONS_INDEX = 'll5_awareness_notifications';
 
+export type NotificationRouteOutcome = 'dropped' | 'skipped' | 'stored' | 'connector' | 'connector+stored';
+
+/**
+ * THE `app_notification` entry point (server.ts calls only this). Reads the
+ * two gates, decides (pure), then: awareness store first (idempotent by _id),
+ * connector path second — a connector failure propagates so the phone retries
+ * the item, and the re-store lands on the same doc.
+ */
+export async function routeAppNotification(
+  es: Client,
+  pool: Pool | undefined,
+  userId: string,
+  item: PushAppNotificationItem,
+  now = Date.now(),
+): Promise<NotificationRouteOutcome> {
+  const cls = classifyNotificationPackage(item.package);
+  if (cls === 'im') {
+    logger.debug('[app-notification][route] IM package, carried by the message path — dropped', { package: item.package });
+    return 'dropped';
+  }
+  const entry = cls === 'connector' ? connectorForPackage(item.package) : undefined;
+  // Without a pool there is no connector path (it needs Postgres) and no gate
+  // to read: the awareness store defaults to enabled, as isSourceEnabled does.
+  const [connectorEnabled, notificationsAllEnabled] = await Promise.all([
+    entry && pool ? isSourceEnabled(pool, userId, `connector_${entry.id}`) : Promise.resolve(false),
+    pool ? isSourceEnabled(pool, userId, 'notifications_all') : Promise.resolve(true),
+  ]);
+  const route = decideNotificationRoute(item.package, { connectorEnabled, notificationsAllEnabled, removed: !!item.removed });
+
+  if (route.store) {
+    await processAppNotification(es, pool, userId, item, now, route.connectorId);
+  }
+  if (route.connector && pool) {
+    await processConnectorEvent(es, pool, userId, route.connector, {
+      connector_id: route.connector.id,
+      package: item.package,
+      sender: null,
+      title: item.title,
+      text: item.text,
+      big_text: item.big_text,
+      post_time: item.post_time,
+    });
+  }
+  const outcome: NotificationRouteOutcome = route.connector && route.store ? 'connector+stored'
+    : route.connector ? 'connector'
+    : route.store ? 'stored'
+    : 'skipped';
+  logger.debug('[app-notification][route] decided', { package: item.package, class: route.class, outcome });
+  return outcome;
+}
+
 export async function processAppNotification(
   es: Client,
   pool: Pool | undefined,
   userId: string,
   item: PushAppNotificationItem,
   now = Date.now(),
+  connectorId: string | null = null,
 ): Promise<void> {
   const routingMap = pool ? await readNotificationRouting(pool, userId, now) : {};
   const routing = resolveNotificationRouting(routingMap, item.package);
@@ -263,8 +381,8 @@ export async function processAppNotification(
     return;
   }
 
-  await es.index({ index: NOTIFICATIONS_INDEX, id, document: buildNotificationDoc(userId, item, receivedAt), refresh: false });
-  logger.debug('[app-notification][store] stored', { package: item.package, routing, delivery, ongoing: !!item.ongoing });
+  await es.index({ index: NOTIFICATIONS_INDEX, id, document: buildNotificationDoc(userId, item, receivedAt, connectorId), refresh: false });
+  logger.debug('[app-notification][store] stored', { package: item.package, routing, delivery, ongoing: !!item.ongoing, connectorId });
 
   if (!pool || delivery === 'store') return;
 

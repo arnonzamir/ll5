@@ -320,6 +320,9 @@ export const AWARENESS_INDICES: IndexDefinition[] = [
         received_at: { type: 'date' },
         removed_at: { type: 'date' },
         dedupe_key: { type: 'keyword' },
+        // Catalog connector id when the same notification was also handed to
+        // the connector parser (one generic capture, gateway routes by package).
+        connector_id: { type: 'keyword' },
       },
     },
   },
