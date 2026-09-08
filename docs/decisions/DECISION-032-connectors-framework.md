@@ -23,6 +23,10 @@ Arnon: "we won't scrape banks or anything fragile." Routes are now exactly three
 
 Approved: LL5 holds ledger and event data in its own normalized schema (`connector_ledger_rows` / `connector_events`: external id, kind, absolute amount, currency, occurred/posted time, masked account ref, HMAC merchant key, encrypted payload). Source-specific fields (Financy category, status, installments, provider, original amount) live only inside the encrypted payload and are returned as fields by the tools, never as columns; promoting one to a column is a migration. Adapters translate at the boundary; no source schema leaks past it.
 
+## Amendment (2026-09-08, Arnon: "lets do it") — one notification capture
+
+The per-connector notification capture on the phone (package map, per-connector toggles, `connector_<id>` phone keys) is retired. The generic all-app capture is the only source; the gateway routes each notification by package: an enabled connector's package goes to the connector parsers (and is also stored as a notification), everything else to the awareness store. Enabling a connector is purely server-side; in include-list mode the gateway tells the phone which packages to include. The SMS path is unchanged.
+
 ## Alternatives considered
 
 - Extend the health MCP (has the credential/adapter skeleton): rejected, different domain and different sensitivity boundary.
