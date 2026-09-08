@@ -8,3 +8,5 @@ export { ElasticsearchWifiRepository } from './wifi.repository.js';
 export { ElasticsearchWifiScanRepository } from './wifi-scan.repository.js';
 export { ElasticsearchDeviceActivityRepository } from './device-activity.repository.js';
 export { ElasticsearchBluetoothRepository } from './bluetooth.repository.js';
+export { ElasticsearchNotificationRepository } from './notification.repository.js';
+export { ElasticsearchCallRepository } from './call.repository.js';

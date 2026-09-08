@@ -7,8 +7,10 @@ import {
 import { logger } from '../utils/logger.js';
 
 // Indices exclusively owned by the awareness MCP (not written to by the gateway).
-// The 7 ll5_awareness_* indices that the gateway also writes to are imported
-// from @ll5/shared to prevent schema drift.
+// The ll5_awareness_* indices that the gateway also writes to — including
+// ll5_awareness_notifications and ll5_awareness_calls (2026-09-08, all-app
+// notifications + phone calls) — are imported from @ll5/shared to prevent
+// schema drift; both services ensure them at boot.
 const AWARENESS_EXCLUSIVE_INDICES: IndexDefinition[] = [
   {
     index: 'll5_agent_journal',

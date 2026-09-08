@@ -17,6 +17,8 @@ export interface DataSources {
   findhub: DataSourceConfig;
   device_activity: DataSourceConfig;
   bluetooth: DataSourceConfig;
+  notifications_all: DataSourceConfig;
+  phone_calls: DataSourceConfig;
 }
 
 export const DEFAULTS: DataSources = {
@@ -32,6 +34,10 @@ export const DEFAULTS: DataSources = {
   // phone is sufficient and nothing is silently dropped server-side.
   device_activity: { enabled: true },
   bluetooth: { enabled: true },
+  // 2026-09-08: all-app notifications + phone calls. Same shape as the two
+  // above — the phone's own toggle is the real opt-in; this gate stays on.
+  notifications_all: { enabled: true },
+  phone_calls: { enabled: true },
 };
 
 // Sources collected on the phone (toggling these queues an Android device
@@ -41,4 +47,6 @@ export const PHONE_COLLECTED_SOURCES: ReadonlySet<keyof DataSources> = new Set([
   "gps",
   "im_capture",
   "calendar",
+  "notifications_all",
+  "phone_calls",
 ]);

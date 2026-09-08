@@ -10,7 +10,7 @@ const MAX_DISPLAY_NAME_LENGTH = 200;
  * Strips +, spaces, dashes, parens — keeps digits only.
  * Also tries common country code variants for Israeli numbers.
  */
-function normalizePhone(raw: string): string[] {
+export function normalizePhone(raw: string): string[] {
   const digits = raw.replace(/[^0-9]/g, '');
   if (!digits) return [];
 

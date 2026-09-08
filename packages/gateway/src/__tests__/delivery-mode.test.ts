@@ -31,6 +31,8 @@ describe('pickMode precedence + sick detection', () => {
     expect(pickMode({ quiet: true, asleep: true, driving: true, meeting: true, sick: true }).mode).toBe('sleep');
     expect(pickMode({ quiet: true, asleep: false, driving: true, meeting: true, sick: true }).mode).toBe('quiet_hours');
     expect(pickMode({ quiet: false, asleep: false, driving: true, meeting: true, sick: true }).mode).toBe('driving');
+    expect(pickMode({ quiet: false, asleep: false, driving: true, meeting: true, sick: true, onCall: true }).mode).toBe('driving');
+    expect(pickMode({ quiet: false, asleep: false, driving: false, meeting: true, sick: true, onCall: true }).mode).toBe('on_call');
     expect(pickMode({ quiet: false, asleep: false, driving: false, meeting: true, sick: true }).mode).toBe('meeting');
     expect(pickMode({ quiet: false, asleep: false, driving: false, meeting: false, sick: true }).mode).toBe('sick');
     expect(pickMode({ quiet: false, asleep: false, driving: false, meeting: false, sick: false })).toEqual({ mode: 'normal', reasons: [] });
