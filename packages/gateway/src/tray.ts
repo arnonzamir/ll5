@@ -421,7 +421,8 @@ interface AskRow {
 
 /** Open asks (plus acknowledged-but-not-done do-bys), soonest due first.
  *  The message's class / stakes / rung state come from message_delivery. */
-async function collectAskItems(pool: Pool, userId: string): Promise<TrayItem[]> {
+/** Ask items for the tray (open, or acknowledged do-by), or — with `onlyId` — that one ask in ANY status (ack/done replies). */
+async function collectAskItems(pool: Pool, userId: string, onlyId?: string): Promise<TrayItem[]> {
   let rows: AskRow[];
   try {
     const res = await pool.query<AskRow>(
@@ -430,9 +431,9 @@ async function collectAskItems(pool: Pool, userId: string): Promise<TrayItem[]> 
          FROM tray_items t
          LEFT JOIN message_delivery d ON d.tray_item_id = t.id AND d.user_id = t.user_id
         WHERE t.user_id = $1 AND t.kind = 'ask'
-          AND (t.status = 'open' OR (t.status = 'acknowledged' AND t.ack_required = true))
+          AND ${onlyId ? 't.id = $2' : "(t.status = 'open' OR (t.status = 'acknowledged' AND t.ack_required = true))"}
         ORDER BY t.due_at ASC NULLS LAST, t.created_at ASC`,
-      [userId],
+      onlyId ? [userId, onlyId] : [userId],
     );
     rows = res.rows;
   } catch (err) {
@@ -558,7 +559,7 @@ export function createTrayRouter(pool: Pool, authSecret: string, options: TrayRo
       // "Network error" on every tap was a JSON parse failure after the action
       // had already been applied). Return the item as GET /me/tray renders it,
       // plus `status` and `changed` at the top level for older builds.
-      const item = (await collectAskItems(pool, userId)).find((i) => i.id === `ask:${itemId}`) ?? null;
+      const item = (await collectAskItems(pool, userId, itemId))[0] ?? null;
       res.json({ ...(item ?? {}), status: result.status, changed: result.changed });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

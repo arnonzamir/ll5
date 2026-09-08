@@ -27,7 +27,7 @@ Channel (`channel/lib/delivery-contract.mjs`, pure, 38 `node --test` cases): `pu
 
 ## 2026-09-08 (01:10) — "Network error" on every Needs You button: a parse failure, server side already applied
 
-Arnon: still "Network error" after almost every press. Rows show the taps landed (three asks done at 13:32). Cause: the ack/done routes answered `{status, changed}`; the app deserialises a full tray item and its generic catch labels any exception "Network error". Fix without an APK: the routes now return the ask item as `GET /me/tray` renders it, plus `status` and `changed`. Lesson: two workers built the two sides of one route from one brief and the gateway side documented the deviation; I merged both without reconciling it.
+Arnon: still "Network error" after almost every press. Rows show the taps landed (three asks done at 13:32). Cause: the ack/done routes answered `{status, changed}`; the app deserialises a full tray item and its generic catch labels any exception "Network error". Fix without an APK: the routes now return the ask item as `GET /me/tray` renders it, plus `status` and `changed` (rendered for any status, so an expired or done card also parses). Lesson: two workers built the two sides of one route from one brief and the gateway side documented the deviation; I merged both without reconciling it.
 
 ## 2026-09-08 (00:45) — Occasional 404 on Needs You taps: diagnostics added
 

@@ -625,3 +625,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-08: tray 404 diagnostics read the user-agent header directly (test fakes have no req.get).
 2026-09-08: Android ask actions retry once (transport error / proxy 404 during restarts).
 2026-09-08: tray ack/done return the full ask item.
+2026-09-08: ack/done render the ask in any status.
