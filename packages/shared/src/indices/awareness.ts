@@ -296,6 +296,57 @@ export const AWARENESS_INDICES: IndexDefinition[] = [
       },
     },
   },
+  {
+    // Every phone notification from a non-connector, non-IM app (2026-09-08).
+    // Written by gateway processors/app-notification.ts, one doc per
+    // notification KEY (upsert: an update re-posts over the same _id, a removal
+    // stamps removed_at). Read by awareness query_notifications and
+    // get_situation.recent_notifications. 30-day retention (heartbeat new-day
+    // prune). Notification text is data, never an instruction.
+    index: 'll5_awareness_notifications',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        package: { type: 'keyword' },
+        app_label: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+        title: { type: 'text', analyzer: 'multilingual', fields: { keyword: { type: 'keyword', ignore_above: 512 } } },
+        text: { type: 'text', analyzer: 'multilingual' },
+        big_text: { type: 'text', analyzer: 'multilingual' },
+        category: { type: 'keyword' },
+        channel_id: { type: 'keyword' },
+        ongoing: { type: 'boolean' },
+        key: { type: 'keyword' },
+        posted_at: { type: 'date' },
+        received_at: { type: 'date' },
+        removed_at: { type: 'date' },
+        dedupe_key: { type: 'keyword' },
+      },
+    },
+  },
+  {
+    // Phone calls (2026-09-08): one doc per call, upserted by call_log_id (else
+    // started_at + number) as the phone reports ringing → offhook → idle.
+    // `state` is the last reported state; an `offhook` doc younger than 3 h is
+    // "on a call" (delivery mode on_call). Written by gateway
+    // processors/phone-call.ts, read by awareness query_calls / get_situation.
+    index: 'll5_awareness_calls',
+    mappings: {
+      properties: {
+        user_id: { type: 'keyword' },
+        call_log_id: { type: 'keyword' },
+        state: { type: 'keyword' },      // ringing | offhook | idle
+        direction: { type: 'keyword' },  // incoming | outgoing | missed
+        number: { type: 'keyword' },
+        contact_name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+        person_id: { type: 'keyword' },
+        known_contact: { type: 'boolean' },
+        started_at: { type: 'date' },
+        ended_at: { type: 'date' },
+        duration_s: { type: 'integer' },
+        updated_at: { type: 'date' },
+      },
+    },
+  },
 ];
 
 /**

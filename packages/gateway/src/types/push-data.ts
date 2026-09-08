@@ -258,6 +258,16 @@ const PushCurrentPlaceSchema = z.object({
 // forwards). Unlike `message` items, nothing is parsed on the phone: the
 // gateway's pure parsers (src/connectors/parsers) turn title/text/big_text
 // into a connector event. `post_time` is the notification's own post time.
+//
+// 2026-09-08 (all-app notifications): the phone now forwards EVERY package's
+// notifications. The gateway routes by package — catalog connectors keep the
+// parser path above, IM packages are dropped here (they already arrive as
+// `message` items), everything else lands in ll5_awareness_notifications via
+// processors/app-notification.ts. The optional fields below are what the
+// notification-listener worker adds for that path: `key` is Android's stable
+// notification key (the dedupe key — an update or removal carries the same
+// key), `when` is the notification's own `when` field, `removed:true` is a
+// removal event (the phone sends title/text as null on removals).
 const PushAppNotificationSchema = z.object({
   type: z.literal('app_notification'),
   package: z.string().min(1),
@@ -266,10 +276,37 @@ const PushAppNotificationSchema = z.object({
   big_text: z.string().nullable(),
   post_time: z.string().datetime({ offset: true }),
   timestamp: z.string().datetime({ offset: true }).optional(),
+  app_label: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
+  channel_id: z.string().nullable().optional(),
+  ongoing: z.boolean().optional(),
+  key: z.string().nullable().optional(),
+  when: z.string().datetime({ offset: true }).nullable().optional(),
+  removed: z.boolean().optional(),
+});
+
+// Phone call state change (2026-09-08). The phone sends one item per telephony
+// state transition: `ringing` (incoming, before answer), `offhook` (a call is
+// active — incoming answered or outgoing dialling/connected), `idle` (ended).
+// `direction` is what the phone knows at that moment (`missed` only on the
+// final idle of an unanswered incoming call); `duration_s`/`ended_at`/
+// `call_log_id` arrive on idle when the call log has the row.
+const PushPhoneCallSchema = z.object({
+  type: z.literal('phone_call'),
+  state: z.enum(['ringing', 'offhook', 'idle']),
+  direction: z.enum(['incoming', 'outgoing', 'missed']).nullable().optional(),
+  number: z.string().nullable().optional(),
+  contact_name: z.string().nullable().optional(),
+  started_at: z.string().datetime({ offset: true }).nullable().optional(),
+  ended_at: z.string().datetime({ offset: true }).nullable().optional(),
+  duration_s: z.number().int().nonnegative().nullable().optional(),
+  call_log_id: z.string().nullable().optional(),
+  timestamp: z.string().datetime({ offset: true }).optional(),
 });
 
 const PushItemSchema = z.discriminatedUnion('type', [
   PushAppNotificationSchema,
+  PushPhoneCallSchema,
   PushLocationItemSchema,
   PushMessageItemSchema,
   PushCalendarItemSchema,
@@ -312,6 +349,7 @@ export type PushSleepSegmentItem = z.infer<typeof PushSleepSegmentSchema>;
 export type PushSleepClassifyItem = z.infer<typeof PushSleepClassifySchema>;
 export type PushCurrentPlaceItem = z.infer<typeof PushCurrentPlaceSchema>;
 export type PushAppNotificationItem = z.infer<typeof PushAppNotificationSchema>;
+export type PushPhoneCallItem = z.infer<typeof PushPhoneCallSchema>;
 export type PushItem = z.infer<typeof PushItemSchema>;
 export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>;
 

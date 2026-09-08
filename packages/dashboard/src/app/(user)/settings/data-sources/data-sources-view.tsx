@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, MapPin, MessageSquare, Calendar, Heart, Phone, Tag, Activity, Bluetooth } from "lucide-react";
+import { RefreshCw, MapPin, MessageSquare, Calendar, Heart, Phone, Tag, Activity, Bluetooth, Bell, PhoneCall } from "lucide-react";
 import {
   fetchDataSources,
   updateDataSources,
@@ -24,6 +24,8 @@ const SOURCE_META: Array<{
   { key: "findhub", label: "Find Hub Trackers", description: "Google Find Hub locations for Bluetooth trackers and devices (keys, bag, car, tablets)", icon: Tag },
   { key: "device_activity", label: "Phone Activity & App Usage", description: "Screen wake/idle and a compact app-usage rollup so the agent can tell when you're up and active (requires Usage Access on the phone)", icon: Activity },
   { key: "bluetooth", label: "Bluetooth Connections", description: "Connect/disconnect events (car, headphones, watch) for context like driving or commuting", icon: Bluetooth },
+  { key: "notifications_all", label: "All App Notifications", description: "Every app's notifications (deliveries, rides, banking apps, Maps) stored for 30 days so the agent can see what the phone showed you. IM apps and connectors have their own paths. Per-app immediate/batch/ignore routing lives in settings.notifications.routing", icon: Bell },
+  { key: "phone_calls", label: "Phone Calls", description: "Incoming, outgoing and missed calls (number, contact, duration); an active call sets the on_call delivery mode", icon: PhoneCall },
 ];
 
 export function DataSourcesView() {

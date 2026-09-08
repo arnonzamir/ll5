@@ -50,6 +50,8 @@ import { processGeofence } from './processors/geofence.js';
 import { processSleepSegment, processSleepClassify } from './processors/sleep.js';
 import { processCurrentPlace } from './processors/current-place.js';
 import { processConnectorEvent } from './processors/connector-event.js';
+import { processAppNotification, classifyNotificationPackage } from './processors/app-notification.js';
+import { processPhoneCall } from './processors/phone-call.js';
 import { connectorForPackage, connectorForSmsSender } from '@ll5/shared';
 import { startSchedulers } from './scheduler/index.js';
 import { WebhookPayloadSchema, PushItemSchema, type ItemResult, type PushItem, type PushCalendarItem, type WebhookResponse } from './types/index.js';
@@ -303,14 +305,20 @@ async function processItem(
       sleep_segment: 'sleep',
       sleep_classify: 'sleep',
       current_place: 'current_place',
+      phone_call: 'phone_calls',
+      // Non-connector, non-IM app notifications (2026-09-08); the connector
+      // branch below overrides this key for catalog packages.
+      app_notification: 'notifications_all',
     };
-    // Connector notifications are gated per connector (`connector_<id>`, the
-    // key the dashboard's /settings/connectors page writes). A package that is
-    // not in the catalog is dropped here: the phone should not forward it, and
-    // the gateway never stores raw text from an unknown app.
+    // app_notification routing by package (2026-09-08): catalog connectors are
+    // gated per connector (`connector_<id>`, the key the dashboard's
+    // /settings/connectors page writes) and parsed; IM packages are dropped
+    // here (they already arrive as `message` items with sender/conversation
+    // identity); everything else is stored raw in ll5_awareness_notifications
+    // under the `notifications_all` toggle.
     const appConnector = item.type === 'app_notification' ? connectorForPackage(item.package) : undefined;
-    if (item.type === 'app_notification' && !appConnector) {
-      logger.debug('[processItem][app_notification] package not in the connector catalog, dropped', { package: item.package });
+    if (item.type === 'app_notification' && !appConnector && classifyNotificationPackage(item.package) === 'im') {
+      logger.debug('[processItem][app_notification] IM package, carried by the message path — dropped', { package: item.package });
       return { index: itemIndex, type: item.type, status: 'ok' };
     }
     const sourceKey = appConnector ? `connector_${appConnector.id}` : sourceMap[item.type];
@@ -330,7 +338,12 @@ async function processItem(
             big_text: item.big_text,
             post_time: item.post_time,
           });
+        } else if (!appConnector) {
+          await processAppNotification(es, pgPool, userId, item);
         }
+        break;
+      case 'phone_call':
+        await processPhoneCall(es, pgPool, userId, item, matcher);
         break;
       case 'location': {
         const stored = await processLocation(

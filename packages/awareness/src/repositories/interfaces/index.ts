@@ -8,3 +8,5 @@ export type { WifiRepository } from './wifi.repository.js';
 export type { WifiScanRepository } from './wifi-scan.repository.js';
 export type { DeviceActivityRepository } from './device-activity.repository.js';
 export type { BluetoothRepository } from './bluetooth.repository.js';
+export type { NotificationRepository, NotificationQueryParams, NotificationRecord } from './notification.repository.js';
+export type { CallRepository, CallQueryParams, CallRecord } from './call.repository.js';

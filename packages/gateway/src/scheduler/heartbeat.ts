@@ -5,6 +5,7 @@ import { insertSystemMessage, createSchedulerEvent } from '../utils/system-messa
 import { timeBanner, formatTime } from '@ll5/shared';
 import { buildLocationLine } from './location-state.js';
 import { getEffectiveTimezone } from '../utils/timezone.js';
+import { pruneOldNotifications } from '../processors/app-notification.js';
 
 interface HeartbeatConfig {
   silenceMinutes: number;
@@ -88,6 +89,10 @@ export class HeartbeatScheduler {
     this.lastPeriod = period;
 
     if (!newDay && !periodFlip) return;
+
+    // Retention for the all-app notifications store rides the new-day edge:
+    // one delete-by-query per local day, never blocking the cue.
+    if (newDay) void pruneOldNotifications(this.es, this.config.userId);
 
     const banner = timeBanner(new Date(), this.tz);
     const parts: string[] = [];

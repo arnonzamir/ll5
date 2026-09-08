@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { Client } from '@elastic/elasticsearch';
 import { logger } from './logger.js';
 import { getLocationState } from '../processors/location.js';
+import { getOnCallState } from './call-state.js';
 
 /**
  * Delivery mode — the user's current state as it should shape what the agent
@@ -11,15 +12,16 @@ import { getLocationState } from '../processors/location.js';
  *   quiet_hours  local time inside the quiet window (default 23:30–06:30)
  *   sleep        phone sleep-classify says asleep (confidence ≥ 0.7, ≤ 20 min old)
  *   driving      location state says driving within the last 10 min
+ *   on_call      the phone reported an active call (offhook, ≤ 3 h old, no idle yet)
  *   meeting      a real (non-all-day, non-LL5-system) calendar event is in progress
  *   sick         the agent's own active_context user-model text says so
  *   normal       none of the above
  *
- * Precedence: sleep > quiet_hours > driving > meeting > sick > normal. The
+ * Precedence: sleep > quiet_hours > driving > on_call > meeting > sick > normal. The
  * channel MCP stamps the mode on every inbound envelope; POST /chat/messages
  * uses quiet_hours/sleep to HOLD non-critical proactive pushes until morning.
  */
-export type DeliveryMode = 'sleep' | 'quiet_hours' | 'driving' | 'meeting' | 'sick' | 'normal';
+export type DeliveryMode = 'sleep' | 'quiet_hours' | 'driving' | 'on_call' | 'meeting' | 'sick' | 'normal';
 
 export interface DeliveryModeResult {
   mode: DeliveryMode;
@@ -109,14 +111,15 @@ export function isUserMeeting(e: MeetingCandidate): boolean {
   return true;
 }
 
-export function pickMode(s: { quiet: boolean; asleep: boolean; driving: boolean; meeting: boolean; sick: boolean }): { mode: DeliveryMode; reasons: string[] } {
+export function pickMode(s: { quiet: boolean; asleep: boolean; driving: boolean; meeting: boolean; sick: boolean; onCall?: boolean }): { mode: DeliveryMode; reasons: string[] } {
   const reasons: string[] = [];
   if (s.asleep) reasons.push('phone sleep-classify: asleep');
   if (s.quiet) reasons.push('quiet hours');
   if (s.driving) reasons.push('location: driving');
+  if (s.onCall) reasons.push('on a phone call');
   if (s.meeting) reasons.push('calendar: event in progress');
   if (s.sick) reasons.push('user model active_context mentions illness');
-  const mode: DeliveryMode = s.asleep ? 'sleep' : s.quiet ? 'quiet_hours' : s.driving ? 'driving' : s.meeting ? 'meeting' : s.sick ? 'sick' : 'normal';
+  const mode: DeliveryMode = s.asleep ? 'sleep' : s.quiet ? 'quiet_hours' : s.driving ? 'driving' : s.onCall ? 'on_call' : s.meeting ? 'meeting' : s.sick ? 'sick' : 'normal';
   return { mode, reasons };
 }
 
@@ -197,7 +200,10 @@ export async function computeDeliveryMode(pool: Pool, es: Client, userId: string
     sick = looksSick(r._source?.content);
   } catch { /* no active_context yet */ }
 
-  const picked = pickMode({ quiet, asleep, driving, meeting, sick });
+  // Phone-call signal is in-process (processors/phone-call.ts feeds utils/call-state.ts).
+  const onCall = getOnCallState(userId, now.getTime()) !== null;
+
+  const picked = pickMode({ quiet, asleep, driving, meeting, sick, onCall });
   const hold = picked.mode === 'sleep' || picked.mode === 'quiet_hours';
   const result: DeliveryModeResult = {
     ...picked,

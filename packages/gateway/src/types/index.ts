@@ -16,6 +16,7 @@ export {
   type PushSleepClassifyItem,
   type PushCurrentPlaceItem,
   type PushAppNotificationItem,
+  type PushPhoneCallItem,
   type PushItem,
   type WebhookPayload,
   type ItemResult,

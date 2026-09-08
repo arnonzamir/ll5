@@ -11,6 +11,8 @@ import type { WifiScanRepository } from '../repositories/interfaces/wifi-scan.re
 import type { TrackedDeviceRepository } from '../repositories/interfaces/tracked-device.repository.js';
 import type { DeviceActivityRepository } from '../repositories/interfaces/device-activity.repository.js';
 import type { BluetoothRepository } from '../repositories/interfaces/bluetooth.repository.js';
+import type { NotificationRepository } from '../repositories/interfaces/notification.repository.js';
+import type { CallRepository } from '../repositories/interfaces/call.repository.js';
 import { LocationService } from '../services/location-service.js';
 import { registerLocationTools } from './location.js';
 import { registerMessageTools } from './messages.js';
@@ -26,6 +28,8 @@ import { registerGeoSearchTools } from './geo-search.js';
 import { registerPhoneStatusTools } from './phone-status.js';
 import { registerWifiTools } from './wifi.js';
 import { registerTrackedDeviceTools } from './tracked-devices.js';
+import { registerNotificationTools } from './notifications.js';
+import { registerCallTools } from './calls.js';
 
 export interface Repositories {
   location: LocationRepository;
@@ -39,6 +43,8 @@ export interface Repositories {
   trackedDevice: TrackedDeviceRepository;
   deviceActivity: DeviceActivityRepository;
   bluetooth: BluetoothRepository;
+  notification: NotificationRepository;
+  call: CallRepository;
 }
 
 export function registerAllTools(
@@ -68,6 +74,8 @@ export function registerAllTools(
       message: repos.message,
       deviceActivity: repos.deviceActivity,
       bluetooth: repos.bluetooth,
+      notification: repos.notification,
+      call: repos.call,
     },
     getUserId,
     timezone,
@@ -86,4 +94,6 @@ export function registerAllTools(
   registerPhoneStatusTools(server, repos.phoneStatus, getUserId);
   registerWifiTools(server, repos.wifi, getUserId);
   registerTrackedDeviceTools(server, repos.trackedDevice, getUserId);
+  registerNotificationTools(server, repos.notification, getUserId);
+  registerCallTools(server, repos.call, getUserId);
 }

@@ -88,6 +88,23 @@ d('MCP contracts (live, read-only)', () => {
     expect(rows!.length).toBeGreaterThan(0);
   });
 
+  it('awareness: query_notifications is listed and answers the capped envelope (2026-09-08)', async () => {
+    expect(await listTools('awareness')).toContain('query_notifications');
+    const r = await call<{ notifications?: unknown[]; total?: number }>('awareness', 'query_notifications', { limit: 3 });
+    expect(r.isError, r.text.slice(0, 200)).toBe(false);
+    // The store may legitimately be empty (source off, phone build without the worker) — the shape is the contract.
+    expect(Array.isArray(r.data?.notifications), 'query_notifications must return { notifications: [...] }').toBe(true);
+    expect(typeof r.data?.total).toBe('number');
+  });
+
+  it('awareness: query_calls is listed and answers the capped envelope (2026-09-08)', async () => {
+    expect(await listTools('awareness')).toContain('query_calls');
+    const r = await call<{ calls?: unknown[]; total?: number }>('awareness', 'query_calls', { limit: 3 });
+    expect(r.isError, r.text.slice(0, 200)).toBe(false);
+    expect(Array.isArray(r.data?.calls), 'query_calls must return { calls: [...] }').toBe(true);
+    expect(typeof r.data?.total).toBe('number');
+  });
+
   it('personal-knowledge: list_narratives returns narratives', async () => {
     expect((await listTools('personal-knowledge')).length).toBeGreaterThan(10);
     const r = await call('personal-knowledge', 'list_narratives', { limit: 3 });

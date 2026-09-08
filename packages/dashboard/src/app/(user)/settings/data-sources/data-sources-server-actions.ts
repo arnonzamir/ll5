@@ -25,6 +25,8 @@ export async function fetchDataSources(): Promise<DataSources> {
       findhub: ds.findhub ?? DEFAULTS.findhub,
       device_activity: ds.device_activity ?? DEFAULTS.device_activity,
       bluetooth: ds.bluetooth ?? DEFAULTS.bluetooth,
+      notifications_all: ds.notifications_all ?? DEFAULTS.notifications_all,
+      phone_calls: ds.phone_calls ?? DEFAULTS.phone_calls,
     };
   } catch {
     return DEFAULTS;

@@ -19,7 +19,7 @@ import { bucketKey, deadlineBand } from './delivery-stats.js';
  *      critical critical);
  *   2. never below the bucket's `floor`, never below the agent's own `level`
  *      (a floor, DECISION-034 §2), never above what delivery mode allows
- *      (sleep / quiet_hours: push_silent; driving / meeting: push_notify;
+ *      (sleep / quiet_hours: push_silent; driving / on_call / meeting: push_notify;
  *      critical stakes lift every ceiling);
  *   3. with probability `exploration_rate` (policy's, default 0.35) pick ONE
  *      rung STRONGER than the base when there is one under the ceiling —
@@ -101,7 +101,7 @@ export function levelForModality(m: Modality): NotificationLevel | null {
 export function modeCeiling(mode: DeliveryMode | string | null | undefined, stakes: Stakes | null): Modality {
   if (stakes === 'critical') return 'push_alarm';
   if (mode === 'sleep' || mode === 'quiet_hours') return 'push_silent';
-  if (mode === 'driving' || mode === 'meeting') return 'push_notify';
+  if (mode === 'driving' || mode === 'meeting' || mode === 'on_call') return 'push_notify';
   return 'push_alert';
 }
 
