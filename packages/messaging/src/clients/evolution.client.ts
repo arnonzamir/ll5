@@ -5,6 +5,8 @@ export interface EvolutionSendResult {
   message_id: string | null;
 }
 
+export type EvolutionMediaType = 'image' | 'video' | 'audio' | 'document';
+
 export interface EvolutionChat {
   id: string;
   name: string;
@@ -92,6 +94,44 @@ export class EvolutionClient {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       logger.error('[EvolutionClient][sendText] Evolution sendText failed', { error: errorMessage });
+      return { success: false, message_id: null };
+    }
+  }
+
+  /**
+   * Send a media message (image / video / audio / document) via Evolution API.
+   * `media` is a URL Evolution fetches itself — the file never round-trips
+   * through this process as base64.
+   */
+  async sendMedia(
+    to: string,
+    media: string,
+    mediatype: EvolutionMediaType,
+    options: { caption?: string; fileName?: string; mimetype?: string } = {},
+  ): Promise<EvolutionSendResult> {
+    try {
+      const number = to.includes('@') ? to : `${to}@s.whatsapp.net`;
+
+      const result = await this.request<{ key?: { id?: string } }>(
+        'POST',
+        `/message/sendMedia/${this.instanceName}`,
+        {
+          number,
+          mediatype,
+          media,
+          ...(options.caption ? { caption: options.caption } : {}),
+          ...(options.fileName ? { fileName: options.fileName } : {}),
+          ...(options.mimetype ? { mimetype: options.mimetype } : {}),
+        },
+      );
+
+      return {
+        success: true,
+        message_id: result?.key?.id ?? null,
+      };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      logger.error('[EvolutionClient][sendMedia] Evolution sendMedia failed', { error: errorMessage });
       return { success: false, message_id: null };
     }
   }

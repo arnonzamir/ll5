@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRenderItems, isRailRow } from "./format";
+import { buildRenderItems, isRailRow, uploadsUrl } from "./format";
 import type { Message } from "./types";
 
 function row(partial: Partial<Message> & { id: string }): Message {
@@ -38,5 +38,19 @@ describe("buildRenderItems", () => {
       new Set(),
     );
     expect(items.map((i) => (i.kind === "compact" ? "compact" : i.message.id))).toEqual(["1", "4", "5"]);
+  });
+});
+
+describe("uploadsUrl", () => {
+  it("proxies an auth-gated upload", () => {
+    expect(uploadsUrl("/uploads/a.png")).toBe("/api/uploads/a.png");
+  });
+
+  it("proxies a public file without collapsing it onto the uploads path", () => {
+    expect(uploadsUrl("/public/a.png")).toBe("/api/uploads/public/a.png");
+  });
+
+  it("leaves an absolute url alone", () => {
+    expect(uploadsUrl("https://cdn.example/a.png")).toBe("https://cdn.example/a.png");
   });
 });

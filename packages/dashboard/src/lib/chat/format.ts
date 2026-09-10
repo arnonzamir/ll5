@@ -1,8 +1,12 @@
 import type { Message } from "./types";
 import { COMPACT_GROUP_WINDOW_MS } from "./constants";
 
-/** Build the proxy URL the dashboard uses for gateway-hosted uploads. */
+/** Build the proxy URL the dashboard uses for gateway-hosted uploads.
+ *  `/uploads/x` and `/public/x` both go through the proxy (it drops the bearer
+ *  only for the public branch); anything absolute is already fetchable as-is. */
 export function uploadsUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("/public/")) return `/api/uploads${url}`;
   return `/api/uploads${url.replace("/uploads", "")}`;
 }
 

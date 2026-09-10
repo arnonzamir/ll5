@@ -7,7 +7,7 @@ import { EvolutionClient } from '../clients/evolution.client.js';
 import { runWhatsAppSendGates } from '../utils/send-gates.js';
 import { logAudit } from '@ll5/shared';
 
-export function registerSendWhatsAppTool(
+export function registerSendWhatsAppMediaTool(
   server: McpServer,
   accountRepo: AccountRepository,
   conversationRepo: ConversationRepository,
@@ -15,16 +15,29 @@ export function registerSendWhatsAppTool(
   getUserId: () => string,
 ): void {
   server.tool(
-    'send_whatsapp',
-    'Send a WhatsApp message to a contact or group via Evolution API. ' +
-      'FIRST-CONTACT GATE: the very first message to a recipient the agent has ' +
-      'never messaged before is blocked unless confirmed:true. On a block, surface ' +
-      'the drafted message to the user, get their explicit approval, then call again ' +
-      'with confirmed:true. Established threads (any prior outbound) send normally.',
+    'send_whatsapp_media',
+    'Send a file (image, video, audio or document) to a WhatsApp contact or group by URL. ' +
+      'The URL must be publicly reachable — Evolution fetches it directly; for a stored LL5 ' +
+      'file, resolve it with the awareness get_media tool first, and use a public URL ' +
+      '(/chat/upload?public=1) since /uploads is auth-gated. The caption carries the [LL5] ' +
+      'prefix and is REQUIRED — a media message with no caption cannot identify itself. ' +
+      'Same first-contact gate as send_whatsapp: the very first message to a new recipient ' +
+      'is blocked unless confirmed:true.',
     {
       account_id: z.string().describe('WhatsApp account UUID'),
       to: z.string().describe('Recipient phone number (with country code) or group JID'),
-      message: z.string().describe('Message text to send'),
+      media_url: z.string().describe('Publicly reachable URL of the file to send'),
+      mediatype: z
+        .enum(['image', 'video', 'audio', 'document'])
+        .describe('How WhatsApp renders it. Use "document" for anything that is not playable media.'),
+      caption: z
+        .string()
+        .describe('Message text sent with the file. Must start with the [LL5] prefix.'),
+      filename: z
+        .string()
+        .optional()
+        .describe('Filename shown to the recipient. Recommended for mediatype "document".'),
+      mimetype: z.string().optional().describe('MIME type, when the URL does not make it obvious'),
       confirmed: z
         .boolean()
         .optional()
@@ -41,7 +54,7 @@ export function registerSendWhatsAppTool(
           userId,
           accountId: params.account_id,
           to: params.to,
-          identityText: params.message,
+          identityText: params.caption,
           confirmed: params.confirmed,
         },
         accountRepo,
@@ -56,9 +69,16 @@ export function registerSendWhatsAppTool(
         };
       }
 
-      // Send via Evolution API
-      const client = new EvolutionClient(gate.account.api_url, gate.account.instance_name, gate.account.api_key);
-      const result = await client.sendText(params.to, params.message);
+      const client = new EvolutionClient(
+        gate.account.api_url,
+        gate.account.instance_name,
+        gate.account.api_key,
+      );
+      const result = await client.sendMedia(params.to, params.media_url, params.mediatype, {
+        caption: params.caption,
+        fileName: params.filename,
+        mimetype: params.mimetype,
+      });
 
       if (!result.success) {
         return {
@@ -67,10 +87,14 @@ export function registerSendWhatsAppTool(
         };
       }
 
-      // Log the sent message
-      await accountRepo.logSentMessage(userId, params.account_id, 'whatsapp', params.to, result.message_id ?? undefined);
+      await accountRepo.logSentMessage(
+        userId,
+        params.account_id,
+        'whatsapp',
+        params.to,
+        result.message_id ?? undefined,
+      );
 
-      // Update last_message_at
       if (gate.hasConversation) {
         await conversationRepo.touchLastMessage(userId, 'whatsapp', gate.conversationId, new Date());
       }
@@ -78,11 +102,16 @@ export function registerSendWhatsAppTool(
       logAudit({
         user_id: userId,
         source: 'messaging',
-        action: 'send',
+        action: 'send_media',
         entity_type: 'whatsapp_message',
         entity_id: result.message_id ?? 'unknown',
-        summary: `Sent WhatsApp message to ${params.to}`,
-        metadata: { account_id: params.account_id, to: params.to },
+        summary: `Sent WhatsApp ${params.mediatype} to ${params.to}`,
+        metadata: {
+          account_id: params.account_id,
+          to: params.to,
+          mediatype: params.mediatype,
+          filename: params.filename ?? null,
+        },
       });
 
       return {
@@ -91,6 +120,7 @@ export function registerSendWhatsAppTool(
           text: JSON.stringify({
             success: true,
             message_id: result.message_id,
+            mediatype: params.mediatype,
             timestamp: new Date().toISOString(),
           }, null, 2),
         }],

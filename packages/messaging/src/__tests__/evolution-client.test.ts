@@ -119,3 +119,62 @@ describe('EvolutionClient.fetchMessages — response envelopes (ISS-028)', () =>
     expect(await new EvolutionClient('https://evo.example', 'll5', 'k').fetchMessages('x')).toEqual([]);
   });
 });
+
+describe('EvolutionClient.sendMedia', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('posts to sendMedia with the url (no base64 round-trip) and suffixes the number', async () => {
+    let sentUrl = '';
+    let sentBody: Record<string, unknown> | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: unknown, init?: unknown) => {
+      sentUrl = String(url);
+      sentBody = JSON.parse(String((init as RequestInit).body));
+      return { ok: true, status: 201, json: async () => ({ key: { id: 'MSG1' } }) } as unknown as Response;
+    });
+
+    const client = new EvolutionClient('https://evo.example', 'll5', 'APIKEY');
+    const result = await client.sendMedia(
+      '972500000000',
+      'https://gateway.example/public/x.pdf',
+      'document',
+      { caption: '[LL5] the lease', fileName: 'lease.pdf' },
+    );
+
+    expect(sentUrl).toBe('https://evo.example/message/sendMedia/ll5');
+    expect(sentBody).toMatchObject({
+      number: '972500000000@s.whatsapp.net',
+      mediatype: 'document',
+      media: 'https://gateway.example/public/x.pdf',
+      caption: '[LL5] the lease',
+      fileName: 'lease.pdf',
+    });
+    expect(result).toEqual({ success: true, message_id: 'MSG1' });
+  });
+
+  it('keeps an explicit group JID untouched', async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url: unknown, init?: unknown) => {
+      sentBody = JSON.parse(String((init as RequestInit).body));
+      return { ok: true, status: 201, json: async () => ({ key: { id: 'M2' } }) } as unknown as Response;
+    });
+
+    const client = new EvolutionClient('https://evo.example', 'll5', 'APIKEY');
+    await client.sendMedia('123-456@g.us', 'https://x/y.png', 'image', {});
+
+    expect(sentBody?.number).toBe('123-456@g.us');
+    expect(sentBody).not.toHaveProperty('caption');
+  });
+
+  it('returns success:false instead of throwing when Evolution errors', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('boom', { status: 500 }) as unknown as Response,
+    );
+
+    const client = new EvolutionClient('https://evo.example', 'll5', 'APIKEY');
+    const result = await client.sendMedia('972500000000', 'https://x/y.png', 'image', {});
+
+    expect(result).toEqual({ success: false, message_id: null });
+  });
+});

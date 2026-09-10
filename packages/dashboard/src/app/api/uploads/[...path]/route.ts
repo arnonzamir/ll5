@@ -7,13 +7,20 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
-  const token = req.cookies.get(COOKIE_NAME)?.value;
-  if (!token) return new NextResponse(null, { status: 401 });
-
   const { path } = await params;
-  const filePath = path.join("/");
-  const res = await fetch(`${env.GATEWAY_URL}/uploads/${filePath}`, {
-    headers: { Authorization: `Bearer ${token}` },
+
+  // `/public/*` on the gateway is the unauthenticated, crypto-random-name route
+  // (shareable links). Everything else is per-file ownership-gated.
+  const isPublic = path[0] === "public";
+  const token = req.cookies.get(COOKIE_NAME)?.value;
+  if (!token && !isPublic) return new NextResponse(null, { status: 401 });
+
+  const upstream = isPublic
+    ? `${env.GATEWAY_URL}/public/${path.slice(1).join("/")}`
+    : `${env.GATEWAY_URL}/uploads/${path.join("/")}`;
+
+  const res = await fetch(upstream, {
+    headers: isPublic ? {} : { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return new NextResponse(null, { status: res.status });
 

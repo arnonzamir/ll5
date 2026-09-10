@@ -178,3 +178,14 @@ Then deliver the PNG. Two URL options:
   `public_url` lives on the user's **own** server (`gateway.noninoni.click`, not a third party) — it's just un-gated: unguessable, but anyone handed the link can open it. **Privacy rule:** don't *unilaterally* put sensitive content (personal screenshots, private docs, anything identifying) behind a public link. But this is the user's own infrastructure, so **if the user has asked for or approved it, you may put whatever they want there** — the caution is about you deciding to expose something on your own, not a hard ban. When unsure whether something's sensitive, use the private `/uploads` link or ask.
 
 For a **map with a real route**, prefer a clickable maps link (a Google Maps directions URL with the key waypoints) over a hand-drawn overlay — the overlay only shows the route shape on a blank canvas, not actual map tiles.
+
+## Sending a file to the user
+Don't paste a bare URL into the text and call it delivered — attach the file to the message.
+
+**In the LL5 thread (web + Android):** `push_to_user` takes `attachments: [{url, filename, mime}]`. Images render inline, everything else as a download chip. The url may be the auth-gated `/uploads/...` one — the clients are logged in — so nothing has to be made public just to show it to the user.
+
+**On WhatsApp:** `send_whatsapp_media(account_id, to, media_url, mediatype, caption, filename)`. Evolution fetches the URL itself, so it **must be public** (`/chat/upload?public=1`, or `get_media`'s `public_url`) — an `/uploads/...` link will fail. `mediatype` is image / video / audio / document; the **caption is required and carries the `[LL5]` prefix**, and the same first-contact gate as `send_whatsapp` applies.
+
+**Sending a file that's already stored:** `list_media` / `get_media_for` to find it, then `get_media(media_id)` for its `url`, `mime_type`, `filename` (and `public_url`, when the file is public). Feed those to whichever of the two paths above you're using.
+
+The message text still has to stand on its own — say what the file is and why it's coming. Never send an attachment with no words.

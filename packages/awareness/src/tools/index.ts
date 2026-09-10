@@ -87,7 +87,7 @@ export function registerAllTools(
     registerJournalTools(server, esClient, getUserId);
     registerLessonTools(server, esClient, getUserId);
     registerRecallEverythingTool(server, esClient, getUserId);
-    registerMediaTools(server, esClient, getUserId);
+    registerMediaTools(server, esClient, getUserId, gatewayUrl);
     registerWakeTools(server, esClient, getUserId);
   }
   registerGeoSearchTools(server, getUserId);

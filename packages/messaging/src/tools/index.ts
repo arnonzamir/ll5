@@ -4,6 +4,7 @@ import type { ConversationRepository } from '../repositories/interfaces/conversa
 import type { ContactRepository } from '../repositories/interfaces/contact.repository.js';
 import { registerListAccountsTool } from './list-accounts.js';
 import { registerSendWhatsAppTool } from './send-whatsapp.js';
+import { registerSendWhatsAppMediaTool } from './send-whatsapp-media.js';
 import { registerSendTelegramTool } from './send-telegram.js';
 import { registerListConversationsTool } from './list-conversations.js';
 import { registerUpdatePermissionsTool } from './update-permissions.js';
@@ -40,6 +41,7 @@ export function registerAllTools(
 ): void {
   registerListAccountsTool(server, deps.accountRepo, getUserId);
   registerSendWhatsAppTool(server, deps.accountRepo, deps.conversationRepo, deps.pool, getUserId);
+  registerSendWhatsAppMediaTool(server, deps.accountRepo, deps.conversationRepo, deps.pool, getUserId);
   registerSendTelegramTool(server, deps.accountRepo, deps.conversationRepo, deps.pool, getUserId);
   registerListConversationsTool(server, deps.conversationRepo, getUserId);
   registerUpdatePermissionsTool(server, deps.pool, getUserId);

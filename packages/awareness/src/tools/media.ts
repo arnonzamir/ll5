@@ -11,6 +11,7 @@ export function registerMediaTools(
   server: McpServer,
   esClient: Client,
   getUserId: () => string,
+  gatewayUrl?: string,
 ): void {
   server.tool(
     'upload_media',
@@ -137,6 +138,58 @@ export function registerMediaTools(
           {
             type: 'text' as const,
             text: JSON.stringify({ media, total }),
+          },
+        ],
+      };
+    },
+  );
+
+  server.tool(
+    'get_media',
+    'Resolve one media_id to the file itself: url, mime_type, filename, source. Use it ' +
+      'before delivering a stored file to the user (push_to_user media_id, or ' +
+      'send_whatsapp_media) or before reading the file yourself.',
+    {
+      media_id: z.string().describe('ID of the media file (from list_media / get_media_for)'),
+    },
+    async (params) => {
+      const userId = getUserId();
+
+      const result = await esClient.search({
+        index: MEDIA_INDEX,
+        size: 1,
+        query: { bool: { must: [{ term: { user_id: userId } }, { ids: { values: [params.media_id] } }] } },
+      });
+
+      const hit = result.hits.hits[0];
+      if (!hit) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: 'MEDIA_NOT_FOUND', media_id: params.media_id }) }],
+          isError: true,
+        };
+      }
+
+      const source = hit._source as Record<string, unknown>;
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({
+              id: hit._id,
+              url: source.url ?? null,
+              mime_type: source.mime_type ?? null,
+              filename: source.filename ?? null,
+              source: source.source ?? null,
+              description: source.description ?? null,
+              created_at: source.created_at ?? null,
+              public: source.public === true,
+              // Absolute and unauthenticated only for a public file — that is the
+              // one an outside fetcher (Evolution/WhatsApp) can actually read.
+              public_url:
+                source.public === true && gatewayUrl && typeof source.url === 'string'
+                  ? `${gatewayUrl.replace(/\/$/, '')}${source.url}`
+                  : null,
+            }),
           },
         ],
       };

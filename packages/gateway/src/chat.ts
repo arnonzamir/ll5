@@ -16,6 +16,7 @@ import { validateDeliveryBlock } from './utils/delivery-contract.js';
 import type { DeliveryBlock } from './utils/delivery-contract.js';
 import { attachDelivery } from './delivery.js';
 import { readDeliveryPolicy } from './utils/delivery-policy.js';
+import { normalizeAttachments } from './utils/attachments.js';
 
 const UPLOAD_DIR = process.env.NODE_ENV === 'production' ? '/app/uploads' : './uploads';
 // Public uploads: served WITHOUT auth from /public with crypto-random
@@ -336,6 +337,7 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       idempotency_key,
       proactive,
       delivery: deliveryRaw,
+      attachments,
     } = req.body as {
       channel?: string;
       content?: string | null;
@@ -352,6 +354,8 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       proactive?: boolean;
       /** DECISION-034 delivery block: class + subject + due_at + stakes + ack_required + escalation. */
       delivery?: unknown;
+      /** Files delivered with the message; rendered as image/file bubbles by every client. */
+      attachments?: unknown;
     };
 
     if (!channel) {
@@ -384,8 +388,18 @@ export function createChatRouter(pool: Pool, authSecret: string, esClient?: Clie
       res.status(400).json({ error: 'delivery applies to assistant outbound messages only', code: 'delivery_contract' });
       return;
     }
+    // Files ride in metadata like inbound attachments do (no new columns).
+    const attachmentsResult = normalizeAttachments(attachments);
+    if (!attachmentsResult.ok) {
+      res.status(400).json({ error: attachmentsResult.error, code: 'attachments' });
+      return;
+    }
+
     // Metadata carries the class fields (no new columns on chat_messages).
     const rowMetadata: Record<string, unknown> = { ...(metadata || {}) };
+    if (attachmentsResult.attachments) {
+      rowMetadata.attachments = attachmentsResult.attachments;
+    }
     if (delivery) {
       rowMetadata.class = delivery.class;
       if (delivery.subject) rowMetadata.subject = delivery.subject;
