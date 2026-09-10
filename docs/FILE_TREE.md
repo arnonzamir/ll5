@@ -633,3 +633,4 @@ _2026-06-20: speed/motion PROVENANCE. push-data.ts +`speed_source`(gnss|derived)
 2026-09-08: notifications + calls awareness live.
 2026-09-08: DECISION-032 amendment — one notification capture.
 2026-09-08: unified notification capture live (server + Android).
+2026-09-10: ll5-run .claude/hooks/session-start.sh line 94 quote bug (double-quoted Python f-string inside double-quoted bash python3 -c) fixed (ll5-run 83b5b15) — broke SessionStart hook silently on every launch since the 2026-09-08T13:55Z delivery_policy deploy, causing the agent.daily_restart_missing alert.
