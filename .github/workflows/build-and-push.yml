@@ -667,7 +667,9 @@ jobs:
               }
               wait_up "fresh boot"
               C=$(docker ps --format '{{.Names}}' | grep '^ll5-agent-' | head -1)
-              docker exec "$C" sh -c 'touch /data/home/.ll5/fresh-session; pkill -f "claude --model" || true'
+              # The reason goes into the flag so ll5-server's "controlled restart" log line
+              # names this smoke — it fires ~31s after every boot and was once mistaken for a loop.
+              docker exec "$C" sh -c 'echo "ci-smoke: forced relaunch (DECISION-029)" > /data/home/.ll5/fresh-session; pkill -f "claude --model" || true'
               sleep 15
               wait_up "forced relaunch"
             fi
